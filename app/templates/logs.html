@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Logs · {{ app_name }}{% endblock %}
+{% block content %}
+<header class="settings-heading app-settings-heading">
+  <p class="eyebrow">TROUBLESHOOTING</p>
+  <h1>Application Logs</h1>
+  <p>Follow scans, matching, metadata, filesystem changes, exports, and errors in plain language. Technical details stay available when they are useful.</p>
+</header>
+<form class="log-filters panel" method="get" action="/logs">
+  <label>Level<select name="level"><option value="">All levels</option>{% for option in ['info','warning','error','debug'] %}<option value="{{ option }}" {% if level == option %}selected{% endif %}>{{ option|title }}</option>{% endfor %}</select></label>
+  <label>Category<select name="category"><option value="">All categories</option>{% for option in categories %}<option value="{{ option }}" {% if category == option %}selected{% endif %}>{{ option|replace('_',' ')|title }}</option>{% endfor %}</select></label>
+  <label class="log-search">Search<input name="search" value="{{ search }}" placeholder="What happened?"></label>
+  <button class="button">Filter</button>
+  <a class="button primary" href="/logs/export">Export logs</a>
+</form>
+<div class="log-live-status"><span class="task-dot"></span><span>Live updates every 3 seconds</span></div>
+<section class="panel log-viewer" id="log-viewer" data-level="{{ level }}" data-category="{{ category }}" data-search="{{ search }}">
+  {% if events %}
+    {% for event in events %}
+    <article class="log-event level-{{ event.level }}" data-log-id="{{ event.id }}">
+      <div class="log-event-heading"><span class="log-level">{{ event.level }}</span><strong>{{ event.message }}</strong><time>{{ local_time(event.created_at) }}</time></div>
+      <div class="log-event-meta">{{ event.category|replace('_',' ')|title }} · {{ event.user_name }}</div>
+      {% if event.detail %}<details><summary>Technical details</summary><pre>{{ event.detail }}</pre></details>{% endif %}
+    </article>
+    {% endfor %}
+  {% else %}
+    <div class="empty">No log entries match these filters yet.</div>
+  {% endif %}
+</section>
+<script>
+(() => {
+  const viewer = document.getElementById('log-viewer');
+  if (!viewer) return;
+  const render = (event) => {
+    const article = document.createElement('article');
+    article.className = `log-event level-${event.level}`;
+    article.dataset.logId = event.id;
+    const heading = document.createElement('div');
+    heading.className = 'log-event-heading';
+    heading.innerHTML = `<span class="log-level"></span><strong></strong><time></time>`;
+    heading.querySelector('.log-level').textContent = event.level;
+    heading.querySelector('strong').textContent = event.message;
+    heading.querySelector('time').textContent = event.created_at;
+    article.appendChild(heading);
+    const meta = document.createElement('div');
+    meta.className = 'log-event-meta';
+    meta.textContent = `${event.category.replaceAll('_', ' ')} · ${event.user_name}`;
+    article.appendChild(meta);
+    if (event.detail) {
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      summary.textContent = 'Technical details';
+      const pre = document.createElement('pre');
+      pre.textContent = event.detail;
+      details.append(summary, pre);
+      article.appendChild(details);
+    }
+    return article;
+  };
+  const refresh = async () => {
+    try {
+      const params = new URLSearchParams({
+        level: viewer.dataset.level,
+        category: viewer.dataset.category,
+        search: viewer.dataset.search,
+        limit: '250'
+      });
+      const response = await fetch(`/api/logs?${params}`, {cache: 'no-store'});
+      if (!response.ok) return;
+      const events = (await response.json()).events || [];
+      const current = viewer.querySelector('[data-log-id]');
+      if (!events.length || (current && Number(current.dataset.logId) === events[0].id)) return;
+      viewer.replaceChildren(...events.map(render));
+    } catch (_) {}
+  };
+  window.setInterval(refresh, 3000);
+})();
+</script>
+{% endblock %}

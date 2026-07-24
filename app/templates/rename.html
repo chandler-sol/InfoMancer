@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Rename preview · InfoMancer{% endblock %}
+{% block content %}
+{% set no_change = source == destination %}
+<a class="back" href="/titles/{{ title.id if kind == 'folder' else title.title_id }}">← Cancel</a>
+<section class="rename-card panel">
+  <p class="eyebrow">FILESYSTEM CHANGE</p>
+  <h1>Preview {{ kind }} rename</h1>
+  {% if no_change %}
+  <div class="match-banner rename-no-change">
+    <span>✓</span>
+    <div>
+      <strong>No changes needed</strong>
+      <small>This name already matches the current metadata and naming format.</small>
+    </div>
+  </div>
+  <div class="rename-path target">
+    <span>Current name</span>
+    <code>{{ source }}</code>
+  </div>
+  {% else %}
+  <p>Nothing has changed yet. Confirm only after checking both paths.</p>
+  <div class="rename-path"><span>Current</span><code>{{ source }}</code></div>
+  <div class="rename-arrow">↓</div>
+  <div class="rename-path target"><span>New</span><code>{{ destination }}</code></div>
+  {% if kind == 'folder' %}
+  <form method="post" action="{{ action }}" class="confirm-form">
+    <label>Type <strong>RENAME</strong> to apply<input name="confirm" autocomplete="off" required></label>
+    <button class="danger">Apply rename</button>
+  </form>
+  {% else %}
+  <form method="post" action="{{ action }}" class="confirm-form">
+    <span class="muted">This changes one file.</span>
+    <button class="danger">Apply rename</button>
+  </form>
+  {% endif %}
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Help · {{ app_name }}{% endblock %}
+{% block content %}
+<header class="settings-heading help-heading">
+  <p class="eyebrow">HELP &amp; GUIDANCE</p>
+  <h1>How can we help?</h1>
+  <p>Quick answers about browsing, scanning, matching, metadata, missing episodes, safe file changes, and account access.</p>
+  {% if current_user.is_librarian and current_user.id > 0 %}<form method="post" action="/getting-started/restart"><button class="button">Open Setup Assistant</button></form>{% endif %}
+</header>
+
+<nav class="help-jump-links" aria-label="Help topics">
+  <a href="#getting-started">Getting started</a>
+  <a href="#libraries">Libraries &amp; scans</a>
+  <a href="#matching">Matching &amp; metadata</a>
+  <a href="#episodes">Episodes &amp; gaps</a>
+  <a href="#files">File changes</a>
+  <a href="#accounts">Accounts</a>
+  <a href="#exports">Exports</a>
+  <a href="#troubleshooting">Troubleshooting</a>
+</nav>
+
+<div class="help-sections">
+  <section class="help-section" id="getting-started"><header><p class="eyebrow">THE BASICS</p><h2>Getting started</h2></header><div class="faq-list">
+    <details class="faq-item"><summary>What is InfoMancer?</summary><div class="faq-answer"><p>InfoMancer catalogs movie and TV files already stored on your server. It helps you browse the library, match titles to metadata, identify missing episodes, and review safer Plex-friendly names.</p></div></details>
+    <details class="faq-item"><summary>Does InfoMancer stream or play my media?</summary><div class="faq-answer"><p>No. InfoMancer organizes and audits the library; a media server such as Plex remains responsible for playback.</p></div></details>
+    <details class="faq-item"><summary>Can I replay the walkthrough?</summary><div class="faq-answer"><p>Yes. Open your Profile menu and choose <strong>Take the Tour</strong>, or open Profile and use the walkthrough card.</p></div></details>
+  </div></section>
+
+  <section class="help-section" id="libraries"><header><p class="eyebrow">ON DISK</p><h2>Libraries and scans</h2><p>Source management and scans are available to Librarians.</p></header><div class="faq-list">
+    <details class="faq-item"><summary>What is a source?</summary><div class="faq-answer"><p>A source is a server folder containing Movies or TV Shows. Movie sources may contain individual files, title folders, or alphabet and number buckets. TV sources normally contain one folder per series with season folders beneath it.</p></div></details>
+    <details class="faq-item"><summary>What does a scan change?</summary><div class="faq-answer"><p>A scan reads supported video files and updates InfoMancer’s catalog. Scanning does not rename, move, or delete media.</p></div></details>
+    <details class="faq-item"><summary>When should I rescan?</summary><div class="faq-answer"><p>Scan after adding, removing, or moving media. Use <strong>Scan all sources</strong> for a broad refresh, or scan one source or series when you know exactly what changed.</p></div></details>
+    <details class="faq-item"><summary>Why can’t InfoMancer browse a folder I know exists?</summary><div class="faq-answer"><p>The folder must be mounted on the machine running InfoMancer and visible inside its container. A path available only on your laptop is not automatically available to the server.</p></div></details>
+  </div></section>
+
+  <section class="help-section" id="matching"><header><p class="eyebrow">IDENTITY</p><h2>Matching and metadata</h2></header><div class="faq-list">
+    <details class="faq-item"><summary>What does matching do?</summary><div class="faq-answer"><p>Matching connects a local title to its authoritative movie or series record. InfoMancer stores the identifier and uses it for artwork, ratings, credits, episode lists, links, and Plex-compatible names.</p></div></details>
+    <details class="faq-item"><summary>What if the suggested match is wrong?</summary><div class="faq-answer"><p>Choose <strong>Fix Match</strong> or <strong>Change Match</strong>, search again, or enter the provider ID or link directly. A match is not applied until you approve it.</p></div></details>
+    <details class="faq-item"><summary>Why is artwork, a rating, or cast information missing?</summary><div class="faq-answer"><p>The title may still be unmatched, may not have an IMDb identifier, or may need a metadata refresh. Use the title’s three-dot menu to refresh IMDb metadata for that movie, series, or episode.</p></div></details>
+    <details class="faq-item"><summary>What is the difference between scanning and refreshing metadata?</summary><div class="faq-answer"><p>Scanning checks your files. Metadata refreshes check external title information such as genres, ratings, people, and IDs. Neither operation renames files by itself.</p></div></details>
+  </div></section>
+
+  <section class="help-section" id="episodes"><header><p class="eyebrow">TV SHOWS</p><h2>Episodes and known gaps</h2></header><div class="faq-list">
+    <details class="faq-item"><summary>How are missing episodes calculated?</summary><div class="faq-answer"><p>After a series is matched, InfoMancer compares its expected aired episodes with the season and episode numbers parsed from local video files. Future episodes and specials outside the normal seasons are handled separately.</p></div></details>
+    <details class="faq-item"><summary>Why does a show report missing episodes that I actually have?</summary><div class="faq-answer"><p>The filename may not contain a recognizable season and episode code, the show may be matched to the wrong series, or the provider’s episode order may differ from your files. Check the match and episode naming, then rescan the series.</p></div></details>
+    <details class="faq-item"><summary>How do I see exactly what is missing?</summary><div class="faq-answer"><p>Open the series and choose <strong>Missing Episodes</strong>. You can review each gap and use the configured search provider link to look for it. InfoMancer presents searches but does not download files itself.</p></div></details>
+  </div></section>
+
+  <section class="help-section" id="files"><header><p class="eyebrow">FILESYSTEM SAFETY</p><h2>Renaming and folder changes</h2></header><div class="faq-list">
+    <details class="faq-item"><summary>Will InfoMancer rename files automatically?</summary><div class="faq-answer"><p>No. Filesystem changes require an explicit preview and confirmation. Bulk pages show the proposed changes before anything is applied.</p></div></details>
+    <details class="faq-item"><summary>What does “No changes needed” mean?</summary><div class="faq-answer"><p>The current name already matches the proposed naming format, so InfoMancer has nothing to apply.</p></div></details>
+    <details class="faq-item"><summary>Can I restore an older filename?</summary><div class="faq-answer"><p>When InfoMancer has recorded the original imported name, use <strong>Restore Original Filenames</strong> from the series actions. Always review the restoration preview first.</p></div></details>
+  </div></section>
+
+  <section class="help-section" id="accounts"><header><p class="eyebrow">ACCESS</p><h2>Accounts and roles</h2></header><div class="faq-list">
+    <details class="faq-item"><summary>What is the difference between a Member and a Librarian?</summary><div class="faq-answer"><p>Members can browse and search the catalog and manage their own account. Librarians can also configure sources, scan libraries, match titles, refresh metadata, approve file changes, manage users, and publish announcements.</p></div></details>
+    <details class="faq-item"><summary>Where can I change my profile or password?</summary><div class="faq-answer"><p>Open the Profile button in the upper-right corner. Profile, Password, and Sessions let you update your account and sign out other browsers.</p></div></details>
+    <details class="faq-item"><summary>Why was I signed out?</summary><div class="faq-answer"><p>Your session may have expired, been revoked, or been invalidated by a password change. Sign in again; if that fails, ask a Librarian to check your account.</p></div></details>
+  </div></section>
+
+  <section class="help-section" id="organization"><header><p class="eyebrow">YOUR VIEW</p><h2>Favorites, tags, and sorting</h2></header><div class="faq-list">
+    <details class="faq-item"><summary>Who can see my favorites, ratings, and tags?</summary><div class="faq-answer"><p>They belong to your account. They help organize the shared catalog without changing another person’s view or any media file.</p></div></details>
+    <details class="faq-item"><summary>How do I tag several titles together?</summary><div class="faq-answer"><p>Select movies or TV series in List view, then choose <strong>Organize &amp; Tags</strong>. Existing and newly created tags can be added to the whole selection.</p></div></details>
+    <details class="faq-item"><summary>Why is runtime, resolution, or HDR information missing?</summary><div class="faq-answer"><p>A Librarian must run Media Inspection from System Settings or the title’s three-dot menu. InfoMancer reads the file with FFprobe and does not modify it.</p></div></details>
+  </div></section>
+
+  <section class="help-section" id="exports"><header><p class="eyebrow">TAKE YOUR DATA WITH YOU</p><h2>Library exports</h2><p>Exports are read-only snapshots. Creating one does not modify the catalog or any media file.</p></header><div class="faq-list">
+    <details class="faq-item" open><summary>Which export format should I choose?</summary><div class="faq-answer">
+      <p><strong>CSV</strong> is usually best for spreadsheets. Open it in Excel, Numbers, LibreOffice Calc, or a data-analysis tool to sort, filter, chart, and audit your library.</p>
+      <p><strong>JSON</strong> is usually best for backups, scripts, and moving structured data between applications. It preserves field names and nested export information cleanly.</p>
+      <p><strong>XML</strong> is useful when another application, automation system, or archival workflow specifically accepts XML. It is structured and widely supported, but less convenient for manual spreadsheet work.</p>
+    </div></details>
+    <details class="faq-item"><summary>What information is included?</summary><div class="faq-answer"><p>Each format contains the same catalog snapshot: titles, kinds, years, source and file paths, provider IDs, ratings, genres, tags, collections, custom fields, file sizes, episode numbers, and any collected runtime, resolution, codec, bitrate, container, and HDR/SDR details.</p></div></details>
+    <details class="faq-item"><summary>Is a library export a complete InfoMancer backup?</summary><div class="faq-answer"><p>No. It is a portable record for reference, analysis, or integration. It does not contain accounts, passwords, sessions, application settings, provider credentials, artwork files, or the media itself. Use a database and configuration backup when you need to restore an entire installation.</p></div></details>
+  </div></section>
+
+  <section class="help-section" id="troubleshooting"><header><p class="eyebrow">WHEN SOMETHING LOOKS WRONG</p><h2>Troubleshooting</h2></header><div class="faq-list">
+    <details class="faq-item"><summary>A background task seems stuck. What should I do?</summary><div class="faq-answer"><p>Open the task widget to read its current status. Large scans and metadata imports can take time. If the status never changes, refresh the page and ask a Librarian to check the System page and application logs.</p></div></details>
+    <details class="faq-item"><summary>Why does a recent interface change not appear?</summary><div class="faq-answer"><p>Your browser may still have an older stylesheet or script cached. Perform a forced refresh or open a fresh private window before reporting the issue.</p></div></details>
+    <details class="faq-item"><summary>What information helps a Librarian diagnose a problem?</summary><div class="faq-answer"><p>Include the page you were using, the title or source involved, what you clicked, what you expected, the exact plain-language error shown, and a screenshot when possible. Do not share passwords, API keys, tunnel tokens, or activation links.</p></div></details>
+    <details class="faq-item"><summary>Where can a Librarian download logs or catalog data?</summary><div class="faq-answer"><p>Open App Settings and choose System. The troubleshooting area opens the live log and exports it, while Library Data downloads the catalog as CSV, JSON, or XML.</p></div></details>
+  </div></section>
+</div>
+{% endblock %}

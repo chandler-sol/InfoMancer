@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Change cover · InfoMancer{% endblock %}
+{% block content %}
+{% set library_return = request.query_params.get('library_return', '') %}
+<a class="back" href="/titles/{{ title.id }}">← {{ title.metadata_title or title.title }}</a>
+<div class="page-head">
+  <div>
+    <p class="eyebrow">ARTWORK</p>
+    <h1>Change Cover</h1>
+    <p>Choose the artwork shown on this title and throughout your library. This does not change its metadata match.</p>
+  </div>
+</div>
+{% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+{% if candidates %}
+<section class="cover-picker" aria-label="Available covers">
+  {% for cover in candidates %}
+  <article class="cover-choice{% if cover.url == title.poster_url %} selected{% endif %}">
+    <div class="cover-choice-art">
+      <img src="{{ cover.thumbnail }}" alt="Cover option {{ loop.index }}" loading="lazy">
+      {% if cover.url == title.poster_url %}<span class="current-cover">Current Cover</span>{% endif %}
+    </div>
+    <div class="cover-choice-footer">
+      <span>{{ cover.language_label }}</span>
+      {% if cover.url != title.poster_url %}
+      <form method="post" action="/titles/{{ title.id }}/cover">
+        <input type="hidden" name="poster_url" value="{{ cover.url }}">
+        <input type="hidden" name="return_to" value="{{ library_return }}">
+        <button class="button">Use This Cover</button>
+      </form>
+      {% else %}
+      <span class="selected-cover-label">Selected</span>
+      {% endif %}
+    </div>
+  </article>
+  {% endfor %}
+</section>
+{% elif not error %}
+<div class="empty">TheTVDB did not return any poster artwork for this title.</div>
+{% endif %}
+<script>
+  (() => {
+    const stored = sessionStorage.getItem("infomancerLibraryReturn") || "";
+    let safeStored = "";
+    try {
+      const parsed = new URL(stored, window.location.origin);
+      if (
+        parsed.origin === window.location.origin
+        && ["/library", "/movies", "/shows"].includes(parsed.pathname)
+      ) safeStored = parsed.pathname + parsed.search + parsed.hash;
+    } catch (_) {}
+    if (!safeStored) return;
+    document.querySelectorAll('input[name="return_to"]').forEach((input) => {
+      if (!input.value) input.value = safeStored;
+    });
+  })();
+</script>
+{% endblock %}

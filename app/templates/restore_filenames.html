@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Restore filename review · InfoMancer{% endblock %}
+{% block content %}
+<a class="back" href="/titles/{{ title.id }}">← {{ title.metadata_title or title.title }}</a>
+<div class="page-head"><div><p class="eyebrow">FILESYSTEM REVIEW</p><h1>Restore original filenames</h1><p class="muted">Review the first-seen filename stored for every file before restoring the batch.</p></div></div>
+<div class="review-summary"><strong>{{ ready }}</strong> ready{% if conflicts %}<span>{{ conflicts }} conflicts or missing files will be skipped</span>{% endif %}</div>
+{% if ready == 0 and conflicts == 0 %}<div class="match-banner"><span>✓</span><div><strong>No restorations needed</strong><small>Every available file already uses its stored original filename.</small></div></div>{% endif %}
+{% if ready > 0 %}<div class="bulk-warning"><strong>You’re about to restore {{ ready }} filename{% if ready != 1 %}s{% endif %}.</strong><span>Folders and media contents will not change.</span></div>{% endif %}
+<section class="panel table-wrap"><table><thead><tr><th>Episode</th><th>Current filename</th><th>Original filename</th><th>Status</th></tr></thead><tbody>
+{% for item in proposals %}<tr><td>{% if item.season is not none %}S{{ '%02d'|format(item.season) }}E{{ '%02d'|format(item.episode) }}{% else %}File{% endif %}</td><td><code>{{ item.old_name }}</code></td><td><code class="proposed-name{% if item.status == 'ready' %} has-changes{% endif %}">{% for part in item.new_name_parts %}{% if part.changed and item.status != 'unchanged' %}<mark>{{ part.text }}</mark>{% else %}{{ part.text }}{% endif %}{% endfor %}</code></td><td><span class="rename-status {{ item.status }}">{{ item.status }}</span></td></tr>{% else %}<tr><td colspan="4" class="empty">No files have an original filename baseline.</td></tr>{% endfor %}
+</tbody></table></section>
+<div class="review-actions"><a class="button" href="/titles/{{ title.id }}">Cancel</a><form method="post" action="/titles/{{ title.id }}/restore-filenames"><button class="button primary" {% if ready == 0 %}disabled{% endif %}>Restore {{ ready }} filenames</button></form></div>
+{% endblock %}

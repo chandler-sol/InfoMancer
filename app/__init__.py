@@ -1,0 +1,2 @@
+"""InfoMancer media catalog."""
+

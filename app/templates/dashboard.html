@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <div><p class="eyebrow">MEDIA OPERATIONS</p><h1>Your library, accounted for.</h1>
+  <p>Index disks, resolve Plex matches, and spot gaps without moving a byte until you approve it.</p></div>
+</section>
+<section class="stats">
+  <a href="/movies"><strong>{{ counts.movies }}</strong><span>Movies</span></a>
+  <a href="/shows"><strong>{{ counts.shows }}</strong><span>TV shows</span></a>
+  <a href="/shows"><strong>{{ counts.episodes }}</strong><span>Episodes</span></a>
+  <div><strong>{{ counts.missing }}</strong><span>Known gaps</span></div>
+</section>
+{% if not roots %}
+<section class="panel empty-library-start">
+  <span class="empty-library-icon" aria-hidden="true">+</span>
+  <div><p class="eyebrow">FIRST SOURCE</p><h2>Your library is ready for media</h2><p>Choose a server folder containing Movies or TV Shows. InfoMancer will preview what it finds before adding anything to the catalog.</p></div>
+  <div class="actions"><a class="button primary" href="/sources">Add first source</a>{% if current_user.id > 0 %}<form method="post" action="/getting-started/restart"><button class="button">Open Setup Assistant</button></form>{% endif %}</div>
+</section>
+{% elif not counts.movies and not counts.shows %}
+<section class="panel empty-library-start compact">
+  <div><p class="eyebrow">SOURCES READY</p><h2>Your first scan is the next step</h2><p>One or more folders are configured, but no titles have been cataloged yet.</p></div>
+  <a class="button primary" href="/sources">Review sources and scan</a>
+</section>
+{% endif %}
+<section class="library-portals" aria-label="Browse library">
+  <a href="/library"><span class="portal-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg></span><span><strong>All</strong><small>Browse the complete library</small></span></a>
+  <a href="/movies"><span class="portal-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="8" cy="7" r="3"></circle><circle cx="16" cy="7" r="3"></circle><path d="M5 10h14v10H5zM19 13l3-2v8l-3-2"></path></svg></span><span><strong>Movies</strong><small>{{ counts.movies }} films</small></span></a>
+  <a href="/shows"><span class="portal-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="15" rx="2"></rect><path d="m8 2 4 4 4-4M7 12h10v5H7z"></path></svg></span><span><strong>TV Shows</strong><small>{{ counts.shows }} series &middot; {{ counts.episodes }} episodes</small></span></a>
+</section>
+{% endblock %}

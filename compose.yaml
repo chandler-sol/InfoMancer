@@ -1,0 +1,24 @@
+services:
+  infomancer:
+    build: .
+    container_name: infomancer
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # Keep this loopback-only; Cloudflare Tunnel is the public entry point.
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - ./data:/app/data
+      # Host media mappings belong in compose.media.yaml. Platform-specific
+      # examples are provided in deploy/. The container always sees them below
+      # /media, regardless of the host operating system.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

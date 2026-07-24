@@ -1,0 +1,15 @@
+.git
+.github
+.agents
+.venv
+.env
+.env.*
+tvdb.env
+data
+tests
+docs
+__pycache__
+*.py[cod]
+*.db
+*.db-*
+*.log

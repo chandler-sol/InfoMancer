@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Ready to match · InfoMancer{% endblock %}
+{% block content %}
+<div class="page-head"><div><p class="eyebrow">NEW MEDIA</p><h1>Ready to match</h1><p class="muted">New titles discovered by library scans remain here until they are matched.</p></div><div class="actions"><a class="button primary" href="/bulk-match">Bulk Match</a><a class="button" href="/">← Home</a></div></div>
+<section class="panel table-wrap">
+  <table class="intake-table"><thead><tr><th>Title</th><th>Type</th><th>Source</th><th>Discovered</th><th></th></tr></thead><tbody>
+  {% for row in rows %}<tr><td><a class="title-link" href="/titles/{{ row.id }}">{{ row.title }}{% if row.year %} <span>({{ row.year }})</span>{% endif %}</a><small>{{ row.folder_path }}</small></td><td><span class="kind {{ row.kind }}">{{ row.kind }}</span><small>{{ row.file_count }} {% if row.kind == 'tv' %}episodes{% else %}file{% if row.file_count != 1 %}s{% endif %}{% endif %}</small></td><td>{{ row.root_label or row.root_path }}</td><td>{{ local_time(row.discovered_at) }}</td><td><a class="button primary small" href="/titles/{{ row.id }}/tvdb">Match {{ 'show' if row.kind == 'tv' else 'movie' }}</a></td></tr>
+  {% else %}<tr><td colspan="5" class="empty good">No newly discovered titles are waiting to be matched.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% endblock %}

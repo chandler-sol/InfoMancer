@@ -1,0 +1,11 @@
+services:
+  infomancer:
+    volumes:
+      # Change the source paths to mounted folders on this Mac.
+      # Docker Desktop may ask you to approve access to these locations.
+      - type: bind
+        source: /Volumes/Media/Movies
+        target: /media/movies
+      - type: bind
+        source: /Volumes/Media/TV
+        target: /media/tv

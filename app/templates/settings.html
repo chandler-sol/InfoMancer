@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Settings · {{ app_name }}{% endblock %}
+{% block content %}
+<header class="settings-heading app-settings-heading"><p class="eyebrow">LIBRARIAN</p><h1>App Settings</h1><p>Configure how this installation behaves. Deployment and trust settings remain protected on the server.</p></header>
+{% include "_settings_nav.html" %}
+{% if error %}<div class="form-error page-error" role="alert">{{ error }}</div>{% endif %}
+
+{% if section == 'general' %}
+<form class="settings-page-grid" method="post" action="/settings/general">
+  {% if current_user.id > 0 %}<section class="panel settings-card full-width setup-assistant-settings"><div><p class="eyebrow">GETTING STARTED</p><h2>Setup Assistant</h2><p class="muted">Review the installation basics, metadata access, and media sources again without changing anything automatically.</p></div><button class="button" type="submit" formaction="/getting-started/restart" formmethod="post">Open Setup Assistant</button></section>{% endif %}
+  <section class="panel settings-card settings-form">
+    <div><p class="eyebrow">IDENTITY</p><h2>Installation</h2><p class="muted">This name appears in the header and browser title for everyone.</p></div>
+    <label>Installation name<input name="installation_name" value="{{ preferences.installation_name }}" minlength="1" maxlength="50" required></label>
+    <label>Time zone<select name="timezone_name" required>{% for group_name, zones in timezone_groups %}<optgroup label="{{ group_name }}">{% for zone, label in zones %}<option value="{{ zone }}" {% if zone == preferences.timezone %}selected{% endif %}>{{ label }}</option>{% endfor %}</optgroup>{% endfor %}</select><small>Choose your location. InfoMancer stores timestamps in UTC and converts them for display.</small></label>
+  </section>
+  <section class="panel settings-card settings-form">
+    <div><p class="eyebrow">LIBRARY</p><h2>Default presentation</h2><p class="muted">These defaults apply when a browser has not already saved its own view choice.</p></div>
+    <label>Default library view<select name="default_library_view"><option value="list" {% if preferences.default_library_view == 'list' %}selected{% endif %}>List</option><option value="covers" {% if preferences.default_library_view == 'covers' %}selected{% endif %}>Covers</option></select></label>
+    <label>Default cover size <output id="settings-cover-size-output">{{ preferences.default_cover_size }}px</output><input id="settings-cover-size" name="default_cover_size" type="range" min="120" max="300" step="10" value="{{ preferences.default_cover_size }}"></label>
+  </section>
+  <div class="settings-save-bar"><span>Changes apply to new page loads.</span><button class="button primary">Save general settings</button></div>
+</form>
+<script>document.getElementById('settings-cover-size')?.addEventListener('input',(event)=>{document.getElementById('settings-cover-size-output').value=`${event.target.value}px`;});</script>
+
+{% elif section == 'metadata' %}
+<div class="settings-page-grid">
+  <section class="panel settings-card">
+    <div class="settings-card-head"><div><p class="eyebrow">TVDB</p><h2>Matching provider</h2></div><span class="settings-state {{ 'good' if tvdb_status.configured else 'warn' }}">{{ 'Configured' if tvdb_status.configured else 'Needs configuration' }}</span></div>
+    <dl class="settings-facts"><div><dt>API key</dt><dd>{{ tvdb_status.key_hint }}</dd></div><div><dt>Subscriber PIN</dt><dd>{{ 'Configured' if tvdb_status.pin_configured else 'Not configured' }}</dd></div><div><dt>Storage</dt><dd>Encrypted application data</dd></div></dl>
+    <p class="muted">Credentials entered through InfoMancer are encrypted separately from the media catalog. Server environment credentials remain supported as an initial fallback.</p>
+    <div class="actions"><a class="button" href="/getting-started/metadata">Manage TVDB credentials</a><form method="post" action="/settings/metadata/tvdb-test"><button class="button" {% if not tvdb_status.configured %}disabled{% endif %}>Test TVDB connection</button></form></div>
+  </section>
+  <section class="panel settings-card">
+    <div class="settings-card-head"><div><p class="eyebrow">IMDb</p><h2>Local metadata</h2></div><span class="settings-state {{ 'active' if imdb_job.status in ['starting','running'] else 'good' }}">{{ 'Updating' if imdb_job.status in ['starting','running'] else 'Ready' }}</span></div>
+    <div class="settings-metrics"><div><strong>{{ '{:,}'.format(metadata_counts.imdb_ids or 0) }}</strong><span>IMDb IDs</span></div><div><strong>{{ '{:,}'.format(metadata_counts.ratings or 0) }}</strong><span>Ratings</span></div><div><strong>{{ '{:,}'.format(metadata_counts.title_credits or 0) }}</strong><span>Title credits</span></div><div><strong>{{ '{:,}'.format(metadata_counts.episode_credits or 0) }}</strong><span>Episode credits</span></div></div>
+    <p class="muted">Last title check: {{ local_time(metadata_counts.last_checked) }}. IMDb's free datasets are streamed and only records connected to your library are retained.</p>
+    <form method="post" action="/imdb-genres/sync"><input type="hidden" name="return_to" value="/settings/metadata"><button class="button primary" {% if imdb_job.status in ['starting','running'] %}disabled{% endif %}>{{ 'IMDb update running' if imdb_job.status in ['starting','running'] else 'Update IMDb metadata' }}</button></form>
+  </section>
+  <section class="panel settings-card full-width"><p class="eyebrow">MATCHING POLICY</p><h2>Current behavior</h2><p class="muted">All automatic movie and TV suggestions still require review before they are applied. Confidence-threshold customization will be added with the next matching-safety pass.</p></section>
+</div>
+
+{% elif section == 'external-search' %}
+<form class="settings-page-grid" method="post" action="/settings/external-search">
+  <section class="panel settings-card settings-form full-width">
+    <div><p class="eyebrow">SEARCH PROVIDER</p><h2>Missing-media searches</h2><p class="muted">Configure the external site opened from series, episode, and missing-episode actions. InfoMancer does not download anything itself.</p></div>
+    <label>Provider name<input name="search_provider_name" value="{{ preferences.search_provider_name }}" maxlength="50" required></label>
+    <label>Search URL template<input name="search_url_template" value="{{ preferences.search_url_template }}" required><small>Include exactly one <code>{query}</code> placeholder. InfoMancer safely URL-encodes each title or episode before inserting it.</small></label>
+    <div class="settings-preview"><span>Example search</span><a href="{{ test_search_url }}" target="_blank" rel="noopener noreferrer">House of the Dragon S01E01 ↗</a></div>
+  </section>
+  <div class="settings-save-bar"><span>Existing action links use the new provider immediately.</span><button class="button primary">Save external-search settings</button></div>
+</form>
+
+{% elif section == 'system' %}
+<div class="settings-page-grid">
+  <section class="panel settings-card full-width">
+    <div class="settings-card-head"><div><p class="eyebrow">STATUS</p><h2>InfoMancer {{ app_version }}</h2></div><span class="settings-state good">Running</span></div>
+    <div class="settings-metrics system-metrics"><div><strong>{{ '{:,}'.format(system_counts.titles) }}</strong><span>Titles</span></div><div><strong>{{ '{:,}'.format(system_counts.files) }}</strong><span>Media files</span></div><div><strong>{{ '{:,}'.format(system_counts.roots) }}</strong><span>Sources</span></div><div><strong>{{ '{:,}'.format(system_counts.active_users) }}</strong><span>Active users</span></div></div>
+  </section>
+  <section class="panel settings-card">
+    <p class="eyebrow">DATABASE</p><h2>Catalog storage</h2>
+    <dl class="settings-facts"><div><dt>Location</dt><dd><code>{{ database_path }}</code></dd></div><div><dt>Catalog size</dt><dd>{{ format_bytes(database_stats.size) }}{% if database_stats.wal_size %} + {{ format_bytes(database_stats.wal_size) }} pending WAL{% endif %}</dd></div><div><dt>SQLite</dt><dd>{{ sqlite_version }}</dd></div></dl>
+    <form method="post" action="/maintenance/optimize-database"><input type="hidden" name="return_to" value="/settings/system"><button class="button">Optimize database</button></form>
+  </section>
+  <section class="panel settings-card">
+    <p class="eyebrow">DEPLOYMENT</p><h2>Protected configuration</h2>
+    <dl class="settings-facts"><div><dt>Authentication</dt><dd>{{ auth_mode|title }}</dd></div><div><dt>Session lifetime</dt><dd>{{ settings_session_days }} day{% if settings_session_days != 1 %}s{% endif %}</dd></div><div><dt>Secure cookie</dt><dd>{{ cookie_secure_setting|title }}</dd></div><div><dt>Cloudflare identity</dt><dd>{{ 'Configured' if cloudflare_configured else 'Not configured in InfoMancer' }}</dd></div><div><dt>Accessible storage locations</dt><dd>{% for root in browse_roots %}<code>{{ root }}</code>{% if not loop.last %}<br>{% endif %}{% endfor %}<small>Paths visible inside InfoMancer. Docker maps your Windows, macOS, or Linux folders into these locations.</small></dd></div></dl>
+    <p class="muted">Authentication, secrets, trusted filesystem paths, and Cloudflare identity validation require server configuration and an application restart.</p>
+  </section>
+  <section class="panel settings-card">
+    <div class="settings-card-head"><div><p class="eyebrow">MEDIA INFORMATION</p><h2>Inspect technical details</h2></div><span class="settings-state {{ 'good' if (media_counts.inspected or 0) >= (media_counts.total or 0) else 'warn' }}">{{ '{:,}'.format(media_counts.inspected or 0) }} / {{ '{:,}'.format(media_counts.total or 0) }}</span></div>
+    <p class="muted">Read runtime, resolution, codecs, bitrate, container, and HDR/SDR status directly from each media file. Inspection does not modify the files.</p>
+    {% if media_counts.failed %}<div class="form-error media-failure-alert"><span><strong>{{ '{:,}'.format(media_counts.failed) }} file{% if media_counts.failed != 1 %}s need{% else %} needs{% endif %} attention.</strong> Review what failed, why it happened, and what to try next.</span><a class="button" href="/media-info/failures">Review affected files</a></div>{% endif %}
+    <div class="actions"><form method="post" action="/media-info/scan"><input type="hidden" name="scope" value="missing"><button class="button primary">Inspect new or missing files</button></form><form method="post" action="/media-info/scan" onsubmit="return confirm('Re-read technical information for every media file?');"><input type="hidden" name="scope" value="all"><button class="button">Reinspect all files</button></form></div>
+  </section>
+  <section class="panel settings-card">
+    <p class="eyebrow">EXPORT</p><h2>Library data</h2>
+    <p class="muted">Download the catalog for backup or analysis. Each format includes paths, provider IDs, ratings, genres, tags, personal fields, and collected media information.</p>
+    <div class="export-actions"><a class="button" href="/exports/library?format=csv">CSV</a><a class="button" href="/exports/library?format=json">JSON</a><a class="button" href="/exports/library?format=xml">XML</a></div>
+    <p class="muted export-help-note">Not sure which format to choose? <a href="/help#exports">Compare export formats and their common uses.</a></p>
+  </section>
+  <section class="panel settings-card full-width">
+    <div class="settings-card-head"><div><p class="eyebrow">TROUBLESHOOTING</p><h2>Application logging</h2></div><a class="button" href="/logs">Open live logs</a></div>
+    <p class="muted">Standard records important actions and failures. Verbose adds per-file and metadata activity. Debug adds diagnostic details and can grow the log more quickly.</p>
+    <form method="post" action="/settings/logging"><div class="logging-options">{% for value,label in [('info','Standard'),('verbose','Verbose'),('debug','Debug')] %}<label><input type="radio" name="log_level" value="{{ value }}" {% if preferences.log_level == value %}checked{% endif %}><span>{{ label }}</span></label>{% endfor %}</div><div class="actions"><button class="button primary">Save logging level</button><a class="button" href="/logs/export">Export logs</a></div></form>
+  </section>
+  <section class="panel settings-card full-width">
+    <div class="settings-card-head"><div><p class="eyebrow">SERVICE</p><h2>Restart application</h2></div></div>
+    <p class="muted">Restarting interrupts active scans and metadata work. Docker's restart policy should bring InfoMancer back online automatically.</p>
+    <form method="post" action="/maintenance/restart" onsubmit="return confirm('Restart InfoMancer now? Running scans and metadata updates will be interrupted.');"><input type="hidden" name="return_to" value="/settings/system"><input type="hidden" name="confirm" value="RESTART"><button class="button danger">Restart InfoMancer</button></form>
+  </section>
+  <section class="panel settings-card full-width">
+    <p class="eyebrow">CHANGE HISTORY</p><h2>Recent settings changes</h2>
+    {% if setting_history %}<div class="settings-history"><table><thead><tr><th>Setting</th><th>Change</th><th>Changed by</th><th>When</th></tr></thead><tbody>{% for change in setting_history %}<tr><td>{{ change.key|replace('_',' ')|title }}</td><td><code>{{ change.old_value }}</code> → <code>{{ change.new_value }}</code></td><td>{{ change.changed_by_name }}</td><td>{{ local_time(change.changed_at) }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="muted">No application settings have been changed yet.</p>{% endif %}
+  </section>
+</div>
+{% endif %}
+{% endblock %}

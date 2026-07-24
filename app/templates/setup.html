@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Set up InfoMancer{% endblock %}
+{% block content %}
+<section class="auth-layout">
+  <div class="auth-intro"><p class="eyebrow">FIRST RUN</p><h1>Create your Librarian</h1><p>The first account controls sources, matching, metadata, filenames, and other users. You can add Member accounts afterward.</p></div>
+  <form class="auth-card auth-form first-run-form" method="post" action="/setup">
+    <input type="hidden" name="preauth_token" value="{{ preauth_token }}">
+    {% if error %}<div class="form-error">{{ error }}</div>{% endif %}
+    <label>Username<input name="username" value="{{ username }}" minlength="3" maxlength="50" autocomplete="username" required><small>Used for local sign-in. Letters, numbers, dots, dashes, and underscores.</small></label>
+    <label>Email<input name="email" type="email" value="{{ email }}" autocomplete="email" {% if auth_mode == 'cloudflare' %}required{% endif %}></label>
+    <label>Display name<input name="display_name" value="{{ display_name }}" maxlength="100" autocomplete="name" required></label>
+    <label>Profile icon<select name="profile_icon"><option value="initials">Display-name initial</option><option value="film">Film</option><option value="television">Television</option><option value="star">Star</option><option value="library">Library</option></select></label>
+    {% if requires_password %}
+      <label>Password<span class="password-control"><input id="setup-password" name="password" type="password" minlength="{{ minimum_password_length }}" maxlength="256" autocomplete="new-password" required><button type="button" class="password-visibility-toggle" data-password-toggle="setup-password" aria-pressed="false" aria-label="Show password">Show</button></span><small>{% if sandbox_mode %}Testing mode: any non-empty password is accepted.{% else %}Use at least {{ minimum_password_length }} characters.{% endif %}</small></label>
+      <label>Confirm password<span class="password-control"><input id="setup-password-confirm" name="password_confirm" type="password" minlength="{{ minimum_password_length }}" maxlength="256" autocomplete="new-password" required><button type="button" class="password-visibility-toggle" data-password-toggle="setup-password-confirm" aria-pressed="false" aria-label="Show password confirmation">Show</button></span></label>
+    {% else %}
+      <p class="auth-provider-note">Cloudflare Access verified this browser. This account will be linked to <strong>{{ email }}</strong>.</p>
+    {% endif %}
+    <button class="button primary auth-submit">Create Librarian account</button>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Organize {{ title.metadata_title or title.title }} · InfoMancer{% endblock %}
+{% block content %}
+<a class="back" href="/titles/{{ title.id }}">← {{ title.metadata_title or title.title }}</a>
+<header class="page-head"><div><p class="eyebrow">PERSONAL LIBRARY</p><h1>Organize title</h1><p>Favorites, ratings, order, and tags belong to your account and do not change the media files.</p></div><a class="button" href="/tags">Manage tags</a></header>
+<form class="panel organize-title-form" method="post" action="/titles/{{ title.id }}/organize">
+  <section>
+    <h2>Quick access</h2>
+    <label class="favorite-setting"><input type="checkbox" name="favorite" value="1" {% if title_state and title_state.favorite %}checked{% endif %}><span class="favorite-star">★</span><span>Favorite</span></label>
+    <div class="organize-fields">
+      <label>Personal rating<input name="personal_rating" type="number" min="0" max="10" step="0.1" value="{{ title_state.personal_rating if title_state and title_state.personal_rating is not none else '' }}" placeholder="0–10"><small>Used by the Personal rating sort.</small></label>
+      <label>Custom order<input name="custom_order" type="number" step="1" value="{{ title_state.custom_order if title_state and title_state.custom_order is not none else '' }}" placeholder="For example, 10"><small>Lower numbers appear first with Custom order sorting.</small></label>
+    </div>
+  </section>
+  <section>
+    <h2>Custom tags</h2>
+    {% if tags %}<div class="tag-choice-grid">{% for tag in tags %}<label><input type="checkbox" name="selected_tags" value="{{ tag.id }}" {% if tag.selected %}checked{% endif %}><span>{{ tag.name }}</span></label>{% endfor %}</div>{% else %}<p class="muted">You have not created any tags yet.</p>{% endif %}
+    <label>Create tags<input name="tag_names" placeholder="Family favorites, Demo content, Holiday"><small>Separate multiple new tags with commas.</small></label>
+  </section>
+  <div class="actions"><a class="button" href="/titles/{{ title.id }}">Cancel</a><button class="button primary">Save organization</button></div>
+</form>
+{% endblock %}

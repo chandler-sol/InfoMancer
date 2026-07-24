@@ -1,0 +1,16 @@
+services:
+  infomancer:
+    volumes:
+      # Change the source paths to folders on this Windows computer.
+      # Duplicate a block when Movies or TV Shows live in several locations.
+      - type: bind
+        source: D:/Movies
+        target: /media/movies
+      - type: bind
+        source: D:/TV
+        target: /media/tv
+
+      # Network shares can also be mounted when Docker Desktop has access:
+      # - type: bind
+      #   source: //server/share/Movies
+      #   target: /media/network-movies

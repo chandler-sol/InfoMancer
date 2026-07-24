@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Sessions · InfoMancer{% endblock %}
+{% block content %}
+<header class="settings-heading"><p class="eyebrow">ACCOUNT</p><h1>Sessions</h1><p>Review the browsers and devices currently signed in to your account.</p></header>
+{% include "_account_nav.html" %}
+<section class="panel session-panel">
+  <div class="panel-head"><div><h2>Active sessions</h2><p class="muted">Session locations use the connecting IP and may be approximate.</p></div>{% if sessions|length > 1 %}<form method="post" action="/account/sessions/revoke-others"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button">Sign out other sessions</button></form>{% endif %}</div>
+  <div class="session-list">{% for session in sessions %}<article><div><strong>{% if session.id == current_session.id %}This browser{% else %}{{ session.user_agent or 'Unknown browser' }}{% endif %}</strong><span>{{ session.ip_address or 'Unknown address' }}</span><small>Last active {{ local_time(session.last_seen_at) }} · Expires {{ local_time(session.expires_at) }}</small></div><form method="post" action="/account/sessions/{{ session.id }}/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button{% if session.id == current_session.id %} danger{% endif %}">Sign out{% if session.id == current_session.id %} here{% endif %}</button></form></article>{% endfor %}</div>
+</section>
+{% endblock %}

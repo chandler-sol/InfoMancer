@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Bulk Match · InfoMancer{% endblock %}
+{% block content %}
+<div class="page-head"><div><p class="eyebrow">METADATA</p><h1>Bulk Match</h1><p class="muted">Choose a library. Matches are suggested in the background and always wait for your review.</p></div></div>
+<section class="library-portals bulk-portals">
+  <a href="/movies/bulk-match"><span class="portal-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="8" cy="7" r="3"></circle><circle cx="16" cy="7" r="3"></circle><path d="M5 10h14v10H5zM19 13l3-2v8l-3-2"></path></svg></span><span><strong>Movies</strong><small>{{ counts.movies }} unmatched</small></span></a>
+  <a href="/shows/bulk-match"><span class="portal-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="15" rx="2"></rect><path d="m8 2 4 4 4-4M7 12h10v5H7z"></path></svg></span><span><strong>TV Series</strong><small>{{ counts.shows }} unmatched</small></span></a>
+</section>
+{% endblock %}

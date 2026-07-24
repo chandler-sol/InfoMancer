@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ status }} · InfoMancer{% endblock %}
+{% block content %}
+<section class="auth-card auth-error-card">
+  <p class="eyebrow">{{ status }}</p>
+  <h1>{{ heading }}</h1>
+  <p class="muted">{{ detail }}</p>
+  <a class="button" href="/">Return home</a>
+</section>
+{% endblock %}

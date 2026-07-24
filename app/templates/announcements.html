@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Announcements · {{ app_name }}{% endblock %}
+{% block content %}
+<header class="settings-heading announcement-heading"><p class="eyebrow">WHAT'S NEW</p><h1>Announcements</h1><p>Release news from InfoMancer and messages from your installation's Librarians.</p></header>
+{% if announcement_error %}<div class="form-error page-error" role="alert">{{ announcement_error }}</div>{% endif %}
+
+{% if current_user.is_librarian %}
+<div class="announcement-admin-grid">
+  <section class="panel announcement-composer">
+    <p class="eyebrow">LIBRARIAN MESSAGE</p><h2>Publish an announcement</h2>
+    <p class="muted">Messages are plain text and appear as a popup when the selected people next use InfoMancer.</p>
+    <form method="post" action="/admin/announcements" class="settings-form">
+      <label>Title<input name="title" value="{{ announcement_form.title or '' }}" maxlength="120" required></label>
+      <label>Message<textarea name="body" rows="7" maxlength="4000" required>{{ announcement_form.body or '' }}</textarea></label>
+      <div class="announcement-form-row">
+        <label>Style<select name="category"><option value="information" {% if announcement_form.category == 'information' %}selected{% endif %}>Information</option><option value="update" {% if announcement_form.category == 'update' %}selected{% endif %}>Update</option><option value="important" {% if announcement_form.category == 'important' %}selected{% endif %}>Important</option></select></label>
+        <label>Audience<select name="audience"><option value="members" {% if announcement_form.audience != 'all' and announcement_form.audience != 'librarians' %}selected{% endif %}>Members</option><option value="librarians" {% if announcement_form.audience == 'librarians' %}selected{% endif %}>Librarians</option><option value="all" {% if announcement_form.audience == 'all' %}selected{% endif %}>Everyone</option></select></label>
+        <label>Delivery<select name="recurrence" id="announcement-recurrence"><option value="once" {% if announcement_form.recurrence != 'daily' and announcement_form.recurrence != 'weekly' %}selected{% endif %}>Once</option><option value="daily" {% if announcement_form.recurrence == 'daily' %}selected{% endif %}>Daily</option><option value="weekly" {% if announcement_form.recurrence == 'weekly' %}selected{% endif %}>Weekly</option></select></label>
+      </div>
+      <div class="announcement-form-row dates">
+        <label>Starts<input type="datetime-local" name="starts_at" value="{{ announcement_form.starts_at or announcement_now }}" required><small>Uses the installation time zone.</small></label>
+        <label>Ends <span class="muted">required when recurring</span><input type="datetime-local" name="ends_at" value="{{ announcement_form.ends_at or '' }}"></label>
+      </div>
+      <button class="button primary">Publish announcement</button>
+    </form>
+  </section>
+  <section class="panel managed-announcements"><p class="eyebrow">INSTALLATION MESSAGES</p><h2>Manage announcements</h2>
+    {% if managed_announcements %}<div class="managed-announcement-list">{% for item in managed_announcements %}<article><div><strong>{{ item.title }}</strong><small>{{ item.audience|title }} · {{ item.recipient_count }} recipient{% if item.recipient_count != 1 %}s{% endif %} · {{ 'Active' if item.active else 'Ended' }}</small></div>{% if item.active %}<form method="post" action="/admin/announcements/{{ item.id }}/deactivate" onsubmit="return confirm('End this announcement now?');"><button class="button small danger">End</button></form>{% endif %}</article>{% endfor %}</div>{% else %}<p class="muted">No installation announcements have been created yet.</p>{% endif %}
+  </section>
+</div>
+{% endif %}
+
+<section class="announcement-feed">
+  <div class="announcement-feed-head"><p class="eyebrow">HISTORY</p><h2>All announcements</h2></div>
+  {% if announcements %}{% for item in announcements %}<article class="announcement-card {{ item.category }}">
+    <div class="announcement-card-meta"><span>{{ 'Official InfoMancer' if item.source == 'official' else (item.created_by_name or 'Librarian') }}</span><span>{{ local_time(item.starts_at) }}</span>{% if item.currently_active %}<b>Active</b>{% endif %}</div>
+    <h3>{{ item.title }}</h3><p>{{ item.body }}</p>
+    <footer>{% if item.recurrence_days %}Repeats {{ 'daily' if item.recurrence_days == 1 else 'weekly' }}{% else %}Shown once{% endif %}{% if item.last_seen_at %} · Seen {{ local_time(item.last_seen_at) }}{% endif %}</footer>
+  </article>{% endfor %}{% else %}<div class="panel empty">There are no announcements for your account yet.</div>{% endif %}
+</section>
+{% endblock %}

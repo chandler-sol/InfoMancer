@@ -1,0 +1,19 @@
+<dialog class="source-browser" id="source-browser" aria-labelledby="source-browser-title">
+  <div class="source-browser-shell">
+    <header class="source-browser-head"><div><p class="eyebrow">ADD MEDIA SOURCE</p><h2 id="source-browser-title">Choose a folder</h2></div><button type="button" class="source-browser-close" data-close-source-browser aria-label="Close folder browser">×</button></header>
+    <div class="source-browser-nav"><button class="button small" type="button" id="source-browser-back" disabled>← Back</button><nav id="source-browser-crumbs" class="source-browser-crumbs" aria-label="Current folder"></nav></div>
+    <div id="source-browser-error" class="source-browser-error" role="alert" hidden></div>
+    <div id="source-browser-list" class="source-browser-list" aria-live="polite"></div>
+    <div id="source-current" class="source-current" hidden><div><small>Current folder</small><strong id="source-current-name"></strong><code id="source-current-path"></code></div><button type="button" class="button" id="source-use-current">Preview this folder</button></div>
+    <section id="source-preview" class="source-preview" hidden>
+      <div class="source-preview-head"><div><p class="eyebrow">MEDIA PREVIEW</p><h3 id="source-preview-title">Review this source</h3></div><span id="source-recommendation" class="source-recommendation"></span></div>
+      <div class="source-preview-stats" id="source-preview-stats"></div><p id="source-preview-warning" class="source-preview-warning" hidden></p>
+      <form method="post" action="/roots" id="source-add-form" class="source-final-form">
+        <input type="hidden" name="path" id="source-final-path"><input type="hidden" name="kind" id="source-final-kind"><input type="hidden" name="scan_after" value="1"><input type="hidden" name="return_to" value="{{ source_return_to|default('/sources') }}">
+        <label>Library type<select id="source-kind-choice"><option value="auto">Auto-detect</option><option value="movie">Movies</option><option value="tv">TV Shows</option></select></label>
+        <label>Display name <span class="muted">optional</span><input name="label" id="source-final-label" placeholder="For example, Family Movies"></label>
+        <button class="button primary" id="source-add-submit" disabled>Add &amp; Scan</button>
+      </form>
+    </section>
+  </div>
+</dialog>

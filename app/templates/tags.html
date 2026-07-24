@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Custom Tags · InfoMancer{% endblock %}
+{% block content %}
+<header class="page-head"><div><p class="eyebrow">PERSONAL LIBRARY</p><h1>Custom Tags</h1><p>Create, rename, and remove your searchable movie and TV labels.</p></div><a class="button" href="/library">Back to Library</a></header>
+<div class="settings-page-grid">
+  <form class="panel settings-card settings-form" method="post" action="/tags/create">
+    <div><h2>Create a tag</h2><p class="muted">Tags belong to your account and can span Movies and TV Shows.</p></div>
+    <label>Tag name<input name="name" maxlength="40" required placeholder="Family night"></label>
+    <button class="button primary">Create tag</button>
+  </form>
+  <section class="panel settings-card">
+    <h2>Your tags <span class="count">{{ tags|length }}</span></h2>
+    {% if tags %}<div class="tag-manager">{% for tag in tags %}<article><form method="post" action="/tags/{{ tag.id }}/rename"><label><span class="sr-only">Rename {{ tag.name }}</span><input name="name" value="{{ tag.name }}" maxlength="40" required></label><span>{{ tag.usage_count }} title{% if tag.usage_count != 1 %}s{% endif %}</span><button class="button">Rename</button></form><form method="post" action="/tags/{{ tag.id }}/delete" onsubmit="return confirm('Delete the tag {{ tag.name|e }}? Movies and TV series will remain in the library.');"><button class="button danger">Delete</button></form></article>{% endfor %}</div>{% else %}<div class="empty">No custom tags yet.</div>{% endif %}
+  </section>
+</div>
+{% endblock %}

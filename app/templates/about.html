@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}About · InfoMancer{% endblock %}
+{% block content %}
+<header class="settings-heading about-heading">
+  <p class="eyebrow">ABOUT</p>
+  <h1>InfoMancer</h1>
+  <p>A local-first catalog for understanding, matching, and carefully organizing the Movies and TV Shows already stored on your server.</p>
+  <span class="about-version">Version {{ app_version }}</span>
+</header>
+
+<section class="about-principles" aria-label="InfoMancer principles">
+  <article class="panel">
+    <p class="eyebrow">LOCAL FIRST</p>
+    <h2>Your library stays yours</h2>
+    <p>InfoMancer catalogs files where they already live. It does not provide media, host your collection, or require your library to be uploaded to a cloud service.</p>
+  </article>
+  <article class="panel">
+    <p class="eyebrow">CAREFUL BY DEFAULT</p>
+    <h2>Review before changing</h2>
+    <p>Scans read the library without renaming it. Filename and folder changes are previewed and require explicit approval before InfoMancer applies them.</p>
+  </article>
+  <article class="panel">
+    <p class="eyebrow">BUILT FOR COLLECTIONS</p>
+    <h2>Movies and TV, accounted for</h2>
+    <p>Search across storage, resolve metadata matches, identify missing episodes, and prepare consistent Plex-compatible names from one catalog.</p>
+  </article>
+</section>
+
+<section class="panel about-providers">
+  <header>
+    <p class="eyebrow">METADATA &amp; ATTRIBUTION</p>
+    <h2>Information that makes the catalog useful</h2>
+    <p>InfoMancer combines information from external metadata providers with details discovered from your local files.</p>
+  </header>
+
+  <div class="provider-credit tvdb-credit">
+    <div class="provider-wordmark" aria-hidden="true">TheTVDB</div>
+    <div>
+      <h3>TheTVDB</h3>
+      <p><strong>Metadata provided by TheTVDB.</strong> Please consider adding missing information or subscribing.</p>
+      <p>TheTVDB supplies title, series, season, episode, artwork, and identifier information used for matching and library organization.</p>
+      <div class="provider-links">
+        <a href="https://thetvdb.com" target="_blank" rel="noopener noreferrer">Visit TheTVDB ↗</a>
+        <a href="https://thetvdb.com/subscribe" target="_blank" rel="noopener noreferrer">Contribute or subscribe ↗</a>
+        <a href="https://thetvdb.com/api-information" target="_blank" rel="noopener noreferrer">API and data licensing ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="provider-credit imdb-credit">
+    <div class="provider-wordmark" aria-hidden="true">IMDb</div>
+    <div>
+      <h3>IMDb</h3>
+      <p>Selected title types, genres, ratings, vote counts, credits, and people information are derived from IMDb’s Non-Commercial Datasets.</p>
+      <p>Those datasets are available for personal and non-commercial use and remain subject to IMDb’s applicable terms and conditions.</p>
+      <div class="provider-links">
+        <a href="https://developer.imdb.com/non-commercial-datasets/" target="_blank" rel="noopener noreferrer">IMDb Non-Commercial Datasets ↗</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="about-independent">
+  <h2>Independent software</h2>
+  <p>InfoMancer is an independent project. It is not affiliated with, sponsored by, or endorsed by TheTVDB, IMDb, Plex, or their respective owners. Product names and trademarks belong to their respective owners.</p>
+</section>
+{% endblock %}

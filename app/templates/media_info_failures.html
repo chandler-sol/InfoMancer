@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Files needing attention · {{ app_name }}{% endblock %}
+{% block content %}
+<header class="settings-heading app-settings-heading media-failures-heading">
+  <a class="back" href="/settings/system">← System Settings</a>
+  <p class="eyebrow">MEDIA INFORMATION</p>
+  <h1>Files needing attention</h1>
+  <p>
+    InfoMancer could not collect technical details from
+    {{ '{:,}'.format(failures|length) }} file{% if failures|length != 1 %}s{% endif %}.
+    Nothing was changed. Review the explanation for each file before replacing,
+    repairing, reconnecting, or reinspecting it.
+  </p>
+  <div class="actions">
+    <a class="button" href="/logs?category=media">Open all media logs</a>
+    {% if failures %}
+    <form method="post" action="/media-info/scan">
+      <input type="hidden" name="scope" value="missing">
+      <button class="button primary">Reinspect unresolved files</button>
+    </form>
+    {% endif %}
+  </div>
+</header>
+
+{% if failures %}
+<section class="media-failure-list" aria-label="Unreadable media files">
+  {% for file in failures %}
+  <article class="panel media-failure-item">
+    <div class="media-failure-title">
+      <div>
+        <span class="kind {{ file.kind }}">{{ file.kind }}</span>
+        <h2>{{ file.display_title }}</h2>
+        <strong>{{ file.filename }}</strong>
+      </div>
+      <div class="actions">
+        <a class="button primary" href="/titles/{{ file.title_id }}">Open title</a>
+        <a class="button" href="{{ file.logs_url }}">Related logs</a>
+      </div>
+    </div>
+    <div class="media-failure-explanation">
+      <strong>What happened</strong>
+      <p>{{ file.explanation }}</p>
+    </div>
+    <dl class="settings-facts media-failure-location">
+      <div><dt>Source</dt><dd>{{ file.source_name }}</dd></div>
+      <div><dt>File path</dt><dd><code>{{ file.path }}</code></dd></div>
+    </dl>
+  </article>
+  {% endfor %}
+</section>
+{% else %}
+<section class="panel empty good">
+  <h2>No files need attention</h2>
+  <p>Every cataloged file with an inspection result is currently readable.</p>
+  <a class="button" href="/settings/system">Return to System Settings</a>
+</section>
+{% endif %}
+{% endblock %}

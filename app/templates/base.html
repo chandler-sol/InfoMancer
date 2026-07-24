@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v={{ static_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='progress.css') }}?v={{ static_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='library.css') }}?v={{ static_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='header.css') }}?v={{ static_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='sources.css') }}?v={{ static_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='auth.css') }}?v={{ static_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='first-run.css') }}?v={{ static_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='settings.css') }}?v={{ static_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='engagement.css') }}?v={{ static_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='tour-demo.css') }}?v={{ static_version }}">
+  <script src="{{ url_for('static', path='password-visibility.js') }}?v={{ static_version }}" defer></script>
+  <script src="{{ url_for('static', path='engagement.js') }}?v={{ static_version }}" defer></script>
+</head>
+<body class="{% if current_user %}role-{{ current_user.role }}{% else %}signed-out{% endif %}">
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-mark">I</span><span class="brand-label">InfoMancer</span></a>
+    {% if current_user %}
+    <div class="topbar-actions">
+      <form class="global-search" id="global-search" method="get" action="/library" role="search">
+        <label class="sr-only" for="global-search-input">Search the entire library</label>
+        <input id="global-search-input" name="q" value="{{ request.query_params.get('q', '') if request.url.path == '/library' else '' }}" placeholder="Search the library" autocomplete="off">
+        <button type="button" class="global-search-toggle" id="global-search-toggle" aria-label="Open library search" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg>
+        </button>
+      </form>
+      <div class="task-widget idle" id="task-widget">
+        <button type="button" class="task-widget-toggle" id="task-widget-toggle" aria-expanded="false" aria-controls="task-popover"><span class="task-dot"></span><span id="task-summary">No tasks running</span></button>
+        <div class="task-popover" id="task-popover" hidden><strong>Running tasks</strong><div id="task-list"></div></div>
+      </div>
+      <div class="site-menu" id="site-menu">
+        <button type="button" class="site-menu-toggle" id="site-menu-toggle" aria-label="Open navigation menu" aria-expanded="false" aria-controls="site-menu-panel"><span></span><span></span><span></span></button>
+        <nav class="site-menu-panel" id="site-menu-panel" aria-hidden="true">
+          <span class="site-menu-label">Browse</span>
+          <a href="/" {% if request.url.path == '/' %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8"></path><path d="M5.5 9.5V21h13V9.5M9 21v-7h6v7"></path></svg><span>Home</span></a>
+          <a href="/movies" {% if request.url.path == '/movies' %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M7 5 9 9m4-4 2 4m4-4 2 4M3 10h18"></path></svg><span>Movies</span></a>
+          <a href="/shows" {% if request.url.path.startswith('/shows') and not request.url.path.startswith('/shows/bulk-match') %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"></rect><path d="m8 2 4 4 4-4M8 15h8"></path></svg><span>TV Shows</span></a>
+          <a href="/announcements" {% if request.url.path == '/announcements' %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9a7 7 0 0 1 14 0c0 8 3 8 3 8H2s3 0 3-8"></path><path d="M9 21h6M12 2V1"></path></svg><span>Announcements</span>{% if announcement_due_count %}<b class="menu-count">{{ announcement_due_count }}</b>{% endif %}</a>
+          <a href="/help" {% if request.url.path == '/help' %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.7 9a2.5 2.5 0 1 1 3.7 2.2c-.9.5-1.4 1.1-1.4 2.3"></path><path d="M12 17.5h.01"></path></svg><span>Help</span></a>
+          {% if current_user.is_librarian %}
+          <span class="site-menu-label site-menu-section">Librarian</span>
+          <a href="/bulk-match" {% if request.url.path.startswith('/bulk-match') or request.url.path.startswith('/movies/bulk-match') or request.url.path.startswith('/shows/bulk-match') %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M4 12h10M4 18h7"></path><path d="m16 15 2 2 4-5"></path></svg><span>Bulk Match</span></a>
+          <a href="/sources" {% if request.url.path.startswith('/sources') %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9v10H3z"></path><path d="M3 7V5h7l2 2"></path></svg><span>Sources</span></a>
+          <a href="/settings" {% if request.url.path.startswith('/settings') %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"></path></svg><span>Settings</span></a>
+          {% endif %}
+        </nav>
+      </div>
+      {% if auth_mode != 'disabled' %}<details class="account-menu series-menu">
+        <summary aria-label="Open account menu" title="Account"><span class="account-avatar">{{ current_user.symbol }}</span><span class="account-name">{{ current_user.display_name }}</span></summary>
+        <div class="series-menu-popover account-menu-popover">
+          <div class="account-menu-identity"><strong>{{ current_user.display_name }}</strong><small>@{{ current_user.username }} · {{ current_user.role|title }}</small></div>
+          <a href="/account/profile">Profile</a><a href="/tour">Take the Tour</a>
+          <hr><form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>Sign out</button></form>
+        </div>
+      </details>{% endif %}
+    </div>
+    {% endif %}
+  </header>
+  <main class="shell">
+    {% set match_return = request.query_params.get('return_to', '') %}
+    {% set is_match_notice = request.query_params.get('match_notice') == '1' and (match_return.startswith('/titles/') or match_return.startswith('/library') or match_return.startswith('/movies') or match_return.startswith('/shows')) %}
+    {% set is_account_notice = request.query_params.get('account_notice') == '1' %}
+    {% if message %}<div class="notice{% if is_match_notice %} match-notice{% endif %}{% if is_account_notice %} account-notice{% endif %}" id="flash-message" role="status"><span>{{ message }}</span>{% if is_match_notice %}<a href="{{ match_return }}">{{ request.query_params.get('return_label', 'Back to search results') }}</a>{% endif %}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer><a href="/about">InfoMancer {{ app_version }}</a> · Local-first media catalog · Metadata provided by <a href="https://thetvdb.com" target="_blank" rel="noopener noreferrer">TheTVDB</a>. Please consider <a href="https://thetvdb.com/subscribe" target="_blank" rel="noopener noreferrer">adding missing information or subscribing</a>. · Selected data from <a href="https://developer.imdb.com/non-commercial-datasets/" target="_blank" rel="noopener noreferrer">IMDb’s Non-Commercial Datasets</a>.</footer>
+  {% if show_onboarding_tour %}
+  <div class="tour-layer tour-intro" id="onboarding-tour" role="dialog" aria-modal="true" aria-labelledby="tour-title" data-csrf-token="{{ csrf_token }}" data-setup-pending="{{ '1' if setup_choice_pending else '0' }}">
+    <div class="tour-scrim" id="tour-scrim" aria-hidden="true">
+      <span data-tour-shade="top"></span>
+      <span data-tour-shade="right"></span>
+      <span data-tour-shade="bottom"></span>
+      <span data-tour-shade="left"></span>
+    </div>
+    <section class="tour-card">
+      <div class="tour-progress"><span id="tour-step-label">1 of 6</span><i id="tour-progress-bar"></i></div>
+      <p class="eyebrow">WELCOME TO {{ app_name|upper }}</p>
+      <h2 id="tour-title">Your media library, accounted for.</h2>
+      <p id="tour-copy">This quick walkthrough shows you where to browse, search, follow background work, and manage your account.</p>
+      <div class="tour-actions"><div class="tour-secondary-actions"><button type="button" class="button" id="tour-back" hidden>Back</button><button type="button" class="button" id="tour-skip">Skip for now</button></div><button type="button" class="button primary" id="tour-next">Start tour</button></div>
+    </section>
+  </div>
+  {% elif show_setup_choice %}
+  <div class="setup-choice-layer" role="dialog" aria-modal="true" aria-labelledby="setup-choice-title">
+    <div class="setup-choice-scrim"></div>
+    <section class="setup-choice-card">
+      <p class="eyebrow">YOUR LIBRARY, YOUR WAY</p>
+      <h2 id="setup-choice-title">How would you like to begin?</h2>
+      <p>InfoMancer can guide you through the important installation choices, or you can explore independently and add media whenever you are ready.</p>
+      <div class="setup-choice-options">
+        <form method="post" action="/getting-started/choice">
+          <input type="hidden" name="mode" value="guided">
+          <button class="setup-choice-option recommended">
+            <span class="setup-choice-icon" aria-hidden="true">→</span>
+            <strong>Guided setup</strong>
+            <small>Configure the installation, review metadata access, add Movie and TV sources, and start scanning.</small>
+            <b>Recommended</b>
+          </button>
+        </form>
+        <form method="post" action="/getting-started/choice">
+          <input type="hidden" name="mode" value="manual">
+          <button class="setup-choice-option">
+            <span class="setup-choice-icon" aria-hidden="true">◇</span>
+            <strong>Set up manually</strong>
+            <small>Go directly to Home and configure InfoMancer at your own pace. Clear shortcuts will help you add your first Movie or TV source, and you can reopen the Setup Assistant at any time.</small>
+          </button>
+        </form>
+      </div>
+    </section>
+  </div>
+  {% elif next_announcement %}
+  <div class="announcement-layer" id="announcement-popup" role="dialog" aria-modal="true" aria-labelledby="announcement-title" data-announcement-id="{{ next_announcement.id }}" data-csrf-token="{{ csrf_token }}">
+    <div class="announcement-scrim"></div>
+    <article class="announcement-popup {{ next_announcement.category }}">
+      <p class="eyebrow">{{ 'INFOMANCER UPDATE' if next_announcement.source == 'official' else app_name|upper ~ ' ANNOUNCEMENT' }}</p>
+      <h2 id="announcement-title">{{ next_announcement.title }}</h2>
+      <p>{{ next_announcement.body }}</p>
+      {% if next_announcement.recurrence_days %}<small>This notice may appear {{ 'daily' if next_announcement.recurrence_days == 1 else 'weekly' }} through {{ local_time(next_announcement.ends_at) }}.</small>{% endif %}
+      <div class="announcement-popup-actions"><a class="button" href="/announcements">View all announcements</a><button class="button primary" type="button" id="announcement-dismiss">Got it</button></div>
+    </article>
+  </div>
+  {% endif %}
+  {% if message %}
+  <script>
+    (() => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("message");
+      url.searchParams.delete("return_to");
+      url.searchParams.delete("return_label");
+      url.searchParams.delete("match_notice");
+      url.searchParams.delete("account_notice");
+      history.replaceState({}, "", url.pathname + url.search + url.hash);
+      const flash = document.getElementById("flash-message");
+      window.setTimeout(() => flash?.remove(), {{ 10000 if is_match_notice or is_account_notice else 5000 }});
+    })();
+  </script>
+  {% endif %}
+  <script>
+    (() => {
+      const csrfToken = {{ csrf_token|tojson }};
+      if (csrfToken) {
+        document.querySelectorAll('form[method="post" i]').forEach((form) => {
+          if (form.querySelector('input[name="csrf_token"]')) return;
+          const input = document.createElement("input");
+          input.type = "hidden";
+          input.name = "csrf_token";
+          input.value = csrfToken;
+          form.prepend(input);
+        });
+      }
+      const search = document.getElementById("global-search");
+      const searchInput = document.getElementById("global-search-input");
+      const searchToggle = document.getElementById("global-search-toggle");
+      const menu = document.getElementById("site-menu");
+      const menuToggle = document.getElementById("site-menu-toggle");
+      const menuPanel = document.getElementById("site-menu-panel");
+
+      const setSearchOpen = (open) => {
+        search.classList.toggle("open", open);
+        searchToggle.setAttribute("aria-expanded", String(open));
+        searchToggle.setAttribute("aria-label", open ? "Search the library" : "Open library search");
+        if (open) window.setTimeout(() => searchInput.focus(), 180);
+      };
+      const setMenuOpen = (open) => {
+        menu.classList.toggle("open", open);
+        menuToggle.setAttribute("aria-expanded", String(open));
+        menuToggle.setAttribute("aria-label", open ? "Close navigation menu" : "Open navigation menu");
+        menuPanel.setAttribute("aria-hidden", String(!open));
+      };
+
+      if (!search || !searchToggle || !menu || !menuToggle || !menuPanel) return;
+      searchToggle.addEventListener("click", () => {
+        if (!search.classList.contains("open")) {
+          setMenuOpen(false);
+          setSearchOpen(true);
+        } else if (searchInput.value.trim()) {
+          search.requestSubmit();
+        } else {
+          setSearchOpen(false);
+        }
+      });
+      menuToggle.addEventListener("click", () => {
+        const open = !menu.classList.contains("open");
+        if (open) setSearchOpen(false);
+        setMenuOpen(open);
+      });
+      document.addEventListener("click", (event) => {
+        if (!menu.contains(event.target)) setMenuOpen(false);
+        if (!search.contains(event.target) && !searchInput.value.trim()) setSearchOpen(false);
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        setMenuOpen(false);
+        if (!searchInput.value.trim()) setSearchOpen(false);
+      });
+    })();
+  </script>
+  <script>
+    (() => {
+      const widget = document.getElementById("task-widget");
+      const toggle = document.getElementById("task-widget-toggle");
+      const popover = document.getElementById("task-popover");
+      const summary = document.getElementById("task-summary");
+      const list = document.getElementById("task-list");
+      if (!widget || !toggle || !popover || !summary || !list) return;
+      toggle.addEventListener("click", () => {
+        const open = popover.hidden;
+        popover.hidden = !open;
+        toggle.setAttribute("aria-expanded", String(open));
+      });
+      document.addEventListener("click", (event) => {
+        if (!widget.contains(event.target)) {
+          popover.hidden = true;
+          toggle.setAttribute("aria-expanded", "false");
+        }
+      });
+      const poll = async () => {
+        let active = false;
+        try {
+          const response = await fetch("/api/tasks", { cache: "no-store" });
+          const data = await response.json();
+          const tasks = data.tasks || [];
+          active = tasks.length > 0;
+          widget.classList.toggle("idle", !active);
+          if (active) {
+            summary.textContent = tasks.length === 1 ? tasks[0].label : `${tasks.length} tasks running`;
+            list.replaceChildren(...tasks.map((task) => {
+              const row = document.createElement("div");
+              row.className = "task-row";
+              const label = document.createElement("strong");
+              label.textContent = task.label;
+              const detail = document.createElement("small");
+              detail.textContent = task.detail;
+              const track = document.createElement("span");
+              track.className = "task-track";
+              track.innerHTML = "<i></i>";
+              row.append(label, detail, track);
+              return row;
+            }));
+          } else {
+            summary.textContent = "No tasks running";
+            const row = document.createElement("div");
+            row.className = "task-empty";
+            row.textContent = "No background tasks are currently active.";
+            list.replaceChildren(row);
+          }
+        } catch (_) {}
+        window.setTimeout(poll, active ? 1500 : 4000);
+      };
+      poll();
+    })();
+  </script>
+  <script>
+    (() => {
+      const actionMenus = ".series-menu, .episode-menu, .account-menu";
+      document.addEventListener("click", (event) => {
+        document.querySelectorAll(`${actionMenus}[open]`).forEach((menu) => {
+          if (!menu.contains(event.target)) menu.removeAttribute("open");
+        });
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          document.querySelectorAll(`${actionMenus}[open]`).forEach((menu) => {
+            menu.removeAttribute("open");
+          });
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

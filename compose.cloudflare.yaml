@@ -1,0 +1,13 @@
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: infomancer-cloudflared
+    restart: unless-stopped
+    depends_on:
+      - infomancer
+    env_file:
+      - .env.cloudflare
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run

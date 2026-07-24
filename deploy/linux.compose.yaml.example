@@ -1,0 +1,11 @@
+services:
+  infomancer:
+    volumes:
+      # Change the source paths to mounted folders on this Linux host.
+      # The account running Docker must be able to read them.
+      - type: bind
+        source: /mnt/media/movies
+        target: /media/movies
+      - type: bind
+        source: /mnt/media/tv
+        target: /media/tv

@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Setup Assistant · InfoMancer{% endblock %}
+{% block content %}
+<div class="setup-assistant-page">
+<header class="settings-heading setup-assistant-heading">
+  <p class="eyebrow">GUIDED SETUP</p><h1>Build your library</h1>
+  <p>Complete four short steps. You can leave at any time and resume from Help, Settings, or your Profile menu.</p>
+</header>
+<nav class="setup-progress" aria-label="Setup progress">
+  {% for item, label in [('general','Installation'),('metadata','Metadata'),('sources','Sources'),('finish','Finish')] %}
+  <a href="/getting-started/{{ item }}" class="{% if item == step %}active{% elif steps.index(item) < steps.index(step) %}complete{% endif %}"><span>{{ loop.index }}</span><b>{{ label }}</b></a>
+  {% endfor %}
+</nav>
+{% if error %}<div class="form-error page-error" role="alert">{{ error }}</div>{% endif %}
+
+{% if step == 'general' %}
+<form class="setup-step panel" method="post" action="/getting-started/general">
+  <div class="setup-step-copy"><p class="eyebrow">STEP 1 OF 4</p><h2>Set your library name and time zone</h2><p>Your library name personalizes page titles and setup summaries. The InfoMancer name and logo always remain in the header.</p></div>
+  <div class="setup-fields two-column compact-fields">
+    <label>Library name<input name="installation_name" value="{{ preferences.installation_name }}" minlength="1" maxlength="50" required><small>You can change this later in App Settings.</small></label>
+    <label>Time zone<select id="setup-timezone" name="timezone_name" required>{% for group_name, zones in timezone_groups %}<optgroup label="{{ group_name }}">{% for zone, label in zones %}<option value="{{ zone }}" {% if zone == preferences.timezone %}selected{% endif %}>{{ label }}</option>{% endfor %}</optgroup>{% endfor %}</select><small>Choose your location. Used for scan times, sessions, and announcements.</small></label>
+  </div>
+  <div class="setup-step-actions"><a class="button" href="/">Exit for now</a><button class="button primary">Save and continue</button></div>
+</form>
+<script>
+(() => {
+  const select = document.getElementById("setup-timezone");
+  if (!select || select.value !== "UTC") return;
+  const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (detected && [...select.options].some(option => option.value === detected)) select.value = detected;
+})();
+</script>
+
+{% elif step == 'metadata' %}
+<form class="setup-step panel" method="post" action="/getting-started/metadata">
+  <div class="setup-step-copy"><p class="eyebrow">STEP 2 OF 4</p><h2>Connect TheTVDB</h2><p>TheTVDB gives InfoMancer the series, movie, season, and episode information used for matching, filenames, and missing-episode reports.</p></div>
+  <div class="metadata-setup-status {{ 'state-configured' if tvdb_status.configured else 'state-missing' }}">
+    <span aria-hidden="true">{{ '✓' if tvdb_status.configured else '!' }}</span>
+    <div>
+      <strong>{{ 'TheTVDB is connected' if tvdb_status.configured else 'TheTVDB is not connected yet' }}</strong>
+      <p>{{ tvdb_status.key_hint }}{% if tvdb_status.pin_configured %} · Subscriber PIN saved{% endif %}</p>
+    </div>
+  </div>
+  <div class="setup-metadata-grid">
+    <div class="setup-instructions">
+      <h3>Get a project API key</h3>
+      <p class="setup-instructions-intro">The API key identifies the app or project asking TheTVDB for metadata. For this self-hosted build, register a key for your InfoMancer installation.</p>
+      <ol>
+        <li>Create or sign in to your TheTVDB account.</li>
+        <li>Open API and Data Licensing, then choose <strong>Get Started</strong>.</li>
+        <li>Register your self-hosted InfoMancer project and copy its API key.</li>
+        <li>Paste the key here. Add a PIN only if TheTVDB says your access model requires one.</li>
+      </ol>
+      <div class="setup-help-links">
+        <a href="https://thetvdb.com/api-information" target="_blank" rel="noopener noreferrer">Open TheTVDB API and licensing ↗</a>
+        <a href="https://support.thetvdb.com/kb/faq.php?id=81" target="_blank" rel="noopener noreferrer">Read TheTVDB's key and PIN guide ↗</a>
+      </div>
+    </div>
+    <div class="setup-credential-fields">
+      <label>
+        <span class="credential-label"><b>Project API key</b><small>Required</small></span>
+        <input name="api_key" type="password" autocomplete="off" {% if not tvdb_status.configured %}required{% endif %} placeholder="{{ 'Leave blank to keep the connected key' if tvdb_status.configured else 'Paste your project API key' }}">
+        <small class="credential-explanation">Identifies this InfoMancer installation to TheTVDB.</small>
+      </label>
+      <label>
+        <span class="credential-label"><b>Subscriber PIN</b><small>Only when required</small></span>
+        <input name="subscriber_pin" type="password" autocomplete="off" placeholder="{{ 'Leave blank to keep the saved PIN' if tvdb_status.configured else 'Paste your subscriber PIN, if required' }}">
+        <small class="credential-explanation">Personal to the subscriber. Never share one PIN between different users.</small>
+      </label>
+      <p class="credential-safety">InfoMancer verifies these credentials before continuing and encrypts them in its application data.</p>
+      {% if tvdb_status.storage_error %}<p class="form-error" role="alert">{{ tvdb_status.storage_error }}</p>{% endif %}
+    </div>
+  </div>
+  <div class="setup-step-actions"><a class="button" href="/getting-started/general">Back</a><div class="actions">{% if sandbox_mode %}<button class="button" name="testing_skip" value="1" formnovalidate>Skip in testing mode</button>{% endif %}<button class="button primary">Verify and continue</button></div></div>
+</form>
+
+{% elif step == 'sources' %}
+<section class="setup-step panel">
+  <div class="setup-step-copy"><p class="eyebrow">STEP 3 OF 4</p><h2>Add your media folders</h2><p>Choose each folder that contains Movies or TV Shows. InfoMancer previews the folder, lets you confirm its type, and begins the first scan after you add it.</p></div>
+  {% if roots %}<div class="setup-source-summary">{% for root in roots %}<article><span class="kind {{ root.kind }}">{{ root.kind }}</span><div><strong>{{ root.label or root.path }}</strong><small>{{ root.path }} · {{ root.title_count }} titles · {{ root.file_count }} video files</small></div></article>{% endfor %}</div>{% else %}<div class="setup-empty-source"><strong>No media folders added yet</strong><span>Add at least one Movie or TV Shows folder to continue.</span></div>{% endif %}
+  <button class="button primary setup-browse-source" type="button" data-open-source-browser>{{ 'Add another folder' if roots else 'Browse folders' }}</button>
+  <div class="source-type-hints" aria-label="Supported library types"><span><b class="kind movie">Movie</b> Movie files, title folders, and A–Z or number buckets</span><span><b class="kind tv">TV</b> Series folders, season folders, and episode files</span></div>
+  <div class="setup-step-actions"><a class="button" href="/getting-started/metadata">Back</a><form method="post" action="/getting-started/sources"><button class="button primary" {% if not roots %}disabled aria-disabled="true"{% endif %}>Continue</button></form></div>
+</section>
+{% set source_return_to = '/getting-started/sources' %}{% include '_source_browser.html' %}
+<script src="{{ url_for('static', path='source-browser.js') }}?v={{ static_version }}" defer></script>
+
+{% elif step == 'finish' %}
+<section class="setup-step panel setup-finish">
+  <div class="setup-finish-mark" aria-hidden="true">✓</div>
+  <div class="setup-step-copy"><p class="eyebrow">STEP 4 OF 4</p><h2>Your library is ready for its first scan</h2><p>InfoMancer is connected to your metadata provider and knows where your media lives. Finish setup to open Home and follow scan progress from the task widget.</p></div>
+  <div class="setup-review"><div><span>Library</span><strong>{{ preferences.installation_name }}</strong></div><div><span>Time zone</span><strong>{{ preferences.timezone.replace('_', ' ') }}</strong></div><div><span>TVDB</span><strong>{{ 'Connected' if tvdb_status.configured else 'Skipped for testing' }}</strong></div><div><span>Media sources</span><strong>{{ roots|length }}</strong></div></div>
+  <div class="setup-step-actions"><a class="button" href="/getting-started/sources">Back</a><form method="post" action="/getting-started/complete"><button class="button primary">Finish setup</button></form></div>
+</section>
+{% endif %}
+</div>
+{% endblock %}

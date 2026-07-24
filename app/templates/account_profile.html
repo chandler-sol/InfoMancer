@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Profile · InfoMancer{% endblock %}
+{% block content %}
+<header class="settings-heading"><p class="eyebrow">ACCOUNT</p><h1>Profile</h1><p>Choose how your account appears inside InfoMancer.</p></header>
+{% include "_account_nav.html" %}
+<form class="panel settings-form" method="post" action="/account/profile">
+  {% if error %}<div class="form-error">{{ error }}</div>{% endif %}
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Username<input value="{{ current_user.username }}" disabled><small>Usernames are permanent identifiers.</small></label>
+  <label>Display name<input name="display_name" value="{{ current_user.display_name }}" maxlength="100" required></label>
+  <label>Email<input name="email" type="email" value="{{ current_user.email }}"></label>
+  <fieldset><legend>Profile icon</legend><div class="icon-options">{% for icon in profile_icons|sort %}<label><input type="radio" name="profile_icon" value="{{ icon }}" {% if current_user.profile_icon == icon %}checked{% endif %}><span>{{ icon|replace('_', ' ')|title }}</span></label>{% endfor %}</div></fieldset>
+  <div class="settings-actions"><button class="button primary">Save profile</button></div>
+</form>
+<section class="panel profile-tour-card"><div><p class="eyebrow">GETTING STARTED</p><h2>InfoMancer walkthrough</h2><p class="muted">Replay the guided overview of search, navigation, tasks, announcements, and account controls whenever you need it.</p></div><a class="button" href="/tour">Take the tour again</a></section>
+{% endblock %}

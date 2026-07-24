@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Users · InfoMancer{% endblock %}
+{% block content %}
+<header class="settings-heading">
+  <p class="eyebrow">ADMIN OPTIONS</p><h1>Users</h1>
+  <p>Librarians manage the catalog and filesystem. Members can browse, search, and review the library.</p>
+</header>
+{% include "_account_nav.html" %}
+{% if error %}<div class="form-error page-error" role="alert">{{ error }}</div>{% endif %}
+{% if invitation_url %}
+<section class="invitation-result" role="status">
+  <div><p class="eyebrow">ONE-TIME SETUP LINK</p><h2>{{ invitation_user.display_name }} is ready to be invited</h2><p>Copy this link now and give it directly to {{ invitation_user.display_name }}. InfoMancer stores only its hash, so the complete link cannot be shown again.</p></div>
+  <div class="invitation-copy"><input id="invitation-url" value="{{ invitation_url }}" readonly aria-label="One-time account setup link"><button type="button" class="button primary" id="copy-invitation">Copy link</button></div>
+  <small>Expires {{ local_time(invitation_expires) }}. Creating another link will cancel this one.</small>
+</section>
+{% endif %}
+<section class="settings-grid">
+  <div class="panel user-list-panel">
+    <h2>People with access</h2>
+    <div class="admin-user-list">
+    {% for user in users %}
+      <details class="admin-user">
+        <summary>
+          <span class="profile-avatar">{{ user.display_name[:1]|upper }}</span>
+          <span><strong>{{ user.display_name }}</strong><small>@{{ user.username }} · {{ user.role|title }}</small></span>
+          <span class="account-state {% if not user.active %}disabled{% elif auth_mode == 'local' and not user.has_password %}pending{% else %}active{% endif %}">
+            {% if not user.active %}Disabled{% elif auth_mode == 'local' and not user.has_password and user.invitation_expires_at %}Pending setup{% elif auth_mode == 'local' and not user.has_password %}Setup link needed{% elif auth_mode == 'cloudflare' and not user.providers %}Awaiting Cloudflare{% else %}Active{% endif %}
+          </span>
+        </summary>
+        <div class="admin-user-body">
+          <form method="post" action="/admin/users/{{ user.id }}" class="stack">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label>Display name<input name="display_name" value="{{ user.display_name }}" required></label>
+            <label>Email<input type="email" name="email" value="{{ user.email or '' }}"></label>
+            <div class="form-pair">
+              <label>Role<select name="role"><option value="member" {% if user.role == 'member' %}selected{% endif %}>Member</option><option value="librarian" {% if user.role == 'librarian' %}selected{% endif %}>Librarian</option></select></label>
+              <label>Status<select name="active"><option value="1" {% if user.active %}selected{% endif %}>Active</option><option value="0" {% if not user.active %}selected{% endif %}>Disabled</option></select></label>
+            </div>
+            <button class="button">Save user</button>
+          </form>
+          {% if auth_mode == 'local' %}
+          <div class="user-invitation-actions">
+            <form method="post" action="/admin/users/{{ user.id }}/invitation"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button">{% if user.has_password %}Create password-reset link{% elif user.invitation_expires_at %}Replace setup link{% else %}Create setup link{% endif %}</button></form>
+            {% if user.invitation_expires_at %}<form method="post" action="/admin/users/{{ user.id }}/invitation/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button danger">Revoke setup link</button></form>{% endif %}
+          </div>
+          {% endif %}
+          <form method="post" action="/admin/users/{{ user.id }}/sessions/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button danger">Sign out all sessions</button></form>
+        </div>
+      </details>
+    {% endfor %}
+    </div>
+  </div>
+  <form class="panel settings-form create-user-form" method="post" action="/admin/users">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><p class="eyebrow">ADD USER</p><h2>Invite a person</h2>
+    <label>Username<input name="username" minlength="3" maxlength="50" required><small>Unique and permanent; used for local sign-in.</small></label>
+    <label>Email<input name="email" type="email" {% if auth_mode == 'cloudflare' %}required{% endif %}></label>
+    <label>Display name<input name="display_name" maxlength="100" required></label>
+    <label>Role<select name="role"><option value="member">Member</option><option value="librarian">Librarian</option></select></label>
+    {% if auth_mode == 'local' %}<p class="auth-provider-note">InfoMancer will create a one-time setup link. The person uses it to choose their own password.</p>{% else %}<p class="auth-provider-note">Their first verified Cloudflare sign-in will link by exact email address.</p>{% endif %}
+    <button class="button primary">Create user</button>
+  </form>
+</section>
+{% if invitation_url %}<script>(()=>{const button=document.getElementById('copy-invitation');const input=document.getElementById('invitation-url');button?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(input.value);button.textContent='Copied';}catch(_){input.select();button.textContent='Press Ctrl+C to copy';}});})();</script>{% endif %}
+{% endblock %}

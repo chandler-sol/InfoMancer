@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Episode rename review · InfoMancer{% endblock %}
+{% block content %}
+<a class="back" href="/titles/{{ title.id }}">← {{ title.metadata_title or title.title }}</a>
+<div class="page-head"><div><p class="eyebrow">BULK REVIEW</p><h1>Episode renames</h1><p class="muted">Review every proposed filesystem change before applying the batch.</p></div></div>
+<div class="review-summary"><strong>{{ ready }}</strong> ready{% if conflicts %}<span>{{ conflicts }} conflicts or missing files will be skipped</span>{% endif %}</div>
+{% if ready == 0 and conflicts == 0 %}<div class="match-banner"><span>✓</span><div><strong>No changes needed</strong><small>All parsed episode filenames already match the current TVDB metadata.</small></div></div>{% endif %}
+{% if ready > 0 %}<div class="bulk-warning"><strong>Select the episode files you want to rename.</strong><span>Only reviewed “ready” entries can be selected; conflicts, missing files, and unchanged names are skipped.</span></div>{% endif %}
+<form method="post" action="/titles/{{ title.id }}/rename-episodes" id="episode-rename-form">
+<section class="panel table-wrap"><table><thead><tr><th class="select-heading"><input type="checkbox" id="select-all-renames" aria-label="Select all ready episode renames" {% if ready == 0 %}disabled{% endif %}></th><th>Episode</th><th>Current filename</th><th>Proposed filename</th><th>Status</th></tr></thead><tbody>
+{% for item in proposals %}<tr><td class="select-cell"><input class="rename-choice" type="checkbox" name="selected_file_ids" value="{{ item.file_id }}" aria-label="Select S{{ '%02d'|format(item.season) }}E{{ '%02d'|format(item.episode) }}" {% if item.status != 'ready' %}disabled{% endif %}></td><td>S{{ '%02d'|format(item.season) }}E{{ '%02d'|format(item.episode) }}</td><td><code>{{ item.old_name }}</code></td><td><code class="proposed-name{% if item.status == 'ready' %} has-changes{% endif %}">{% for part in item.new_name_parts %}{% if part.changed and item.status != 'unchanged' %}<mark>{{ part.text }}</mark>{% else %}{{ part.text }}{% endif %}{% endfor %}</code></td><td><span class="rename-status {{ item.status }}">{{ item.status }}</span></td></tr>{% else %}<tr><td colspan="5" class="empty">No parsed episode files found.</td></tr>{% endfor %}
+</tbody></table></section>
+<div class="review-actions"><a class="button" href="/titles/{{ title.id }}">Cancel</a><div class="actions"><span class="selection-count" id="rename-selection-count">0 selected</span><button class="button primary" id="rename-selected-button" disabled>Rename selected episodes</button></div></div>
+</form>
+<script>
+(() => {
+  const choices = Array.from(document.querySelectorAll('.rename-choice:not(:disabled)'));
+  const selectAll = document.getElementById('select-all-renames');
+  const count = document.getElementById('rename-selection-count');
+  const button = document.getElementById('rename-selected-button');
+  const update = () => {
+    const selected = choices.filter(choice => choice.checked);
+    count.textContent = `${selected.length} selected`;
+    button.disabled = selected.length === 0;
+    selectAll.checked = choices.length > 0 && selected.length === choices.length;
+    selectAll.indeterminate = selected.length > 0 && selected.length < choices.length;
+  };
+  selectAll?.addEventListener('change', () => {
+    choices.forEach(choice => { choice.checked = selectAll.checked; });
+    update();
+  });
+  choices.forEach(choice => choice.addEventListener('change', update));
+  update();
+})();
+</script>
+{% endblock %}

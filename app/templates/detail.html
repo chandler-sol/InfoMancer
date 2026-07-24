@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}{{ title.metadata_title or title.title }} · InfoMancer{% endblock %}
+{% block content %}
+{% set library_return = request.query_params.get('library_return', '') %}
+<div class="page-head detail-page-head"><div><div class="detail-title">{% if title.poster_url %}<img src="{{ title.poster_url }}" alt="" class="detail-poster">{% endif %}<div class="detail-copy"><h1>{{ title.metadata_title or title.title }}</h1>{% if lifespan(title) %}<p class="detail-date">{{ lifespan(title) }}</p>{% endif %}{% if title.imdb_title_type or title.imdb_rating is not none %}<div class="imdb-facts">{% if title.imdb_title_type %}<a href="{{ '/shows' if title.kind == 'tv' else '/movies' }}?title_type={{ title.imdb_title_type|urlencode }}">{{ display_title_type(title.imdb_title_type) }}</a>{% endif %}{% if title.imdb_rating is not none %}<span class="imdb-rating">★ {{ title.imdb_rating }}<small>{% if title.imdb_votes %} {{ '{:,}'.format(title.imdb_votes) }} votes{% endif %}</small></span>{% endif %}</div>{% endif %}{% if genres %}<div class="genre-list" aria-label="IMDb genres">{% for genre in genres %}<a href="{{ '/shows' if title.kind == 'tv' else '/movies' }}?genre={{ genre|urlencode }}">{{ genre }}</a>{% endfor %}</div>{% endif %}</div></div></div></div>
+{% if actors or (title.kind == 'movie' and (directors or writers)) %}<div class="movie-credits" aria-label="IMDb title credits">
+  {% if title.kind == 'movie' and directors %}<div><strong>Director{% if directors|length > 1 %}s{% endif %}:</strong><span>{% for person in directors %}<a href="/library?person={{ person.imdb_person_id }}&amp;credit_role=director">{{ person.person_name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</span></div>{% endif %}
+  {% if actors %}<div><strong>Top billed:</strong><span>{% for person in actors[:3] %}<a href="/library?person={{ person.imdb_person_id }}&amp;credit_role=actor">{{ person.person_name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% if actors|length > 3 %}<span id="additional-cast" hidden>, {% for person in actors[3:] %}<a href="/library?person={{ person.imdb_person_id }}&amp;credit_role=actor">{{ person.person_name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</span> <button type="button" class="credit-more" id="credit-more" aria-expanded="false" aria-controls="additional-cast">See more</button>{% endif %}</span></div>{% endif %}
+  {% if title.kind == 'movie' and writers %}<div><strong>Writer{% if writers|length > 1 %}s{% endif %}:</strong><span>{% for person in writers %}<a href="/library?person={{ person.imdb_person_id }}&amp;credit_role=writer">{{ person.person_name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</span></div>{% endif %}
+</div>{% endif %}
+{% if credit_update_active and not actors and not directors and not writers %}<div class="credits-updating" id="credits-updating"><span class="task-dot"></span><span><strong>IMDb credits are updating</strong><small>Director, writer, and top-billed cast will appear automatically when name resolution finishes.</small></span></div>{% endif %}
+{% if title.kind == 'movie' and (title.tmdb_id or title.imdb_id) %}<div class="match-banner"><span>✓</span><div><strong>Matched to {% if title.tmdb_id %}TMDB {{ title.tmdb_id }}{% else %}IMDb {{ title.imdb_id }}{% endif %}</strong><small>The identifier is compatible with Plex movie matching.</small></div></div>{% endif %}
+<section class="panel"><div class="panel-head"><button type="button" class="on-disk-copy" id="on-disk-copy" data-path="{{ title.folder_path }}" title="Copy directory" aria-label="Copy media directory"><span id="on-disk-label">On Disk</span> <span class="count" id="visible-file-count">{{ files|length }}</span></button>
+<div class="series-controls">{% if title.kind == 'tv' and title.tvdb_id %}<button type="button" class="missing-episodes-toggle" id="toggle-missing" aria-expanded="{{ 'true' if request.query_params.get('show_missing') == '1' else 'false' }}" aria-controls="missing-panel">Missing Episodes <span class="missing-episodes-count{% if missing %} has-missing{% endif %}">{{ missing|length }}</span></button>{% endif %}{% if title.kind == 'tv' and seasons %}<label class="season-filter" for="season-filter"><span>Season</span><select id="season-filter"><option value="all">All seasons</option>{% for season in seasons %}<option value="{{ season }}">Season {{ '%02d'|format(season) }}</option>{% endfor %}</select></label>{% endif %}
+{% if title.kind == 'tv' %}<details class="series-menu"><summary aria-label="Series actions" title="Series actions">⋮</summary><div class="series-menu-popover">
+<form method="post" action="/titles/{{ title.id }}/favorite"><input type="hidden" name="return_to" value="/titles/{{ title.id }}"><button class="favorite-action{% if title_state and title_state.favorite %} active{% endif %}"><span>★</span>{{ 'Remove favorite' if title_state and title_state.favorite else 'Add favorite' }}</button></form><a href="/titles/{{ title.id }}/organize">Organize &amp; Tags</a>{% if title.tvdb_id %}<a href="/titles/{{ title.id }}/cover">Change Cover</a>{% endif %}<form method="post" action="/titles/{{ title.id }}/media-info"><button>Inspect Media Information</button></form><hr>
+{% if title.tvdb_id %}<div class="menu-status"><span class="status-icon {% if not scan_at %}bad{% elif scan_stale or missing %}warn{% else %}good{% endif %}">{% if not scan_at %}×{% elif scan_stale or missing %}×{% else %}✓{% endif %}</span><span><strong>Scanned</strong><small>{% if scan_at %}Last scan {{ local_time(scan_at) }}{% if scan_stale %} · Needs Rescan{% endif %}{% else %}Needs Scan{% endif %}{% if missing %} · {{ missing|length }} known missing{% endif %}</small></span></div>{% else %}<div class="menu-status"><span class="status-icon {% if not scan_at %}bad{% elif scan_stale %}warn{% else %}good{% endif %}">{% if not scan_at or scan_stale %}×{% else %}✓{% endif %}</span><span><strong>Scanned</strong><small>{% if scan_at %}Last scan {{ local_time(scan_at) }}{% if scan_stale %} · Needs Rescan{% endif %}{% else %}Needs Scan{% endif %}</small></span></div>{% endif %}
+<hr><form method="post" action="/titles/{{ title.id }}/scan"><button>{% if scan_at %}Rescan Series{% else %}Scan Series{% endif %}</button></form>{% if title.imdb_id or title.tvdb_id %}<form method="post" action="/titles/{{ title.id }}/imdb-refresh"><button>{% if title.imdb_id %}Refresh{% else %}Pull{% endif %} IMDb Metadata</button></form>{% endif %}<a href="{{ series_search_url }}" target="_blank" rel="noopener noreferrer">Search {{ search_provider_name }} ↗</a>{% if title.tvdb_id %}<a href="/titles/{{ title.id }}/rename-episodes">Review Episodes Renames</a><a href="/titles/{{ title.id }}/rename-folder">Preview Folder Rename</a><form method="post" action="/titles/{{ title.id }}/rename-folder" onsubmit="return confirm('Apply the reviewed folder rename?');"><input type="hidden" name="confirm" value="RENAME"><button>Apply Folder Rename</button></form>{% endif %}<a href="/titles/{{ title.id }}/restore-filenames">Restore Original Filenames</a>
+<hr><a href="/titles/{{ title.id }}/tvdb">{% if title.tvdb_id %}Change Match{% else %}Match{% endif %}</a>{% if title.tvdb_id %}<form method="post" action="/titles/{{ title.id }}/unmatch" onsubmit="return confirm('Remove match metadata? Files and filenames will remain unchanged.');"><button class="menu-danger">Unmatch</button></form>{% endif %}
+<hr>{% if title.tvdb_id %}<a class="provider-status good" href="https://thetvdb.com/dereferrer/series/{{ title.tvdb_id }}" target="_blank" rel="noopener noreferrer"><span>✓</span> TVDB</a>{% else %}<span class="provider-status bad"><span>×</span> TVDB</span>{% endif %}{% if title.imdb_id %}<a href="https://www.imdb.com/title/{{ title.imdb_id }}/" target="_blank" rel="noopener noreferrer">IMDb Link ↗</a>{% else %}<span class="menu-disabled">IMDb Link</span>{% endif %}
+</div></details>{% elif title.kind == 'movie' %}<details class="series-menu movie-detail-menu"><summary aria-label="Movie actions" title="Movie actions">⋮</summary><div class="series-menu-popover"><form method="post" action="/titles/{{ title.id }}/favorite"><input type="hidden" name="return_to" value="/titles/{{ title.id }}"><button class="favorite-action{% if title_state and title_state.favorite %} active{% endif %}"><span>★</span>{{ 'Remove favorite' if title_state and title_state.favorite else 'Add favorite' }}</button></form><a href="/titles/{{ title.id }}/organize">Organize &amp; Tags</a>{% if title.tvdb_movie_id %}<a href="/titles/{{ title.id }}/cover">Change Cover</a>{% endif %}<form method="post" action="/titles/{{ title.id }}/media-info"><button>Inspect Media Information</button></form><hr><a href="/titles/{{ title.id }}/tvdb">{% if title.tvdb_movie_id or title.tmdb_id or title.imdb_id %}Fix Match{% else %}Match{% endif %}</a>{% if title.imdb_id or title.tvdb_movie_id %}<form method="post" action="/titles/{{ title.id }}/imdb-refresh"><button>{% if title.imdb_id %}Refresh{% else %}Pull{% endif %} IMDb Metadata</button></form>{% endif %}{% if (title.tvdb_movie_id or title.tmdb_id or title.imdb_id) and files %}<a href="/files/{{ files[0].id }}/rename-movie">Preview Rename</a>{% endif %}{% if title.imdb_id %}<hr><a href="https://www.imdb.com/title/{{ title.imdb_id }}/" target="_blank" rel="noopener noreferrer">IMDb Link ↗</a>{% endif %}</div></details>{% endif %}</div></div>
+{% if title_tags or (title_state and (title_state.favorite or title_state.personal_rating is not none)) %}<div class="title-organization-summary">{% if title_state and title_state.favorite %}<span class="favorite-summary">★ Favorite</span>{% endif %}{% if title_state and title_state.personal_rating is not none %}<span>My rating {{ title_state.personal_rating }}/10</span>{% endif %}{% for tag in title_tags %}<a href="/library?tag={{ tag.id }}">{{ tag.name }}</a>{% endfor %}</div>{% endif %}
+{% if title.kind == 'tv' and seasons %}<nav class="season-nav" aria-label="Filter episodes by season"><button type="button" class="active" data-season-choice="all">All</button>{% for season in seasons %}<button type="button" data-season-choice="{{ season }}">{% if season == 0 %}Specials{% else %}Season {{ '%02d'|format(season) }}{% endif %}</button>{% endfor %}</nav>{% endif %}
+<div class="file-list">{% set grouping = namespace(season=none) %}{% for file in files %}{% if title.kind == 'tv' and file.season is not none and file.season != grouping.season %}<div class="season-heading" id="season-{{ file.season }}" data-season-heading="{{ file.season }}">{% if file.season == 0 %}Specials{% else %}Season {{ '%02d'|format(file.season) }}{% endif %}</div>{% set grouping.season = file.season %}{% endif %}<article data-episode-row data-season="{{ file.season if file.season is not none else 'other' }}"><div class="episode-code">{% if file.season is not none %}{{ '%02d'|format(file.episode_start) }}{% if file.episode_end and file.episode_end > file.episode_start %}–{{ '%02d'|format(file.episode_end) }}{% endif %}{% if file.season_total %}/{{ '%02d'|format(file.season_total) }}{% endif %}{% else %}File{% endif %}</div><div class="grow"><strong>{% if title.kind == 'tv' and file.episode_name %}{{ file.episode_name }}{% else %}{{ file.filename }}{% endif %}</strong>{% if file.episode_directors or file.episode_writers %}<div class="episode-credits">{% if file.episode_directors %}<span>Directed by {% for person in file.episode_directors %}<a href="/shows?person={{ person.imdb_person_id }}&amp;credit_role=director">{{ person.person_name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endif %}{% if file.episode_writers %}<span>Written by {% for person in file.episode_writers %}<a href="/shows?person={{ person.imdb_person_id }}&amp;credit_role=writer">{{ person.person_name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endif %}</div>{% endif %}<small>{{ (file.size_bytes / 1073741824)|round(2) }} GB{% if file.runtime_seconds %} · {{ (file.runtime_seconds / 60)|round|int }} min{% endif %}{% if file.width and file.height %} · {{ file.width }}×{{ file.height }}{% endif %}{% if file.video_codec %} · {{ file.video_codec|upper }}{% endif %}{% if file.audio_codec %} / {{ file.audio_codec|upper }}{% endif %}{% if file.dynamic_range %} · {{ file.dynamic_range }}{% endif %}{% if file.container %} · {{ file.container|upper }}{% endif %} · {{ file.path }}</small>{% if file.media_info_error %}<small class="media-info-error">Media details unavailable: {{ file.media_info_error }}</small>{% endif %}</div>{% if title.kind=='tv' and file.season is not none %}<details class="episode-menu"><summary aria-label="Episode actions" title="Episode actions">⋮</summary><div><a href="/files/{{ file.id }}/rename">Preview Rename</a>{% if title.imdb_id or title.tvdb_id %}<form method="post" action="/files/{{ file.id }}/imdb-refresh"><button>Refresh IMDb Metadata</button></form>{% endif %}{% if file.episode_tvdb_id %}<a href="https://thetvdb.com/dereferrer/episode/{{ file.episode_tvdb_id }}" target="_blank" rel="noopener noreferrer">TVDB Link ↗</a>{% endif %}</div></details>{% elif title.kind=='movie' and (title.tmdb_id or title.imdb_id) %}<details class="episode-menu movie-file-menu"><summary aria-label="Movie file actions" title="Movie file actions">⋮</summary><div><a href="/files/{{ file.id }}/rename-movie">Preview Rename</a>{% if title.imdb_id %}<a href="https://www.imdb.com/title/{{ title.imdb_id }}/" target="_blank" rel="noopener noreferrer">IMDb Link ↗</a>{% endif %}</div></details>{% endif %}</article>{% endfor %}</div></section>
+{% if title.kind=='tv' and title.tvdb_id %}<section class="panel missing-panel" id="missing-panel" {% if request.query_params.get('show_missing') != '1' %}hidden{% endif %}><div class="panel-head"><h2>Missing episodes <span class="count">{{ missing|length }}</span></h2></div>
+{% if missing %}<p class="muted">Aired regular episodes only; specials and future episodes are excluded.</p><div class="episode-grid">{% for ep in missing %}<article><strong>S{{ '%02d'|format(ep.season) }}E{{ '%02d'|format(ep.episode) }}</strong><span>{{ ep.name or 'Untitled episode' }}</span><small>{% if ep.aired %}Aired {{ ep.aired }}{% endif %}</small><a target="_blank" rel="noopener noreferrer" href="{{ ep.search_url }}">Search {{ search_provider_name }} ↗</a></article>{% endfor %}</div>
+<p class="legal-note">Search links open the configured provider. Only download media you are legally entitled to obtain.</p>
+{% else %}<div class="empty good">No gaps found in the selected TVDB order.</div>{% endif %}</section>{% endif %}
+<script>
+  document.querySelectorAll('a[href$="/tvdb"], a[href$="/cover"]').forEach((link) => {
+    const libraryReturn = {{ library_return|tojson }};
+    if (libraryReturn) {
+      const target = new URL(link.href);
+      target.searchParams.set("library_return", libraryReturn);
+      link.href = target.pathname + target.search;
+    }
+  });
+(() => {
+  const seasonFilter = document.getElementById("season-filter");
+  const seasonChoices = Array.from(document.querySelectorAll("[data-season-choice]"));
+  const seasonHeadings = Array.from(document.querySelectorAll("[data-season-heading]"));
+  const episodeRows = Array.from(document.querySelectorAll("[data-episode-row]"));
+  const visibleCount = document.getElementById("visible-file-count");
+  const applySeason = (season) => {
+    let shown = 0;
+    episodeRows.forEach((row) => {
+      const visible = season === "all" || row.dataset.season === season;
+      row.hidden = !visible;
+      if (visible) shown += 1;
+    });
+    seasonHeadings.forEach((heading) => {
+      heading.hidden = season !== "all" && heading.dataset.seasonHeading !== season;
+    });
+    seasonChoices.forEach((choice) => {
+      choice.classList.toggle("active", choice.dataset.seasonChoice === season);
+    });
+    if (seasonFilter) seasonFilter.value = season;
+    if (visibleCount) visibleCount.textContent = shown;
+  };
+  seasonFilter?.addEventListener("change", () => applySeason(seasonFilter.value));
+  seasonChoices.forEach((choice) => {
+    choice.addEventListener("click", () => applySeason(choice.dataset.seasonChoice));
+  });
+
+  const creditMore = document.getElementById("credit-more");
+  const additionalCast = document.getElementById("additional-cast");
+  creditMore?.addEventListener("click", () => {
+    const show = additionalCast.hidden;
+    additionalCast.hidden = !show;
+    creditMore.textContent = show ? "See less" : "See more";
+    creditMore.setAttribute("aria-expanded", String(show));
+  });
+
+  // The episode action already carries the canonical TVDB URL. Make the
+  // visible episode name use the same destination without duplicating data.
+  document.querySelectorAll("[data-episode-row]").forEach((row) => {
+    const tvdbLink = row.querySelector('.episode-menu a[href*="/dereferrer/episode/"]');
+    const title = row.querySelector('.grow > strong');
+    if (!tvdbLink || !title || title.querySelector('a')) return;
+    const link = document.createElement('a');
+    link.className = 'episode-title-link';
+    link.href = tvdbLink.href;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    while (title.firstChild) link.appendChild(title.firstChild);
+    title.appendChild(link);
+  });
+
+  {% if credit_update_active %}
+  let observedCreditTask = true;
+  const waitForCredits = async () => {
+    try {
+      const response = await fetch('/api/tasks', {cache: 'no-store'});
+      const tasks = (await response.json()).tasks || [];
+      const active = tasks.some(task => task.id === 'imdb-metadata');
+      if (observedCreditTask && !active) { location.reload(); return; }
+      observedCreditTask = observedCreditTask || active;
+    } catch (_) {}
+    window.setTimeout(waitForCredits, 2500);
+  };
+  window.setTimeout(waitForCredits, 1500);
+  {% endif %}
+
+  const diskButton = document.getElementById("on-disk-copy");
+  const diskLabel = document.getElementById("on-disk-label");
+  diskButton?.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(diskButton.dataset.path);
+      diskLabel.textContent = "Directory copied";
+    } catch (_) {
+      const temporary = document.createElement("textarea");
+      temporary.value = diskButton.dataset.path;
+      document.body.appendChild(temporary);
+      temporary.select();
+      document.execCommand("copy");
+      temporary.remove();
+      diskLabel.textContent = "Directory copied";
+    }
+    window.setTimeout(() => { diskLabel.textContent = "On Disk"; }, 1600);
+  });
+
+  const missingButton = document.getElementById("toggle-missing");
+  const missingPanel = document.getElementById("missing-panel");
+  missingButton?.addEventListener("click", () => {
+    const show = missingPanel.hidden;
+    missingPanel.hidden = !show;
+    missingButton.setAttribute("aria-expanded", String(show));
+    missingButton.closest("details")?.removeAttribute("open");
+    if (show) missingPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  document.addEventListener("click", (event) => {
+    document.querySelectorAll(".series-menu[open], .episode-menu[open]").forEach((menu) => {
+      if (!menu.contains(event.target)) menu.removeAttribute("open");
+    });
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Organize selected titles · InfoMancer{% endblock %}
+{% block content %}
+<header class="page-head"><div><p class="eyebrow">PERSONAL LIBRARY</p><h1>Organize selected titles</h1><p>Add the same custom tags to {{ titles|length }} selected movie{% if titles|length != 1 %}s or TV series{% endif %}.</p></div><a class="button" href="/tags">Manage tags</a></header>
+<form class="panel organize-form" method="post" action="/titles/organize-bulk">
+  <input type="hidden" name="apply" value="1">
+  {% for title_id in title_ids %}<input type="hidden" name="selected" value="{{ title_id }}">{% endfor %}
+  <section>
+    <h2>Selected titles <span class="count">{{ titles|length }}</span></h2>
+    <div class="bulk-title-review">{% for title in titles %}<span>{{ title.display_title }} <small>{{ 'TV' if title.kind == 'tv' else 'Movie' }}</small></span>{% endfor %}</div>
+  </section>
+  <section>
+    <h2>Add tags</h2>
+    {% if tags %}<div class="organize-tag-grid">{% for tag in tags %}<label><input type="checkbox" name="selected_tags" value="{{ tag.id }}"><span>{{ tag.name }} <small>{{ tag.usage_count }}</small></span></label>{% endfor %}</div>{% else %}<p class="muted">You have not created any custom tags yet. Create the first ones below.</p>{% endif %}
+    <label class="organize-tag-new">Create tags while applying<input name="tag_names" placeholder="Family night, Demo content, Holiday"><small>Separate several tags with commas.</small></label>
+  </section>
+  <div class="actions"><a class="button" href="/library">Cancel</a><button class="button primary">Add tags to selected titles</button></div>
+</form>
+{% endblock %}

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Password · InfoMancer{% endblock %}
+{% block content %}
+<header class="settings-heading"><p class="eyebrow">ACCOUNT</p><h1>Password</h1><p>Changing your password signs out every other browser session.</p></header>
+{% include "_account_nav.html" %}
+{% if local_password %}<form class="panel settings-form" method="post" action="/account/security">
+  {% if error %}<div class="form-error">{{ error }}</div>{% endif %}
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>{% if current_user.force_password_change %}Temporary password{% else %}Current password{% endif %}<span class="password-control"><input id="current-password" name="current_password" type="password" autocomplete="current-password" required><button type="button" class="password-visibility-toggle" data-password-toggle="current-password" aria-pressed="false" aria-label="Show current password">Show</button></span></label>
+  <label>New password<span class="password-control"><input id="new-password" name="new_password" type="password" minlength="{{ minimum_password_length }}" maxlength="256" autocomplete="new-password" required><button type="button" class="password-visibility-toggle" data-password-toggle="new-password" aria-pressed="false" aria-label="Show new password">Show</button></span><small>{% if sandbox_mode %}Testing mode: any non-empty password is accepted.{% else %}Use at least {{ minimum_password_length }} characters.{% endif %}</small></label>
+  <label>Confirm new password<span class="password-control"><input id="new-password-confirm" name="password_confirm" type="password" minlength="12" maxlength="256" autocomplete="new-password" required><button type="button" class="password-visibility-toggle" data-password-toggle="new-password-confirm" aria-pressed="false" aria-label="Show new password confirmation">Show</button></span></label>
+  <div class="settings-actions"><button class="button primary">Change password</button></div>
+</form>
+{% else %}<section class="panel settings-form"><h2>Managed by Cloudflare Access</h2><p class="muted">Your sign-in password and identity verification are managed by the provider connected to Cloudflare Access. No password is stored for this InfoMancer account.</p></section>{% endif %}
+{% endblock %}
