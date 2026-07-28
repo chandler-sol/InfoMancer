@@ -1,7 +1,5 @@
-![Screenshot](https://pixeldrain.com/api/file/CCwTAJxi)
-
 # InfoMancer
-![Screenshot](https://pixeldrain.com/api/file/CCwTAJxi)
+![Screenshot](docs/infomancer-screenshot.svg)
 A local-first, lightweight movie and TV inventory for multiple disks. InfoMancer scans media into SQLite, helps match titles through TVDB and IMDb metadata, reports missing episodes, and previews Plex-compatible filesystem changes before applying them.
 
 ## What works

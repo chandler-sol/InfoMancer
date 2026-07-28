@@ -1,7 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Sources · InfoMancer{% endblock %}
 {% block content %}
-<div class="page-head"><div><p class="eyebrow">CONFIGURATION</p><h1>Sources</h1><p class="muted">Manage the folders InfoMancer is allowed to catalog.</p></div></div>
+<header class="settings-heading app-settings-heading"><p class="eyebrow">LIBRARIAN</p><h1>App Settings</h1><p>Configure how this installation behaves. Deployment and trust settings remain protected on the server.</p></header>
+{% set section = 'sources' %}
+{% include "_settings_nav.html" %}
+<div class="page-head sources-page-head"><div><p class="eyebrow">CONFIGURATION</p><h1>Sources</h1><p class="muted">Manage the folders InfoMancer is allowed to catalog.</p></div></div>
 {% if setup_assistant_active %}<section class="setup-handoff-banner"><div><p class="eyebrow">GUIDED SETUP · SOURCE STEP</p><strong>Add every Movie and TV Shows folder you want InfoMancer to catalog.</strong><span>You can return to the assistant after adding one or several sources.</span></div><a class="button primary" href="/getting-started/sources">Continue guided setup</a></section>{% endif %}
 <div class="split">
   <section class="panel grow"><div class="panel-head"><div><p class="eyebrow">CONFIGURED</p><h2>Library roots</h2></div><div class="actions"><a class="button intake-button" href="/intake">Ready to match</a><form method="post" action="/scan-all"><button class="button primary">Scan all sources</button></form></div></div>

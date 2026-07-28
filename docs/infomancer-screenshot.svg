@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">InfoMancer screenshot</title>
+  <desc id="desc">A stylized dashboard preview for InfoMancer with a dark header and content panels.</desc>
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <rect x="0" y="0" width="1280" height="72" fill="#111827"/>
+  <rect x="32" y="24" width="180" height="24" rx="8" fill="#1d4ed8"/>
+  <rect x="246" y="24" width="96" height="24" rx="8" fill="#334155"/>
+  <rect x="364" y="24" width="120" height="24" rx="8" fill="#334155"/>
+  <rect x="1100" y="20" width="148" height="28" rx="14" fill="#2563eb"/>
+  <rect x="32" y="114" width="360" height="220" rx="16" fill="#111827" stroke="#334155" stroke-width="2"/>
+  <rect x="64" y="146" width="200" height="18" rx="9" fill="#e2e8f0"/>
+  <rect x="64" y="182" width="280" height="12" rx="6" fill="#64748b"/>
+  <rect x="64" y="208" width="240" height="12" rx="6" fill="#64748b"/>
+  <rect x="64" y="238" width="180" height="12" rx="6" fill="#64748b"/>
+  <rect x="438" y="114" width="810" height="520" rx="16" fill="#111827" stroke="#334155" stroke-width="2"/>
+  <rect x="470" y="146" width="360" height="24" rx="12" fill="#f8fafc"/>
+  <rect x="470" y="192" width="746" height="120" rx="16" fill="#1e293b"/>
+  <rect x="494" y="220" width="180" height="16" rx="8" fill="#38bdf8"/>
+  <rect x="494" y="248" width="240" height="12" rx="6" fill="#94a3b8"/>
+  <rect x="470" y="336" width="358" height="140" rx="16" fill="#1e293b"/>
+  <rect x="470" y="500" width="358" height="104" rx="16" fill="#1e293b"/>
+  <rect x="858" y="336" width="358" height="268" rx="16" fill="#1e293b"/>
+  <circle cx="540" cy="406" r="44" fill="#38bdf8"/>
+  <rect x="608" y="386" width="140" height="18" rx="9" fill="#e2e8f0"/>
+  <rect x="608" y="418" width="180" height="12" rx="6" fill="#64748b"/>
+  <rect x="608" y="448" width="150" height="12" rx="6" fill="#64748b"/>
+  <rect x="898" y="376" width="160" height="14" rx="7" fill="#e2e8f0"/>
+  <rect x="898" y="408" width="250" height="12" rx="6" fill="#64748b"/>
+  <rect x="898" y="438" width="220" height="12" rx="6" fill="#64748b"/>
+  <rect x="898" y="468" width="180" height="12" rx="6" fill="#64748b"/>
+  <rect x="898" y="520" width="140" height="14" rx="7" fill="#38bdf8"/>
+  <text x="64" y="666" font-family="Segoe UI, Arial, sans-serif" font-size="34" fill="#f8fafc">InfoMancer</text>
+  <text x="64" y="698" font-family="Segoe UI, Arial, sans-serif" font-size="20" fill="#94a3b8">Local-first media inventory and organization</text>
+</svg>
