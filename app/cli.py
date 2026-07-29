@@ -369,6 +369,13 @@ def _export_rows(database: Database, username: str | None) -> list[dict]:
         ).fetchall()
         state: dict[int, dict] = {}
         tags: dict[int, list[str]] = {}
+        collections: dict[int, list[str]] = {}
+        for row in conn.execute(
+            """SELECT ct.title_id,c.name FROM collection_titles ct
+               JOIN collections c ON c.id=ct.collection_id
+               ORDER BY c.name COLLATE NOCASE"""
+        ):
+            collections.setdefault(row["title_id"], []).append(row["name"])
         if user_id is not None:
             state = {
                 row["title_id"]: dict(row)
@@ -389,7 +396,7 @@ def _export_rows(database: Database, username: str | None) -> list[dict]:
         item = dict(row)
         personal = state.get(row["title_id"], {})
         item["tags"] = ", ".join(tags.get(row["title_id"], []))
-        item["collections"] = ""
+        item["collections"] = ", ".join(collections.get(row["title_id"], []))
         item["custom_fields"] = json.dumps(
             {
                 "favorite": bool(personal.get("favorite", 0)),
@@ -629,6 +636,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reset a Librarian password and revoke existing sessions.",
     )
     reset.add_argument("username")
+    recovery = commands.add_parser(
+        "recovery-link",
+        help="Create a short-lived, single-use password recovery link.",
+    )
+    recovery.add_argument("username")
+    recovery.add_argument(
+        "--base-url", default="http://127.0.0.1:8787",
+        help="Public InfoMancer address used to build the link.",
+    )
+    recovery.add_argument(
+        "--hours", type=int, default=1,
+        help="Link lifetime from 1 to 168 hours (default: 1).",
+    )
     return parser
 
 
@@ -638,6 +658,10 @@ def main(argv: list[str] | None = None) -> int:
         from .admin_cli import reset_librarian
 
         return reset_librarian(args.username)
+    if args.command == "recovery-link":
+        from .admin_cli import create_recovery_link
+
+        return create_recovery_link(args.username, args.base_url, args.hours)
     settings = get_settings()
     try:
         database = _database(settings)

@@ -3,13 +3,17 @@ from __future__ import annotations
 import os
 import hmac
 import csv
+import base64
 import io
 import json
 import re
 import secrets
 import sqlite3
+import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 from xml.etree import ElementTree
 from difflib import SequenceMatcher
 from datetime import date, datetime, timezone
@@ -17,8 +21,10 @@ from pathlib import Path
 from urllib.parse import quote_plus, unquote, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import (
+    FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -34,6 +40,11 @@ from .engagement import EngagementError, EngagementService, utc_from_local
 from .event_log import EventLog
 from .imdb import sync_genres
 from .media_info import MediaInspectionError, inspect_media
+from .maintenance import (
+    MaintenanceError, create_database_backup, install_database_backup,
+    list_database_backups, read_update_status, resolve_backup,
+    write_update_request, write_update_status,
+)
 from .naming import (
     contained_destination, plex_episode_filename, plex_movie_filename, plex_show_folder,
 )
@@ -61,9 +72,11 @@ try:
 except ProviderSecretError as exc:
     stored_provider_secrets = {}
     provider_secret_error = str(exc)
-APP_VERSION = "0.3.0-alpha.1"
+APP_VERSION = "0.4.0-alpha.1"
 app = FastAPI(title="InfoMancer", version=APP_VERSION)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "app" / "static"), name="static")
+COLLECTION_ART_DIR = settings.database.parent / "collection-art"
+COLLECTION_ART_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def shared_template_context(request: Request) -> dict:
@@ -150,14 +163,14 @@ def record_event(
     )
 
 
-PUBLIC_PATHS = {"/health", "/login", "/setup"}
+PUBLIC_PATHS = {"/health", "/login", "/setup", "/forgot-password"}
 LIBRARIAN_GET_PREFIXES = (
     "/sources", "/intake", "/bulk-match", "/movies/bulk-match",
     "/shows/bulk-match", "/admin", "/api/source-", "/api/scans",
     "/api/scan-all", "/api/movie-match-analysis", "/api/tv-match-analysis",
     "/api/logs",
     "/settings", "/getting-started",
-    "/logs", "/exports", "/media-info/failures",
+    "/logs", "/exports", "/media-info/failures", "/maintenance",
 )
 
 
@@ -165,7 +178,8 @@ def librarian_only_path(path: str) -> bool:
     if path.startswith(LIBRARIAN_GET_PREFIXES):
         return True
     return bool(re.match(
-        r"^/(?:titles/\d+/(?:tvdb|rename|restore|cover)|files/\d+/rename)", path
+        r"^/(?:titles/\d+/(?:tvdb|rename|restore|cover|collections)|"
+        r"files/\d+/(?:rename|collections))", path
     ))
 
 
@@ -308,6 +322,7 @@ async def authentication_middleware(request: Request, call_next):
                 "/logout", "/account/profile", "/account/security",
                 "/account/sessions/revoke-others",
             } and not re.match(r"^/titles/\d+/(?:favorite|organize)$", path) \
+              and not re.match(r"^/files/\d+/favorite$", path) \
               and path not in {
                   "/titles/organize-bulk", "/tags/create",
               } and not re.match(r"^/tags/\d+/(?:rename|delete)$", path) \
@@ -675,6 +690,63 @@ def plex_movie_ids(record: dict) -> tuple[str, str]:
 
 def normalized_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def fuzzy_people(query: str, kind: str = "", limit: int = 10) -> list[dict]:
+    """Find close local credit names without sending the query to a provider."""
+    query = query.strip()
+    normalized_query = normalized_name(query)
+    if len(normalized_query) < 3:
+        return []
+    words = [word for word in re.findall(r"[a-z0-9]+", query.lower()) if len(word) >= 2]
+    if not words:
+        return []
+    candidate_conditions = []
+    candidate_params: list[str] = []
+    for word in words:
+        candidate_conditions.extend(["c.person_name LIKE ?", "c.person_name LIKE ?"])
+        candidate_params.extend([f"%{word}%", f"{word[:2]}%"])
+    kind_condition = " AND t.kind=?" if kind in {"movie", "tv"} else ""
+    if kind_condition:
+        candidate_params.append(kind)
+    with db.connect() as conn:
+        rows = conn.execute(
+            f"""SELECT c.imdb_person_id, c.person_name,
+                       GROUP_CONCAT(DISTINCT c.role) roles,
+                       COUNT(DISTINCT c.title_id) title_count
+                FROM title_credits c JOIN titles t ON t.id=c.title_id
+                WHERE ({' OR '.join(candidate_conditions)}){kind_condition}
+                GROUP BY c.imdb_person_id, c.person_name
+                LIMIT 300""",
+            candidate_params,
+        ).fetchall()
+    ranked = []
+    for row in rows:
+        candidate_name = row["person_name"]
+        candidate_words = re.findall(r"[a-z0-9]+", candidate_name.lower())
+        full_score = SequenceMatcher(
+            None, normalized_query, normalized_name(row["person_name"])
+        ).ratio()
+        word_scores = []
+        for word in words:
+            word_scores.append(max(
+                1.0 if candidate.startswith(word) else SequenceMatcher(
+                    None, word, candidate
+                ).ratio()
+                for candidate in candidate_words
+            ))
+        word_score = sum(word_scores) / len(word_scores) if word_scores else 0
+        score = max(full_score, word_score)
+        if score >= 0.82:
+            item = dict(row)
+            item["similarity"] = score
+            ranked.append(item)
+    ranked.sort(
+        key=lambda item: (
+            -item["similarity"], -item["title_count"], item["person_name"].casefold()
+        )
+    )
+    return ranked[:limit]
 
 
 def match_confidence(title: str, year: int | None, candidate: dict) -> dict:
@@ -1141,6 +1213,15 @@ def login(
             "next": safe_next(next), "identity": identity, "error": str(exc),
         })
     return signed_in_response(request, user, next)
+
+
+@app.get("/forgot-password", response_class=HTMLResponse)
+def forgot_password_page(request: Request):
+    if settings.auth_mode != "local":
+        return redirect("/")
+    return templates.TemplateResponse(request, "forgot_password.html", {
+        "message": request.query_params.get("message", ""),
+    })
 
 
 @app.get("/activate/{token}", response_class=HTMLResponse, name="activate_page")
@@ -2372,6 +2453,11 @@ def dashboard(request: Request):
             """SELECT
               (SELECT COUNT(*) FROM titles WHERE kind='movie') movies,
               (SELECT COUNT(*) FROM titles WHERE kind='tv') shows,
+              (SELECT COUNT(*) FROM collections) collections,
+              (SELECT COUNT(*) FROM user_title_state
+                 WHERE user_id=? AND favorite=1)
+              + (SELECT COUNT(*) FROM user_episode_favorites
+                 WHERE user_id=?) favorites,
               (SELECT COALESCE(SUM(
                  CASE WHEN f.episode_start IS NOT NULL
                    THEN COALESCE(f.episode_end, f.episode_start) - f.episode_start + 1
@@ -2386,7 +2472,7 @@ def dashboard(request: Request):
               (SELECT COUNT(*) FROM titles t WHERE t.discovered_at IS NOT NULL AND
                  ((t.kind='tv' AND t.tvdb_id IS NULL) OR
                   (t.kind='movie' AND t.tvdb_movie_id IS NULL))) ready"""
-        ).fetchone()
+        , (request.state.user.id, request.state.user.id)).fetchone()
         roots = conn.execute(
             """SELECT r.*, COUNT(DISTINCT t.id) title_count, COUNT(f.id) file_count
                FROM roots r LEFT JOIN titles t ON t.root_id=r.id
@@ -2505,6 +2591,11 @@ def settings_page_context(
             "setting_history": app_settings.history(),
             "media_counts": media_counts,
             "log_categories": event_log.categories(),
+            "database_backups": list_database_backups(db.path),
+            "update_status": read_update_status(db.path),
+            "update_repository": os.getenv(
+                "INFOMANCER_UPDATE_REPOSITORY", "chandler-sol/InfoMancer"
+            ).strip(),
         })
     return context
 
@@ -2551,7 +2642,10 @@ def library_export_rows(user_id: int) -> list[dict]:
                uts.custom_order,
                COALESCE((SELECT GROUP_CONCAT(ut.name, ', ')
                  FROM title_tags tt JOIN user_tags ut ON ut.id=tt.tag_id
-                 WHERE tt.title_id=t.id AND ut.user_id=?),'') tags
+                 WHERE tt.title_id=t.id AND ut.user_id=?),'') tags,
+               COALESCE((SELECT GROUP_CONCAT(c.name, ', ')
+                 FROM collection_titles ct JOIN collections c ON c.id=ct.collection_id
+                 WHERE ct.title_id=t.id),'') collections
                FROM titles t JOIN roots r ON r.id=t.root_id
                LEFT JOIN files f ON f.title_id=t.id
                LEFT JOIN user_title_state uts
@@ -2563,7 +2657,6 @@ def library_export_rows(user_id: int) -> list[dict]:
     exported = []
     for row in rows:
         item = dict(row)
-        item["collections"] = ""
         item["custom_fields"] = json.dumps({
             "favorite": bool(item.pop("favorite")),
             "personal_rating": item.pop("personal_rating"),
@@ -2626,6 +2719,363 @@ def export_library(request: Request, format: str = "csv"):
     return Response(
         body, media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/settings/export")
+def export_application_settings(request: Request):
+    payload = {
+        "format": "infomancer-settings",
+        "format_version": 1,
+        "app_version": APP_VERSION,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "settings": app_settings.values(),
+        "excluded": [
+            "passwords", "sessions", "provider credentials",
+            "encryption keys", "media sources", "accounts",
+        ],
+    }
+    record_event(
+        "settings", "Portable application settings exported.",
+        user_id=request.state.user.id,
+    )
+    return Response(
+        json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8"),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": (
+                "attachment; filename="
+                f'"infomancer-settings-{datetime.now().strftime("%Y%m%d-%H%M%S")}.json"'
+            )
+        },
+    )
+
+
+@app.post("/settings/import/preview", response_class=HTMLResponse)
+async def preview_application_settings(request: Request, settings_file: UploadFile = File(...)):
+    try:
+        content = await settings_file.read(262145)
+        if len(content) > 262144:
+            raise AppSettingError(
+                "The settings file is larger than 256 KB. Choose the JSON settings "
+                "file exported by InfoMancer."
+            )
+        payload = json.loads(content.decode("utf-8-sig"))
+        if not isinstance(payload, dict) or payload.get("format") != "infomancer-settings":
+            raise AppSettingError(
+                "That is not an InfoMancer settings export. Choose a JSON file "
+                "downloaded from Export Settings."
+            )
+        imported = app_settings.validate_import(payload.get("settings"))
+        current = app_settings.values()
+        changes = [
+            {"key": key, "old": current[key], "new": value}
+            for key, value in imported.items() if current[key] != value
+        ]
+        encoded = base64.urlsafe_b64encode(json.dumps(imported).encode()).decode()
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return render_settings(
+            request, "system",
+            "The selected settings file is not valid JSON. No settings were changed.",
+            status_code=400,
+        )
+    except AppSettingError as exc:
+        return render_settings(request, "system", str(exc), status_code=400)
+    return templates.TemplateResponse(request, "settings_import_preview.html", {
+        "changes": changes, "encoded_settings": encoded,
+        "message": "", "error": "",
+    })
+
+
+@app.post("/settings/import")
+def apply_application_settings(
+    request: Request, encoded_settings: str = Form(...), confirm: str = Form(""),
+):
+    if confirm != "IMPORT":
+        return redirect(
+            "/settings/system",
+            "Settings import cancelled; no settings were changed.",
+        )
+    try:
+        raw = base64.urlsafe_b64decode(encoded_settings.encode())
+        imported = app_settings.validate_import(json.loads(raw))
+        create_database_backup(db.path, "before-settings-import")
+        changed = app_settings.update(imported, request.state.user.id)
+    except (ValueError, json.JSONDecodeError, AppSettingError, MaintenanceError) as exc:
+        record_event(
+            "settings", "Application settings import failed.",
+            level="error", detail=str(exc), user_id=request.state.user.id,
+        )
+        return redirect(
+            "/settings/system",
+            f"Settings were not imported. {exc}",
+        )
+    record_event(
+        "settings", "Portable application settings imported.",
+        context={"changed": changed}, user_id=request.state.user.id,
+    )
+    return redirect(
+        "/settings/system",
+        f"Settings imported successfully. {changed} setting"
+        f"{'s' if changed != 1 else ''} changed.",
+    )
+
+
+@app.post("/maintenance/backups")
+def create_backup_from_ui(request: Request):
+    try:
+        path = create_database_backup(db.path)
+    except MaintenanceError as exc:
+        record_event(
+            "backup", "Database backup could not be created.",
+            level="error", detail=str(exc), user_id=request.state.user.id,
+        )
+        return redirect("/settings/system", str(exc))
+    record_event(
+        "backup", "Database backup created from App Settings.",
+        context={"name": path.name}, user_id=request.state.user.id,
+    )
+    return redirect(
+        "/settings/system",
+        f"Database backup {path.name} was created successfully.",
+    )
+
+
+@app.get("/maintenance/backups/{name}")
+def download_database_backup(name: str):
+    try:
+        path = resolve_backup(db.path, name)
+    except MaintenanceError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return FileResponse(
+        path, media_type="application/vnd.sqlite3", filename=path.name,
+    )
+
+
+def restart_after_restore() -> None:
+    time.sleep(2.0)
+    os._exit(0)
+
+
+@app.post("/maintenance/restore/server", response_class=HTMLResponse)
+def restore_server_database(
+    request: Request, backup_name: str = Form(...), confirm: str = Form(""),
+):
+    if confirm != "RESTORE":
+        return redirect(
+            "/settings/system",
+            "Database restore cancelled; the live database was not changed.",
+        )
+    try:
+        candidate = resolve_backup(db.path, backup_name)
+        safety = install_database_backup(db.path, candidate)
+    except MaintenanceError as exc:
+        record_event(
+            "restore", "Database restore was rejected.",
+            level="error", detail=str(exc), user_id=request.state.user.id,
+        )
+        return redirect("/settings/system", str(exc))
+    threading.Thread(target=restart_after_restore, daemon=True).start()
+    return templates.TemplateResponse(request, "restore_pending.html", {
+        "safety_backup": safety.name, "message": "",
+    })
+
+
+@app.post("/maintenance/restore/upload", response_class=HTMLResponse)
+async def restore_uploaded_database(
+    request: Request, database_file: UploadFile = File(...),
+    confirm: str = Form(""),
+):
+    if confirm != "RESTORE":
+        return redirect(
+            "/settings/system",
+            "Database restore cancelled; the live database was not changed.",
+        )
+    candidate_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=db.path.parent, prefix="restore-upload-", suffix=".db", delete=False
+        ) as candidate:
+            candidate_path = Path(candidate.name)
+            total = 0
+            while chunk := await database_file.read(1024 * 1024):
+                total += len(chunk)
+                if total > 2 * 1024 * 1024 * 1024:
+                    raise MaintenanceError(
+                        "The uploaded database is larger than the 2 GB restore limit."
+                    )
+                candidate.write(chunk)
+        safety = install_database_backup(db.path, candidate_path)
+    except (MaintenanceError, OSError) as exc:
+        record_event(
+            "restore", "Uploaded database restore was rejected.",
+            level="error", detail=str(exc), user_id=request.state.user.id,
+        )
+        detail = (
+            str(exc) if isinstance(exc, MaintenanceError)
+            else "InfoMancer could not save the uploaded database for validation. "
+                 "The live database was not changed. Check available disk space "
+                 "and application-data permissions, then try again."
+        )
+        return redirect("/settings/system", detail)
+    finally:
+        if candidate_path:
+            candidate_path.unlink(missing_ok=True)
+    threading.Thread(target=restart_after_restore, daemon=True).start()
+    return templates.TemplateResponse(request, "restore_pending.html", {
+        "safety_backup": safety.name, "message": "",
+    })
+
+
+def release_version_key(value: str) -> tuple:
+    parts = re.split(r"[.+-]", value.lstrip("vV"))
+    numbers = tuple(int(part) if part.isdigit() else -1 for part in parts[:3])
+    return numbers + (0 if "-" in value else 1,)
+
+
+@app.post("/maintenance/updates/check")
+def check_for_updates(request: Request):
+    repository = os.getenv(
+        "INFOMANCER_UPDATE_REPOSITORY", "chandler-sol/InfoMancer"
+    ).strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        return redirect(
+            "/settings/system",
+            "Update checking is unavailable because the configured GitHub "
+            "repository name is invalid.",
+        )
+    # GitHub's /releases/latest endpoint deliberately excludes prereleases.
+    # InfoMancer is currently distributed as an alpha prerelease, so inspect
+    # the ordered release list and choose the newest non-draft release.
+    url = f"https://api.github.com/repos/{repository}/releases?per_page=20"
+    try:
+        request_headers = urllib.request.Request(
+            url, headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": f"InfoMancer/{APP_VERSION}",
+            },
+        )
+        with urllib.request.urlopen(request_headers, timeout=10) as response:
+            releases = json.loads(response.read(1024 * 1024))
+        if not isinstance(releases, list):
+            raise ValueError("GitHub returned an unexpected releases response.")
+        release = next(
+            (
+                item for item in releases
+                if isinstance(item, dict) and not item.get("draft")
+            ),
+            None,
+        )
+        if release is None:
+            status = {
+                "status": "no_releases",
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "current_version": APP_VERSION,
+                "message": (
+                    "GitHub is reachable, but this repository has no published "
+                    "releases yet. InfoMancer was not changed."
+                ),
+            }
+            write_update_status(db.path, status)
+            record_event(
+                "update",
+                "Update check completed; no published releases were found.",
+                user_id=request.state.user.id,
+            )
+            return redirect(
+                "/settings/system",
+                "GitHub is reachable, but no InfoMancer releases have been "
+                "published yet. The application was not changed.",
+            )
+        tag = str(release.get("tag_name") or "")
+        if not tag:
+            raise ValueError("GitHub returned a release without a version tag.")
+        available = release_version_key(tag) > release_version_key(APP_VERSION)
+        status = {
+            "status": "available" if available else "current",
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "current_version": APP_VERSION,
+            "latest_version": tag,
+            "release_name": release.get("name") or tag,
+            "release_url": release.get("html_url") or "",
+            "release_notes": str(release.get("body") or "")[:4000],
+        }
+        write_update_status(db.path, status)
+    except (
+        urllib.error.HTTPError, urllib.error.URLError, TimeoutError,
+        ValueError, json.JSONDecodeError, OSError,
+    ) as exc:
+        if isinstance(exc, urllib.error.HTTPError) and exc.code == 404:
+            explanation = (
+                "GitHub could not find the configured InfoMancer repository. "
+                "Check the update repository name in the server configuration."
+            )
+        elif isinstance(exc, urllib.error.HTTPError) and exc.code == 403:
+            explanation = (
+                "GitHub temporarily refused the update check, usually because "
+                "its anonymous API limit was reached. Wait and try again later."
+            )
+        else:
+            explanation = (
+                "GitHub could not be reached or returned an unreadable release "
+                "list. Check the server internet connection and try again."
+            )
+        record_event(
+            "update", explanation,
+            level="error", detail=str(exc), user_id=request.state.user.id,
+        )
+        return redirect(
+            "/settings/system",
+            f"{explanation} InfoMancer was not changed.",
+        )
+    return redirect(
+        "/settings/system",
+        (
+            f"InfoMancer {tag} is available."
+            if available else f"InfoMancer {APP_VERSION} is up to date."
+        ),
+    )
+
+
+@app.post("/maintenance/updates/apply")
+def request_application_update(
+    request: Request, tag: str = Form(...), confirm: str = Form(""),
+):
+    if confirm != "UPDATE":
+        return redirect(
+            "/settings/system",
+            "Update cancelled; InfoMancer was not changed.",
+        )
+    status = read_update_status(db.path)
+    if status.get("status") != "available" or status.get("latest_version") != tag:
+        return redirect(
+            "/settings/system",
+            "That update is no longer the verified available release. Check for "
+            "updates again before applying it.",
+        )
+    try:
+        safety = create_database_backup(db.path, "before-update")
+        write_update_request(db.path, tag, request.state.user.username)
+        write_update_status(db.path, {
+            "status": "requested",
+            "current_version": APP_VERSION,
+            "latest_version": tag,
+            "message": (
+                f"Update {tag} is queued. The restricted host updater will "
+                "begin it when that helper is running."
+            ),
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except MaintenanceError as exc:
+        return redirect("/settings/system", str(exc))
+    record_event(
+        "update", f"Application update {tag} requested.",
+        context={"backup": safety.name}, user_id=request.state.user.id,
+    )
+    return redirect(
+        "/settings/system",
+        f"Update {tag} was queued and database backup {safety.name} was created. "
+        "The restricted host updater will rebuild and restart InfoMancer.",
     )
 
 
@@ -2955,7 +3405,9 @@ def title_return_path(title_id: int, return_to: str = "") -> str:
     parsed = urlparse(return_to)
     if (
         return_to and not parsed.scheme and not parsed.netloc
-        and parsed.path in {"/library", "/movies", "/shows", f"/titles/{title_id}"}
+        and parsed.path in {
+            "/library", "/movies", "/shows", "/favorites", f"/titles/{title_id}"
+        }
     ):
         return return_to
     return f"/titles/{title_id}"
@@ -2996,6 +3448,761 @@ def toggle_favorite(
     )
 
 
+def favorite_return_path(file_row) -> str:
+    return f"/titles/{file_row['title_id']}#season-{file_row['season']}"
+
+
+@app.get("/favorites", response_class=HTMLResponse)
+def favorites_page(request: Request):
+    if request.state.user.id <= 0:
+        return templates.TemplateResponse(request, "favorites.html", {
+            "favorite_titles": [], "favorite_episodes": [],
+            "error": (
+                "Favorites need a signed-in account so InfoMancer can keep each "
+                "person's choices separate."
+            ),
+        })
+    with db.connect() as conn:
+        favorite_titles = conn.execute(
+            """SELECT t.*,uts.updated_at favorite_updated_at
+               FROM user_title_state uts JOIN titles t ON t.id=uts.title_id
+               WHERE uts.user_id=? AND uts.favorite=1
+               ORDER BY COALESCE(NULLIF(t.metadata_title,''),t.title) COLLATE NOCASE""",
+            (request.state.user.id,),
+        ).fetchall()
+        favorite_episodes = conn.execute(
+            """SELECT uef.note,uef.updated_at,e.id expected_episode_id,
+                      e.season,e.episode,e.name episode_name,
+                      t.id title_id,COALESCE(NULLIF(t.metadata_title,''),t.title) show_name,
+                      t.poster_url,
+                      (SELECT MIN(f.id) FROM files f
+                       WHERE f.title_id=e.title_id AND f.season=e.season
+                         AND e.episode BETWEEN f.episode_start
+                           AND COALESCE(f.episode_end,f.episode_start)) file_id
+               FROM user_episode_favorites uef
+               JOIN expected_episodes e ON e.id=uef.expected_episode_id
+               JOIN titles t ON t.id=e.title_id
+               WHERE uef.user_id=?
+               ORDER BY show_name COLLATE NOCASE,e.season,e.episode""",
+            (request.state.user.id,),
+        ).fetchall()
+    return templates.TemplateResponse(request, "favorites.html", {
+        "favorite_titles": favorite_titles,
+        "favorite_episodes": favorite_episodes,
+        "error": "",
+        "message": request.query_params.get("message", ""),
+    })
+
+
+@app.get("/files/{file_id}/favorite", response_class=HTMLResponse)
+def episode_favorite_page(request: Request, file_id: int):
+    with db.connect() as conn:
+        file_row = conn.execute(
+            """SELECT f.id,f.title_id,f.season,f.episode_start,f.episode_end,
+                      COALESCE(NULLIF(t.metadata_title,''),t.title) show_name
+               FROM files f JOIN titles t ON t.id=f.title_id
+               WHERE f.id=? AND t.kind='tv'""",
+            (file_id,),
+        ).fetchone()
+        if not file_row:
+            raise HTTPException(404, "TV episode file not found")
+        final_episode = file_row["episode_end"] or file_row["episode_start"]
+        episodes = conn.execute(
+            """SELECT e.id,e.season,e.episode,e.name,uef.note,
+                      CASE WHEN uef.expected_episode_id IS NULL THEN 0 ELSE 1 END favorite
+               FROM expected_episodes e
+               LEFT JOIN user_episode_favorites uef
+                 ON uef.expected_episode_id=e.id AND uef.user_id=?
+               WHERE e.title_id=? AND e.season=?
+                 AND e.episode BETWEEN ? AND ?
+               ORDER BY e.episode""",
+            (
+                request.state.user.id, file_row["title_id"], file_row["season"],
+                file_row["episode_start"], final_episode,
+            ),
+        ).fetchall()
+    return templates.TemplateResponse(request, "episode_favorite.html", {
+        "file": file_row, "episodes": episodes,
+        "message": request.query_params.get("message", ""),
+    })
+
+
+@app.post("/files/{file_id}/favorite")
+async def save_episode_favorite(request: Request, file_id: int):
+    if request.state.user.id <= 0:
+        return redirect(
+            "/shows",
+            "Episode favorites need a signed-in account so InfoMancer knows whose list to update.",
+        )
+    form = await request.form()
+    selected = {
+        int(value) for value in form.getlist("selected")
+        if str(value).isdigit()
+    }
+    with db.connect() as conn:
+        file_row = conn.execute(
+            """SELECT f.id,f.title_id,f.season,f.episode_start,f.episode_end
+               FROM files f JOIN titles t ON t.id=f.title_id
+               WHERE f.id=? AND t.kind='tv'""",
+            (file_id,),
+        ).fetchone()
+        if not file_row:
+            return redirect("/shows", "That TV episode file no longer exists.")
+        final_episode = file_row["episode_end"] or file_row["episode_start"]
+        episode_ids = {
+            row["id"] for row in conn.execute(
+                """SELECT id FROM expected_episodes
+                   WHERE title_id=? AND season=? AND episode BETWEEN ? AND ?""",
+                (
+                    file_row["title_id"], file_row["season"],
+                    file_row["episode_start"], final_episode,
+                ),
+            ).fetchall()
+        }
+        selected &= episode_ids
+        for episode_id in episode_ids:
+            if episode_id not in selected:
+                conn.execute(
+                    """DELETE FROM user_episode_favorites
+                       WHERE user_id=? AND expected_episode_id=?""",
+                    (request.state.user.id, episode_id),
+                )
+                continue
+            note = str(form.get(f"note_{episode_id}", "")).strip()[:1000]
+            conn.execute(
+                """INSERT INTO user_episode_favorites(
+                     user_id,expected_episode_id,note,updated_at
+                   ) VALUES (?,?,?,CURRENT_TIMESTAMP)
+                   ON CONFLICT(user_id,expected_episode_id) DO UPDATE SET
+                     note=excluded.note,updated_at=CURRENT_TIMESTAMP""",
+                (request.state.user.id, episode_id, note),
+            )
+    record_event(
+        "library", "Episode favorites updated.",
+        user_id=request.state.user.id,
+        context={"file_id": file_id, "favorite_episode_count": len(selected)},
+    )
+    return redirect(
+        favorite_return_path(file_row),
+        (
+            f"Saved {len(selected)} episode favorite"
+            f"{'' if len(selected) == 1 else 's'}."
+        ),
+    )
+
+
+def collection_artwork_url(row) -> str:
+    if row["artwork_filename"]:
+        return f"/collections/art/{row['artwork_filename']}"
+    return row["fallback_poster"] or ""
+
+
+def normalize_collection_positions(conn, collection_id: int) -> None:
+    rows = conn.execute(
+        """SELECT 'title' item_type,title_id item_id,position
+           FROM collection_titles WHERE collection_id=?
+           UNION ALL
+           SELECT 'episode',expected_episode_id,position
+           FROM collection_episodes WHERE collection_id=?
+           ORDER BY position,item_type,item_id""",
+        (collection_id, collection_id),
+    ).fetchall()
+    for position, row in enumerate(rows):
+        table = "collection_titles" if row["item_type"] == "title" else "collection_episodes"
+        column = "title_id" if row["item_type"] == "title" else "expected_episode_id"
+        conn.execute(
+            f"UPDATE {table} SET position=? WHERE collection_id=? AND {column}=?",
+            (position, collection_id, row["item_id"]),
+        )
+
+
+def next_collection_position(conn, collection_id: int) -> int:
+    row = conn.execute(
+        """SELECT COALESCE(MAX(position),-1)+1 next_position FROM (
+             SELECT position FROM collection_titles WHERE collection_id=?
+             UNION ALL
+             SELECT position FROM collection_episodes WHERE collection_id=?
+           )""",
+        (collection_id, collection_id),
+    ).fetchone()
+    return row["next_position"]
+
+
+def collection_items(conn, collection_id: int):
+    return conn.execute(
+        """SELECT 'title' item_type,t.id item_id,t.id title_id,
+                  COALESCE(NULLIF(t.metadata_title,''),t.title) display_title,
+                  CASE WHEN t.kind='tv' THEN 'TV series' ELSE 'Movie' END item_label,
+                  COALESCE(t.metadata_year,t.year) display_year,
+                  t.poster_url,NULL season,NULL episode,ct.position
+           FROM collection_titles ct JOIN titles t ON t.id=ct.title_id
+           WHERE ct.collection_id=?
+           UNION ALL
+           SELECT 'episode',e.id,t.id,
+                  COALESCE(NULLIF(e.name,''),
+                    printf('S%02dE%02d',e.season,e.episode)),
+                  COALESCE(NULLIF(t.metadata_title,''),t.title),
+                  COALESCE(t.metadata_year,t.year),t.poster_url,
+                  e.season,e.episode,ce.position
+           FROM collection_episodes ce
+           JOIN expected_episodes e ON e.id=ce.expected_episode_id
+           JOIN titles t ON t.id=e.title_id
+           WHERE ce.collection_id=?
+           ORDER BY position,item_type,item_id""",
+        (collection_id, collection_id),
+    ).fetchall()
+
+
+async def save_collection_artwork(upload: UploadFile | None) -> str:
+    if not upload or not upload.filename:
+        return ""
+    content = await upload.read(5 * 1024 * 1024 + 1)
+    if len(content) > 5 * 1024 * 1024:
+        raise ValueError(
+            "The collection image is larger than 5 MB. Choose a smaller JPEG, PNG, or WebP image."
+        )
+    signatures = (
+        (b"\xff\xd8\xff", ".jpg"),
+        (b"\x89PNG\r\n\x1a\n", ".png"),
+    )
+    extension = next(
+        (extension for signature, extension in signatures if content.startswith(signature)),
+        "",
+    )
+    if not extension and len(content) >= 12 \
+            and content.startswith(b"RIFF") and content[8:12] == b"WEBP":
+        extension = ".webp"
+    if not extension:
+        raise ValueError(
+            "InfoMancer could not recognize that image. Choose a JPEG, PNG, or WebP file."
+        )
+    filename = f"{secrets.token_hex(20)}{extension}"
+    (COLLECTION_ART_DIR / filename).write_bytes(content)
+    return filename
+
+
+@app.get("/titles/{title_id}/collections", response_class=HTMLResponse)
+def title_collections_page(request: Request, title_id: int):
+    with db.connect() as conn:
+        title = conn.execute(
+            """SELECT id,kind,COALESCE(NULLIF(metadata_title,''),title) display_title
+               FROM titles WHERE id=?""",
+            (title_id,),
+        ).fetchone()
+        if not title:
+            raise HTTPException(404, "Title not found")
+        collections = conn.execute(
+            """SELECT c.id,c.name,
+                      EXISTS(SELECT 1 FROM collection_titles ct
+                             WHERE ct.collection_id=c.id AND ct.title_id=?) selected
+               FROM collections c ORDER BY c.name COLLATE NOCASE""",
+            (title_id,),
+        ).fetchall()
+    return templates.TemplateResponse(request, "title_collections.html", {
+        "title": title, "collections": collections,
+        "return_to": request.query_params.get("return_to", f"/titles/{title_id}"),
+        "message": request.query_params.get("message", ""),
+    })
+
+
+@app.post("/titles/{title_id}/collections")
+def save_title_collections(
+    request: Request, title_id: int,
+    selected_collections: list[int] = Form([]), return_to: str = Form(""),
+):
+    selected = set(selected_collections)
+    with db.connect() as conn:
+        title = conn.execute(
+            "SELECT COALESCE(NULLIF(metadata_title,''),title) name FROM titles WHERE id=?",
+            (title_id,),
+        ).fetchone()
+        if not title:
+            return redirect("/collections", "That library title no longer exists.")
+        valid = {
+            row["id"] for row in conn.execute("SELECT id FROM collections").fetchall()
+        }
+        selected &= valid
+        previous = {
+            row["collection_id"] for row in conn.execute(
+                "SELECT collection_id FROM collection_titles WHERE title_id=?",
+                (title_id,),
+            ).fetchall()
+        }
+        for collection_id in previous - selected:
+            conn.execute(
+                "DELETE FROM collection_titles WHERE collection_id=? AND title_id=?",
+                (collection_id, title_id),
+            )
+            normalize_collection_positions(conn, collection_id)
+        for collection_id in selected - previous:
+            conn.execute(
+                """INSERT INTO collection_titles(collection_id,title_id,position)
+                   VALUES (?,?,?)""",
+                (collection_id, title_id, next_collection_position(conn, collection_id)),
+            )
+    return redirect(
+        title_return_path(title_id, return_to),
+        f'Collections for "{title["name"]}" updated.',
+    )
+
+
+@app.get("/files/{file_id}/collections", response_class=HTMLResponse)
+def episode_collections_page(request: Request, file_id: int):
+    with db.connect() as conn:
+        file_row = conn.execute(
+            """SELECT f.id,f.title_id,f.season,f.episode_start,f.episode_end,
+                      COALESCE(NULLIF(t.metadata_title,''),t.title) show_name
+               FROM files f JOIN titles t ON t.id=f.title_id
+               WHERE f.id=? AND t.kind='tv'""",
+            (file_id,),
+        ).fetchone()
+        if not file_row:
+            raise HTTPException(404, "TV episode file not found")
+        final_episode = file_row["episode_end"] or file_row["episode_start"]
+        episodes = conn.execute(
+            """SELECT e.id,e.season,e.episode,e.name
+               FROM expected_episodes e
+               WHERE e.title_id=? AND e.season=?
+                 AND e.episode BETWEEN ? AND ?
+               ORDER BY e.episode""",
+            (
+                file_row["title_id"], file_row["season"],
+                file_row["episode_start"], final_episode,
+            ),
+        ).fetchall()
+        collections = conn.execute(
+            "SELECT id,name FROM collections ORDER BY name COLLATE NOCASE"
+        ).fetchall()
+        memberships = {
+            (row["expected_episode_id"], row["collection_id"])
+            for row in conn.execute(
+                """SELECT ce.expected_episode_id,ce.collection_id
+                   FROM collection_episodes ce
+                   JOIN expected_episodes e ON e.id=ce.expected_episode_id
+                   WHERE e.title_id=? AND e.season=?
+                     AND e.episode BETWEEN ? AND ?""",
+                (
+                    file_row["title_id"], file_row["season"],
+                    file_row["episode_start"], final_episode,
+                ),
+            ).fetchall()
+        }
+    return templates.TemplateResponse(request, "episode_collections.html", {
+        "file": file_row, "episodes": episodes, "collections": collections,
+        "memberships": memberships, "message": request.query_params.get("message", ""),
+    })
+
+
+@app.post("/files/{file_id}/collections")
+def save_episode_collections(
+    request: Request, file_id: int, assignments: list[str] = Form([]),
+):
+    requested = set()
+    for assignment in assignments:
+        try:
+            episode_id, collection_id = (int(value) for value in assignment.split(":", 1))
+            requested.add((episode_id, collection_id))
+        except (TypeError, ValueError):
+            continue
+    with db.connect() as conn:
+        file_row = conn.execute(
+            """SELECT f.title_id,f.season,f.episode_start,f.episode_end
+               FROM files f JOIN titles t ON t.id=f.title_id
+               WHERE f.id=? AND t.kind='tv'""",
+            (file_id,),
+        ).fetchone()
+        if not file_row:
+            return redirect("/shows", "That TV episode file no longer exists.")
+        final_episode = file_row["episode_end"] or file_row["episode_start"]
+        episode_ids = {
+            row["id"] for row in conn.execute(
+                """SELECT id FROM expected_episodes
+                   WHERE title_id=? AND season=? AND episode BETWEEN ? AND ?""",
+                (
+                    file_row["title_id"], file_row["season"],
+                    file_row["episode_start"], final_episode,
+                ),
+            ).fetchall()
+        }
+        collection_ids = {
+            row["id"] for row in conn.execute("SELECT id FROM collections").fetchall()
+        }
+        requested = {
+            pair for pair in requested
+            if pair[0] in episode_ids and pair[1] in collection_ids
+        }
+        affected_collections = {
+            row["collection_id"] for row in conn.execute(
+                f"""SELECT DISTINCT collection_id FROM collection_episodes
+                    WHERE expected_episode_id IN ({','.join('?' for _ in episode_ids)})""",
+                tuple(episode_ids),
+            ).fetchall()
+        } if episode_ids else set()
+        if episode_ids:
+            conn.execute(
+                f"""DELETE FROM collection_episodes
+                    WHERE expected_episode_id IN ({','.join('?' for _ in episode_ids)})""",
+                tuple(episode_ids),
+            )
+        for episode_id, collection_id in sorted(requested):
+            conn.execute(
+                """INSERT INTO collection_episodes
+                   (collection_id,expected_episode_id,position) VALUES (?,?,?)""",
+                (
+                    collection_id, episode_id,
+                    next_collection_position(conn, collection_id),
+                ),
+            )
+            affected_collections.add(collection_id)
+        for collection_id in affected_collections:
+            normalize_collection_positions(conn, collection_id)
+    return redirect(
+        f"/titles/{file_row['title_id']}",
+        "Episode collection selections updated. No media files were changed.",
+    )
+
+
+@app.get("/collections", response_class=HTMLResponse)
+def collections_page(request: Request):
+    with db.connect() as conn:
+        rows = conn.execute(
+            """SELECT c.*,
+                      ((SELECT COUNT(*) FROM collection_titles ct
+                        WHERE ct.collection_id=c.id) +
+                       (SELECT COUNT(*) FROM collection_episodes ce
+                        WHERE ce.collection_id=c.id)) title_count,
+                      COALESCE(
+                        (SELECT t.poster_url FROM collection_titles ct
+                         JOIN titles t ON t.id=ct.title_id
+                         WHERE ct.collection_id=c.id ORDER BY ct.position LIMIT 1),
+                        (SELECT t.poster_url FROM collection_episodes ce
+                         JOIN expected_episodes e ON e.id=ce.expected_episode_id
+                         JOIN titles t ON t.id=e.title_id
+                         WHERE ce.collection_id=c.id ORDER BY ce.position LIMIT 1)
+                      ) fallback_poster
+               FROM collections c ORDER BY c.name COLLATE NOCASE"""
+        ).fetchall()
+    collections = [
+        {**dict(row), "artwork_url": collection_artwork_url(row)} for row in rows
+    ]
+    return templates.TemplateResponse(request, "collections.html", {
+        "collections": collections,
+        "message": request.query_params.get("message", ""),
+    })
+
+
+@app.post("/collections")
+def create_collection(
+    request: Request, name: str = Form(...), description: str = Form(""),
+):
+    cleaned = " ".join(name.strip().split())[:80]
+    if not cleaned:
+        return redirect(
+            "/collections",
+            "The collection was not created. Enter a name and try again.",
+        )
+    try:
+        with db.connect() as conn:
+            cursor = conn.execute(
+                """INSERT INTO collections(name,description,created_by)
+                   VALUES (?,?,?)""",
+                (
+                    cleaned, description.strip()[:1000],
+                    request.state.user.id if request.state.user.id > 0 else None,
+                ),
+            )
+            collection_id = cursor.lastrowid
+    except sqlite3.IntegrityError:
+        return redirect(
+            "/collections",
+            f'A collection named "{cleaned}" already exists. Open it or choose a different name.',
+        )
+    record_event(
+        "library", f'Collection "{cleaned}" created.',
+        user_id=request.state.user.id, context={"collection_id": collection_id},
+    )
+    return redirect(
+        f"/collections/{collection_id}",
+        f'Collection "{cleaned}" created. Add movies or TV series when you are ready.',
+    )
+
+
+@app.get("/collections/art/{filename}")
+def collection_artwork(filename: str):
+    if not re.fullmatch(r"[0-9a-f]{40}\.(?:jpg|png|webp)", filename):
+        raise HTTPException(404, "Collection image not found")
+    path = COLLECTION_ART_DIR / filename
+    if not path.is_file():
+        raise HTTPException(404, "Collection image not found")
+    return FileResponse(path)
+
+
+@app.get("/collections/{collection_id}", response_class=HTMLResponse)
+def collection_detail(request: Request, collection_id: int, q: str = ""):
+    with db.connect() as conn:
+        collection = conn.execute(
+            """SELECT c.*,COALESCE(
+                      (SELECT t.poster_url FROM collection_titles first_ct
+                       JOIN titles t ON t.id=first_ct.title_id
+                       WHERE first_ct.collection_id=c.id
+                       ORDER BY first_ct.position,first_ct.title_id LIMIT 1),
+                      (SELECT t.poster_url FROM collection_episodes first_ce
+                       JOIN expected_episodes e ON e.id=first_ce.expected_episode_id
+                       JOIN titles t ON t.id=e.title_id
+                       WHERE first_ce.collection_id=c.id
+                       ORDER BY first_ce.position,first_ce.expected_episode_id LIMIT 1)
+                     ) fallback_poster
+               FROM collections c WHERE c.id=?""",
+            (collection_id,),
+        ).fetchone()
+        if not collection:
+            raise HTTPException(404, "Collection not found")
+        items = collection_items(conn, collection_id)
+        candidates = []
+        if q.strip():
+            term = f"%{q.strip()}%"
+            candidates = conn.execute(
+                """SELECT t.id,t.kind,t.poster_url,
+                          COALESCE(NULLIF(t.metadata_title,''),t.title) display_title,
+                          COALESCE(t.metadata_year,t.year) display_year
+                   FROM titles t
+                   WHERE (t.title LIKE ? OR t.metadata_title LIKE ?)
+                     AND NOT EXISTS (
+                       SELECT 1 FROM collection_titles ct
+                       WHERE ct.collection_id=? AND ct.title_id=t.id
+                     )
+                   ORDER BY display_title COLLATE NOCASE LIMIT 20""",
+                (term, term, collection_id),
+            ).fetchall()
+    return templates.TemplateResponse(request, "collection_detail.html", {
+        "collection": {
+            **dict(collection),
+            "artwork_url": collection_artwork_url(collection),
+        },
+        "items": items, "candidates": candidates, "q": q,
+        "message": request.query_params.get("message", ""),
+    })
+
+
+@app.post("/collections/{collection_id}/edit")
+async def edit_collection(
+    request: Request, collection_id: int, name: str = Form(...),
+    description: str = Form(""), artwork: UploadFile | None = File(None),
+    remove_artwork: str = Form(""),
+):
+    cleaned = " ".join(name.strip().split())[:80]
+    if not cleaned:
+        return redirect(
+            f"/collections/{collection_id}",
+            "The collection was not changed. Enter a name and try again.",
+        )
+    try:
+        artwork_filename = await save_collection_artwork(artwork)
+    except ValueError as exc:
+        return redirect(f"/collections/{collection_id}", str(exc))
+    old_artwork = ""
+    try:
+        with db.connect() as conn:
+            current = conn.execute(
+                "SELECT artwork_filename FROM collections WHERE id=?",
+                (collection_id,),
+            ).fetchone()
+            if not current:
+                raise HTTPException(404, "Collection not found")
+            old_artwork = current["artwork_filename"] or ""
+            selected_artwork = (
+                artwork_filename if artwork_filename
+                else (None if remove_artwork == "1" else old_artwork or None)
+            )
+            conn.execute(
+                """UPDATE collections SET name=?,description=?,artwork_filename=?,
+                     updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                (cleaned, description.strip()[:1000], selected_artwork, collection_id),
+            )
+    except sqlite3.IntegrityError:
+        if artwork_filename:
+            (COLLECTION_ART_DIR / artwork_filename).unlink(missing_ok=True)
+        return redirect(
+            f"/collections/{collection_id}",
+            f'The name "{cleaned}" is already used by another collection.',
+        )
+    if old_artwork and (artwork_filename or remove_artwork == "1"):
+        (COLLECTION_ART_DIR / old_artwork).unlink(missing_ok=True)
+    return redirect(
+        f"/collections/{collection_id}",
+        f'Collection "{cleaned}" updated.',
+    )
+
+
+@app.post("/collections/{collection_id}/titles")
+def add_collection_title(
+    request: Request, collection_id: int, title_id: int = Form(...),
+):
+    with db.connect() as conn:
+        collection = conn.execute(
+            "SELECT name FROM collections WHERE id=?", (collection_id,)
+        ).fetchone()
+        title = conn.execute(
+            "SELECT COALESCE(NULLIF(metadata_title,''),title) name FROM titles WHERE id=?",
+            (title_id,),
+        ).fetchone()
+        if not collection or not title:
+            return redirect(
+                f"/collections/{collection_id}",
+                "The title could not be added because the collection or library title no longer exists.",
+            )
+        position = next_collection_position(conn, collection_id)
+        cursor = conn.execute(
+            """INSERT OR IGNORE INTO collection_titles(collection_id,title_id,position)
+               VALUES (?,?,?)""",
+            (collection_id, title_id, position),
+        )
+    message = (
+        f'"{title["name"]}" added to "{collection["name"]}".'
+        if cursor.rowcount else
+        f'"{title["name"]}" is already in "{collection["name"]}".'
+    )
+    return redirect(f"/collections/{collection_id}", message)
+
+
+@app.post("/collections/{collection_id}/titles/{title_id}/remove")
+def remove_collection_title(request: Request, collection_id: int, title_id: int):
+    with db.connect() as conn:
+        title = conn.execute(
+            "SELECT COALESCE(NULLIF(metadata_title,''),title) name FROM titles WHERE id=?",
+            (title_id,),
+        ).fetchone()
+        cursor = conn.execute(
+            "DELETE FROM collection_titles WHERE collection_id=? AND title_id=?",
+            (collection_id, title_id),
+        )
+        normalize_collection_positions(conn, collection_id)
+    if not cursor.rowcount:
+        return redirect(
+            f"/collections/{collection_id}",
+            "That title was not in this collection, so nothing was removed.",
+        )
+    return redirect(
+        f"/collections/{collection_id}",
+        f'"{title["name"] if title else "Title"}" removed from the collection. The media files were not changed.',
+    )
+
+
+@app.post("/collections/{collection_id}/titles/{title_id}/move")
+def move_collection_title(
+    request: Request, collection_id: int, title_id: int,
+    direction: str = Form(...),
+):
+    return move_collection_item(collection_id, "title", title_id, direction)
+
+
+def move_collection_item(
+    collection_id: int, item_type: str, item_id: int, direction: str,
+):
+    if direction not in {"up", "down"}:
+        return redirect(
+            f"/collections/{collection_id}",
+            "The collection item was not moved because the requested direction was not recognized.",
+        )
+    with db.connect() as conn:
+        normalize_collection_positions(conn, collection_id)
+        items = collection_items(conn, collection_id)
+        current_index = next(
+            (
+                index for index, item in enumerate(items)
+                if item["item_type"] == item_type and item["item_id"] == item_id
+            ),
+            None,
+        )
+        current = items[current_index] if current_index is not None else None
+        if not current:
+            return redirect(
+                f"/collections/{collection_id}",
+                "That item could not be moved because it is no longer in this collection.",
+            )
+        target_index = current_index + (-1 if direction == "up" else 1)
+        if 0 <= target_index < len(items):
+            reordered = list(items)
+            reordered[current_index], reordered[target_index] = (
+                reordered[target_index], reordered[current_index]
+            )
+            for position, item in enumerate(reordered):
+                table = (
+                    "collection_titles"
+                    if item["item_type"] == "title" else "collection_episodes"
+                )
+                column = (
+                    "title_id"
+                    if item["item_type"] == "title" else "expected_episode_id"
+                )
+                conn.execute(
+                    f"UPDATE {table} SET position=? WHERE collection_id=? AND {column}=?",
+                    (position, collection_id, item["item_id"]),
+                )
+    return RedirectResponse(
+        f"/collections/{collection_id}#{item_type}-{item_id}", status_code=303
+    )
+
+
+@app.post("/collections/{collection_id}/episodes/{episode_id}/move")
+def move_collection_episode(
+    request: Request, collection_id: int, episode_id: int,
+    direction: str = Form(...),
+):
+    return move_collection_item(collection_id, "episode", episode_id, direction)
+
+
+@app.post("/collections/{collection_id}/episodes/{episode_id}/remove")
+def remove_collection_episode(request: Request, collection_id: int, episode_id: int):
+    with db.connect() as conn:
+        episode = conn.execute(
+            """SELECT e.name,e.season,e.episode,
+                      COALESCE(NULLIF(t.metadata_title,''),t.title) show_name
+               FROM expected_episodes e JOIN titles t ON t.id=e.title_id
+               WHERE e.id=?""",
+            (episode_id,),
+        ).fetchone()
+        cursor = conn.execute(
+            """DELETE FROM collection_episodes
+               WHERE collection_id=? AND expected_episode_id=?""",
+            (collection_id, episode_id),
+        )
+        normalize_collection_positions(conn, collection_id)
+    if not cursor.rowcount:
+        return redirect(
+            f"/collections/{collection_id}",
+            "That episode was not in this collection, so nothing was removed.",
+        )
+    label = (
+        f'{episode["show_name"]} S{episode["season"]:02d}E{episode["episode"]:02d}'
+        if episode else "Episode"
+    )
+    return redirect(
+        f"/collections/{collection_id}",
+        f'"{label}" removed from the collection. The episode file was not changed.',
+    )
+
+
+@app.post("/collections/{collection_id}/delete")
+def delete_collection(request: Request, collection_id: int):
+    artwork = ""
+    with db.connect() as conn:
+        collection = conn.execute(
+            "SELECT name,artwork_filename FROM collections WHERE id=?",
+            (collection_id,),
+        ).fetchone()
+        if not collection:
+            return redirect("/collections", "That collection no longer exists.")
+        artwork = collection["artwork_filename"] or ""
+        conn.execute("DELETE FROM collections WHERE id=?", (collection_id,))
+    if artwork:
+        (COLLECTION_ART_DIR / artwork).unlink(missing_ok=True)
+    return redirect(
+        "/collections",
+        f'Collection "{collection["name"]}" deleted. No movies, TV series, or media files were removed.',
+    )
+
+
 @app.get("/titles/{title_id}/organize", response_class=HTMLResponse)
 def organize_title_page(request: Request, title_id: int):
     with db.connect() as conn:
@@ -3013,8 +4220,16 @@ def organize_title_page(request: Request, title_id: int):
                WHERE ut.user_id=? ORDER BY ut.name COLLATE NOCASE""",
             (title_id, request.state.user.id),
         ).fetchall()
+        collections = conn.execute(
+            """SELECT c.*,ct.title_id IS NOT NULL selected
+               FROM collections c LEFT JOIN collection_titles ct
+                 ON ct.collection_id=c.id AND ct.title_id=?
+               ORDER BY c.name COLLATE NOCASE""",
+            (title_id,),
+        ).fetchall()
     return templates.TemplateResponse(request, "organize.html", {
         "title": title, "title_state": state, "tags": tags,
+        "collections": collections,
         "message": request.query_params.get("message", ""),
     })
 
@@ -3024,6 +4239,7 @@ def save_title_organization(
     request: Request, title_id: int, favorite: str = Form(""),
     personal_rating: str = Form(""), custom_order: str = Form(""),
     tag_names: str = Form(""), selected_tags: list[int] = Form(default=[]),
+    selected_collections: list[int] = Form(default=[]),
 ):
     if request.state.user.id <= 0:
         return redirect(
@@ -3101,12 +4317,35 @@ def save_title_organization(
             "INSERT OR IGNORE INTO title_tags(title_id,tag_id) VALUES (?,?)",
             [(title_id, tag_id) for tag_id in chosen_ids],
         )
+        if request.state.user.is_librarian:
+            allowed_collections = {
+                row["id"] for row in conn.execute("SELECT id FROM collections")
+            }
+            collection_ids = {
+                collection_id for collection_id in selected_collections
+                if collection_id in allowed_collections
+            }
+            conn.execute("DELETE FROM collection_titles WHERE title_id=?", (title_id,))
+            for collection_id in collection_ids:
+                next_position = conn.execute(
+                    """SELECT COALESCE(MAX(position),-1)+1 next_position
+                       FROM collection_titles WHERE collection_id=?""",
+                    (collection_id,),
+                ).fetchone()["next_position"]
+                conn.execute(
+                    """INSERT INTO collection_titles(collection_id,title_id,position)
+                       VALUES (?,?,?)""",
+                    (collection_id, title_id, next_position),
+                )
     record_event(
         "library", "Personal title organization updated.",
         user_id=request.state.user.id,
         context={"title_id": title_id, "tags": len(chosen_ids)},
     )
-    return redirect(f"/titles/{title_id}", "Favorites, rating, order, and tags saved.")
+    message = "Favorites, rating, order, and tags saved."
+    if request.state.user.is_librarian:
+        message = "Organization and collection membership saved."
+    return redirect(f"/titles/{title_id}", message)
 
 
 @app.post("/titles/organize-bulk", response_class=HTMLResponse)
@@ -3114,6 +4353,7 @@ def organize_titles_bulk(
     request: Request, selected: list[int] = Form(default=[]),
     apply: str = Form(""), selected_tags: list[int] = Form(default=[]),
     tag_names: str = Form(""),
+    selected_collections: list[int] = Form(default=[]),
 ):
     title_ids = list(dict.fromkeys(selected))[:1000]
     if not title_ids:
@@ -3137,6 +4377,12 @@ def organize_titles_bulk(
                FROM user_tags ut LEFT JOIN title_tags tt ON tt.tag_id=ut.id
                WHERE ut.user_id=? GROUP BY ut.id ORDER BY ut.name COLLATE NOCASE""",
             (user_id,),
+        ).fetchall()
+        collections = conn.execute(
+            """SELECT c.*,COUNT(ct.title_id) title_count
+               FROM collections c LEFT JOIN collection_titles ct
+                 ON ct.collection_id=c.id
+               GROUP BY c.id ORDER BY c.name COLLATE NOCASE"""
         ).fetchall()
         if apply == "1":
             allowed = {row["id"] for row in tags}
@@ -3167,6 +4413,25 @@ def organize_titles_bulk(
                 "INSERT OR IGNORE INTO title_tags(title_id,tag_id) VALUES (?,?)",
                 [(title_id, tag_id) for title_id in title_ids for tag_id in tag_ids],
             )
+            collection_ids: set[int] = set()
+            if request.state.user.is_librarian:
+                allowed_collections = {row["id"] for row in collections}
+                collection_ids = {
+                    collection_id for collection_id in selected_collections
+                    if collection_id in allowed_collections
+                }
+                for collection_id in collection_ids:
+                    next_position = conn.execute(
+                        """SELECT COALESCE(MAX(position),-1)+1 next_position
+                           FROM collection_titles WHERE collection_id=?""",
+                        (collection_id,),
+                    ).fetchone()["next_position"]
+                    for offset, title_id in enumerate(title_ids):
+                        conn.execute(
+                            """INSERT OR IGNORE INTO collection_titles
+                               (collection_id,title_id,position) VALUES (?,?,?)""",
+                            (collection_id, title_id, next_position + offset),
+                        )
             record_event(
                 "library",
                 f"Tags added to {len(title_ids)} selected titles.",
@@ -3175,10 +4440,12 @@ def organize_titles_bulk(
             )
             return redirect(
                 "/library",
-                f"Tags added to {len(title_ids)} selected title{'s' if len(title_ids) != 1 else ''}.",
+                f"Organization saved for {len(title_ids)} selected "
+                f"title{'s' if len(title_ids) != 1 else ''}.",
             )
     return templates.TemplateResponse(request, "organize_bulk.html", {
-        "titles": titles, "title_ids": title_ids, "tags": tags, "message": "",
+        "titles": titles, "title_ids": title_ids, "tags": tags,
+        "collections": collections, "message": "",
     })
 
 
@@ -3278,6 +4545,15 @@ def library(
         "favorites", "random", "custom",
     } else "title"
     if q:
+        fuzzy_names = [item["person_name"] for item in fuzzy_people(q, kind, 6)]
+        fuzzy_credit_sql = ""
+        if fuzzy_names:
+            placeholders = ",".join("?" for _ in fuzzy_names)
+            fuzzy_credit_sql = (
+                " OR EXISTS (SELECT 1 FROM title_credits fuzzy_credit "
+                "WHERE fuzzy_credit.title_id=t.id "
+                f"AND fuzzy_credit.person_name IN ({placeholders}))"
+            )
         conditions.append(
             "(t.title LIKE ? OR t.metadata_title LIKE ? OR EXISTS "
             "(SELECT 1 FROM files qf WHERE qf.title_id=t.id AND qf.filename LIKE ?) "
@@ -3285,10 +4561,22 @@ def library(
             "SELECT 1 FROM title_tags qtt "
             "JOIN user_tags qut ON qut.id=qtt.tag_id "
             "WHERE qtt.title_id=t.id AND qut.user_id=? AND qut.name LIKE ?"
-            "))"
+            ") OR EXISTS ("
+            "SELECT 1 FROM title_credits qtc "
+            "WHERE qtc.title_id=t.id AND qtc.person_name LIKE ?"
+            ") OR EXISTS ("
+            "SELECT 1 FROM expected_episodes qee "
+            "JOIN episode_credits qec ON qec.expected_episode_id=qee.id "
+            "WHERE qee.title_id=t.id AND qec.person_name LIKE ?"
+            ")"
+            + fuzzy_credit_sql
+            + ")"
         )
         term = f"%{q}%"
-        params.extend([term, term, term, request.state.user.id, term])
+        params.extend([
+            term, term, term, request.state.user.id, term, term, term,
+        ])
+        params.extend(fuzzy_names)
     if kind in {"movie", "tv"}:
         conditions.append("t.kind=?")
         params.append(kind)
@@ -3543,7 +4831,114 @@ def people_search(q: str = "", role: str = "", kind: str = "") -> dict:
                 LIMIT 10""",
             params,
         ).fetchall()
-    return {"people": [dict(row) for row in rows]}
+    people = [dict(row) for row in rows]
+    seen = {
+        (item.get("imdb_person_id") or "", item["person_name"].casefold())
+        for item in people
+    }
+    for item in fuzzy_people(query, kind, 10):
+        key = (item.get("imdb_person_id") or "", item["person_name"].casefold())
+        if key not in seen:
+            item.pop("similarity", None)
+            people.append(item)
+            seen.add(key)
+        if len(people) >= 10:
+            break
+    return {"people": people[:10]}
+
+
+@app.get("/api/library-suggestions")
+def library_suggestions(request: Request, q: str = "", kind: str = "all") -> dict:
+    """Suggest searchable values already present in this installation."""
+    query = q.strip()
+    if len(query) < 2:
+        return {"suggestions": []}
+    kind = kind if kind in {"movie", "tv"} else "all"
+    term = f"%{query}%"
+    prefix = f"{query}%"
+    kind_sql = " AND t.kind=?" if kind != "all" else ""
+
+    with db.connect() as conn:
+        title_rows = conn.execute(
+            f"""SELECT DISTINCT COALESCE(NULLIF(t.metadata_title,''),t.title) label,
+                       COALESCE(t.metadata_year,t.year) year, t.kind
+                FROM titles t
+                WHERE COALESCE(NULLIF(t.metadata_title,''),t.title) LIKE ?{kind_sql}
+                ORDER BY CASE
+                  WHEN COALESCE(NULLIF(t.metadata_title,''),t.title)=? COLLATE NOCASE THEN 0
+                  WHEN COALESCE(NULLIF(t.metadata_title,''),t.title) LIKE ? THEN 1
+                  ELSE 2 END,
+                  label COLLATE NOCASE
+                LIMIT 5""",
+            [term, *([kind] if kind != "all" else []), query, prefix],
+        ).fetchall()
+        people_rows = conn.execute(
+            f"""SELECT c.person_name label, GROUP_CONCAT(DISTINCT c.role) roles,
+                       COUNT(DISTINCT c.title_id) title_count
+                FROM title_credits c JOIN titles t ON t.id=c.title_id
+                WHERE c.person_name LIKE ?{kind_sql}
+                GROUP BY c.person_name
+                ORDER BY CASE WHEN c.person_name=? COLLATE NOCASE THEN 0
+                              WHEN c.person_name LIKE ? THEN 1 ELSE 2 END,
+                         title_count DESC, c.person_name COLLATE NOCASE
+                LIMIT 4""",
+            [term, *([kind] if kind != "all" else []), query, prefix],
+        ).fetchall()
+        file_rows = conn.execute(
+            f"""SELECT f.filename label, t.kind
+                FROM files f JOIN titles t ON t.id=f.title_id
+                WHERE f.filename LIKE ?{kind_sql}
+                ORDER BY CASE WHEN f.filename LIKE ? THEN 0 ELSE 1 END,
+                         f.filename COLLATE NOCASE
+                LIMIT 3""",
+            [term, *([kind] if kind != "all" else []), prefix],
+        ).fetchall()
+        tag_rows = conn.execute(
+            """SELECT ut.name label, COUNT(DISTINCT tt.title_id) title_count
+               FROM user_tags ut LEFT JOIN title_tags tt ON tt.tag_id=ut.id
+               WHERE ut.user_id=? AND ut.name LIKE ?
+               GROUP BY ut.id
+               ORDER BY CASE WHEN ut.name=? COLLATE NOCASE THEN 0
+                             WHEN ut.name LIKE ? THEN 1 ELSE 2 END,
+                        ut.name COLLATE NOCASE
+               LIMIT 3""",
+            (request.state.user.id, term, query, prefix),
+        ).fetchall()
+
+    suggestions: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(value: str, suggestion_type: str, detail: str = "") -> None:
+        key = (suggestion_type, value.casefold())
+        if key in seen or len(suggestions) >= 10:
+            return
+        seen.add(key)
+        suggestions.append({
+            "value": value, "label": value, "type": suggestion_type, "detail": detail,
+        })
+
+    for row in title_rows:
+        detail = "Movie" if row["kind"] == "movie" else "TV Show"
+        if row["year"]:
+            detail += f" · {row['year']}"
+        add(row["label"], "Title", detail)
+    for row in people_rows:
+        roles = ", ".join(role.title() for role in (row["roles"] or "").split(","))
+        count = row["title_count"]
+        add(row["label"], "Person", f"{roles} · {count} title{'s' if count != 1 else ''}")
+    for row in fuzzy_people(query, kind, 6):
+        roles = ", ".join(role.title() for role in (row["roles"] or "").split(","))
+        count = row["title_count"]
+        add(
+            row["person_name"], "Person",
+            f"{roles} · {count} title{'s' if count != 1 else ''}",
+        )
+    for row in tag_rows:
+        count = row["title_count"]
+        add(row["label"], "Custom Tag", f"{count} title{'s' if count != 1 else ''}")
+    for row in file_rows:
+        add(row["label"], "Filename", "Movie" if row["kind"] == "movie" else "TV Show")
+    return {"suggestions": suggestions}
 
 
 @app.get("/titles/{title_id}", response_class=HTMLResponse)

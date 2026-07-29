@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Add Episodes to Collections · InfoMancer{% endblock %}
+{% block content %}
+<a class="back" href="/titles/{{ file.title_id }}">← {{ file.show_name }}</a>
+<header class="page-head">
+  <div>
+    <p class="eyebrow">COLLECTIONS</p>
+    <h1>Add episode{% if episodes|length != 1 %}s{% endif %} to a collection</h1>
+    <p>Choose collections for each logical episode in this file. This is especially useful for story timelines that mix movies and individual TV episodes.</p>
+  </div>
+</header>
+{% if not episodes %}
+<section class="panel empty">
+  <h2>Episode metadata is not available yet</h2>
+  <p>InfoMancer could not identify the logical episode records in this file. Match the TV series and rescan it, then try again.</p>
+  <a class="button" href="/titles/{{ file.title_id }}">Back to {{ file.show_name }}</a>
+</section>
+{% elif not collections %}
+<section class="panel empty">
+  <h2>No collections yet</h2>
+  <p>Create a collection first, then return to this episode to add it.</p>
+  <a class="button" href="/collections">Create a collection</a>
+</section>
+{% else %}
+<form class="episode-collection-form" method="post" action="/files/{{ file.id }}/collections">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% for episode in episodes %}
+  <section class="panel episode-collection-choice">
+    <div>
+      <p class="eyebrow">S{{ '%02d'|format(episode.season) }}E{{ '%02d'|format(episode.episode) }}</p>
+      <h2>{{ episode.name or 'Episode ' ~ episode.episode }}</h2>
+    </div>
+    <div class="tag-choice-grid">
+      {% for collection in collections %}
+      <label><input type="checkbox" name="assignments" value="{{ episode.id }}:{{ collection.id }}" {% if (episode.id, collection.id) in memberships %}checked{% endif %}><span>{{ collection.name }}</span></label>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+  <div class="actions"><a class="button" href="/titles/{{ file.title_id }}">Cancel</a><button class="button primary">Save episode collections</button></div>
+</form>
+{% endif %}
+{% endblock %}

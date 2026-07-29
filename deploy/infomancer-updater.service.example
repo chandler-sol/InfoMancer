@@ -1,0 +1,17 @@
+[Unit]
+Description=InfoMancer restricted release updater
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=infomancer
+WorkingDirectory=/opt/infomancer
+ExecStart=/usr/bin/python3 /opt/infomancer/scripts/host_updater.py --watch --compose-file compose.yaml --compose-file compose.media.yaml
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

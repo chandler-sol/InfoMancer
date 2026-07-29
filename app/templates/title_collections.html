@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Add {{ title.display_title }} to Collections · InfoMancer{% endblock %}
+{% block content %}
+<a class="back" href="{{ return_to }}">← {{ title.display_title }}</a>
+<header class="page-head">
+  <div>
+    <p class="eyebrow">COLLECTIONS</p>
+    <h1>Add to a collection</h1>
+    <p>Choose where “{{ title.display_title }}” belongs. Collections are shared library timelines and do not move or rename media.</p>
+  </div>
+</header>
+<form class="panel organize-title-form" method="post" action="/titles/{{ title.id }}/collections">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="return_to" value="{{ return_to }}">
+  {% if collections %}
+  <div class="tag-choice-grid">
+    {% for collection in collections %}
+    <label><input type="checkbox" name="selected_collections" value="{{ collection.id }}" {% if collection.selected %}checked{% endif %}><span>{{ collection.name }}</span></label>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">
+    <h2>No collections yet</h2>
+    <p>Create a collection first, then return here to add this {{ 'series' if title.kind == 'tv' else 'movie' }}.</p>
+    <a class="button" href="/collections">Create a collection</a>
+  </div>
+  {% endif %}
+  <div class="actions"><a class="button" href="{{ return_to }}">Cancel</a>{% if collections %}<button class="button primary">Save collections</button>{% endif %}</div>
+</form>
+{% endblock %}

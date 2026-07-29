@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Favorite episodes · InfoMancer{% endblock %}
+{% block content %}
+<a class="back-link" href="/titles/{{ file.title_id }}#season-{{ file.season }}">← {{ file.show_name }}</a>
+<section class="page-heading">
+  <p class="eyebrow">YOUR FAVORITES</p>
+  <h1>Favorite episodes</h1>
+  <p>Save individual episodes for quick access. A note is optional and is visible only in your Favorites.</p>
+</section>
+<form class="panel episode-favorite-form" method="post" action="/files/{{ file.id }}/favorite">
+  {% if episodes %}
+    {% for episode in episodes %}
+    <article>
+      <label class="episode-favorite-choice">
+        <input type="checkbox" name="selected" value="{{ episode.id }}" {% if episode.favorite %}checked{% endif %}>
+        <span><strong>S{{ '%02d'|format(episode.season) }}E{{ '%02d'|format(episode.episode) }}</strong><small>{{ episode.name or 'Untitled episode' }}</small></span>
+      </label>
+      <label>Why is this a favorite? <span class="muted">(optional)</span>
+        <textarea name="note_{{ episode.id }}" maxlength="1000" rows="3" placeholder="A memorable scene, a family favorite, a great guest star…">{{ episode.note or '' }}</textarea>
+      </label>
+    </article>
+    {% endfor %}
+    <div class="actions"><a class="button" href="/titles/{{ file.title_id }}#season-{{ file.season }}">Cancel</a><button class="button primary">Save favorites</button></div>
+  {% else %}
+    <div class="empty">Episode metadata is not loaded for this file yet. Match the series and rescan it, then try again.</div>
+  {% endif %}
+</form>
+{% endblock %}

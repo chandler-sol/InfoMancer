@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Collections · InfoMancer{% endblock %}
+{% block content %}
+<header class="page-head collections-head">
+  <div><p class="eyebrow">CURATED LIBRARY</p><h1>Collections</h1><p>Build ordered timelines from movies, TV series, and individual episodes without adding extra items to the Library.</p></div>
+</header>
+{% if current_user.is_librarian %}
+<form class="panel collection-create" method="post" action="/collections">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div><h2>Create a collection</h2><p class="muted">Start with a name. Artwork, description, titles, and order can be added next.</p></div>
+  <label>Name<input name="name" maxlength="80" required placeholder="For example, Marvel Cinematic Universe"></label>
+  <label>Description <span class="muted">optional</span><input name="description" maxlength="1000" placeholder="What belongs in this collection?"></label>
+  <button class="button primary">Create collection</button>
+</form>
+{% endif %}
+<section class="collection-grid">
+{% for collection in collections %}
+  <a class="collection-card" href="/collections/{{ collection.id }}">
+    <span class="collection-art">{% if collection.artwork_url %}<img src="{{ collection.artwork_url }}" alt="" loading="lazy">{% else %}<span>{{ collection.name[:1]|upper }}</span>{% endif %}</span>
+    <strong>{{ collection.name }}</strong>
+    <small>{{ collection.title_count }} item{% if collection.title_count != 1 %}s{% endif %}</small>
+    {% if collection.description %}<p>{{ collection.description }}</p>{% endif %}
+  </a>
+{% else %}
+  <div class="panel empty"><h2>No collections yet</h2><p>{% if current_user.is_librarian %}Create the first collection above, then add movies, TV series, or individual episodes in the order you want them shown.{% else %}A Librarian has not created any collections yet.{% endif %}</p></div>
+{% endfor %}
+</section>
+{% endblock %}

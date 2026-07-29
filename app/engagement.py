@@ -9,6 +9,21 @@ TOUR_KEY = "welcome-v1"
 
 OFFICIAL_ANNOUNCEMENTS = (
     {
+        "source_key": "release-0.4.0-alpha.1",
+        "title": "InfoMancer 0.4: safer administration and richer libraries",
+        "body": (
+            "This alpha adds Collections and Favorites for movies, series, and "
+            "individual episodes; improved library search and mobile layouts; "
+            "portable settings; validated database backup and restore; release "
+            "checking; clearer diagnostics; and extensive matching, account, "
+            "source, and navigation refinements. The next development direction "
+            "is the explainable Media Intelligence Engine described in the "
+            "0.4 release notes."
+        ),
+        "category": "update",
+        "starts_at": "2026-07-29 00:00:00",
+    },
+    {
         "source_key": "release-0.3.0",
         "title": "New: App Settings, guided tours, and announcements",
         "body": (

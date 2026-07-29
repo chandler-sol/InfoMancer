@@ -74,6 +74,18 @@ docker compose exec infomancer python -m app.cli reset-librarian USERNAME
 
 ```
 
+Alternatively, generate a one-hour, single-use recovery link. This lets the
+account owner choose the new password in their browser without placing any
+password in terminal history:
+
+```bash
+docker compose exec infomancer python -m app.cli recovery-link USERNAME \
+  --base-url https://your-infomancer-address
+```
+
+Treat the printed link like a password. It expires automatically, becomes
+invalid immediately after use, and revokes the account’s existing sessions.
+
 For a native installation, run `.venv\Scripts\python.exe -m app.cli reset-librarian USERNAME` on Windows or `.venv/bin/python -m app.cli reset-librarian USERNAME` on macOS/Linux. The recovery command accepts Librarian usernames only and never places the new password in shell history.
 
 Members can browse and search titles, metadata, missing episodes, and permitted external provider links. Only Librarians can manage sources and users, scan or match media, refresh metadata, or perform filesystem changes. These permissions are enforced by the server; the Member interface also omits controls they cannot use.
@@ -90,9 +102,17 @@ Librarians can open **Settings** from the main menu or their account menu. Setti
 - **Metadata & Matching** shows TVDB credential status, tests the TVDB connection, reports locally stored IMDb coverage, and starts an IMDb metadata update.
 - **External Search** changes the provider label and URL template used by series, episode, and missing-episode search actions.
 - **System** reports application and database health, inspects technical media
-  information, exports the catalog and logs, controls logging detail, provides
-  database optimization and restart controls, and lists recent settings
-  changes with the Librarian who made each change.
+  information, exports the catalog and logs, controls logging detail, exports
+  and imports portable preferences, creates and restores validated database
+  backups, checks releases, provides database optimization and restart
+  controls, and lists recent settings changes with the Librarian who made each
+  change.
+
+Settings exports intentionally omit passwords, accounts, sessions, provider
+credentials, encryption keys, sources, and media. Complete database backups
+include catalog and account data but never copy the media files themselves.
+Installing a checked release from the interface requires the optional,
+restricted host updater; see **[Updating InfoMancer](docs/UPDATES.md)**.
 
 Safe presentation and provider preferences are stored in SQLite and take effect on subsequent page loads. TVDB credentials entered through InfoMancer are stored in a separate encrypted application-data file; `INFOMANCER_SECRET` protects that file when configured, otherwise InfoMancer creates a restricted local encryption key in its data folder. Other trust-boundary settings—including authentication mode, secure-cookie policy, Cloudflare validation, database location, and allowed browse roots—remain protected environment or Compose configuration.
 

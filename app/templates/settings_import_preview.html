@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Review Settings Import · {{ app_name }}{% endblock %}
+{% block content %}
+<header class="settings-heading app-settings-heading">
+  <p class="eyebrow">SAFE IMPORT</p>
+  <h1>Review settings changes</h1>
+  <p>Nothing has changed yet. Provider credentials, accounts, sessions, sources, and media are not part of this import.</p>
+</header>
+<section class="panel settings-card">
+  {% if changes %}
+  <div class="settings-history"><table><thead><tr><th>Setting</th><th>Current</th><th>Imported</th></tr></thead><tbody>
+    {% for change in changes %}<tr><td>{{ change.key|replace('_',' ')|title }}</td><td><code>{{ change.old }}</code></td><td><code>{{ change.new }}</code></td></tr>{% endfor %}
+  </tbody></table></div>
+  <div class="form-error"><strong>{{ changes|length }} setting{% if changes|length != 1 %}s{% endif %} will change.</strong> InfoMancer will create a database backup before applying them.</div>
+  {% else %}
+  <div class="success-banner"><strong>No changes needed.</strong> The imported settings already match this installation.</div>
+  {% endif %}
+  <div class="review-actions">
+    <a class="button" href="/settings/system">Cancel</a>
+    {% if changes %}<form method="post" action="/settings/import"><input type="hidden" name="encoded_settings" value="{{ encoded_settings }}"><input type="hidden" name="confirm" value="IMPORT"><button class="button primary">Import {{ changes|length }} settings</button></form>{% endif %}
+  </div>
+</section>
+{% endblock %}

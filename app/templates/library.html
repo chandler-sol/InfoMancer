@@ -6,18 +6,23 @@
 <form class="library-search library-controls" method="get">
   <div class="library-filter-search{% if q %} open{% endif %}" id="library-filter-search">
     <label class="sr-only" for="live-library-search">Search {{ heading|lower }}</label>
-    <input id="live-library-search" name="q" value="{{ q }}" placeholder="Search {{ heading|lower }} or filenames" autocomplete="off">
+    <input id="live-library-search" name="q" value="{{ q }}" placeholder="Search titles, filenames, people, or tags" autocomplete="off" aria-autocomplete="list" aria-controls="library-search-suggestions">
     <button type="button" class="library-filter-search-toggle" id="library-filter-search-toggle" aria-label="Open {{ heading|lower }} search" aria-expanded="{{ 'true' if q else 'false' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg></button>
+    <div class="library-search-suggestions" id="library-search-suggestions" role="listbox" hidden></div>
   </div>
-  <select id="source-filter" name="root" aria-label="Filter by source"><option value="">All sources</option>{% for source in root_options %}<option value="{{ source.id }}" {% if root_id == source.id %}selected{% endif %}>{{ source.label or source.path }}</option>{% endfor %}</select>
-  <select id="match-filter" name="match" aria-label="Filter by match status"><option value="">All matches</option><option value="matched" {% if match_status == 'matched' %}selected{% endif %}>Matched only</option><option value="unmatched" {% if match_status == 'unmatched' %}selected{% endif %}>Unmatched only</option></select>
-  {% if kind != 'movie' %}<select id="gap-filter" name="gaps" aria-label="Filter by missing episodes"><option value="">All episode status</option><option value="missing" {% if gap_status == 'missing' %}selected{% endif %}>Missing episodes</option><option value="complete" {% if gap_status == 'complete' %}selected{% endif %}>No known gaps</option></select>{% endif %}
-  <select id="genre-filter" name="genre" aria-label="Filter by genre"><option value="">All genres</option>{% for option in genre_options %}<option value="{{ option }}" {% if genre == option %}selected{% endif %}>{{ option }}</option>{% endfor %}</select>
-  <select id="title-type-filter" name="title_type" aria-label="Filter by IMDb title type"><option value="">All title types</option>{% for option in title_type_options %}<option value="{{ option }}" {% if title_type == option %}selected{% endif %}>{{ display_title_type(option) }}</option>{% endfor %}</select>
-  <select id="favorite-filter" name="favorite" aria-label="Filter by favorites"><option value="">All favorites</option><option value="favorites" {% if favorite_status %}selected{% endif %}>Favorites only</option></select>
-  <select id="tag-filter" name="tag" aria-label="Filter by custom tag"><option value="">Custom tags</option>{% for option in tag_options %}<option value="{{ option.id }}" {% if tag_id == option.id %}selected{% endif %}>{{ option.name }} ({{ option.title_count }})</option>{% endfor %}</select>
-  <select id="sort-filter" name="sort" aria-label="Sort library"><option value="title" {% if sort_key == 'title' %}selected{% endif %}>Alphabetical</option><option value="favorites" {% if sort_key == 'favorites' %}selected{% endif %}>Favorites first</option><option value="release_new" {% if sort_key == 'release_new' %}selected{% endif %}>Newest release</option><option value="release_old" {% if sort_key == 'release_old' %}selected{% endif %}>Oldest release</option><option value="rating" {% if sort_key == 'rating' %}selected{% endif %}>IMDb rating</option><option value="personal_rating" {% if sort_key == 'personal_rating' %}selected{% endif %}>Personal rating</option><option value="date_added" {% if sort_key == 'date_added' %}selected{% endif %}>Date added</option><option value="runtime" {% if sort_key == 'runtime' %}selected{% endif %}>Runtime</option><option value="resolution" {% if sort_key == 'resolution' %}selected{% endif %}>Resolution</option><option value="bitrate" {% if sort_key == 'bitrate' %}selected{% endif %}>Bitrate</option><option value="file_size" {% if sort_key == 'file_size' %}selected{% endif %}>File size</option><option value="custom" {% if sort_key == 'custom' %}selected{% endif %}>Custom order</option><option value="random" {% if sort_key == 'random' %}selected{% endif %}>Random</option></select>
-  <details class="people-filter-menu"{% if person_name or credit_role %} open{% endif %}><summary>{% if person_name %}{{ person_name }}{% else %}People{% endif %}</summary><div class="people-filter-panel"><div class="people-filter"><input id="people-filter" name="person_name" value="{{ person_name }}" placeholder="Actor, director, or writer" autocomplete="off" aria-label="Filter by person" aria-autocomplete="list" aria-controls="people-suggestions"><input type="hidden" id="person-id-filter" name="person" value="{{ person_id }}"><div class="people-suggestions" id="people-suggestions" role="listbox" hidden></div></div><select id="credit-role-filter" name="credit_role" aria-label="Filter by credit role"><option value="">Any role</option><option value="actor" {% if credit_role == 'actor' %}selected{% endif %}>Actor</option><option value="director" {% if credit_role == 'director' %}selected{% endif %}>Director</option><option value="writer" {% if credit_role == 'writer' %}selected{% endif %}>Writer</option></select></div></details>
+  <select id="genre-filter" name="genre" aria-label="Filter by genre"><option value="">All Genres</option>{% for option in genre_options %}<option value="{{ option }}" {% if genre == option %}selected{% endif %}>{{ option }}</option>{% endfor %}</select>
+  <select id="title-type-filter" name="title_type" aria-label="Filter by IMDb title type"><option value="">All Title Types</option>{% for option in title_type_options %}<option value="{{ option }}" {% if title_type == option %}selected{% endif %}>{{ display_title_type(option) }}</option>{% endfor %}</select>
+  <select id="favorite-filter" name="favorite" aria-label="Filter by favorites"><option value="">All Favorites</option><option value="favorites" {% if favorite_status %}selected{% endif %}>Favorites Only</option></select>
+  <select id="tag-filter" name="tag" aria-label="Filter by custom tag"><option value="">Custom Tags</option>{% for option in tag_options %}<option value="{{ option.id }}" {% if tag_id == option.id %}selected{% endif %}>{{ option.name }} ({{ option.title_count }})</option>{% endfor %}</select>
+  <details class="more-filters-menu{% if root_id or match_status or gap_status or sort_key != 'title' %} has-active-filter{% endif %}" {% if root_id or match_status or gap_status or sort_key != 'title' %}open{% endif %}>
+    <summary>More Filters</summary>
+    <div class="more-filters-panel">
+      <select id="source-filter" name="root" aria-label="Filter by source"><option value="">All Sources</option>{% for source in root_options %}<option value="{{ source.id }}" {% if root_id == source.id %}selected{% endif %}>{{ source.label or source.path }}</option>{% endfor %}</select>
+      <select id="match-filter" name="match" aria-label="Filter by match status"><option value="">All Matches</option><option value="matched" {% if match_status == 'matched' %}selected{% endif %}>Matched Only</option><option value="unmatched" {% if match_status == 'unmatched' %}selected{% endif %}>Unmatched Only</option></select>
+      {% if kind != 'movie' %}<select id="gap-filter" name="gaps" aria-label="Filter by missing episodes"><option value="">All Episode Statuses</option><option value="missing" {% if gap_status == 'missing' %}selected{% endif %}>Missing Episodes</option><option value="complete" {% if gap_status == 'complete' %}selected{% endif %}>No Known Gaps</option></select>{% endif %}
+      <select id="sort-filter" name="sort" aria-label="Sort library"><option value="title" {% if sort_key == 'title' %}selected{% endif %}>Alphabetical</option><option value="favorites" {% if sort_key == 'favorites' %}selected{% endif %}>Favorites First</option><option value="release_new" {% if sort_key == 'release_new' %}selected{% endif %}>Newest Release</option><option value="release_old" {% if sort_key == 'release_old' %}selected{% endif %}>Oldest Release</option><option value="rating" {% if sort_key == 'rating' %}selected{% endif %}>IMDb Rating</option><option value="personal_rating" {% if sort_key == 'personal_rating' %}selected{% endif %}>Personal Rating</option><option value="date_added" {% if sort_key == 'date_added' %}selected{% endif %}>Date Added</option><option value="runtime" {% if sort_key == 'runtime' %}selected{% endif %}>Runtime</option><option value="resolution" {% if sort_key == 'resolution' %}selected{% endif %}>Resolution</option><option value="bitrate" {% if sort_key == 'bitrate' %}selected{% endif %}>Bitrate</option><option value="file_size" {% if sort_key == 'file_size' %}selected{% endif %}>File Size</option><option value="custom" {% if sort_key == 'custom' %}selected{% endif %}>Custom Order</option><option value="random" {% if sort_key == 'random' %}selected{% endif %}>Random</option></select>
+    </div>
+  </details>
 </form>
 <nav class="alphabet" aria-label="Filter titles by first character">
   <a href="{{ request.url.path }}{% if filter_query %}?{{ filter_query }}{% endif %}" {% if not letter %}class="active"{% endif %}>All</a>
@@ -63,7 +68,7 @@
       <span class="cover-card-meta">{% if row.favorite %}<span class="favorite-star active" aria-label="Favorite">★</span>{% endif %}{% if row.imdb_rating %}<span class="cover-rating" aria-label="IMDb rating {{ row.imdb_rating }} out of 10">★ {{ '%.1f'|format(row.imdb_rating) }}</span>{% endif %}{% if lifespan(row) %}<span>{{ lifespan(row) }}</span>{% endif %}</span>
     </a>
     <div class="cover-card-actions" aria-label="Actions for {{ row.metadata_title or row.title }}">
-      <details class="episode-menu cover-row-menu"><summary aria-label="Actions for {{ row.metadata_title or row.title }}" title="{{ 'Movie' if row.kind == 'movie' else 'Series' }} actions">⋮</summary><div><form method="post" action="/titles/{{ row.id }}/favorite"><input type="hidden" name="return_to" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}"><button class="favorite-action{% if row.favorite %} active{% endif %}"><span>★</span>{{ 'Remove favorite' if row.favorite else 'Add favorite' }}</button></form><a href="/titles/{{ row.id }}/organize">Organize &amp; Tags</a>{% if (row.kind == 'tv' and row.tvdb_id) or (row.kind == 'movie' and row.tvdb_movie_id) %}<a href="/titles/{{ row.id }}/cover">Change Cover</a>{% endif %}{% if row.kind == 'movie' %}{% if row.tvdb_movie_id or row.tmdb_id or row.imdb_id %}<a href="/titles/{{ row.id }}/tvdb">Fix Match</a>{% if row.first_file_id %}<a href="/files/{{ row.first_file_id }}/rename-movie">Preview Rename</a>{% endif %}{% else %}<a href="/titles/{{ row.id }}/tvdb">Match</a>{% endif %}{% else %}<a href="/titles/{{ row.id }}/tvdb">{% if row.tvdb_id %}Fix Match{% else %}Match{% endif %}</a>{% if row.tvdb_id %}<a href="/titles/{{ row.id }}/rename-episodes">Review Episode Renames</a><a href="/titles/{{ row.id }}/rename-folder">Preview Folder Rename</a>{% endif %}{% endif %}</div></details>
+      <details class="episode-menu cover-row-menu"><summary aria-label="Actions for {{ row.metadata_title or row.title }}" title="{{ 'Movie' if row.kind == 'movie' else 'Series' }} actions">⋮</summary><div><form method="post" action="/titles/{{ row.id }}/favorite"><input type="hidden" name="return_to" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}"><button class="favorite-action{% if row.favorite %} active{% endif %}"><span>★</span>{{ 'Remove favorite' if row.favorite else 'Add favorite' }}</button></form><a href="/titles/{{ row.id }}/organize">Organize &amp; Tags</a><a href="/titles/{{ row.id }}/collections?return_to={{ (request.url.path ~ ('?' ~ request.url.query if request.url.query else ''))|urlencode }}">Add to Collection</a>{% if (row.kind == 'tv' and row.tvdb_id) or (row.kind == 'movie' and row.tvdb_movie_id) %}<a href="/titles/{{ row.id }}/cover">Change Cover</a>{% endif %}{% if row.kind == 'movie' %}{% if row.tvdb_movie_id or row.tmdb_id or row.imdb_id %}<a href="/titles/{{ row.id }}/tvdb">Fix Match</a>{% if row.first_file_id %}<a href="/files/{{ row.first_file_id }}/rename-movie">Preview Rename</a>{% endif %}{% else %}<a href="/titles/{{ row.id }}/tvdb">Match</a>{% endif %}{% else %}<a href="/titles/{{ row.id }}/tvdb">{% if row.tvdb_id %}Fix Match{% else %}Match{% endif %}</a>{% if row.tvdb_id %}<a href="/titles/{{ row.id }}/rename-episodes">Review Episode Renames</a><a href="/titles/{{ row.id }}/rename-folder">Preview Folder Rename</a>{% endif %}{% endif %}</div></details>
     </div>
   </article>
 {% else %}<div class="empty cover-library-empty">{% if q or genre or title_type or letter or root_id or match_status or person_id or person_name %}No titles match the current filters.{% else %}No titles found. Add and scan a library root.{% endif %}</div>{% endfor %}
@@ -80,7 +85,7 @@
     <td class="title-type-cell"><span class="kind {{ row.kind }}">{{ row.kind }}</span></td>
     <td class="match-cell">{% if row.kind == 'tv' and row.tvdb_id %}<span class="matched">TVDB {{ row.tvdb_id }}</span>{% elif row.kind == 'movie' and row.tmdb_id %}<span class="matched">TMDB {{ row.tmdb_id }}</span>{% elif row.kind == 'movie' and row.imdb_id %}<span class="matched">IMDb {{ row.imdb_id }}</span>{% else %}<span class="muted">Unmatched</span>{% endif %}</td>
     {% if kind != 'movie' %}<td class="episode-count-cell">{% if row.kind == 'tv' %}{{ row.episode_count }}{% endif %}</td><td class="missing-count-cell">{% if row.kind == 'tv' and row.missing_count %}<a class="missing missing-link" href="/titles/{{ row.id }}?show_missing=1#missing-panel" title="Show {{ row.missing_count }} missing episode{% if row.missing_count != 1 %}s{% endif %}" aria-label="Show {{ row.missing_count }} missing episode{% if row.missing_count != 1 %}s{% endif %} for {{ row.metadata_title or row.title }}">{{ row.missing_count }}</a>{% elif row.kind == 'tv' %}—{% endif %}</td>{% endif %}
-    <td class="row-actions"><details class="episode-menu library-row-menu"><summary aria-label="Actions for {{ row.metadata_title or row.title }}" title="{{ 'Movie' if row.kind == 'movie' else 'Series' }} actions">⋮</summary><div><button class="favorite-action{% if row.favorite %} active{% endif %}" formaction="/titles/{{ row.id }}/favorite" formmethod="post"><span>★</span>{{ 'Remove favorite' if row.favorite else 'Add favorite' }}</button><a href="/titles/{{ row.id }}/organize">Organize &amp; Tags</a>{% if (row.kind == 'tv' and row.tvdb_id) or (row.kind == 'movie' and row.tvdb_movie_id) %}<a href="/titles/{{ row.id }}/cover">Change Cover</a>{% endif %}{% if row.kind == 'movie' %}{% if row.tvdb_movie_id or row.tmdb_id or row.imdb_id %}<a href="/titles/{{ row.id }}/tvdb">Fix Match</a>{% if row.first_file_id %}<a href="/files/{{ row.first_file_id }}/rename-movie">Preview Rename</a>{% endif %}{% else %}<a href="/titles/{{ row.id }}/tvdb">Match</a>{% endif %}{% else %}<a href="/titles/{{ row.id }}/tvdb">{% if row.tvdb_id %}Fix Match{% else %}Match{% endif %}</a>{% if row.tvdb_id %}<a href="/titles/{{ row.id }}/rename-episodes">Review Episode Renames</a><a href="/titles/{{ row.id }}/rename-folder">Preview Folder Rename</a>{% endif %}{% endif %}</div></details></td>
+    <td class="row-actions"><details class="episode-menu library-row-menu"><summary aria-label="Actions for {{ row.metadata_title or row.title }}" title="{{ 'Movie' if row.kind == 'movie' else 'Series' }} actions">⋮</summary><div><button class="favorite-action{% if row.favorite %} active{% endif %}" formaction="/titles/{{ row.id }}/favorite" formmethod="post"><span>★</span>{{ 'Remove favorite' if row.favorite else 'Add favorite' }}</button><a href="/titles/{{ row.id }}/organize">Organize &amp; Tags</a><a href="/titles/{{ row.id }}/collections?return_to={{ (request.url.path ~ ('?' ~ request.url.query if request.url.query else ''))|urlencode }}">Add to Collection</a>{% if (row.kind == 'tv' and row.tvdb_id) or (row.kind == 'movie' and row.tvdb_movie_id) %}<a href="/titles/{{ row.id }}/cover">Change Cover</a>{% endif %}{% if row.kind == 'movie' %}{% if row.tvdb_movie_id or row.tmdb_id or row.imdb_id %}<a href="/titles/{{ row.id }}/tvdb">Fix Match</a>{% if row.first_file_id %}<a href="/files/{{ row.first_file_id }}/rename-movie">Preview Rename</a>{% endif %}{% else %}<a href="/titles/{{ row.id }}/tvdb">Match</a>{% endif %}{% else %}<a href="/titles/{{ row.id }}/tvdb">{% if row.tvdb_id %}Fix Match{% else %}Match{% endif %}</a>{% if row.tvdb_id %}<a href="/titles/{{ row.id }}/rename-episodes">Review Episode Renames</a><a href="/titles/{{ row.id }}/rename-folder">Preview Folder Rename</a>{% endif %}{% endif %}</div></details></td>
   </tr>
 {% else %}<tr><td colspan="{{ 5 if kind == 'movie' else 7 }}" class="empty">{% if q or genre or title_type or letter or root_id or match_status or person_id or person_name %}No titles match the current filters.{% else %}No titles found. Add and scan a library root.{% endif %}</td></tr>{% endfor %}</tbody></table></section>
 </form>
@@ -105,10 +110,7 @@
     const favoriteFilter = document.getElementById("favorite-filter");
     const tagFilter = document.getElementById("tag-filter");
     const sortFilter = document.getElementById("sort-filter");
-    const peopleFilter = document.getElementById("people-filter");
-    const personIdFilter = document.getElementById("person-id-filter");
-    const creditRoleFilter = document.getElementById("credit-role-filter");
-    const peopleSuggestions = document.getElementById("people-suggestions");
+    const librarySuggestions = document.getElementById("library-search-suggestions");
     const filterSearch = document.getElementById("library-filter-search");
     const filterSearchToggle = document.getElementById("library-filter-search-toggle");
     const tableBody = document.querySelector(".table-wrap tbody");
@@ -131,8 +133,8 @@
 
     let timer;
     let controller;
-    let peopleTimer;
     let suggestionController;
+    let suggestionTimer;
     let requestNumber = 0;
     let coverSizeValueTimer;
     const savedLibraryView = localStorage.getItem("infomancer-library-view");
@@ -239,12 +241,6 @@
       else url.searchParams.delete("match");
       if (gapFilter?.value) url.searchParams.set("gaps", gapFilter.value);
       else url.searchParams.delete("gaps");
-      if (peopleFilter?.value.trim()) url.searchParams.set("person_name", peopleFilter.value.trim());
-      else url.searchParams.delete("person_name");
-      if (personIdFilter?.value) url.searchParams.set("person", personIdFilter.value);
-      else url.searchParams.delete("person");
-      if (creditRoleFilter?.value) url.searchParams.set("credit_role", creditRoleFilter.value);
-      else url.searchParams.delete("credit_role");
       state.textContent = "Searching…";
       tableBody.classList.add("updating");
 
@@ -280,7 +276,7 @@
           link.href = linkUrl.pathname + linkUrl.search;
         });
         history.replaceState({}, "", url.pathname + url.search);
-        const filters = [query && `“${query}”`, sourceFilter.value && sourceFilter.options[sourceFilter.selectedIndex]?.text, matchFilter.value && matchFilter.options[matchFilter.selectedIndex]?.text, gapFilter?.value && gapFilter.options[gapFilter.selectedIndex]?.text, favoriteFilter.value && favoriteFilter.options[favoriteFilter.selectedIndex]?.text, tagFilter.value && tagFilter.options[tagFilter.selectedIndex]?.text, peopleFilter?.value.trim(), creditRoleFilter?.value && creditRoleFilter.options[creditRoleFilter.selectedIndex]?.text, genreFilter.value, titleTypeFilter.value && titleTypeFilter.options[titleTypeFilter.selectedIndex]?.text].filter(Boolean);
+        const filters = [query && `“${query}”`, sourceFilter.value && sourceFilter.options[sourceFilter.selectedIndex]?.text, matchFilter.value && matchFilter.options[matchFilter.selectedIndex]?.text, gapFilter?.value && gapFilter.options[gapFilter.selectedIndex]?.text, favoriteFilter.value && favoriteFilter.options[favoriteFilter.selectedIndex]?.text, tagFilter.value && tagFilter.options[tagFilter.selectedIndex]?.text, genreFilter.value, titleTypeFilter.value && titleTypeFilter.options[titleTypeFilter.selectedIndex]?.text].filter(Boolean);
         state.textContent = filters.length ? `Showing ${filters.join(" · ")}` : "";
       } catch (error) {
         if (error.name !== "AbortError" && thisRequest === requestNumber) {
@@ -291,47 +287,75 @@
       }
     };
 
-    const updatePeopleSuggestions = async () => {
-      const query = peopleFilter?.value.trim() || "";
-      if (!peopleSuggestions || query.length < 2) {
-        if (peopleSuggestions) peopleSuggestions.hidden = true;
+    const updateLibrarySuggestions = async () => {
+      const query = input.value.trim();
+      if (!librarySuggestions || query.length < 2) {
+        if (librarySuggestions) librarySuggestions.hidden = true;
         return;
       }
       suggestionController?.abort();
       suggestionController = new AbortController();
-      const url = new URL("/api/people", window.location.origin);
+      const url = new URL("/api/library-suggestions", window.location.origin);
       url.searchParams.set("q", query);
-      if (creditRoleFilter?.value) url.searchParams.set("role", creditRoleFilter.value);
       url.searchParams.set("kind", "{{ kind }}");
       try {
         const response = await fetch(url, {signal: suggestionController.signal, cache: "no-store"});
         const data = await response.json();
-        const options = (data.people || []).map(person => {
+        const options = (data.suggestions || []).map(suggestion => {
           const option = document.createElement("button");
           option.type = "button";
           option.setAttribute("role", "option");
-          const roles = (person.roles || "").split(",").join(" · ");
           option.innerHTML = `<strong></strong><small></small>`;
-          option.querySelector("strong").textContent = person.person_name;
-          option.querySelector("small").textContent = `${roles} · ${person.title_count} title${person.title_count === 1 ? "" : "s"}`;
+          option.querySelector("strong").textContent = suggestion.label;
+          option.querySelector("small").textContent = suggestion.detail
+            ? `${suggestion.type} · ${suggestion.detail}`
+            : suggestion.type;
           option.addEventListener("click", () => {
-            peopleFilter.value = person.person_name;
-            personIdFilter.value = person.imdb_person_id;
-            peopleSuggestions.hidden = true;
+            input.value = suggestion.value;
+            librarySuggestions.hidden = true;
             updateResults();
           });
           return option;
         });
-        peopleSuggestions.replaceChildren(...options);
-        peopleSuggestions.hidden = options.length === 0;
+        librarySuggestions.replaceChildren(...options);
+        librarySuggestions.hidden = options.length === 0;
       } catch (error) {
-        if (error.name !== "AbortError") peopleSuggestions.hidden = true;
+        if (error.name !== "AbortError") librarySuggestions.hidden = true;
       }
     };
 
     input.addEventListener("input", () => {
       window.clearTimeout(timer);
+      window.clearTimeout(suggestionTimer);
       timer = window.setTimeout(updateResults, 180);
+      suggestionTimer = window.setTimeout(updateLibrarySuggestions, 45);
+    });
+    input.addEventListener("focus", updateLibrarySuggestions);
+    input.addEventListener("keydown", async event => {
+      if (event.key === "ArrowDown" && librarySuggestions) {
+        event.preventDefault();
+        if (librarySuggestions.hidden) await updateLibrarySuggestions();
+        const firstSuggestion = librarySuggestions.querySelector("button");
+        if (firstSuggestion) firstSuggestion.focus();
+      } else if (event.key === "Escape" && librarySuggestions) {
+        librarySuggestions.hidden = true;
+      }
+    });
+    librarySuggestions?.addEventListener("keydown", event => {
+      const options = [...librarySuggestions.querySelectorAll("button")];
+      const index = options.indexOf(document.activeElement);
+      if (event.key === "ArrowDown" && options.length) {
+        event.preventDefault();
+        options[(index + 1) % options.length].focus();
+      } else if (event.key === "ArrowUp" && options.length) {
+        event.preventDefault();
+        if (index <= 0) input.focus();
+        else options[index - 1].focus();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        librarySuggestions.hidden = true;
+        input.focus();
+      }
     });
     listViewButton?.addEventListener("click", () => setLibraryView("list"));
     coverViewButton?.addEventListener("click", () => setLibraryView("covers"));
@@ -352,19 +376,6 @@
     sourceFilter.addEventListener("change", updateResults);
     matchFilter.addEventListener("change", updateResults);
     gapFilter?.addEventListener("change", updateResults);
-    peopleFilter?.addEventListener("input", () => {
-      personIdFilter.value = "";
-      window.clearTimeout(peopleTimer);
-      peopleTimer = window.setTimeout(() => {
-        updatePeopleSuggestions();
-        updateResults();
-      }, 220);
-    });
-    peopleFilter?.addEventListener("focus", updatePeopleSuggestions);
-    creditRoleFilter?.addEventListener("change", () => {
-      updatePeopleSuggestions();
-      updateResults();
-    });
     selectAllTitles?.addEventListener("change", () => {
       document.querySelectorAll(".library-title-choice").forEach(choice => {
         choice.checked = selectAllTitles.checked;
@@ -395,8 +406,8 @@
           document.querySelectorAll(".cover-card.actions-visible").forEach(card => card.classList.remove("actions-visible"));
         }
       }{% endif %}
-      if (peopleSuggestions && !event.target.closest(".people-filter")) {
-        peopleSuggestions.hidden = true;
+      if (librarySuggestions && !filterSearch?.contains(event.target)) {
+        librarySuggestions.hidden = true;
       }
       if (filterSearch && !filterSearch.contains(event.target) && !input.value.trim()) {
         setFilterSearchOpen(false);

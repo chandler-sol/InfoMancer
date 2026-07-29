@@ -57,11 +57,11 @@ Upload both files created in `dist/` to the GitHub release:
 After the initial commit and push, create a private prerelease with GitHub CLI:
 
 ```powershell
-gh release create v0.3.0-alpha.1 `
-  .\dist\InfoMancer-0.3.0-alpha.1.zip `
+gh release create v0.4.0-alpha.1 `
+  .\dist\InfoMancer-0.4.0-alpha.1.zip `
   .\dist\SHA256SUMS.txt `
   --prerelease `
-  --title "InfoMancer 0.3.0 Alpha 1" `
+  --title "InfoMancer 0.4.0 Alpha 1" `
   --generate-notes
 ```
 

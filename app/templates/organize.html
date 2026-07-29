@@ -17,6 +17,13 @@
     {% if tags %}<div class="tag-choice-grid">{% for tag in tags %}<label><input type="checkbox" name="selected_tags" value="{{ tag.id }}" {% if tag.selected %}checked{% endif %}><span>{{ tag.name }}</span></label>{% endfor %}</div>{% else %}<p class="muted">You have not created any tags yet.</p>{% endif %}
     <label>Create tags<input name="tag_names" placeholder="Family favorites, Demo content, Holiday"><small>Separate multiple new tags with commas.</small></label>
   </section>
+  {% if current_user.is_librarian %}
+  <section>
+    <h2>Collections</h2>
+    <p class="muted">Choose every shared collection this title should appear in. Its position can be adjusted from the collection page.</p>
+    {% if collections %}<div class="tag-choice-grid">{% for collection in collections %}<label><input type="checkbox" name="selected_collections" value="{{ collection.id }}" {% if collection.selected %}checked{% endif %}><span>{{ collection.name }}</span></label>{% endfor %}</div>{% else %}<p class="muted">No collections exist yet. <a href="/collections">Create the first collection</a>.</p>{% endif %}
+  </section>
+  {% endif %}
   <div class="actions"><a class="button" href="/titles/{{ title.id }}">Cancel</a><button class="button primary">Save organization</button></div>
 </form>
 {% endblock %}

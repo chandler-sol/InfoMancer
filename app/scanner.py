@@ -36,7 +36,7 @@ MOVIE_BUCKET_RE = re.compile(
     r"^(?:[A-Z]|#|(?:#\s*)?0\s*[-–]\s*9|numbers?)$", re.I
 )
 MOVIE_RELEASE_YEAR_RE = re.compile(
-    r"^(?P<title>.+?)[. _\-(\[](?P<year>(?:19|20)\d{2})(?=$|[. _\-)\]])"
+    r"(?:^|[. _\-(\[])(?P<year>(?:19|20)\d{2})(?=$|[. _\-)\]])"
 )
 
 
@@ -84,7 +84,11 @@ def parse_title(folder_name: str) -> ParsedTitle:
 
     # Fall back for loose names such as "Movie Name 2020". Prefer the final
     # year so numeric titles like "1923" are not stolen when a later year exists.
-    matches = list(YEAR_RE.finditer(cleaned))
+    latest_reasonable_year = datetime.now(timezone.utc).year + 3
+    matches = [
+        item for item in YEAR_RE.finditer(cleaned)
+        if 1888 <= int(item.group("year")) <= latest_reasonable_year
+    ]
     match = matches[-1] if matches else None
     year = int(match.group("year")) if match else None
     if match:
@@ -99,10 +103,17 @@ def title_and_year(folder_name: str) -> tuple[str, int | None]:
 
 def movie_release_title(filename_stem: str) -> str:
     """Trim release-group noise after the movie's release year."""
-    match = MOVIE_RELEASE_YEAR_RE.search(filename_stem)
+    # Prefer the final plausible release year. This preserves numeric sequel
+    # names such as "Blade Runner 2049" while still finding a later "(2017)".
+    latest_reasonable_year = datetime.now(timezone.utc).year + 3
+    matches = [
+        item for item in MOVIE_RELEASE_YEAR_RE.finditer(filename_stem)
+        if 1888 <= int(item.group("year")) <= latest_reasonable_year
+    ]
+    match = matches[-1] if matches else None
     if not match:
         return clean_words(NOISE_RE.sub(" ", filename_stem))
-    title = clean_words(match.group("title"))
+    title = clean_words(filename_stem[:match.start("year")].rstrip(" ._-[("))
     return f"{title} ({match.group('year')})"
 
 

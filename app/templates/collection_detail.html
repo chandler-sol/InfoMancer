@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}{{ collection.name }} · Collections · InfoMancer{% endblock %}
+{% block content %}
+<a class="back" href="/collections">← Collections</a>
+<header class="collection-detail-head">
+  <span class="collection-detail-art">{% if collection.artwork_url %}<img src="{{ collection.artwork_url }}" alt="" loading="lazy">{% else %}<span>{{ collection.name[:1]|upper }}</span>{% endif %}</span>
+  <div><p class="eyebrow">COLLECTION</p><h1>{{ collection.name }}</h1>{% if collection.description %}<p>{{ collection.description }}</p>{% endif %}<small>{{ items|length }} item{% if items|length != 1 %}s{% endif %} · shown only on the Collections page</small></div>
+</header>
+
+{% if current_user.is_librarian %}
+<details class="panel collection-editor">
+  <summary>Edit collection details and artwork</summary>
+  <form method="post" action="/collections/{{ collection.id }}/edit" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Name<input name="name" maxlength="80" required value="{{ collection.name }}"></label>
+    <label>Description<textarea name="description" maxlength="1000" rows="3">{{ collection.description }}</textarea></label>
+    <label>Custom thumbnail<input type="file" name="artwork" accept="image/jpeg,image/png,image/webp"><small>Recommended: 1600 × 900 pixels (16:9). JPEG, PNG, or WebP · up to 5 MB. Without one, InfoMancer uses the first title’s cover.</small></label>
+    {% if collection.artwork_filename %}<label class="inline-check"><input type="checkbox" name="remove_artwork" value="1"> Remove the custom thumbnail and use the first title’s cover</label>{% endif %}
+    <div class="actions"><button class="button primary">Save collection</button></div>
+  </form>
+</details>
+
+<section class="panel collection-add">
+  <div><h2>Add a movie or TV series</h2><p class="muted">Search your existing InfoMancer library. Adding a title does not move or rename its files.</p></div>
+  <form method="get" action="/collections/{{ collection.id }}" class="search"><input name="q" value="{{ q }}" placeholder="Search library titles"><button>Search</button></form>
+  {% if q %}
+  <div class="collection-search-results">
+    {% for title in candidates %}
+    <form method="post" action="/collections/{{ collection.id }}/titles">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="title_id" value="{{ title.id }}">
+      <span>{% if title.poster_url %}<img src="{{ title.poster_url }}" alt="">{% endif %}<strong>{{ title.display_title }}</strong><small>{{ 'TV series' if title.kind == 'tv' else 'Movie' }}{% if title.display_year %} · {{ title.display_year }}{% endif %}</small></span>
+      <button class="button small">Add</button>
+    </form>
+    {% else %}<p class="muted">No available library titles match “{{ q }}”. Try a shorter or different title.</p>{% endfor %}
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="collection-title-list">
+{% for item in items %}
+  <article class="panel collection-title" id="{{ item.item_type }}-{{ item.item_id }}">
+    <a href="/titles/{{ item.title_id }}{% if item.item_type == 'episode' %}#season-{{ item.season }}{% endif %}" class="collection-title-main">
+      <span class="collection-title-position">{{ loop.index }}</span>
+      <span class="collection-title-poster">{% if item.poster_url %}<img src="{{ item.poster_url }}" alt="" loading="lazy">{% else %}{{ item.display_title[:1]|upper }}{% endif %}</span>
+      <span><strong>{{ item.display_title }}</strong><small>{% if item.item_type == 'episode' %}{{ item.item_label }} · S{{ '%02d'|format(item.season) }}E{{ '%02d'|format(item.episode) }}{% else %}{{ item.item_label }}{% if item.display_year %} · {{ item.display_year }}{% endif %}{% endif %}</small></span>
+    </a>
+    {% if current_user.is_librarian %}
+    <div class="collection-title-actions">
+      <form method="post" action="/collections/{{ collection.id }}/{{ 'episodes' if item.item_type == 'episode' else 'titles' }}/{{ item.item_id }}/move"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="direction" value="up"><button class="button small" {% if loop.first %}disabled{% endif %} aria-label="Move {{ item.display_title }} earlier">↑</button></form>
+      <form method="post" action="/collections/{{ collection.id }}/{{ 'episodes' if item.item_type == 'episode' else 'titles' }}/{{ item.item_id }}/move"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="direction" value="down"><button class="button small" {% if loop.last %}disabled{% endif %} aria-label="Move {{ item.display_title }} later">↓</button></form>
+      <form method="post" action="/collections/{{ collection.id }}/{{ 'episodes' if item.item_type == 'episode' else 'titles' }}/{{ item.item_id }}/remove"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button small danger">Remove</button></form>
+    </div>
+    {% endif %}
+  </article>
+{% else %}
+  <div class="panel empty"><h2>This collection is empty</h2><p>{% if current_user.is_librarian %}Add a movie, TV series, or individual episode to begin.{% else %}A Librarian has not added any items yet.{% endif %}</p></div>
+{% endfor %}
+</section>
+
+{% if current_user.is_librarian %}
+<details class="collection-delete">
+  <summary>Delete collection</summary>
+  <form method="post" action="/collections/{{ collection.id }}/delete"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><p>Only the collection will be deleted. Its movies, TV series, and files stay in place.</p><button class="button danger">Delete {{ collection.name }}</button></form>
+</details>
+{% endif %}
+{% endblock %}
