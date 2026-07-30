@@ -92,6 +92,9 @@ class AuthUser:
     active: bool
     force_password_change: bool
     last_login_at: str
+    home_layout: str = "modern"
+    show_home_hero: bool = True
+    high_contrast: bool = False
 
     @property
     def is_librarian(self) -> bool:
@@ -127,6 +130,13 @@ def user_from_row(row: sqlite3.Row) -> AuthUser:
         role=row["role"], active=bool(row["active"]),
         force_password_change=bool(row["force_password_change"]),
         last_login_at=row["last_login_at"] or "",
+        home_layout=row["home_layout"] if "home_layout" in row.keys() else "modern",
+        show_home_hero=(
+            bool(row["show_home_hero"]) if "show_home_hero" in row.keys() else True
+        ),
+        high_contrast=(
+            bool(row["high_contrast"]) if "high_contrast" in row.keys() else False
+        ),
     )
 
 
@@ -461,7 +471,8 @@ class AuthService:
         with self.database.connect() as conn:
             row = conn.execute(
                 """SELECT s.*,u.username,u.email,u.display_name,u.profile_icon,u.role,
-                          u.active,u.force_password_change,u.last_login_at
+                          u.active,u.force_password_change,u.last_login_at,
+                          u.home_layout,u.show_home_hero,u.high_contrast
                    FROM user_sessions s JOIN users u ON u.id=s.user_id
                    WHERE s.token_hash=? AND datetime(s.expires_at)>CURRENT_TIMESTAMP AND u.active=1""",
                 (token_hash(raw_token),),
@@ -485,6 +496,9 @@ class AuthService:
             role=row["role"], active=bool(row["active"]),
             force_password_change=bool(row["force_password_change"]),
             last_login_at=row["last_login_at"] or "",
+            home_layout=row["home_layout"] or "modern",
+            show_home_hero=bool(row["show_home_hero"]),
+            high_contrast=bool(row["high_contrast"]),
         )
         return AuthSession(
             id=row["id"], user=user, csrf_token=row["csrf_token"],
@@ -522,6 +536,7 @@ class AuthService:
 
     def update_profile(
         self, user_id: int, display_name: str, email: str, profile_icon: str,
+        show_home_hero: bool | None = None, high_contrast: bool | None = None,
     ) -> AuthUser:
         current = self.get_user(user_id)
         if not current:
@@ -533,13 +548,45 @@ class AuthService:
             profile_icon = "initials"
         try:
             with self.database.connect() as conn:
-                conn.execute(
-                    """UPDATE users SET display_name=?,email=?,profile_icon=?,
-                       updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-                    (display_name, email or None, profile_icon, user_id),
-                )
+                if show_home_hero is None and high_contrast is None:
+                    conn.execute(
+                        """UPDATE users SET display_name=?,email=?,profile_icon=?,
+                           updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                        (display_name, email or None, profile_icon, user_id),
+                    )
+                else:
+                    current_hero = (
+                        bool(current.show_home_hero)
+                        if show_home_hero is None else bool(show_home_hero)
+                    )
+                    current_contrast = (
+                        bool(current.high_contrast)
+                        if high_contrast is None else bool(high_contrast)
+                    )
+                    conn.execute(
+                        """UPDATE users SET display_name=?,email=?,profile_icon=?,
+                           show_home_hero=?,high_contrast=?,
+                           updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                        (
+                            display_name, email or None, profile_icon,
+                            int(current_hero), int(current_contrast), user_id,
+                        ),
+                    )
         except sqlite3.IntegrityError as exc:
             raise AuthenticationError("That email is already used by another account.") from exc
+        return self.get_user(user_id)
+
+    def toggle_home_layout(self, user_id: int) -> AuthUser:
+        current = self.get_user(user_id)
+        if not current:
+            raise AuthenticationError("Account not found.")
+        layout = "classic" if current.home_layout == "modern" else "modern"
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE users SET home_layout=?,updated_at=CURRENT_TIMESTAMP
+                   WHERE id=?""",
+                (layout, user_id),
+            )
         return self.get_user(user_id)
 
     def change_password(self, user_id: int, current_password: str, new_password: str) -> None:

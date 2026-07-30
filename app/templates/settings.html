@@ -86,7 +86,7 @@
     <div class="actions"><form method="post" action="/maintenance/updates/check"><button class="button">Check for updates</button></form>{% if update_status.status == 'available' %}<form method="post" action="/maintenance/updates/apply" onsubmit="return confirm('Update to {{ update_status.latest_version }}? Active scans will be interrupted during the restart.');"><input type="hidden" name="tag" value="{{ update_status.latest_version }}"><input type="hidden" name="confirm" value="UPDATE"><button class="button primary">Back up and update</button></form>{% endif %}</div>
     <p class="muted"><small>Automatic installation requires the optional InfoMancer host updater. Without it, update requests remain safely queued until the helper is run.</small></p>
   </section>
-  <section class="panel settings-card">
+  <section class="panel settings-card" id="media-information">
     <div class="settings-card-head"><div><p class="eyebrow">MEDIA INFORMATION</p><h2>Inspect technical details</h2></div><span class="settings-state {{ 'good' if (media_counts.inspected or 0) >= (media_counts.total or 0) else 'warn' }}">{{ '{:,}'.format(media_counts.inspected or 0) }} / {{ '{:,}'.format(media_counts.total or 0) }}</span></div>
     <p class="muted">Read runtime, resolution, codecs, bitrate, container, and HDR/SDR status directly from each media file. Inspection does not modify the files.</p>
     {% if media_counts.failed %}<div class="form-error media-failure-alert"><span><strong>{{ '{:,}'.format(media_counts.failed) }} file{% if media_counts.failed != 1 %}s need{% else %} needs{% endif %} attention.</strong> Review what failed, why it happened, and what to try next.</span><a class="button" href="/media-info/failures">Review affected files</a></div>{% endif %}

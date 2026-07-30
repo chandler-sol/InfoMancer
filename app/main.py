@@ -40,6 +40,9 @@ from .engagement import EngagementError, EngagementService, utc_from_local
 from .event_log import EventLog
 from .imdb import sync_genres
 from .media_info import MediaInspectionError, inspect_media
+from .mie import CATEGORIES as MIE_CATEGORIES
+from .mie import SEVERITIES as MIE_SEVERITIES
+from .mie import MediaIntelligenceEngine
 from .maintenance import (
     MaintenanceError, create_database_backup, install_database_backup,
     list_database_backups, read_update_status, resolve_backup,
@@ -62,6 +65,7 @@ auth_service = AuthService(db, settings)
 app_settings = AppSettings(db, settings.search_url_template)
 engagement = EngagementService(db)
 event_log = EventLog(db)
+mie = MediaIntelligenceEngine(db)
 engagement.seed_official()
 provider_secrets = ProviderSecretStore(
     settings.database.parent / "provider-secrets.enc", settings.application_secret
@@ -72,7 +76,7 @@ try:
 except ProviderSecretError as exc:
     stored_provider_secrets = {}
     provider_secret_error = str(exc)
-APP_VERSION = "0.4.0-alpha.1"
+APP_VERSION = "0.5.0-alpha.1"
 app = FastAPI(title="InfoMancer", version=APP_VERSION)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "app" / "static"), name="static")
 COLLECTION_ART_DIR = settings.database.parent / "collection-art"
@@ -1298,15 +1302,30 @@ def account_profile(request: Request):
 @app.post("/account/profile")
 def update_account_profile(
     request: Request, display_name: str = Form(...), email: str = Form(""),
-    profile_icon: str = Form("initials"),
+    profile_icon: str = Form("initials"), show_home_hero: str = Form(""),
+    high_contrast: str = Form(""),
 ):
     try:
-        auth_service.update_profile(request.state.user.id, display_name, email, profile_icon)
+        auth_service.update_profile(
+            request.state.user.id, display_name, email, profile_icon,
+            show_home_hero == "1", high_contrast == "1",
+        )
     except AuthenticationError as exc:
         return templates.TemplateResponse(request, "account_profile.html", {
             "profile_icons": PROFILE_ICONS, "message": "", "error": str(exc),
         }, status_code=400)
     return redirect("/account/profile", "Profile saved")
+
+
+@app.post("/account/home-layout")
+def toggle_account_home_layout(request: Request):
+    if request.state.user.id <= 0:
+        return redirect(
+            "/",
+            "Home layout preferences require a signed-in account.",
+        )
+    auth_service.toggle_home_layout(request.state.user.id)
+    return RedirectResponse("/", status_code=303)
 
 
 @app.get("/account/security", response_class=HTMLResponse)
@@ -2278,7 +2297,8 @@ def active_tasks() -> dict:
                 )
             ),
         })
-    return {"tasks": tasks}
+    # Scheduled work can be added here without changing the task-widget contract.
+    return {"tasks": tasks, "scheduled": []}
 
 
 @app.get("/api/movie-match-analysis")
@@ -2446,10 +2466,9 @@ def refresh_episode_imdb_metadata(file_id: int):
     )
 
 
-@app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request):
+def dashboard_counts(user_id: int):
     with db.connect() as conn:
-        counts = conn.execute(
+        return conn.execute(
             """SELECT
               (SELECT COUNT(*) FROM titles WHERE kind='movie') movies,
               (SELECT COUNT(*) FROM titles WHERE kind='tv') shows,
@@ -2472,22 +2491,187 @@ def dashboard(request: Request):
               (SELECT COUNT(*) FROM titles t WHERE t.discovered_at IS NOT NULL AND
                  ((t.kind='tv' AND t.tvdb_id IS NULL) OR
                   (t.kind='movie' AND t.tvdb_movie_id IS NULL))) ready"""
-        , (request.state.user.id, request.state.user.id)).fetchone()
+        , (user_id, user_id)).fetchone()
+
+
+@app.get("/api/dashboard-metrics")
+def dashboard_metrics(request: Request) -> dict:
+    counts = dashboard_counts(request.state.user.id)
+    return {
+        "movies": {"value": counts["movies"], "display": f"{counts['movies']:,}"},
+        "shows": {"value": counts["shows"], "display": f"{counts['shows']:,}"},
+        "episodes": {
+            "value": counts["episodes"], "display": f"{counts['episodes']:,}",
+        },
+        "missing": {
+            "value": counts["missing"], "display": f"{counts['missing']:,}",
+        },
+        "bytes": {
+            "value": counts["bytes"], "display": format_bytes(counts["bytes"]),
+        },
+    }
+
+
+@app.get("/", response_class=HTMLResponse)
+def dashboard(request: Request):
+    counts = dashboard_counts(request.state.user.id)
+    with db.connect() as conn:
         roots = conn.execute(
             """SELECT r.*, COUNT(DISTINCT t.id) title_count, COUNT(f.id) file_count
                FROM roots r LEFT JOIN titles t ON t.root_id=r.id
                LEFT JOIN files f ON f.title_id=t.id GROUP BY r.id ORDER BY r.kind, r.label, r.path"""
         ).fetchall()
         recent = conn.execute(
-            "SELECT * FROM titles ORDER BY updated_at DESC LIMIT 8"
+            """SELECT t.*,COALESCE(uts.favorite,0) favorite,
+                      (SELECT MIN(f.id) FROM files f WHERE f.title_id=t.id)
+                        first_file_id
+               FROM titles t
+               LEFT JOIN user_title_state uts
+                 ON uts.title_id=t.id AND uts.user_id=?
+               ORDER BY t.updated_at DESC LIMIT 8""",
+            (request.state.user.id,),
+        ).fetchall()
+        favorites = conn.execute(
+            """SELECT t.*,1 favorite,
+                      (SELECT MIN(f.id) FROM files f WHERE f.title_id=t.id)
+                        first_file_id
+               FROM titles t
+               JOIN user_title_state uts
+                 ON uts.title_id=t.id AND uts.user_id=? AND uts.favorite=1
+               ORDER BY uts.updated_at DESC,t.title COLLATE NOCASE LIMIT 8""",
+            (request.state.user.id,),
         ).fetchall()
     with scan_all_lock:
         all_scan_job = dict(scan_all_job)
-    return templates.TemplateResponse(request, "dashboard.html", {
-        "counts": counts, "roots": roots, "recent": recent, "jobs": scan_jobs,
+    mie_summary = mie.summary()
+    requested_layout = request.query_params.get("layout", "")
+    home_layout = (
+        requested_layout if requested_layout in {"modern", "classic"}
+        else getattr(request.state.user, "home_layout", "modern")
+    )
+    home_template = (
+        "dashboard_classic.html" if home_layout == "classic" else "dashboard.html"
+    )
+    return templates.TemplateResponse(request, home_template, {
+        "counts": counts, "roots": roots, "recent": recent, "favorites": favorites,
+        "jobs": scan_jobs,
         "scan_all_job": all_scan_job,
+        "mie_summary": mie_summary,
         "message": request.query_params.get("message", ""),
     })
+
+
+@app.get("/library-health", response_class=HTMLResponse)
+def library_health(
+    request: Request, status: str = "active", severity: str = "",
+    category: str = "",
+):
+    status = status if status in {"active", "dismissed", "resolved"} else "active"
+    severity = severity if severity in MIE_SEVERITIES else ""
+    category = category if category in MIE_CATEGORIES else ""
+    summary = mie.summary()
+    if not summary["last_analyzed_at"]:
+        try:
+            mie.analyze()
+            summary = mie.summary()
+        except sqlite3.Error as exc:
+            record_event(
+                "mie", "Library Health analysis could not start.",
+                level="error", detail=str(exc),
+                context={"operation": "initial-analysis"},
+                user_id=request.state.user.id,
+            )
+            return templates.TemplateResponse(
+                request, "library_health.html", {
+                    "summary": summary, "findings": [], "status": status,
+                    "severity": severity, "category": category,
+                    "categories": sorted(MIE_CATEGORIES),
+                    "severities": ["critical", "warning", "information"],
+                    "message": "",
+                    "error": (
+                        "InfoMancer could not analyze the catalog because its "
+                        "findings could not be saved. No media files were changed. "
+                        "Try again; if it continues, open Logs for the technical details."
+                    ),
+                }, status_code=500,
+            )
+    return templates.TemplateResponse(request, "library_health.html", {
+        "summary": summary,
+        "findings": mie.findings(
+            status=status, severity=severity, category=category,
+        ),
+        "status": status, "severity": severity, "category": category,
+        "categories": sorted(MIE_CATEGORIES),
+        "severities": ["critical", "warning", "information"],
+        "message": request.query_params.get("message", ""),
+        "error": "",
+    })
+
+
+@app.post("/library-health/analyze")
+def analyze_library_health(request: Request):
+    try:
+        finding_count = mie.analyze()
+    except sqlite3.Error as exc:
+        record_event(
+            "mie", "Library Health analysis could not be completed.",
+            level="error", detail=str(exc),
+            context={"operation": "analysis"},
+            user_id=request.state.user.id,
+        )
+        return redirect(
+            "/library-health",
+            "Library Health could not refresh because the findings could not be "
+            "saved. No media files were changed. Try again, then check Logs if "
+            "the problem continues.",
+        )
+    record_event(
+        "mie",
+        f"Library Health analysis completed with {finding_count} current findings.",
+        context={"finding_count": finding_count},
+        user_id=request.state.user.id,
+    )
+    return redirect(
+        "/library-health",
+        f"Library Health refreshed. InfoMancer found {finding_count} current "
+        f"issue{'s' if finding_count != 1 else ''}. No media files were changed.",
+    )
+
+
+@app.post("/library-health/findings/{finding_id}/dismiss")
+def dismiss_library_health_finding(request: Request, finding_id: int):
+    if not mie.dismiss(finding_id, request.state.user.id):
+        return redirect(
+            "/library-health",
+            "That finding was not dismissed because it is no longer active. "
+            "Refresh Library Health to see its current status.",
+        )
+    record_event(
+        "mie", f"Library Health finding {finding_id} was dismissed.",
+        context={"finding_id": finding_id}, user_id=request.state.user.id,
+    )
+    return redirect(
+        "/library-health",
+        "Finding dismissed. It remains available under Dismissed findings.",
+    )
+
+
+@app.post("/library-health/findings/{finding_id}/restore")
+def restore_library_health_finding(request: Request, finding_id: int):
+    if not mie.restore(finding_id):
+        return redirect(
+            "/library-health?status=dismissed",
+            "That finding could not be restored because it is no longer dismissed. "
+            "Refresh Library Health to see its current status.",
+        )
+    record_event(
+        "mie", f"Library Health finding {finding_id} was restored.",
+        context={"finding_id": finding_id}, user_id=request.state.user.id,
+    )
+    return redirect(
+        "/library-health?status=dismissed",
+        "Finding restored to the active Library Health list.",
+    )
 
 
 @app.get("/intake", response_class=HTMLResponse)
@@ -3406,7 +3590,7 @@ def title_return_path(title_id: int, return_to: str = "") -> str:
     if (
         return_to and not parsed.scheme and not parsed.netloc
         and parsed.path in {
-            "/library", "/movies", "/shows", "/favorites", f"/titles/{title_id}"
+            "/", "/library", "/movies", "/shows", "/favorites", f"/titles/{title_id}"
         }
     ):
         return return_to

@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="mie-hero">
+  <div>
+    <p class="eyebrow">MEDIA INTELLIGENCE ENGINE</p>
+    <h1>Library Health</h1>
+    <p>InfoMancer explains what it found, why it matters, and what to review next. Analysis never changes your media files.</p>
+  </div>
+  {% if current_user.is_librarian %}
+  <form method="post" action="/library-health/analyze">
+    <button class="button primary">Refresh analysis</button>
+  </form>
+  {% endif %}
+</section>
+
+{% if error %}<div class="form-error mie-page-message">{{ error }}</div>{% endif %}
+{% if message %}<div class="success-banner mie-page-message">{{ message }}</div>{% endif %}
+
+<section class="mie-summary" aria-label="Library Health summary">
+  <a href="/library-health"><strong>{{ summary.active }}</strong><span>Active findings</span></a>
+  <a href="/library-health?severity=critical"><strong>{{ summary.critical }}</strong><span>Critical</span></a>
+  <a href="/library-health?severity=warning"><strong>{{ summary.warning }}</strong><span>Warnings</span></a>
+  <a href="/library-health?status=dismissed"><strong>{{ summary.dismissed }}</strong><span>Dismissed</span></a>
+</section>
+
+<div class="mie-analysis-note">
+  {% if summary.last_analyzed_at %}
+  Last analyzed {{ local_time(summary.last_analyzed_at) }}. Findings reflect the catalog and inspection results stored at that time.
+  {% else %}
+  This library has not been analyzed yet.
+  {% endif %}
+</div>
+
+<form class="panel mie-filters" method="get" action="/library-health">
+  <label>Status
+    <select name="status">
+      <option value="active" {% if status == 'active' %}selected{% endif %}>Active</option>
+      <option value="dismissed" {% if status == 'dismissed' %}selected{% endif %}>Dismissed</option>
+      <option value="resolved" {% if status == 'resolved' %}selected{% endif %}>Resolved</option>
+    </select>
+  </label>
+  <label>Severity
+    <select name="severity">
+      <option value="">All severities</option>
+      {% for item in severities %}<option value="{{ item }}" {% if severity == item %}selected{% endif %}>{{ item|title }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Category
+    <select name="category">
+      <option value="">All categories</option>
+      {% for item in categories %}<option value="{{ item }}" {% if category == item %}selected{% endif %}>{{ item|title }}</option>{% endfor %}
+    </select>
+  </label>
+  <button class="button">Apply filters</button>
+</form>
+
+<section class="mie-findings" aria-live="polite">
+  {% if findings %}
+    {% for finding in findings %}
+    <article class="panel mie-finding severity-{{ finding.severity }}">
+      <div class="mie-finding-head">
+        <div>
+          <div class="mie-labels">
+            <span class="mie-severity">{{ finding.severity|title }}</span>
+            <span>{{ finding.category|title }}</span>
+          </div>
+          <h2>{{ finding.summary }}</h2>
+        </div>
+        {% if finding.title_name %}<span class="mie-title-kind">{{ finding.title_kind|upper }}</span>{% endif %}
+      </div>
+      <div class="mie-reasoning">
+        <div><h3>Why InfoMancer flagged it</h3><p>{{ finding.explanation }}</p></div>
+        <div><h3>Recommended next step</h3><p>{{ finding.recommendation }}</p></div>
+      </div>
+      {% if finding.evidence %}
+      <details class="mie-evidence">
+        <summary>Evidence used</summary>
+        <dl>
+          {% for key, value in finding.evidence.items() %}
+          <div><dt>{{ key|replace('_', ' ')|title }}</dt><dd>{% if value is iterable and value is not string and value is not mapping %}{{ value|join(', ') }}{% elif value is none %}Not recorded{% else %}{{ value }}{% endif %}</dd></div>
+          {% endfor %}
+        </dl>
+      </details>
+      {% endif %}
+      <div class="actions mie-finding-actions">
+        <a class="button{% if finding.status == 'active' %} primary{% endif %}" href="{{ finding.href }}">Review affected media</a>
+        {% if current_user.is_librarian and finding.status == 'active' %}
+        <form method="post" action="/library-health/findings/{{ finding.id }}/dismiss">
+          <button class="button">Dismiss finding</button>
+        </form>
+        {% elif current_user.is_librarian and finding.status == 'dismissed' %}
+        <form method="post" action="/library-health/findings/{{ finding.id }}/restore">
+          <button class="button">Restore finding</button>
+        </form>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  {% else %}
+  <div class="panel mie-empty">
+    <span aria-hidden="true">✓</span>
+    <div>
+      <h2>No findings match these filters</h2>
+      <p>{% if status == 'active' %}InfoMancer has no current issues in this view. Refresh the analysis after library changes to check again.{% else %}Choose another status or remove a filter to see more findings.{% endif %}</p>
+    </div>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

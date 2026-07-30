@@ -9,6 +9,20 @@ TOUR_KEY = "welcome-v1"
 
 OFFICIAL_ANNOUNCEMENTS = (
     {
+        "source_key": "release-0.5.0-alpha.1",
+        "title": "InfoMancer 0.5: your library, understood",
+        "body": (
+            "This alpha introduces the first Media Intelligence Engine health "
+            "analysis, a redesigned dashboard and navigation system, improved "
+            "library discovery and search, clearer background-task feedback, "
+            "and a more polished guided tour. It also strengthens local account "
+            "recovery and administration while preserving InfoMancer's "
+            "explainable, review-first approach."
+        ),
+        "category": "update",
+        "starts_at": "2026-07-30 00:00:00",
+    },
+    {
         "source_key": "release-0.4.0-alpha.1",
         "title": "InfoMancer 0.4: safer administration and richer libraries",
         "body": (

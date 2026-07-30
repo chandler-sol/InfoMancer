@@ -25,20 +25,21 @@
     );
     const steps = [
       [null, "Your media library, accounted for.", "This quick walkthrough shows you where to browse, search, follow background work, and manage your account.", "/", null],
-      [".library-portals", "Choose the library you need", "Open the complete catalog, browse Movies, or focus on TV Shows. Each destination keeps the same filters and display tools.", "/", null],
+      [".home-destinations, .library-portals", "Choose the library you need", "Open the complete catalog, browse Movies, or focus on TV Shows. Each destination keeps the same filters and display tools.", "/", null],
       [".tour-demo-list, .library-table", "List view keeps the details close", "List view is designed for catalog work: paths, matching status, episode counts, missing episodes, selections, and title actions.", "/movies", "list"],
       [".tour-demo-covers, #cover-library", "Cover view puts artwork first", "Cover view gives you a visual shelf with the title, rating, and release years. Hover—or tap on mobile—to reveal title actions.", "/movies", "covers"],
       [".library-view-controls", "Make the library yours", "Switch between List and Covers here. In Cover view, use the minus, slider, and plus controls to choose a comfortable poster size.", "/movies", "covers", null],
       [".announcement-heading", "Never miss what changed", "This is the Announcements center, where you can revisit InfoMancer release notes and messages from your installation's Librarians.", "/announcements", null, null],
       [".global-search-toggle", "Search from anywhere", "Use the search button in the header to find a movie, series, or filename without leaving the page you are using.", "/movies", null, null],
-      [".task-widget-toggle", "Background work stays visible", "Scans, matching, and metadata updates report their status here while you continue using InfoMancer.", "/movies", null, null],
-      [".site-menu-toggle", "Everything is in the main menu", "Open Home, Movies, TV Shows, Announcements, and any Librarian tools from this menu.", "/movies", null, "menu"],
+      [".task-widget", "Background work stays visible", "Scans, matching, and metadata updates report their status here while you continue using InfoMancer.", "/movies", null, "task-demo"],
+      [".site-menu-panel", "Navigation stays close", "On larger screens, Home, Movies, TV Shows, Announcements, and Librarian tools stay available here. On mobile, the same destinations live in the menu button.", "/movies", null, "menu"],
       [".account-menu > summary", "Your profile and account", "Open your profile, change your password, review active sessions, open Help, or replay this tour from the Profile button at the far right.", "/movies", null, "profile"],
     ];
     const requestedStep = Number.parseInt(new URLSearchParams(window.location.search).get("tour_step") || "0", 10);
     let index = Number.isInteger(requestedStep) ? Math.min(Math.max(requestedStep, 0), steps.length - 1) : 0;
     let highlighted = null;
     let highlightedGroup = [];
+    let taskDemoTimer = 0;
     const tourViewStorageKey = "infomancer-tour-original-library-view";
     const restoreLibraryView = () => {
       const saved = sessionStorage.getItem(tourViewStorageKey);
@@ -134,7 +135,8 @@
         return;
       }
 
-      const gap = 12;
+      // Leave enough clear space for the highlighted element's outer glow.
+      const gap = 24;
       const rect = highlightedRect();
       const top = Math.max(0, rect.top - gap);
       const right = Math.min(window.innerWidth, rect.right + gap);
@@ -150,7 +152,46 @@
       updateSpotlight();
       positionTourCard();
     };
+    const stopTaskDemo = () => {
+      window.clearInterval(taskDemoTimer);
+      taskDemoTimer = 0;
+      const widget = document.getElementById("task-widget");
+      if (!widget || widget.dataset.tourDemo !== "1") return;
+      delete widget.dataset.tourDemo;
+      widget.classList.remove("tour-task-demo");
+      widget.querySelector(".tour-task-demo-progress")?.remove();
+      document.getElementById("task-summary").textContent = "No tasks running";
+      document.getElementById("task-card-detail").textContent = "Background work appears here.";
+      widget.classList.add("idle");
+      widget.classList.remove("visible");
+    };
+    const startTaskDemo = () => {
+      const widget = document.getElementById("task-widget");
+      const toggle = document.getElementById("task-widget-toggle");
+      const summary = document.getElementById("task-summary");
+      const detail = document.getElementById("task-card-detail");
+      if (!widget || !toggle || !summary || !detail) return;
+      widget.dataset.tourDemo = "1";
+      widget.classList.remove("idle");
+      widget.classList.add("visible", "tour-task-demo");
+      summary.textContent = "Scanning Movie Library";
+      let checked = 1284;
+      const total = 4820;
+      detail.textContent = `${checked.toLocaleString()} of ${total.toLocaleString()} files checked`;
+      const track = document.createElement("span");
+      track.className = "tour-task-demo-progress";
+      track.setAttribute("aria-hidden", "true");
+      track.innerHTML = "<i></i>";
+      toggle.append(track);
+      taskDemoTimer = window.setInterval(() => {
+        checked = Math.min(total, checked + 137);
+        detail.textContent = `${checked.toLocaleString()} of ${total.toLocaleString()} files checked`;
+        track.style.setProperty("--tour-task-progress", `${(checked / total) * 100}%`);
+        if (checked === total) checked = 1284;
+      }, 900);
+    };
     const clearHighlight = () => {
+      stopTaskDemo();
       highlighted?.classList.remove("tour-highlight");
       highlightedGroup.forEach((element) => element.classList.remove("tour-highlight"));
       highlightedGroup = [];
@@ -162,7 +203,10 @@
       clearHighlight();
       const [selector, heading, text, , libraryView, action] = steps[index];
       showLibraryView(libraryView);
-      if (action === "menu") document.getElementById("site-menu")?.classList.add("tour-menu-open");
+      if (action === "task-demo") startTaskDemo();
+      if (action === "menu" && window.matchMedia("(max-width: 980px)").matches) {
+        document.getElementById("site-menu")?.classList.add("tour-menu-open");
+      }
       if (action === "profile") document.querySelector(".account-menu")?.setAttribute("open", "");
       title.textContent = heading;
       copy.textContent = text;
@@ -172,7 +216,9 @@
       back.hidden = index === 0;
       highlighted = selector ? document.querySelector(selector) : null;
       highlighted?.classList.add("tour-highlight");
-      if (action === "menu") {
+      if (action === "menu" && window.matchMedia("(max-width: 980px)").matches) {
+        highlighted = document.querySelector(".site-menu-toggle");
+        highlighted?.classList.add("tour-highlight");
         const menuPanel = document.getElementById("site-menu-panel");
         if (menuPanel) {
           highlightedGroup = [menuPanel];

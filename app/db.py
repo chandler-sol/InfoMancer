@@ -141,6 +141,10 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member', 'librarian')),
     active INTEGER NOT NULL DEFAULT 1,
     force_password_change INTEGER NOT NULL DEFAULT 0,
+    home_layout TEXT NOT NULL DEFAULT 'modern'
+        CHECK(home_layout IN ('modern', 'classic')),
+    show_home_hero INTEGER NOT NULL DEFAULT 1,
+    high_contrast INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_login_at TEXT,
@@ -328,6 +332,35 @@ CREATE TABLE IF NOT EXISTS event_logs (
     user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS mie_findings (
+    id INTEGER PRIMARY KEY,
+    fingerprint TEXT NOT NULL UNIQUE,
+    rule_key TEXT NOT NULL,
+    category TEXT NOT NULL,
+    severity TEXT NOT NULL CHECK(severity IN ('critical', 'warning', 'information')),
+    root_id INTEGER REFERENCES roots(id) ON DELETE CASCADE,
+    title_id INTEGER REFERENCES titles(id) ON DELETE CASCADE,
+    file_id INTEGER REFERENCES files(id) ON DELETE CASCADE,
+    expected_episode_id INTEGER REFERENCES expected_episodes(id) ON DELETE CASCADE,
+    summary TEXT NOT NULL,
+    explanation TEXT NOT NULL,
+    recommendation TEXT NOT NULL,
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK(status IN ('active', 'dismissed', 'resolved')),
+    first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    dismissed_at TEXT,
+    dismissed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    resolved_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS mie_analysis_state (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    last_analyzed_at TEXT,
+    finding_count INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_titles_search ON titles(title, metadata_title);
 CREATE INDEX IF NOT EXISTS idx_titles_kind_root ON titles(kind, root_id);
 CREATE INDEX IF NOT EXISTS idx_titles_root ON titles(root_id);
@@ -379,6 +412,12 @@ CREATE INDEX IF NOT EXISTS idx_event_logs_time
     ON event_logs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_event_logs_category
     ON event_logs(category, level, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mie_findings_status
+    ON mie_findings(status, severity, category, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mie_findings_title
+    ON mie_findings(title_id, status);
+CREATE INDEX IF NOT EXISTS idx_mie_findings_file
+    ON mie_findings(file_id, status);
 """
 
 
@@ -442,6 +481,17 @@ class Database:
             }
             if "imdb_id" not in episode_columns:
                 conn.execute("ALTER TABLE expected_episodes ADD COLUMN imdb_id TEXT")
+            user_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(users)")
+            }
+            user_additions = {
+                "home_layout": "TEXT NOT NULL DEFAULT 'modern'",
+                "show_home_hero": "INTEGER NOT NULL DEFAULT 1",
+                "high_contrast": "INTEGER NOT NULL DEFAULT 0",
+            }
+            for name, column_type in user_additions.items():
+                if name not in user_columns:
+                    conn.execute(f"ALTER TABLE users ADD COLUMN {name} {column_type}")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
