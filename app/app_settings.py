@@ -109,6 +109,55 @@ class AppSettings:
             raise AppSettingError("Choose Standard, Verbose, or Debug logging.")
         return {"log_level": level}
 
+    def validate_import(self, values: object) -> dict[str, str]:
+        if not isinstance(values, dict):
+            raise AppSettingError(
+                "The settings file must contain a JSON object named settings."
+            )
+        unknown = set(values) - self.EDITABLE_KEYS
+        if unknown:
+            raise AppSettingError(
+                "The settings file contains options this version does not support: "
+                + ", ".join(sorted(unknown))
+                + ". No settings were changed."
+            )
+        text_values = {
+            key: value for key, value in values.items() if isinstance(value, str)
+        }
+        if len(text_values) != len(values):
+            raise AppSettingError(
+                "Every imported setting must contain text. No settings were changed."
+            )
+        validated: dict[str, str] = {}
+        general = {
+            key: text_values[key] for key in (
+                "installation_name", "timezone", "default_library_view",
+                "default_cover_size",
+            ) if key in text_values
+        }
+        if general:
+            current = self.values()
+            validated.update(self.validate_general(
+                general.get("installation_name", current["installation_name"]),
+                general.get("timezone", current["timezone"]),
+                general.get("default_library_view", current["default_library_view"]),
+                general.get("default_cover_size", current["default_cover_size"]),
+            ))
+        external = {
+            key: text_values[key] for key in (
+                "search_provider_name", "search_url_template",
+            ) if key in text_values
+        }
+        if external:
+            current = self.values()
+            validated.update(self.validate_external_search(
+                external.get("search_provider_name", current["search_provider_name"]),
+                external.get("search_url_template", current["search_url_template"]),
+            ))
+        if "log_level" in text_values:
+            validated.update(self.validate_logging(text_values["log_level"]))
+        return {key: validated[key] for key in text_values}
+
     def update(self, values: dict[str, str], changed_by: int | None) -> int:
         unknown = set(values) - self.EDITABLE_KEYS
         if unknown:

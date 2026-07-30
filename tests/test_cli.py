@@ -8,7 +8,10 @@ from argparse import Namespace
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
+from app.admin_cli import create_recovery_link
+from app.auth import AuthService
 from app.cli import (
     CliError,
     _database,
@@ -64,6 +67,31 @@ class CliTests(unittest.TestCase):
         self.assertTrue(parsed.all)
         self.assertTrue(parsed.yes)
 
+    def test_recovery_link_is_single_use_and_does_not_print_a_password(self) -> None:
+        settings = Namespace(
+            database=self.database.path, sandbox=True,
+            minimum_password_length=1,
+        )
+        service = AuthService(self.database, settings)
+        user = service.create_user(
+            "recover-me", "recover@example.com", "Recover Me", "old",
+            role="librarian",
+        )
+        output = StringIO()
+        with patch("app.admin_cli.get_settings", return_value=settings):
+            with redirect_stdout(output):
+                result = create_recovery_link(
+                    user.username, "https://infomancer.example.test", 1,
+                )
+        self.assertEqual(result, 0)
+        rendered = output.getvalue()
+        self.assertIn("https://infomancer.example.test/activate/", rendered)
+        self.assertIn("can be used only once", rendered)
+        self.assertNotIn("old", rendered)
+        token = rendered.split("/activate/", 1)[1].splitlines()[0]
+        invitation = service.invitation_for_token(token)
+        self.assertEqual(invitation["user_id"], user.id)
+
     def test_missing_database_is_explained_without_creating_one(self) -> None:
         missing = self.base / "missing.db"
         with self.assertRaisesRegex(CliError, "Start InfoMancer once"):
@@ -81,10 +109,21 @@ class CliTests(unittest.TestCase):
         self.assertIn("Media files: 1", rendered)
 
     def test_export_rows_include_shared_library_data_without_a_user(self) -> None:
+        with self.database.connect() as conn:
+            title_id = conn.execute("SELECT id FROM titles").fetchone()["id"]
+            collection_id = conn.execute(
+                "INSERT INTO collections(name) VALUES ('Test Collection')"
+            ).lastrowid
+            conn.execute(
+                """INSERT INTO collection_titles(collection_id,title_id,position)
+                   VALUES (?,?,0)""",
+                (collection_id, title_id),
+            )
         rows = _export_rows(self.database, None)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["title"], "Example Movie")
         self.assertEqual(rows[0]["imdb_id"], "tt1234567")
+        self.assertEqual(rows[0]["collections"], "Test Collection")
         self.assertEqual(json.loads(rows[0]["custom_fields"])["favorite"], False)
 
     def test_json_export_writes_a_portable_library_file(self) -> None:

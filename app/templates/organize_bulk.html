@@ -14,6 +14,13 @@
     {% if tags %}<div class="organize-tag-grid">{% for tag in tags %}<label><input type="checkbox" name="selected_tags" value="{{ tag.id }}"><span>{{ tag.name }} <small>{{ tag.usage_count }}</small></span></label>{% endfor %}</div>{% else %}<p class="muted">You have not created any custom tags yet. Create the first ones below.</p>{% endif %}
     <label class="organize-tag-new">Create tags while applying<input name="tag_names" placeholder="Family night, Demo content, Holiday"><small>Separate several tags with commas.</small></label>
   </section>
-  <div class="actions"><a class="button" href="/library">Cancel</a><button class="button primary">Add tags to selected titles</button></div>
+  {% if current_user.is_librarian %}
+  <section>
+    <h2>Add to collections</h2>
+    <p class="muted">Selected titles are appended to each chosen collection in their current display order.</p>
+    {% if collections %}<div class="organize-tag-grid">{% for collection in collections %}<label><input type="checkbox" name="selected_collections" value="{{ collection.id }}"><span>{{ collection.name }} <small>{{ collection.title_count }}</small></span></label>{% endfor %}</div>{% else %}<p class="muted">No collections exist yet. <a href="/collections">Create the first collection</a>.</p>{% endif %}
+  </section>
+  {% endif %}
+  <div class="actions"><a class="button" href="/library">Cancel</a><button class="button primary">Save organization</button></div>
 </form>
 {% endblock %}

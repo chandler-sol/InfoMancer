@@ -356,6 +356,12 @@ class MovieCreditViewTests(unittest.TestCase):
                 cross_library = client.get(
                     "/library?person=nm0000002&credit_role=actor"
                 )
+                unified_people_search = client.get("/library?q=Lead%20Actor")
+                unified_movie_search = client.get("/movies?q=Lead%20Actor")
+                fuzzy_people_search = client.get("/library?q=Led%20Actor")
+                fuzzy_suggestions = client.get(
+                    "/api/library-suggestions?q=Led%20Actor&kind=all"
+                )
                 movies = client.get("/movies")
                 matched_movies = client.get("/movies?match=matched")
                 unmatched_movies = client.get("/movies?match=unmatched")
@@ -371,7 +377,7 @@ class MovieCreditViewTests(unittest.TestCase):
             self.assertIn("Writer One", detail.text)
             self.assertIn("See more", detail.text)
             self.assertIn(
-                'href="/library?person=nm0000002&amp;credit_role=actor"',
+                'href="/library?q=Lead%20Actor"',
                 detail.text,
             )
             self.assertIn("movie-file-menu", detail.text)
@@ -384,6 +390,16 @@ class MovieCreditViewTests(unittest.TestCase):
             self.assertNotIn("Other Movie", filtered.text)
             self.assertIn("Example Movie", cross_library.text)
             self.assertIn("Example Show", cross_library.text)
+            self.assertIn("Example Movie", unified_people_search.text)
+            self.assertIn("Example Show", unified_people_search.text)
+            self.assertIn("Example Movie", unified_movie_search.text)
+            self.assertNotIn("Example Show", unified_movie_search.text)
+            self.assertIn("Example Movie", fuzzy_people_search.text)
+            self.assertIn("Example Show", fuzzy_people_search.text)
+            self.assertTrue(any(
+                item["value"] == "Lead Actor"
+                for item in fuzzy_suggestions.json()["suggestions"]
+            ))
             self.assertIn(
                 '/movies?person=nm0000002&amp;person_name=Lead+Actor&amp;credit_role=actor',
                 cross_library.text,

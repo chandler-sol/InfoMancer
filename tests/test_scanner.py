@@ -33,6 +33,15 @@ class NamingTests(unittest.TestCase):
         cleaned = movie_release_title("Avengers.Endgame.2019.x264.ads;jflaksjd;flkajdsf")
         self.assertEqual(cleaned, "Avengers Endgame (2019)")
 
+    def test_numeric_sequel_title_is_not_mistaken_for_a_release_year(self):
+        self.assertEqual(movie_release_title("Blade Runner 2049"), "Blade Runner 2049")
+        self.assertEqual(title_and_year(movie_release_title("Blade Runner 2049")),
+                         ("Blade Runner 2049", None))
+        self.assertEqual(
+            movie_release_title("Blade.Runner.2049.2017.2160p.x265"),
+            "Blade Runner 2049 (2017)",
+        )
+
     def test_plex_names(self):
         self.assertEqual(
             plex_show_folder("The Office", 2005, 73244),

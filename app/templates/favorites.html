@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Favorites · InfoMancer{% endblock %}
+{% block content %}
+<section class="page-heading favorites-heading">
+  <p class="eyebrow">QUICK ACCESS</p>
+  <h1>Favorites</h1>
+  <p>Movies, TV series, and individual episodes you want close at hand.</p>
+</section>
+{% if error %}<div class="notice error" role="alert">{{ error }}</div>{% endif %}
+
+{% if favorite_titles %}
+<section class="favorites-section">
+  <div class="panel-head"><h2>Movies &amp; TV Series <span class="count">{{ favorite_titles|length }}</span></h2></div>
+  <div class="favorite-title-grid">
+    {% for title in favorite_titles %}
+    <article>
+      <a class="favorite-poster" href="/titles/{{ title.id }}">{% if title.poster_url %}<img src="{{ title.poster_url }}" alt="" loading="lazy">{% else %}<span>{{ title_initial(title) }}</span>{% endif %}</a>
+      <div><a href="/titles/{{ title.id }}"><strong>{{ title.metadata_title or title.title }}</strong></a>{% if lifespan(title) %}<small>{{ lifespan(title) }}</small>{% endif %}</div>
+      <details class="episode-menu"><summary aria-label="Actions for {{ title.metadata_title or title.title }}" title="Favorite actions">⋮</summary><div><form method="post" action="/titles/{{ title.id }}/favorite"><input type="hidden" name="return_to" value="/favorites"><button class="favorite-action active"><span>★</span>Remove favorite</button></form><a href="/titles/{{ title.id }}/organize">Organize &amp; Tags</a><a href="/titles/{{ title.id }}/collections?return_to=%2Ffavorites">Add to Collection</a></div></details>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if favorite_episodes %}
+<section class="favorites-section">
+  <div class="panel-head"><h2>Episodes <span class="count">{{ favorite_episodes|length }}</span></h2></div>
+  <div class="favorite-episode-list">
+    {% for episode in favorite_episodes %}
+    <article>
+      <a class="favorite-episode-poster" href="/titles/{{ episode.title_id }}#season-{{ episode.season }}">{% if episode.poster_url %}<img src="{{ episode.poster_url }}" alt="" loading="lazy">{% else %}<span>TV</span>{% endif %}</a>
+      <div class="grow"><a href="/titles/{{ episode.title_id }}#season-{{ episode.season }}"><strong>{{ episode.episode_name or 'Untitled episode' }}</strong></a><small>{{ episode.show_name }} · S{{ '%02d'|format(episode.season) }}E{{ '%02d'|format(episode.episode) }}</small>{% if episode.note %}<p>{{ episode.note }}</p>{% endif %}</div>
+      {% if episode.file_id %}<a class="button" href="/files/{{ episode.file_id }}/favorite">Edit favorite</a>{% endif %}
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if not favorite_titles and not favorite_episodes and not error %}
+<section class="panel empty favorites-empty"><span aria-hidden="true">☆</span><div><h2>No favorites yet</h2><p>Use a three-dot menu on a movie, TV series, or episode to add it here.</p></div><a class="button primary" href="/library">Browse library</a></section>
+{% endif %}
+{% endblock %}

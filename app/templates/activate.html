@@ -2,7 +2,7 @@
 {% block title %}Set up your account · InfoMancer{% endblock %}
 {% block content %}
 <section class="auth-layout login-layout">
-  <div class="auth-intro"><p class="eyebrow">ACCOUNT SETUP</p><h1>{% if invitation %}Welcome, {{ invitation.display_name }}{% else %}This link cannot be used{% endif %}</h1><p>{% if invitation %}Choose the password you’ll use to sign in to InfoMancer. The setup link will stop working immediately afterward.{% else %}Your media library was not changed. The explanation and next step appear here.{% endif %}</p></div>
+  <div class="auth-intro"><p class="eyebrow">{% if invitation and invitation.password_hash %}ACCOUNT RECOVERY{% else %}ACCOUNT SETUP{% endif %}</p><h1>{% if invitation and invitation.password_hash %}Reset your password{% elif invitation %}Welcome, {{ invitation.display_name }}{% else %}This link cannot be used{% endif %}</h1><p>{% if invitation and invitation.password_hash %}Choose a new password for {{ invitation.display_name }}. This link will stop working and every other session for this account will be signed out after you continue.{% elif invitation %}Choose the password you’ll use to sign in to InfoMancer. The setup link will stop working immediately afterward.{% else %}Your media library was not changed. The explanation and next step appear here.{% endif %}</p></div>
   <div class="auth-card">
     {% if error %}<div class="form-error" role="alert">{{ error }}</div>{% endif %}
     {% if invitation %}<form class="auth-form" method="post" action="/activate/{{ token }}">
@@ -10,7 +10,7 @@
       <div class="activation-identity"><strong>{{ invitation.display_name }}</strong><span>@{{ invitation.username }} · {{ invitation.role|title }}</span></div>
       <label>Password<span class="password-control"><input id="activation-password" name="password" type="password" minlength="{{ minimum_password_length }}" maxlength="256" autocomplete="new-password" required><button type="button" class="password-visibility-toggle" data-password-toggle="activation-password" aria-pressed="false" aria-label="Show password">Show</button></span><small>{% if sandbox_mode %}Testing mode: any non-empty password is accepted.{% else %}Use at least {{ minimum_password_length }} characters.{% endif %}</small></label>
       <label>Confirm password<span class="password-control"><input id="activation-password-confirm" name="password_confirm" type="password" minlength="12" maxlength="256" autocomplete="new-password" required><button type="button" class="password-visibility-toggle" data-password-toggle="activation-password-confirm" aria-pressed="false" aria-label="Show password confirmation">Show</button></span></label>
-      <button class="button primary auth-submit">Finish account setup</button>
+      <button class="button primary auth-submit">{% if invitation.password_hash %}Save new password{% else %}Finish account setup{% endif %}</button>
     </form>{% else %}<a class="button" href="/login">Go to sign in</a>{% endif %}
   </div>
 </section>

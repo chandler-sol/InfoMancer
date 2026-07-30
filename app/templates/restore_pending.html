@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Restoring InfoMancer{% endblock %}
+{% block content %}
+<section class="panel auth-card">
+  <p class="eyebrow">DATABASE RESTORE</p>
+  <h1>Restore completed</h1>
+  <div class="success-banner"><strong>The selected database passed validation and was restored.</strong></div>
+  <p>InfoMancer created safety backup <code>{{ safety_backup }}</code> and is restarting. You may need to sign in using an account contained in the restored database.</p>
+  <p><a class="button primary" href="/login">Return to InfoMancer</a></p>
+</section>
+<script>window.setTimeout(()=>window.location.assign('/login'),6000);</script>
+{% endblock %}

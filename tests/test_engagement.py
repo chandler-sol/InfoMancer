@@ -3,7 +3,9 @@ import unittest
 from pathlib import Path
 
 from app.db import Database
-from app.engagement import EngagementError, EngagementService
+from app.engagement import (
+    OFFICIAL_ANNOUNCEMENTS, EngagementError, EngagementService,
+)
 
 
 class EngagementTests(unittest.TestCase):
@@ -34,10 +36,11 @@ class EngagementTests(unittest.TestCase):
             count = conn.execute(
                 "SELECT COUNT(*) count FROM announcements WHERE source='official'"
             ).fetchone()["count"]
-        self.assertEqual(count, 1)
-        due = self.service.due(2, "member")
-        self.assertIsNotNone(due)
-        self.service.mark_seen(due["id"], 2)
+        self.assertEqual(count, len(OFFICIAL_ANNOUNCEMENTS))
+        for _ in OFFICIAL_ANNOUNCEMENTS:
+            due = self.service.due(2, "member")
+            self.assertIsNotNone(due)
+            self.service.mark_seen(due["id"], 2)
         self.assertIsNone(self.service.due(2, "member"))
 
     def test_member_announcement_audience_and_recurrence(self):

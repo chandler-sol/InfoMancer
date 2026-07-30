@@ -68,6 +68,24 @@ class AppSettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(AppSettingError, "Standard, Verbose, or Debug"):
             self.settings.validate_logging("everything")
 
+    def test_import_accepts_partial_portable_settings(self):
+        imported = self.settings.validate_import({
+            "timezone": "America/Chicago",
+            "log_level": "debug",
+        })
+        self.assertEqual(imported, {
+            "timezone": "America/Chicago",
+            "log_level": "debug",
+        })
+
+    def test_import_rejects_secrets_and_invalid_values(self):
+        with self.assertRaisesRegex(AppSettingError, "does not support"):
+            self.settings.validate_import({"tvdb_api_key": "secret"})
+        with self.assertRaisesRegex(AppSettingError, "recognized IANA time zone"):
+            self.settings.validate_import({"timezone": "Not/A_Zone"})
+        with self.assertRaisesRegex(AppSettingError, "must contain text"):
+            self.settings.validate_import({"default_cover_size": 200})
+
 
 if __name__ == "__main__":
     unittest.main()

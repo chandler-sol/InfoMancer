@@ -266,6 +266,15 @@ CREATE TABLE IF NOT EXISTS user_title_state (
     CHECK(personal_rating IS NULL OR (personal_rating >= 0 AND personal_rating <= 10))
 );
 
+CREATE TABLE IF NOT EXISTS user_episode_favorites (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expected_episode_id INTEGER NOT NULL REFERENCES expected_episodes(id) ON DELETE CASCADE,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(user_id, expected_episode_id)
+);
+
 CREATE TABLE IF NOT EXISTS user_tags (
     id INTEGER PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -280,6 +289,32 @@ CREATE TABLE IF NOT EXISTS title_tags (
     tag_id INTEGER NOT NULL REFERENCES user_tags(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(title_id, tag_id)
+);
+
+CREATE TABLE IF NOT EXISTS collections (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    artwork_filename TEXT,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS collection_titles (
+    collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    title_id INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(collection_id, title_id)
+);
+
+CREATE TABLE IF NOT EXISTS collection_episodes (
+    collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    expected_episode_id INTEGER NOT NULL REFERENCES expected_episodes(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(collection_id, expected_episode_id)
 );
 
 CREATE TABLE IF NOT EXISTS event_logs (
@@ -322,10 +357,24 @@ CREATE INDEX IF NOT EXISTS idx_user_title_state_favorite
     ON user_title_state(user_id, favorite, title_id);
 CREATE INDEX IF NOT EXISTS idx_user_title_state_order
     ON user_title_state(user_id, custom_order, title_id);
+CREATE INDEX IF NOT EXISTS idx_user_episode_favorites_user
+    ON user_episode_favorites(user_id, updated_at DESC, expected_episode_id);
+CREATE INDEX IF NOT EXISTS idx_user_episode_favorites_episode
+    ON user_episode_favorites(expected_episode_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_user_tags_name
     ON user_tags(user_id, name);
 CREATE INDEX IF NOT EXISTS idx_title_tags_title
     ON title_tags(title_id, tag_id);
+CREATE INDEX IF NOT EXISTS idx_collections_name
+    ON collections(name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_collection_titles_order
+    ON collection_titles(collection_id, position, title_id);
+CREATE INDEX IF NOT EXISTS idx_collection_titles_title
+    ON collection_titles(title_id, collection_id);
+CREATE INDEX IF NOT EXISTS idx_collection_episodes_order
+    ON collection_episodes(collection_id, position, expected_episode_id);
+CREATE INDEX IF NOT EXISTS idx_collection_episodes_episode
+    ON collection_episodes(expected_episode_id, collection_id);
 CREATE INDEX IF NOT EXISTS idx_event_logs_time
     ON event_logs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_event_logs_category
