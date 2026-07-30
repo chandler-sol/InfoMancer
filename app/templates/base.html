@@ -4,6 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', path='infomancer-icon.svg') }}" type="image/svg+xml">
+  <link rel="shortcut icon" href="{{ url_for('static', path='infomancer-icon.svg') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', path='infomancer-icon.svg') }}">
   <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v={{ static_version }}">
   <link rel="stylesheet" href="{{ url_for('static', path='progress.css') }}?v={{ static_version }}">
   <link rel="stylesheet" href="{{ url_for('static', path='library.css') }}?v={{ static_version }}">
@@ -19,9 +22,24 @@
   <script src="{{ url_for('static', path='engagement.js') }}?v={{ static_version }}" defer></script>
 </head>
 <body class="{% if current_user %}role-{{ current_user.role }} has-app-sidebar{% if current_user.high_contrast %} high-contrast{% endif %}{% else %}signed-out{% endif %}">
+  {% if current_user %}
+  <script>
+    try {
+      if (window.localStorage.getItem("infomancer-sidebar-collapsed") === "1") {
+        document.body.classList.add("sidebar-collapsed");
+      }
+    } catch (_error) {}
+  </script>
+  {% endif %}
   <header class="topbar">
-    <a class="brand" href="/"><span class="brand-mark">I</span><span class="brand-label">InfoMancer</span></a>
+    <a class="brand" href="/" aria-label="InfoMancer Home">
+      <img class="brand-lockup" src="{{ url_for('static', path='infomancer-lockup.svg') }}" alt="InfoMancer">
+      <img class="brand-icon" src="{{ url_for('static', path='infomancer-icon.svg') }}" alt="">
+    </a>
     {% if current_user %}
+    <button type="button" class="sidebar-collapse-toggle" id="sidebar-collapse-toggle" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"></path></svg>
+    </button>
     <div class="topbar-actions">
       <form class="global-search" id="global-search" method="get" action="/library" role="search">
         <label class="sr-only" for="global-search-input">Search the entire library</label>
@@ -183,6 +201,7 @@
       const menu = document.getElementById("site-menu");
       const menuToggle = document.getElementById("site-menu-toggle");
       const menuPanel = document.getElementById("site-menu-panel");
+      const sidebarToggle = document.getElementById("sidebar-collapse-toggle");
 
       const setSearchOpen = (open) => {
         search.classList.toggle("open", open);
@@ -238,6 +257,22 @@
       };
 
       if (!search || !searchToggle || !menu || !menuToggle || !menuPanel) return;
+      const setSidebarCollapsed = (collapsed) => {
+        document.body.classList.toggle("sidebar-collapsed", collapsed);
+        if (!sidebarToggle) return;
+        sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+        sidebarToggle.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+        sidebarToggle.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+        try {
+          window.localStorage.setItem("infomancer-sidebar-collapsed", collapsed ? "1" : "0");
+        } catch (_error) {}
+      };
+      if (sidebarToggle) {
+        setSidebarCollapsed(document.body.classList.contains("sidebar-collapsed"));
+        sidebarToggle.addEventListener("click", () => {
+          setSidebarCollapsed(!document.body.classList.contains("sidebar-collapsed"));
+        });
+      }
       searchToggle.addEventListener("click", () => {
         if (!search.classList.contains("open")) {
           setMenuOpen(false);

@@ -297,7 +297,7 @@
 
 .home-modern {
   display: grid;
-  gap: 18px;
+  gap: 14px;
 }
 
 .home-command {
@@ -307,7 +307,7 @@
   border: 1px solid var(--line);
   display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(290px, 0.65fr);
-  min-height: 390px;
+  min-height: 350px;
   overflow: hidden;
   position: relative;
 }
@@ -327,7 +327,7 @@
 .home-command-copy {
   align-content: center;
   display: grid;
-  padding: clamp(34px, 5vw, 68px);
+  padding: clamp(24px, 2.25vw, 32px);
   position: relative;
   z-index: 1;
 }
@@ -357,11 +357,11 @@
 
 .home-command h1 {
   font-family: var(--serif);
-  font-size: clamp(3.7rem, 7vw, 6.7rem);
+  font-size: clamp(3.5rem, 5.4vw, 5.2rem);
   font-weight: 400;
   letter-spacing: -0.065em;
   line-height: 0.86;
-  margin: 25px 0 28px;
+  margin: 13px 0 13px;
   max-width: 760px;
 }
 
@@ -373,7 +373,7 @@
 .home-command-copy > p:not(.eyebrow) {
   color: var(--muted);
   font-size: 1.08rem;
-  line-height: 1.65;
+  line-height: 1.5;
   margin: 0;
   max-width: 630px;
 }
@@ -383,7 +383,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 22px;
-  margin-top: 34px;
+  margin-top: 16px;
 }
 
 .home-command-actions > a {
@@ -418,7 +418,7 @@
   border-left: 1px solid var(--line);
   color: var(--text);
   display: grid;
-  padding: clamp(28px, 4vw, 48px);
+  padding: clamp(22px, 2.2vw, 30px);
   position: relative;
   text-decoration: none;
   z-index: 1;
@@ -501,7 +501,7 @@
 .home-intelligence-card > strong {
   color: var(--lime);
   font-family: var(--serif);
-  font-size: clamp(3.5rem, 6vw, 6rem);
+  font-size: clamp(3rem, 4.8vw, 4.8rem);
   font-weight: 400;
   line-height: 1;
 }
@@ -510,7 +510,7 @@
   font-family: var(--serif);
   font-size: 1.8rem;
   font-weight: 400;
-  margin: 3px 0 14px;
+  margin: 2px 0 8px;
 }
 
 .home-intelligence-card p {
@@ -528,7 +528,7 @@
 .home-health-line {
   background: var(--line);
   height: 3px;
-  margin-top: 26px;
+  margin-top: 12px;
   overflow: hidden;
 }
 
@@ -551,7 +551,7 @@
   display: grid;
   gap: 3px;
   min-width: 0;
-  padding: 22px 24px;
+  padding: 10px 18px;
   text-decoration: none;
 }
 
@@ -635,7 +635,7 @@
 .home-destinations,
 .home-organize {
   display: grid;
-  gap: 14px;
+  gap: 10px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
@@ -731,7 +731,7 @@
   gap: 15px;
   grid-template-columns: auto 1fr auto;
   min-width: 0;
-  padding: 20px;
+  padding: 14px 18px;
   text-decoration: none;
   transition: background 160ms ease, border-color 160ms ease;
 }
@@ -3282,8 +3282,8 @@ main.shell:has(> .detail-page-head + .movie-credits) {
   display: flex;
   font-weight: 700;
   justify-content: space-between;
-  margin-top: 18px;
-  padding: 13px 15px;
+  margin-top: 12px;
+  padding: 11px 14px;
   text-decoration: none;
 }
 
@@ -3299,8 +3299,8 @@ main.shell:has(> .detail-page-head + .movie-credits) {
   align-items: center;
   column-gap: 16px;
   grid-template-columns: 46px minmax(0, 1fr) auto;
-  min-height: 154px;
-  padding: 24px;
+  min-height: 112px;
+  padding: 17px 20px;
 }
 
 .home-destination-icon {
@@ -3317,8 +3317,8 @@ main.shell:has(> .detail-page-head + .movie-credits) {
 }
 
 .home-organize-icon {
-  height: 46px;
-  width: 46px;
+  height: 42px;
+  width: 42px;
 }
 
 .home-destination-copy {
@@ -3327,7 +3327,7 @@ main.shell:has(> .detail-page-head + .movie-credits) {
 }
 
 .home-destination-copy strong {
-  font-size: clamp(1.65rem, 2.5vw, 2.2rem);
+  font-size: clamp(1.5rem, 2.1vw, 1.95rem);
 }
 
 .home-destination > b {
