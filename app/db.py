@@ -361,6 +361,37 @@ CREATE TABLE IF NOT EXISTS mie_analysis_state (
     finding_count INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS mie_quality_profiles (
+    root_id INTEGER PRIMARY KEY REFERENCES roots(id) ON DELETE CASCADE,
+    minimum_width INTEGER,
+    minimum_height INTEGER,
+    minimum_bitrate INTEGER,
+    preferred_video_codecs TEXT NOT NULL DEFAULT '',
+    preferred_containers TEXT NOT NULL DEFAULT '',
+    minimum_audio_channels INTEGER,
+    dynamic_range TEXT NOT NULL DEFAULT 'any'
+        CHECK(dynamic_range IN ('any', 'sdr', 'hdr')),
+    detect_outliers INTEGER NOT NULL DEFAULT 1,
+    updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS duplicate_reviews (
+    file_a_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    file_b_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    decision TEXT NOT NULL DEFAULT 'active'
+        CHECK(decision IN ('active', 'ignored', 'not_duplicate')),
+    file_a_signature TEXT NOT NULL DEFAULT '',
+    file_b_signature TEXT NOT NULL DEFAULT '',
+    file_a_sha256 TEXT,
+    file_b_sha256 TEXT,
+    verified_at TEXT,
+    reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(file_a_id, file_b_id),
+    CHECK(file_a_id < file_b_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_titles_search ON titles(title, metadata_title);
 CREATE INDEX IF NOT EXISTS idx_titles_kind_root ON titles(kind, root_id);
 CREATE INDEX IF NOT EXISTS idx_titles_root ON titles(root_id);
@@ -418,6 +449,8 @@ CREATE INDEX IF NOT EXISTS idx_mie_findings_title
     ON mie_findings(title_id, status);
 CREATE INDEX IF NOT EXISTS idx_mie_findings_file
     ON mie_findings(file_id, status);
+CREATE INDEX IF NOT EXISTS idx_duplicate_reviews_decision
+    ON duplicate_reviews(decision, updated_at DESC);
 """
 
 

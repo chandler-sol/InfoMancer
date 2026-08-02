@@ -8,6 +8,7 @@
   </div>
   {% if current_user.is_librarian %}
   <form method="post" action="/library-health/analyze">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button class="button primary">Refresh analysis</button>
   </form>
   {% endif %}
@@ -30,6 +31,51 @@
   This library has not been analyzed yet.
   {% endif %}
 </div>
+
+{% if current_user.is_librarian %}
+<details class="panel mie-quality-profiles">
+  <summary>
+    <span><strong>Quality and consistency profiles</strong><small>Set expectations independently for each media source.</small></span>
+  </summary>
+  <p class="mie-profile-intro">Blank preferences are ignored. MIE only reports differences and never replaces, moves, or deletes a media file.</p>
+  <div class="mie-profile-list">
+    {% for profile in quality_profiles %}
+    <section class="mie-profile-card">
+      <header>
+        <div><h2>{{ profile.label or profile.path }}</h2><p>{{ profile.kind|title }} source{% if profile.configured %} · Last updated {{ local_time(profile.updated_at) }}{% endif %}</p></div>
+        <span class="mie-profile-state">{{ 'Configured' if profile.configured else 'Not configured' }}</span>
+      </header>
+      <form class="mie-profile-form" method="post" action="/library-health/quality-profiles/{{ profile.root_id }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Minimum width (pixels)<input name="minimum_width" inputmode="numeric" value="{{ profile.minimum_width or '' }}" placeholder="1920"></label>
+        <label>Minimum height (pixels)<input name="minimum_height" inputmode="numeric" value="{{ profile.minimum_height or '' }}" placeholder="1080"></label>
+        <label>Minimum bitrate (Mbps)<input name="minimum_bitrate_mbps" inputmode="decimal" value="{{ profile.minimum_bitrate_mbps }}" placeholder="8"></label>
+        <label>Preferred video codecs<input name="preferred_video_codecs" value="{{ profile.preferred_video_codecs }}" placeholder="HEVC, AV1"></label>
+        <label>Preferred containers<input name="preferred_containers" value="{{ profile.preferred_containers }}" placeholder="MATROSKA, MP4"></label>
+        <label>Minimum audio channels<input name="minimum_audio_channels" inputmode="numeric" value="{{ profile.minimum_audio_channels or '' }}" placeholder="6"></label>
+        <label>Dynamic range
+          <select name="dynamic_range">
+            <option value="any" {% if profile.dynamic_range == 'any' %}selected{% endif %}>Any</option>
+            <option value="sdr" {% if profile.dynamic_range == 'sdr' %}selected{% endif %}>Prefer SDR</option>
+            <option value="hdr" {% if profile.dynamic_range == 'hdr' %}selected{% endif %}>Prefer HDR</option>
+          </select>
+        </label>
+        <label class="mie-profile-checkbox"><input type="checkbox" name="detect_outliers" {% if profile.detect_outliers %}checked{% endif %}> Detect files that differ from a title's dominant technical profile</label>
+        <button class="button primary">Save and analyze</button>
+      </form>
+      {% if profile.configured %}
+      <form class="mie-profile-delete" method="post" action="/library-health/quality-profiles/{{ profile.root_id }}/delete">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button">Remove profile</button>
+      </form>
+      {% endif %}
+    </section>
+    {% else %}
+    <p>No enabled media sources are available. Add a source before creating a quality profile.</p>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
 
 <form class="panel mie-filters" method="get" action="/library-health">
   <label>Status
@@ -86,10 +132,12 @@
         <a class="button{% if finding.status == 'active' %} primary{% endif %}" href="{{ finding.href }}">Review affected media</a>
         {% if current_user.is_librarian and finding.status == 'active' %}
         <form method="post" action="/library-health/findings/{{ finding.id }}/dismiss">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <button class="button">Dismiss finding</button>
         </form>
         {% elif current_user.is_librarian and finding.status == 'dismissed' %}
         <form method="post" action="/library-health/findings/{{ finding.id }}/restore">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <button class="button">Restore finding</button>
         </form>
         {% endif %}

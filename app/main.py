@@ -36,6 +36,7 @@ from .auth import (
     secure_cookie_for,
 )
 from .db import Database
+from .duplicates import DuplicateService
 from .engagement import EngagementError, EngagementService, utc_from_local
 from .event_log import EventLog
 from .imdb import sync_genres
@@ -66,6 +67,7 @@ app_settings = AppSettings(db, settings.search_url_template)
 engagement = EngagementService(db)
 event_log = EventLog(db)
 mie = MediaIntelligenceEngine(db)
+duplicates = DuplicateService(db)
 engagement.seed_official()
 provider_secrets = ProviderSecretStore(
     settings.database.parent / "provider-secrets.enc", settings.application_secret
@@ -149,6 +151,8 @@ tv_match_job: dict = {"status": "idle"}
 tv_match_lock = threading.Lock()
 media_info_job: dict = {"status": "idle"}
 media_info_lock = threading.Lock()
+duplicate_verify_job: dict = {"status": "idle"}
+duplicate_verify_lock = threading.Lock()
 
 
 def record_event(
@@ -174,7 +178,7 @@ LIBRARIAN_GET_PREFIXES = (
     "/api/scan-all", "/api/movie-match-analysis", "/api/tv-match-analysis",
     "/api/logs",
     "/settings", "/getting-started",
-    "/logs", "/exports", "/media-info/failures", "/maintenance",
+    "/logs", "/exports", "/media-info/failures", "/maintenance", "/duplicates",
 )
 
 
@@ -2297,6 +2301,14 @@ def active_tasks() -> dict:
                 )
             ),
         })
+    with duplicate_verify_lock:
+        duplicate_job = dict(duplicate_verify_job)
+    if duplicate_job.get("status") in {"starting", "running"}:
+        tasks.append({
+            "id": "duplicate-verification",
+            "label": "Verifying duplicate files",
+            "detail": duplicate_job.get("detail") or "Reading both files byte for byte",
+        })
     # Scheduled work can be added here without changing the task-widget contract.
     return {"tasks": tasks, "scheduled": []}
 
@@ -2587,6 +2599,7 @@ def library_health(
                     "severity": severity, "category": category,
                     "categories": sorted(MIE_CATEGORIES),
                     "severities": ["critical", "warning", "information"],
+                    "quality_profiles": mie.quality_profiles(),
                     "message": "",
                     "error": (
                         "InfoMancer could not analyze the catalog because its "
@@ -2603,6 +2616,7 @@ def library_health(
         "status": status, "severity": severity, "category": category,
         "categories": sorted(MIE_CATEGORIES),
         "severities": ["critical", "warning", "information"],
+        "quality_profiles": mie.quality_profiles(),
         "message": request.query_params.get("message", ""),
         "error": "",
     })
@@ -2635,6 +2649,70 @@ def analyze_library_health(request: Request):
         "/library-health",
         f"Library Health refreshed. InfoMancer found {finding_count} current "
         f"issue{'s' if finding_count != 1 else ''}. No media files were changed.",
+    )
+
+
+@app.post("/library-health/quality-profiles/{root_id}")
+def save_library_quality_profile(
+    request: Request, root_id: int,
+    minimum_width: str = Form(""), minimum_height: str = Form(""),
+    minimum_bitrate_mbps: str = Form(""),
+    preferred_video_codecs: str = Form(""),
+    preferred_containers: str = Form(""),
+    minimum_audio_channels: str = Form(""),
+    dynamic_range: str = Form("any"), detect_outliers: str = Form(""),
+):
+    try:
+        mie.save_quality_profile(
+            root_id,
+            minimum_width=minimum_width,
+            minimum_height=minimum_height,
+            minimum_bitrate_mbps=minimum_bitrate_mbps,
+            preferred_video_codecs=preferred_video_codecs,
+            preferred_containers=preferred_containers,
+            minimum_audio_channels=minimum_audio_channels,
+            dynamic_range=dynamic_range,
+            detect_outliers=detect_outliers == "on",
+            user_id=request.state.user.id,
+        )
+        finding_count = mie.analyze()
+    except (ValueError, sqlite3.Error) as exc:
+        record_event(
+            "mie", "A Library Health quality profile could not be saved.",
+            level="error", detail=str(exc), context={"root_id": root_id},
+            user_id=request.state.user.id,
+        )
+        return redirect(
+            "/library-health",
+            f"The quality profile was not saved. {exc}",
+        )
+    record_event(
+        "mie", "A Library Health quality profile was saved.",
+        context={"root_id": root_id, "finding_count": finding_count},
+        user_id=request.state.user.id,
+    )
+    return redirect(
+        "/library-health",
+        "Quality profile saved and Library Health refreshed. No media files were changed.",
+    )
+
+
+@app.post("/library-health/quality-profiles/{root_id}/delete")
+def delete_library_quality_profile(request: Request, root_id: int):
+    if not mie.delete_quality_profile(root_id):
+        return redirect(
+            "/library-health",
+            "That quality profile no longer exists. Refresh Library Health to see current settings.",
+        )
+    finding_count = mie.analyze()
+    record_event(
+        "mie", "A Library Health quality profile was removed.",
+        context={"root_id": root_id, "finding_count": finding_count},
+        user_id=request.state.user.id,
+    )
+    return redirect(
+        "/library-health",
+        "Quality profile removed and related findings refreshed. No media files were changed.",
     )
 
 
@@ -2671,6 +2749,111 @@ def restore_library_health_finding(request: Request, finding_id: int):
     return redirect(
         "/library-health?status=dismissed",
         "Finding restored to the active Library Health list.",
+    )
+
+
+@app.get("/duplicates", response_class=HTMLResponse)
+def duplicate_review(request: Request, status: str = "active"):
+    status = status if status in {"active", "ignored", "not_duplicate"} else "active"
+    return templates.TemplateResponse(request, "duplicates.html", {
+        "candidates": duplicates.candidates(status=status),
+        "status": status,
+        "message": request.query_params.get("message", ""),
+    })
+
+
+@app.post("/duplicates/{file_a_id}/{file_b_id}/decision")
+def decide_duplicate(
+    request: Request, file_a_id: int, file_b_id: int,
+    decision: str = Form(...),
+):
+    labels = {
+        "ignored": (
+            "Candidate ignored. It will return if either file changes so the new "
+            "version can be reviewed."
+        ),
+        "not_duplicate": (
+            "Files marked as intentional alternatives. InfoMancer will not show "
+            "this pair as an active duplicate candidate."
+        ),
+        "active": "Candidate restored to the active duplicate review list.",
+    }
+    if decision not in labels:
+        return redirect(
+            "/duplicates",
+            "That review choice was not recognized, so nothing changed. Refresh the page and try again.",
+        )
+    if not duplicates.decide(file_a_id, file_b_id, decision, request.state.user.id):
+        return redirect(
+            "/duplicates",
+            "InfoMancer could not save that choice because one or both files are no longer in the catalog. Rescan the source and review the current candidates.",
+        )
+    record_event(
+        "duplicates", labels[decision],
+        context={"file_a_id": file_a_id, "file_b_id": file_b_id, "decision": decision},
+        user_id=request.state.user.id,
+    )
+    destination = "/duplicates"
+    return redirect(destination, labels[decision])
+
+
+@app.post("/duplicates/{file_a_id}/{file_b_id}/verify")
+def verify_duplicate(request: Request, file_a_id: int, file_b_id: int):
+    with duplicate_verify_lock:
+        if duplicate_verify_job.get("status") in {"starting", "running"}:
+            return redirect(
+                "/duplicates",
+                "A duplicate verification is already running. Its progress is shown in the task panel.",
+            )
+        duplicate_verify_job.clear()
+        duplicate_verify_job.update({
+            "status": "starting",
+            "detail": "Preparing to read both files byte for byte",
+        })
+
+    user_id = request.state.user.id
+
+    def run_verification() -> None:
+        try:
+            with duplicate_verify_lock:
+                duplicate_verify_job.update({
+                    "status": "running",
+                    "detail": "Reading both files byte for byte; large files may take several minutes",
+                })
+            result = duplicates.verify(file_a_id, file_b_id, user_id)
+            message = (
+                "Verification finished: the files are byte-for-byte identical. "
+                "InfoMancer did not delete or move either file."
+                if result == "exact" else
+                "Verification finished: the files contain different bytes. They may be "
+                "different encodes or editions, and InfoMancer did not change either file."
+            )
+            record_event(
+                "duplicates", message,
+                context={"file_a_id": file_a_id, "file_b_id": file_b_id, "result": result},
+                user_id=user_id,
+            )
+            with duplicate_verify_lock:
+                duplicate_verify_job.update({
+                    "status": "complete", "detail": message, "result": result,
+                })
+        except (OSError, ValueError) as exc:
+            message = str(exc)
+            record_event(
+                "duplicates", "Duplicate verification could not be completed.",
+                level="error", detail=message,
+                context={"file_a_id": file_a_id, "file_b_id": file_b_id},
+                user_id=user_id,
+            )
+            with duplicate_verify_lock:
+                duplicate_verify_job.update({
+                    "status": "error", "detail": message, "error": message,
+                })
+
+    threading.Thread(target=run_verification, daemon=True).start()
+    return redirect(
+        "/duplicates",
+        "Verification started in the background. InfoMancer will read both files without changing them; progress is shown in the task panel.",
     )
 
 

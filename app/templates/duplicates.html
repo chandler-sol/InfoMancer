@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Duplicate Review - {{ app_name }}{% endblock %}
+{% block content %}
+<section class="mie-hero duplicate-hero">
+  <div>
+    <p class="eyebrow">MEDIA INTELLIGENCE ENGINE</p>
+    <h1>Duplicate Review</h1>
+    <p>Compare files that appear to represent the same movie or TV episode. InfoMancer explains the evidence and never deletes media automatically.</p>
+  </div>
+  <a class="button" href="/library-health">Back to Library Health</a>
+</section>
+
+{% if message %}<div class="notice" role="status">{{ message }}</div>{% endif %}
+
+<nav class="duplicate-tabs" aria-label="Duplicate review status">
+  <a href="/duplicates" {% if status == 'active' %}class="active"{% endif %}>Needs review</a>
+  <a href="/duplicates?status=ignored" {% if status == 'ignored' %}class="active"{% endif %}>Ignored</a>
+  <a href="/duplicates?status=not_duplicate" {% if status == 'not_duplicate' %}class="active"{% endif %}>Intentional alternatives</a>
+</nav>
+
+<section class="duplicate-list">
+{% for candidate in candidates %}
+  <article class="panel duplicate-candidate duplicate-{{ candidate.classification }}">
+    <header>
+      <div>
+        <div class="mie-labels"><span>{{ candidate.kind|upper }}</span><span>{{ candidate.label }}</span></div>
+        <h2><a href="/titles/{{ candidate.title_id }}">{{ candidate.title_name }}</a></h2>
+      </div>
+      {% if candidate.verified_at %}<span class="duplicate-verified">Hash verified</span>{% endif %}
+    </header>
+    <div class="duplicate-reason"><strong>Why it was flagged</strong><p>{{ candidate.explanation }}</p></div>
+    <div class="duplicate-comparison">
+      {% for file in [candidate.file_a, candidate.file_b] %}
+      <section class="duplicate-file{% if file.id == candidate.preferred_id %} preferred{% endif %}">
+        <div class="duplicate-file-heading">
+          <h3>{{ file.filename }}</h3>
+          {% if file.id == candidate.preferred_id %}<span>Stronger technical profile</span>{% endif %}
+        </div>
+        <dl>
+          <div><dt>Source</dt><dd>{{ file.root_label }}</dd></div>
+          <div><dt>Size</dt><dd>{{ format_bytes(file.size_bytes) }}</dd></div>
+          <div><dt>Runtime</dt><dd>{% if file.runtime_seconds %}{{ (file.runtime_seconds / 60)|round(1) }} min{% else %}Not inspected{% endif %}</dd></div>
+          <div><dt>Resolution</dt><dd>{{ file.resolution }}</dd></div>
+          <div><dt>Video</dt><dd>{{ file.video_codec }}</dd></div>
+          <div><dt>Audio</dt><dd>{{ file.audio_codec }}</dd></div>
+          <div><dt>Dynamic range</dt><dd>{{ file.dynamic_range }}</dd></div>
+          <div><dt>Container</dt><dd>{{ file.container }}</dd></div>
+        </dl>
+        <details><summary>Show full path</summary><p class="path">{{ file.path }}</p></details>
+      </section>
+      {% endfor %}
+    </div>
+    <div class="duplicate-advice"><strong>Recommendation</strong><p>{{ candidate.recommendation }}</p></div>
+    <div class="duplicate-recovery">
+      <strong>Storage-recovery evidence</strong>
+      <p>Recommended copy to preserve first: <b>{{ candidate.recommended_keep }}</b></p>
+      <ul>{% for reason in candidate.recovery_reasons %}<li>{{ reason }}</li>{% endfor %}</ul>
+      <p class="muted">MIE never considers either copy safe to remove automatically. Verify playback, editions, backups, and storage availability before making a manual change.</p>
+    </div>
+    <div class="actions duplicate-actions">
+      {% if status == 'active' %}
+      <form method="post" action="/duplicates/{{ candidate.file_a.id }}/{{ candidate.file_b.id }}/verify">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button">Verify file contents</button>
+      </form>
+      <form method="post" action="/duplicates/{{ candidate.file_a.id }}/{{ candidate.file_b.id }}/decision">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="ignored">
+        <button class="button">Ignore for now</button>
+      </form>
+      <form method="post" action="/duplicates/{{ candidate.file_a.id }}/{{ candidate.file_b.id }}/decision">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="not_duplicate">
+        <button class="button">Keep as intentional alternatives</button>
+      </form>
+      {% else %}
+      <form method="post" action="/duplicates/{{ candidate.file_a.id }}/{{ candidate.file_b.id }}/decision">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="active">
+        <button class="button primary">Return to review</button>
+      </form>
+      {% endif %}
+    </div>
+  </article>
+{% else %}
+  <div class="panel mie-empty"><span aria-hidden="true">&#10003;</span><div><h2>No duplicate candidates here</h2><p>{% if status == 'active' %}InfoMancer did not find overlapping catalog identities that still need review.{% else %}No pairs have been placed in this review state.{% endif %}</p></div></div>
+{% endfor %}
+</section>
+{% endblock %}
