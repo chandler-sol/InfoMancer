@@ -43,6 +43,15 @@ class EngagementTests(unittest.TestCase):
             self.service.mark_seen(due["id"], 2)
         self.assertIsNone(self.service.due(2, "member"))
 
+    def test_since_0_4_release_notes_cover_current_safety_features(self):
+        release = next(
+            item for item in OFFICIAL_ANNOUNCEMENTS
+            if item["source_key"] == "release-notes-since-0.4-2026-08-06"
+        )
+        self.assertIn("transparent category scores", release["body"])
+        self.assertIn("SHA-256", release["body"])
+        self.assertIn("never deletes media automatically", release["body"])
+
     def test_member_announcement_audience_and_recurrence(self):
         announcement_id = self.service.create(
             "Server maintenance", "The library will be briefly unavailable.",

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.db import Database
 from app.duplicates import DuplicateService
+from app.duplicate_trash import DuplicateTrashError, DuplicateTrashService
 
 
 class DuplicateServiceTests(unittest.TestCase):
@@ -15,6 +16,7 @@ class DuplicateServiceTests(unittest.TestCase):
         self.database = Database(self.base / "catalog.db")
         self.database.initialize()
         self.service = DuplicateService(self.database)
+        self.trash = DuplicateTrashService(self.database)
         with self.database.connect() as conn:
             conn.execute(
                 "INSERT INTO roots(id,path,kind,label) VALUES (1,?,'movie','Movies')",
@@ -54,6 +56,10 @@ class DuplicateServiceTests(unittest.TestCase):
             "Higher stored resolution" in reason
             for reason in candidates[0]["recovery_reasons"]
         ))
+        opportunity = self.service.recovery_opportunity(candidates)
+        self.assertEqual(opportunity["files"], 1)
+        self.assertEqual(opportunity["bytes"], 5)
+        self.assertEqual(opportunity["likely_files"], 1)
 
     def test_ignore_returns_only_after_a_file_changes(self):
         self.assertTrue(self.service.decide(1, 2, "ignored", None))
@@ -87,6 +93,60 @@ class DuplicateServiceTests(unittest.TestCase):
         with self.database.connect() as conn:
             conn.execute("UPDATE files SET episode_start=1,episode_end=2 WHERE id=2")
         self.assertEqual(len(self.service.candidates()), 1)
+
+    def test_selected_duplicate_can_be_trashed_and_restored(self):
+        original = self.base / "first.mkv"
+        original.write_bytes(b"first")
+        trash_id = self.trash.move(1, 30, None)
+        self.assertFalse(original.exists())
+        self.assertEqual(len(self.trash.items()), 1)
+        self.assertEqual(self.trash.impact()["pending_bytes"], 5)
+        self.assertEqual(self.trash.impact()["reclaimed_bytes"], 0)
+        pending = self.trash.history("pending")
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["action_label"], "Moved to managed Trash")
+        self.assertEqual(pending[0]["size_bytes"], 5)
+        with self.database.connect() as conn:
+            self.assertIsNone(conn.execute("SELECT id FROM files WHERE id=1").fetchone())
+        restored = self.trash.restore(trash_id)
+        self.assertEqual(restored, str(original))
+        self.assertTrue(original.exists())
+        with self.database.connect() as conn:
+            row = conn.execute("SELECT path FROM files WHERE title_id=1 AND filename='first.mkv'").fetchone()
+        self.assertEqual(row["path"], str(original))
+        self.assertEqual(self.trash.impact()["handled_bytes"], 0)
+        restored_history = self.trash.history("restored")
+        self.assertEqual(len(restored_history), 1)
+        self.assertEqual(restored_history[0]["status"], "restored")
+
+    def test_manual_removal_is_verified_before_catalog_update(self):
+        original = self.base / "first.mkv"
+        original.write_bytes(b"still here")
+        with self.assertRaises(DuplicateTrashError):
+            self.trash.verify_manually_removed(1)
+        original.unlink()
+        self.assertEqual(self.trash.verify_manually_removed(1), str(original))
+        with self.database.connect() as conn:
+            self.assertIsNone(conn.execute("SELECT id FROM files WHERE id=1").fetchone())
+        self.assertEqual(self.trash.impact()["reclaimed_bytes"], 5)
+        self.assertEqual(self.trash.impact()["reclaimed_files"], 1)
+        manual_history = self.trash.history("manual")
+        self.assertEqual(len(manual_history), 1)
+        self.assertEqual(manual_history[0]["status"], "manual_deleted")
+
+    def test_purged_trash_counts_as_reclaimed_storage(self):
+        original = self.base / "first.mkv"
+        original.write_bytes(b"first")
+        self.trash.move(1, 0, None)
+        with self.database.connect() as conn:
+            conn.execute("UPDATE duplicate_trash SET purge_after='2000-01-01T00:00:00+00:00'")
+        self.assertEqual(self.trash.purge_expired(), 1)
+        impact = self.trash.impact()
+        self.assertEqual(impact["pending_bytes"], 0)
+        self.assertEqual(impact["reclaimed_bytes"], 5)
+        purged_history = self.trash.history("purged")
+        self.assertEqual(len(purged_history), 1)
+        self.assertEqual(purged_history[0]["status"], "purged")
 
 
 if __name__ == "__main__":

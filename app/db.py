@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -376,6 +377,52 @@ CREATE TABLE IF NOT EXISTS mie_quality_profiles (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS mie_calibration (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    identity_warning_threshold INTEGER NOT NULL DEFAULT 70,
+    source_stale_hours INTEGER NOT NULL DEFAULT 24,
+    critical_weight INTEGER NOT NULL DEFAULT 20,
+    warning_weight INTEGER NOT NULL DEFAULT 8,
+    information_weight INTEGER NOT NULL DEFAULT 2,
+    updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS mie_analysis_runs (
+    id INTEGER PRIMARY KEY,
+    analyzed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    active_findings INTEGER NOT NULL DEFAULT 0,
+    suppressed_findings INTEGER NOT NULL DEFAULT 0,
+    overall_score INTEGER NOT NULL DEFAULT 100
+);
+
+CREATE TABLE IF NOT EXISTS mie_category_scores (
+    run_id INTEGER NOT NULL REFERENCES mie_analysis_runs(id) ON DELETE CASCADE,
+    category TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    critical_count INTEGER NOT NULL DEFAULT 0,
+    warning_count INTEGER NOT NULL DEFAULT 0,
+    information_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(run_id, category)
+);
+
+CREATE TABLE IF NOT EXISTS mie_feedback (
+    id INTEGER PRIMARY KEY,
+    finding_fingerprint TEXT NOT NULL,
+    rule_key TEXT NOT NULL,
+    root_id INTEGER REFERENCES roots(id) ON DELETE CASCADE,
+    title_id INTEGER REFERENCES titles(id) ON DELETE CASCADE,
+    file_id INTEGER REFERENCES files(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL CHECK(reason IN (
+        'expected','incorrect','resolved_elsewhere','other'
+    )),
+    scope TEXT NOT NULL CHECK(scope IN ('finding','title','source')),
+    note TEXT NOT NULL DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS duplicate_reviews (
     file_a_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
     file_b_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
@@ -392,11 +439,45 @@ CREATE TABLE IF NOT EXISTS duplicate_reviews (
     CHECK(file_a_id < file_b_id)
 );
 
+CREATE TABLE IF NOT EXISTS duplicate_trash (
+    id INTEGER PRIMARY KEY,
+    original_file_id INTEGER,
+    title_id INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
+    root_id INTEGER REFERENCES roots(id) ON DELETE SET NULL,
+    original_path TEXT NOT NULL,
+    trash_path TEXT NOT NULL UNIQUE,
+    file_snapshot TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'trashed'
+        CHECK(status IN ('trashed', 'restored', 'purged', 'missing')),
+    moved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    moved_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    purge_after TEXT,
+    restored_at TEXT,
+    purged_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS duplicate_manual_removals (
+    id INTEGER PRIMARY KEY,
+    original_file_id INTEGER,
+    title_id INTEGER REFERENCES titles(id) ON DELETE SET NULL,
+    root_id INTEGER REFERENCES roots(id) ON DELETE SET NULL,
+    path TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    verified_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    verified_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_titles_search ON titles(title, metadata_title);
 CREATE INDEX IF NOT EXISTS idx_titles_kind_root ON titles(kind, root_id);
 CREATE INDEX IF NOT EXISTS idx_titles_root ON titles(root_id);
 CREATE INDEX IF NOT EXISTS idx_files_episode ON files(title_id, season, episode_start);
 CREATE INDEX IF NOT EXISTS idx_files_title_filename ON files(title_id, filename);
+CREATE INDEX IF NOT EXISTS idx_duplicate_trash_status
+    ON duplicate_trash(status, purge_after, moved_at DESC);
+CREATE INDEX IF NOT EXISTS idx_duplicate_manual_removals_verified
+    ON duplicate_manual_removals(verified_at DESC);
 CREATE INDEX IF NOT EXISTS idx_expected_episode ON expected_episodes(title_id, season, episode);
 CREATE INDEX IF NOT EXISTS idx_expected_aired ON expected_episodes(title_id, season, aired);
 CREATE INDEX IF NOT EXISTS idx_title_credits_title ON title_credits(title_id, role, billing_order);
@@ -449,6 +530,10 @@ CREATE INDEX IF NOT EXISTS idx_mie_findings_title
     ON mie_findings(title_id, status);
 CREATE INDEX IF NOT EXISTS idx_mie_findings_file
     ON mie_findings(file_id, status);
+CREATE INDEX IF NOT EXISTS idx_mie_feedback_active
+    ON mie_feedback(active, rule_key, scope);
+CREATE INDEX IF NOT EXISTS idx_mie_analysis_runs_time
+    ON mie_analysis_runs(analyzed_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_duplicate_reviews_decision
     ON duplicate_reviews(decision, updated_at DESC);
 """
@@ -525,6 +610,25 @@ class Database:
             for name, column_type in user_additions.items():
                 if name not in user_columns:
                     conn.execute(f"ALTER TABLE users ADD COLUMN {name} {column_type}")
+            trash_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(duplicate_trash)")
+            }
+            if "size_bytes" not in trash_columns:
+                conn.execute(
+                    "ALTER TABLE duplicate_trash ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0"
+                )
+                for row in conn.execute(
+                    "SELECT id,file_snapshot FROM duplicate_trash WHERE size_bytes=0"
+                ).fetchall():
+                    try:
+                        snapshot = json.loads(row["file_snapshot"] or "{}")
+                        size_bytes = max(0, int(snapshot.get("size_bytes") or 0))
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        size_bytes = 0
+                    conn.execute(
+                        "UPDATE duplicate_trash SET size_bytes=? WHERE id=?",
+                        (size_bytes, row["id"]),
+                    )
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

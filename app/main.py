@@ -12,6 +12,7 @@ import sqlite3
 import tempfile
 import threading
 import time
+import zipfile
 import urllib.error
 import urllib.request
 from xml.etree import ElementTree
@@ -37,6 +38,7 @@ from .auth import (
 )
 from .db import Database
 from .duplicates import DuplicateService
+from .duplicate_trash import DuplicateTrashError, DuplicateTrashService
 from .engagement import EngagementError, EngagementService, utc_from_local
 from .event_log import EventLog
 from .imdb import sync_genres
@@ -47,6 +49,7 @@ from .mie import MediaIntelligenceEngine
 from .maintenance import (
     MaintenanceError, create_database_backup, install_database_backup,
     list_database_backups, read_update_status, resolve_backup,
+    validate_database_backup,
     write_update_request, write_update_status,
 )
 from .naming import (
@@ -68,6 +71,7 @@ engagement = EngagementService(db)
 event_log = EventLog(db)
 mie = MediaIntelligenceEngine(db)
 duplicates = DuplicateService(db)
+duplicate_trash = DuplicateTrashService(db)
 engagement.seed_official()
 provider_secrets = ProviderSecretStore(
     settings.database.parent / "provider-secrets.enc", settings.application_secret
@@ -78,7 +82,7 @@ try:
 except ProviderSecretError as exc:
     stored_provider_secrets = {}
     provider_secret_error = str(exc)
-APP_VERSION = "0.5.0-alpha.1"
+APP_VERSION = "0.5.0-alpha.2"
 app = FastAPI(title="InfoMancer", version=APP_VERSION)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "app" / "static"), name="static")
 COLLECTION_ART_DIR = settings.database.parent / "collection-art"
@@ -153,6 +157,47 @@ media_info_job: dict = {"status": "idle"}
 media_info_lock = threading.Lock()
 duplicate_verify_job: dict = {"status": "idle"}
 duplicate_verify_lock = threading.Lock()
+trash_cleanup_job: dict = {"status": "idle"}
+trash_cleanup_lock = threading.Lock()
+trash_cleanup_last_check = 0.0
+
+
+def trash_retention_days() -> int | None:
+    value = app_settings.get("trash_retention_days")
+    return None if value == "never" else int(value)
+
+
+def maybe_start_trash_cleanup() -> None:
+    """Check for expired managed-trash items at most once per day."""
+    global trash_cleanup_last_check
+    now = time.time()
+    with trash_cleanup_lock:
+        if now - trash_cleanup_last_check < 86_400:
+            return
+        trash_cleanup_last_check = now
+        trash_cleanup_job.clear()
+        trash_cleanup_job.update({"status": "starting", "detail": "Checking retention dates"})
+
+    def run() -> None:
+        try:
+            with trash_cleanup_lock:
+                trash_cleanup_job.update({
+                    "status": "running", "detail": "Removing expired managed-trash items",
+                })
+            purged = duplicate_trash.purge_expired()
+            with trash_cleanup_lock:
+                trash_cleanup_job.update({
+                    "status": "complete", "detail": f"{purged:,} expired item(s) removed",
+                })
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            with trash_cleanup_lock:
+                trash_cleanup_job.update({
+                    "status": "error",
+                    "detail": "Trash cleanup could not finish. Open Logs for details.",
+                    "error": str(exc),
+                })
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 def record_event(
@@ -2165,6 +2210,7 @@ def imdb_genre_status() -> dict:
 
 @app.get("/api/tasks")
 def active_tasks() -> dict:
+    maybe_start_trash_cleanup()
     tasks = []
     with scan_all_lock:
         all_scan = dict(scan_all_job)
@@ -2267,9 +2313,15 @@ def active_tasks() -> dict:
     with movie_match_lock:
         match_job = dict(movie_match_job)
     if match_job.get("status") in {"starting", "running"}:
+        match_mode = match_job.get("mode")
+        match_label = (
+            "Analyzing selected movie matches"
+            if match_mode == "selected"
+            else "Analyzing movie matches"
+        )
         tasks.append({
             "id": "movie-match-analysis",
-            "label": "Analyzing movie matches",
+            "label": match_label,
             "detail": (
                 f"{match_job.get('processed', 0):,} of {match_job.get('total', 0):,} checked"
                 + (f" · {match_job.get('matched', 0):,} suggestions found" if match_job.get("processed") else "")
@@ -2308,6 +2360,14 @@ def active_tasks() -> dict:
             "id": "duplicate-verification",
             "label": "Verifying duplicate files",
             "detail": duplicate_job.get("detail") or "Reading both files byte for byte",
+        })
+    with trash_cleanup_lock:
+        cleanup_job = dict(trash_cleanup_job)
+    if cleanup_job.get("status") in {"starting", "running"}:
+        tasks.append({
+            "id": "duplicate-trash-cleanup",
+            "label": "Cleaning managed trash",
+            "detail": cleanup_job.get("detail") or "Checking retention dates",
         })
     # Scheduled work can be added here without changing the task-widget contract.
     return {"tasks": tasks, "scheduled": []}
@@ -2600,6 +2660,11 @@ def library_health(
                     "categories": sorted(MIE_CATEGORIES),
                     "severities": ["critical", "warning", "information"],
                     "quality_profiles": mie.quality_profiles(),
+                    "calibration": mie.calibration(),
+                    "category_scores": mie.category_scores(),
+                    "analysis_history": mie.analysis_history(),
+                    "feedback_rules": mie.feedback(),
+                    "duplicate_impact": duplicate_trash.impact(),
                     "message": "",
                     "error": (
                         "InfoMancer could not analyze the catalog because its "
@@ -2617,9 +2682,30 @@ def library_health(
         "categories": sorted(MIE_CATEGORIES),
         "severities": ["critical", "warning", "information"],
         "quality_profiles": mie.quality_profiles(),
+        "calibration": mie.calibration(),
+        "category_scores": mie.category_scores(),
+        "analysis_history": mie.analysis_history(),
+        "feedback_rules": mie.feedback(),
+        "duplicate_impact": duplicate_trash.impact(),
         "message": request.query_params.get("message", ""),
         "error": "",
     })
+
+
+@app.get("/storage-intelligence", response_class=HTMLResponse)
+def storage_intelligence(request: Request):
+    return templates.TemplateResponse(request, "storage_intelligence.html", {
+        "report": mie.storage_report(),
+        "duplicate_impact": duplicate_trash.impact(),
+    })
+
+
+@app.get("/titles/{title_id}/identity", response_class=HTMLResponse)
+def title_identity(request: Request, title_id: int):
+    report = mie.identity_report(title_id)
+    if report is None:
+        raise HTTPException(404, "That library title no longer exists.")
+    return templates.TemplateResponse(request, "identity_report.html", {"report": report})
 
 
 @app.post("/library-health/analyze")
@@ -2697,6 +2783,44 @@ def save_library_quality_profile(
     )
 
 
+@app.post("/library-health/calibration")
+def save_library_health_calibration(
+    request: Request,
+    identity_warning_threshold: str = Form("70"),
+    source_stale_hours: str = Form("24"),
+    critical_weight: str = Form("20"),
+    warning_weight: str = Form("8"),
+    information_weight: str = Form("2"),
+):
+    try:
+        mie.save_calibration(
+            identity_warning_threshold=identity_warning_threshold,
+            source_stale_hours=source_stale_hours,
+            critical_weight=critical_weight,
+            warning_weight=warning_weight,
+            information_weight=information_weight,
+            user_id=request.state.user.id,
+        )
+        finding_count = mie.analyze()
+    except (ValueError, sqlite3.Error) as exc:
+        record_event(
+            "mie", "Library Health calibration could not be saved.",
+            level="error", detail=str(exc), context={"operation": "calibration"},
+            user_id=request.state.user.id,
+        )
+        return redirect(
+            "/library-health", f"Calibration was not saved. {exc} Correct the settings and try again."
+        )
+    record_event(
+        "mie", "Library Health calibration was saved.",
+        context={"finding_count": finding_count}, user_id=request.state.user.id,
+    )
+    return redirect(
+        "/library-health",
+        "Calibration saved and Library Health refreshed. No media files were changed.",
+    )
+
+
 @app.post("/library-health/quality-profiles/{root_id}/delete")
 def delete_library_quality_profile(request: Request, root_id: int):
     if not mie.delete_quality_profile(root_id):
@@ -2717,8 +2841,19 @@ def delete_library_quality_profile(request: Request, root_id: int):
 
 
 @app.post("/library-health/findings/{finding_id}/dismiss")
-def dismiss_library_health_finding(request: Request, finding_id: int):
-    if not mie.dismiss(finding_id, request.state.user.id):
+def dismiss_library_health_finding(
+    request: Request, finding_id: int, reason: str = Form("other"),
+    scope: str = Form("finding"), note: str = Form(""),
+):
+    try:
+        dismissed = mie.dismiss(
+            finding_id, request.state.user.id, reason=reason, scope=scope, note=note,
+        )
+    except ValueError as exc:
+        return redirect(
+            "/library-health", f"The finding was not dismissed. {exc} Review the feedback and try again."
+        )
+    if not dismissed:
         return redirect(
             "/library-health",
             "That finding was not dismissed because it is no longer active. "
@@ -2726,11 +2861,12 @@ def dismiss_library_health_finding(request: Request, finding_id: int):
         )
     record_event(
         "mie", f"Library Health finding {finding_id} was dismissed.",
-        context={"finding_id": finding_id}, user_id=request.state.user.id,
+        context={"finding_id": finding_id, "reason": reason, "scope": scope},
+        user_id=request.state.user.id,
     )
     return redirect(
         "/library-health",
-        "Finding dismissed. It remains available under Dismissed findings.",
+        "Feedback saved and finding dismissed. MIE will apply that correction to the selected scope.",
     )
 
 
@@ -2752,14 +2888,262 @@ def restore_library_health_finding(request: Request, finding_id: int):
     )
 
 
+@app.post("/library-health/feedback/{feedback_id}/delete")
+def delete_library_health_feedback(request: Request, feedback_id: int):
+    if not mie.delete_feedback(feedback_id):
+        return redirect(
+            "/library-health",
+            "That learned exception was not removed because it is no longer active. Refresh and try again.",
+        )
+    finding_count = mie.analyze()
+    record_event(
+        "mie", f"Library Health feedback {feedback_id} was removed.",
+        context={"feedback_id": feedback_id, "finding_count": finding_count},
+        user_id=request.state.user.id,
+    )
+    return redirect(
+        "/library-health",
+        "Learned exception removed and Library Health refreshed. Matching findings may appear again.",
+    )
+
+
 @app.get("/duplicates", response_class=HTMLResponse)
-def duplicate_review(request: Request, status: str = "active"):
+def duplicate_review(
+    request: Request, status: str = "active", evidence: str | None = None,
+    refresh: bool = False, cleanup_status: str = "all", q: str = "",
+    source: str = "", sort: str = "confidence",
+):
     status = status if status in {"active", "ignored", "not_duplicate"} else "active"
+    evidence = evidence if evidence in {"strong", "alternate", "all"} else (
+        "strong" if status == "active" else "all"
+    )
+    all_candidates = duplicates.candidates(status=status)
+    cleanup_status = cleanup_status if cleanup_status in {
+        "all", "pending", "purged", "restored", "manual",
+    } else "all"
+    duplicate_opportunity = duplicates.recovery_opportunity(all_candidates)
+    duplicate_impact = duplicate_trash.impact()
+    cleanup_history = duplicate_trash.history(cleanup_status, limit=50)
+    counts = {
+        "verified_exact": sum(
+            candidate["classification"] == "verified_exact"
+            for candidate in all_candidates
+        ),
+        "likely": sum(
+            candidate["classification"] == "likely"
+            for candidate in all_candidates
+        ),
+        "alternate": sum(
+            candidate["classification"] == "alternate"
+            for candidate in all_candidates
+        ),
+    }
+    if evidence == "strong":
+        candidates = [
+            candidate for candidate in all_candidates
+            if candidate["classification"] in {"verified_exact", "likely"}
+        ]
+    elif evidence == "alternate":
+        candidates = [
+            candidate for candidate in all_candidates
+            if candidate["classification"] == "alternate"
+        ]
+    else:
+        candidates = all_candidates
+    source_options = sorted({
+        (str(item["file_a"].get("root_id") or ""), item["file_a"]["root_label"])
+        for item in all_candidates
+    } | {
+        (str(item["file_b"].get("root_id") or ""), item["file_b"]["root_label"])
+        for item in all_candidates
+    }, key=lambda item: item[1].casefold())
+    query = q.strip().casefold()
+    if query:
+        candidates = [item for item in candidates if query in " ".join([
+            item["title_name"], item["file_a"]["filename"], item["file_a"]["path"],
+            item["file_b"]["filename"], item["file_b"]["path"],
+        ]).casefold()]
+    if source:
+        candidates = [item for item in candidates if source in {
+            str(item["file_a"].get("root_id") or ""),
+            str(item["file_b"].get("root_id") or ""),
+        }]
+    sort = sort if sort in {"confidence", "space", "title"} else "confidence"
+    if sort == "space":
+        candidates.sort(key=lambda item: (-item["recoverable_bytes"], item["title_name"].casefold()))
+    elif sort == "title":
+        candidates.sort(key=lambda item: item["title_name"].casefold())
+    message = request.query_params.get("message", "")
+    if refresh and not message:
+        message = (
+            f"Duplicate candidates refreshed from the current catalog. "
+            f"InfoMancer found {len(all_candidates):,} pair"
+            f"{'s' if len(all_candidates) != 1 else ''} in this review state."
+        )
     return templates.TemplateResponse(request, "duplicates.html", {
-        "candidates": duplicates.candidates(status=status),
+        "candidates": candidates,
+        "candidate_counts": counts,
+        "candidate_total": len(all_candidates),
         "status": status,
+        "evidence": evidence,
+        "message": message,
+        "trash_count": len(duplicate_trash.items()),
+        "duplicate_opportunity": duplicate_opportunity,
+        "duplicate_impact": duplicate_impact,
+        "cleanup_history": cleanup_history,
+        "cleanup_status": cleanup_status,
+        "q": q.strip(), "source": source, "sort": sort,
+        "source_options": source_options,
+    })
+
+
+@app.post("/duplicates/bulk-action")
+def bulk_duplicate_action(
+    request: Request, pairs: list[str] = Form(default=[]), action: str = Form(...),
+):
+    allowed = {"ignored", "not_duplicate", "active", "verify"}
+    if action not in allowed:
+        return redirect("/duplicates", "That bulk review choice was not recognized. Nothing changed.")
+    parsed: list[tuple[int, int]] = []
+    for value in list(dict.fromkeys(pairs))[:500]:
+        if not re.fullmatch(r"\d+:\d+", value):
+            continue
+        left, right = (int(part) for part in value.split(":", 1))
+        if left != right:
+            parsed.append((left, right))
+    if not parsed:
+        return redirect("/duplicates", "Select at least one duplicate candidate first.")
+    user_id = request.state.user.id
+    if action != "verify":
+        changed = sum(duplicates.decide(left, right, action, user_id) for left, right in parsed)
+        labels = {"ignored": "ignored for now", "not_duplicate": "kept as intentional alternatives", "active": "returned to review"}
+        message = f"{changed:,} duplicate candidate pair{'s' if changed != 1 else ''} {labels[action]}. No media files were changed."
+        record_event("duplicates", message, context={"pairs": changed, "action": action}, user_id=user_id)
+        return redirect("/duplicates", message)
+    with duplicate_verify_lock:
+        if duplicate_verify_job.get("status") in {"starting", "running"}:
+            return redirect("/duplicates", "A duplicate verification is already running. Its progress is shown in the task panel.")
+        duplicate_verify_job.clear()
+        duplicate_verify_job.update({"status": "starting", "total": len(parsed), "processed": 0, "detail": "Preparing selected file comparisons"})
+
+    def run_bulk_verification() -> None:
+        exact = different = failed = 0
+        for index, (left, right) in enumerate(parsed, 1):
+            with duplicate_verify_lock:
+                duplicate_verify_job.update({"status": "running", "processed": index - 1, "detail": f"Verifying pair {index:,} of {len(parsed):,}"})
+            try:
+                result = duplicates.verify(left, right, user_id)
+                exact += result == "exact"
+                different += result != "exact"
+            except (OSError, ValueError):
+                failed += 1
+            with duplicate_verify_lock:
+                duplicate_verify_job["processed"] = index
+        message = f"Verified {len(parsed):,} pairs: {exact:,} exact, {different:,} different, {failed:,} unavailable. No files were changed."
+        record_event("duplicates", message, context={"pairs": len(parsed), "exact": exact, "different": different, "failed": failed}, user_id=user_id)
+        with duplicate_verify_lock:
+            duplicate_verify_job.update({"status": "complete", "detail": message})
+
+    threading.Thread(target=run_bulk_verification, daemon=True).start()
+    return redirect("/duplicates", f"Verification started for {len(parsed):,} selected pairs. Progress is shown in the task panel.")
+
+
+@app.get("/duplicates/{file_id}/trash-preview")
+def preview_duplicate_trash(request: Request, file_id: int):
+    try:
+        preview = duplicate_trash.preview(file_id, trash_retention_days())
+    except DuplicateTrashError as exc:
+        return redirect("/duplicates", str(exc))
+    return templates.TemplateResponse(request, "duplicate_trash_preview.html", {
+        "preview": preview,
         "message": request.query_params.get("message", ""),
     })
+
+
+@app.post("/duplicates/{file_id}/trash")
+def move_duplicate_to_trash(request: Request, file_id: int):
+    try:
+        duplicate_trash.move(file_id, trash_retention_days(), request.state.user.id)
+    except (DuplicateTrashError, OSError, sqlite3.Error) as exc:
+        return redirect(
+            f"/duplicates/{file_id}/trash-preview",
+            str(exc) if isinstance(exc, DuplicateTrashError) else
+            "InfoMancer could not move the file into managed trash. The original file was left in place. Check that the source is writable, then try again.",
+        )
+    message = (
+        "The selected copy was moved into managed trash and removed from the active catalog. "
+        "You can restore it from Duplicate Review → Trash until its retention date."
+    )
+    record_event(
+        "duplicates", message, context={"file_id": file_id},
+        user_id=request.state.user.id,
+    )
+    return redirect("/duplicates/trash", message)
+
+
+@app.post("/duplicates/{file_id}/verify-removed")
+def verify_duplicate_removed(request: Request, file_id: int):
+    try:
+        path = duplicate_trash.verify_manually_removed(file_id, request.state.user.id)
+    except DuplicateTrashError as exc:
+        return redirect("/duplicates", str(exc))
+    message = (
+        "Deletion verified. The file was no longer present, so InfoMancer removed its stale "
+        "catalog entry. No other file was changed."
+    )
+    record_event(
+        "duplicates", message, context={"file_id": file_id, "path": path},
+        user_id=request.state.user.id,
+    )
+    return redirect("/duplicates", message)
+
+
+@app.get("/duplicates/trash")
+def duplicate_trash_page(request: Request):
+    maybe_start_trash_cleanup()
+    return templates.TemplateResponse(request, "duplicate_trash.html", {
+        "items": duplicate_trash.items(),
+        "retention": app_settings.get("trash_retention_days"),
+        "message": request.query_params.get("message", ""),
+    })
+
+
+@app.post("/duplicates/trash/retention")
+def update_duplicate_trash_retention(
+    request: Request, retention: str = Form(...),
+):
+    retention = retention.strip().casefold()
+    if retention not in {"never", "7", "30", "90", "365"}:
+        return redirect(
+            "/duplicates/trash",
+            "Choose Never, 7 days, 30 days, 90 days, or 1 year. The retention setting was not changed.",
+        )
+    app_settings.update(
+        {"trash_retention_days": retention}, request.state.user.id,
+    )
+    label = "Never automatically" if retention == "never" else f"After {retention} days"
+    return redirect(
+        "/duplicates/trash",
+        f"Managed-trash retention updated: {label}. This applies to files moved to trash from now on.",
+    )
+
+
+@app.post("/duplicates/trash/{trash_id}/restore")
+def restore_duplicate_trash(request: Request, trash_id: int):
+    try:
+        path = duplicate_trash.restore(trash_id)
+    except (DuplicateTrashError, OSError, sqlite3.Error) as exc:
+        return redirect(
+            "/duplicates/trash",
+            str(exc) if isinstance(exc, DuplicateTrashError) else
+            "InfoMancer could not restore that file. Nothing was overwritten. Check that the source is mounted and writable, then try again.",
+        )
+    message = f"File restored to its original location and returned to the catalog: {path}"
+    record_event(
+        "duplicates", message, context={"trash_id": trash_id, "path": path},
+        user_id=request.state.user.id,
+    )
+    return redirect("/duplicates/trash", message)
 
 
 @app.post("/duplicates/{file_a_id}/{file_b_id}/decision")
@@ -3206,6 +3590,54 @@ def create_backup_from_ui(request: Request):
         "/settings/system",
         f"Database backup {path.name} was created successfully.",
     )
+
+
+@app.post("/maintenance/backups/verify")
+def verify_all_backups(request: Request):
+    backups = list_database_backups(db.path)
+    failures: list[str] = []
+    for item in backups:
+        try:
+            validate_database_backup(resolve_backup(db.path, item["name"]))
+        except MaintenanceError:
+            failures.append(item["name"])
+    if failures:
+        message = (
+            f"{len(failures)} backup{'s' if len(failures) != 1 else ''} could not be read. "
+            "The live catalog was not changed. Create a fresh backup before restoring anything."
+        )
+        record_event("backup", message, level="error", context={"failed": failures}, user_id=request.state.user.id)
+        return redirect("/settings/system", message)
+    message = f"Verified {len(backups)} database backup{'s' if len(backups) != 1 else ''}. Each is readable and contains the required InfoMancer tables."
+    record_event("backup", message, context={"verified": len(backups)}, user_id=request.state.user.id)
+    return redirect("/settings/system", message)
+
+
+@app.get("/maintenance/diagnostics")
+def download_diagnostics(request: Request):
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("summary.json", json.dumps({
+            "app_version": APP_VERSION,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "database_size": db.path.stat().st_size if db.path.exists() else 0,
+            "library_health": mie.summary(),
+            "backup_count": len(list_database_backups(db.path)),
+        }, indent=2, default=str))
+        events = []
+        for row in event_log.query(limit=1000):
+            item = dict(row)
+            item.pop("user_id", None)
+            events.append(item)
+        archive.writestr("recent-events.json", json.dumps(events, indent=2, default=str))
+        archive.writestr("README.txt", (
+            "InfoMancer diagnostic bundle\n\nThis bundle contains application status and recent "
+            "events. It excludes passwords, sessions, API credentials, provider secrets, and the media database.\n"
+        ))
+    record_event("diagnostics", "A diagnostic bundle was exported.", user_id=request.state.user.id)
+    return Response(output.getvalue(), media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="infomancer-diagnostics-{datetime.now().strftime("%Y%m%d-%H%M%S")}.zip"'
+    })
 
 
 @app.get("/maintenance/backups/{name}")
@@ -5852,6 +6284,12 @@ def bulk_movie_match_review(
                JOIN titles t ON t.id=s.title_id
                    WHERE t.kind='movie'"""
         ).fetchone()[0]
+        unanalyzed_count = conn.execute(
+            """SELECT COUNT(*) FROM titles t
+               LEFT JOIN movie_match_suggestions s ON s.title_id=t.id
+               WHERE t.kind='movie' AND t.tvdb_movie_id IS NULL
+                 AND s.title_id IS NULL"""
+        ).fetchone()[0]
         no_result_count = conn.execute(
             """SELECT COUNT(*) FROM movie_match_suggestions s
                JOIN titles t ON t.id=s.title_id
@@ -5904,6 +6342,7 @@ def bulk_movie_match_review(
         })
     return templates.TemplateResponse(request, "bulk_movie_match.html", {
         "movies": available, "available_count": len(available),
+        "unanalyzed_count": unanalyzed_count,
         "suggestions": suggestions, "analyzed": review, "error": "",
         "cached_count": cached_count, "no_result_count": no_result_count,
         "offset": max(0, offset), "job": job,

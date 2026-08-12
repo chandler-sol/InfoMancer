@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="mie-hero compact">
+  <div><p class="eyebrow">STORAGE INTELLIGENCE</p><h1>Where your library lives</h1><p>Catalog measurements, largest titles, and duplicate cleanup results. No storage is modified here.</p></div>
+  <a class="button" href="/library-health">Library Health</a>
+</section>
+<section class="mie-summary">
+  <div><strong>{{ format_bytes(duplicate_impact.reclaimed_bytes) }}</strong><span>Duplicate space reclaimed</span></div>
+  <div><strong>{{ format_bytes(duplicate_impact.pending_bytes) }}</strong><span>Restorable in Trash</span></div>
+  <div><strong>{{ duplicate_impact.handled_files }}</strong><span>Duplicates handled</span></div>
+</section>
+<section class="panel">
+  <p class="eyebrow">BY SOURCE</p><h2>Storage locations</h2>
+  <div class="storage-bars">{% for item in report.by_source %}<a href="/library?source={{ item.id }}"><span><strong>{{ item.label }}</strong><small>{{ item.titles }} titles &middot; {{ item.files }} files</small></span><b>{{ format_bytes(item.bytes) }}</b></a>{% else %}<p>No source measurements are available yet.</p>{% endfor %}</div>
+</section>
+<section class="report-grid">
+  <article class="panel"><p class="eyebrow">LARGEST TITLES</p><h2>Biggest catalog entries</h2><ol class="storage-list">{% for item in report.largest_titles %}<li><a href="/titles/{{ item.id }}">{{ item.title }}</a><span>{{ format_bytes(item.bytes) }} &middot; {{ item.files }} files</span></li>{% else %}<li>No catalog measurements are available yet.</li>{% endfor %}</ol></article>
+  <article class="panel"><p class="eyebrow">MEDIA TYPES</p><h2>Movies and TV</h2><ol class="storage-list">{% for item in report.by_kind %}<li><strong>{{ 'Movies' if item.kind == 'movie' else 'TV Shows' }}</strong><span>{{ format_bytes(item.bytes) }} &middot; {{ item.titles }} titles</span></li>{% else %}<li>No media-type measurements are available yet.</li>{% endfor %}</ol></article>
+  <article class="panel"><p class="eyebrow">LARGEST FOLDERS</p><h2>Folders using the most space</h2><ol class="storage-list">{% for item in report.largest_folders %}<li><strong>{{ item.title }}</strong><span>{{ format_bytes(item.bytes) }} &middot; {{ item.files }} files</span><small title="{{ item.folder_path }}">{{ item.folder_path }}</small></li>{% else %}<li>No folder measurements are available yet.</li>{% endfor %}</ol></article>
+  <article class="panel"><p class="eyebrow">CLEANUP HISTORY</p><h2>Space recovered by day</h2><ol class="storage-list">{% for item in report.cleanup_trend %}<li><strong>{{ item.day }}</strong><span>{{ format_bytes(item.bytes) }} &middot; {{ item.files }} files</span></li>{% else %}<li>No duplicate cleanup has been recorded yet.</li>{% endfor %}</ol></article>
+</section>
+{% endblock %}

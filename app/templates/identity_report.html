@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="mie-hero compact"><div><p class="eyebrow">IDENTITY INTELLIGENCE</p><h1>{{ report.title.metadata_title or report.title.title }}</h1><p>Why InfoMancer believes this title is what it is. This report is evidence only and never changes files.</p></div><a class="button" href="/titles/{{ report.title.id }}">Back to title</a></section>
+<section class="panel identity-score"><div><strong>{{ report.score }}</strong><span>of 100 confidence</span></div><div><h2>Evidence breakdown</h2><p>Provider identifiers carry the most weight. Title, year, and catalog placement strengthen the conclusion independently.</p></div></section>
+<section class="report-grid">
+{% for item in report.breakdown %}<article class="panel evidence-card{% if item.conflict %} warning{% endif %}"><header><h3>{{ item.label }}</h3><strong>{{ item.score }}/{{ item.maximum }}</strong></header><p>{{ item.detail }}</p>{% if item.conflict %}<small>Conflicting evidence needs review.</small>{% endif %}</article>{% endfor %}
+</section>
+{% if report.conflicts %}<section class="panel"><p class="eyebrow">CONFLICTS</p><h2>Evidence that disagrees</h2>{% for conflict in report.conflicts %}<p>{{ conflict }}</p>{% endfor %}</section>{% endif %}
+<section class="panel"><p class="eyebrow">RECOMMENDATION</p><h2>What to do next</h2>{% for recommendation in report.recommendations %}<p>{{ recommendation }}</p>{% endfor %}<p><a class="button" href="/titles/{{ report.title.id }}/tvdb">Review or change match</a></p></section>
+{% endblock %}

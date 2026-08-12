@@ -19,6 +19,7 @@ class AppSettings:
         "search_provider_name",
         "search_url_template",
         "log_level",
+        "trash_retention_days",
     }
 
     def __init__(self, database: Database, environment_search_url: str) -> None:
@@ -33,6 +34,7 @@ class AppSettings:
             "search_provider_name": provider or "External search",
             "search_url_template": environment_search_url,
             "log_level": "info",
+            "trash_retention_days": "30",
         }
 
     def get(self, key: str) -> str:
@@ -154,6 +156,13 @@ class AppSettings:
                 external.get("search_provider_name", current["search_provider_name"]),
                 external.get("search_url_template", current["search_url_template"]),
             ))
+        if "trash_retention_days" in text_values:
+            retention = text_values["trash_retention_days"].strip().casefold()
+            if retention not in {"never", "7", "30", "90", "365"}:
+                raise AppSettingError(
+                    "Trash retention must be Never, 7 days, 30 days, 90 days, or 1 year."
+                )
+            validated["trash_retention_days"] = retention
         if "log_level" in text_values:
             validated.update(self.validate_logging(text_values["log_level"]))
         return {key: validated[key] for key in text_values}

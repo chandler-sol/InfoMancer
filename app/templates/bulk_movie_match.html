@@ -6,10 +6,10 @@
 <div class="page-head"><div><p class="eyebrow">REVIEW QUEUE</p><h1>{{ 'Match selected movies' if direct_selection else 'Bulk movie matching' }}</h1><p class="muted">{% if direct_selection %}Review matches for only the movies you selected. Nothing is applied until you approve it here.{% else %}Analyze a small batch, any selection, or every unmatched movie. Suggestions are stored locally and nothing is applied without review.{% endif %}</p></div></div>
 {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
 {% if not analyzed %}
-<section class="panel bulk-match-start"><div><h2>{{ available_count }} unmatched movies</h2><p class="muted">{{ cached_count }} already analyzed. Searches run as a paced background task and results are cached for review.</p></div><div class="actions">{% if cached_count %}<a class="button" href="/movies/bulk-match?review=true">Review analyzed matches</a>{% endif %}{% if no_result_count %}<form method="post" action="/movies/bulk-match/analyze"><input type="hidden" name="mode" value="no_results"><button class="button">Retry no results ({{ no_result_count }})</button></form>{% endif %}<form method="post" action="/movies/bulk-match/analyze"><input type="hidden" name="mode" value="next"><button class="button">Analyze next 20</button></form><form method="post" action="/movies/bulk-match/analyze"><input type="hidden" name="mode" value="all"><button class="button primary">Analyze all unmatched</button></form></div></section>
+<section class="panel bulk-match-start"><div><h2>{{ available_count }} unmatched movies</h2><p class="muted">{{ cached_count }} already analyzed. Searches run as a paced background task and results are cached for review.</p></div><div class="actions">{% if cached_count %}<a class="button" href="/movies/bulk-match?review=true">Review analyzed matches</a>{% endif %}{% if no_result_count %}<form method="post" action="/movies/bulk-match/analyze"><input type="hidden" name="mode" value="no_results"><button class="button">Retry no results ({{ no_result_count }})</button></form>{% endif %}<form method="post" action="/movies/bulk-match/analyze"><input type="hidden" name="mode" value="next"><button class="button">Analyze next 20</button></form><form method="post" action="/movies/bulk-match/analyze" class="large-movie-batch" data-batch-count="{{ unanalyzed_count }}"><input type="hidden" name="mode" value="all"><button class="button primary">Analyze all unmatched</button></form></div></section>
 <form method="post" action="/movies/bulk-match/analyze" id="bulk-selection-form"><input type="hidden" name="mode" value="selected">
-  {% if movies %}<div class="review-actions selection-actions" id="selection-actions" hidden><span class="selection-count" id="selection-count">0 selected</span><button class="button primary" id="analyze-selected">Analyze selected</button></div>{% endif %}
-  <section class="panel table-wrap"><table><thead><tr><th>Select</th><th>Library movie</th><th>Source</th></tr></thead><tbody>
+  {% if movies %}<div class="review-actions selection-actions" id="selection-actions" hidden><span class="selection-count" id="selection-count">0 selected</span><div class="selection-action-buttons"><button class="button" type="button" id="clear-all-movies">Clear selection</button><button class="button primary" id="analyze-selected">Analyze selected</button></div></div>{% endif %}
+  <section class="panel table-wrap"><table><thead><tr><th class="bulk-select-heading"><button class="batch-select-all" type="button" id="select-all-movies" aria-pressed="false"><span class="batch-select-all-box" aria-hidden="true"></span><span id="select-all-label">Select all</span></button></th><th>Library movie</th><th>Source</th></tr></thead><tbody>
   {% for movie in movies %}<tr><td><input class="batch-choice" type="checkbox" name="selected" value="{{ movie.id }}" aria-label="Select {{ movie.title }}"></td><td><strong>{{ movie.title }}</strong>{% if movie.year %} ({{ movie.year }}){% endif %}<small>{{ movie.folder_path }}</small></td><td>{{ movie.root_label or movie.root_path }}</td></tr>{% else %}<tr><td colspan="3" class="empty good">No unmatched movies remain.</td></tr>{% endfor %}
   </tbody></table></section>
 </form>
@@ -30,6 +30,16 @@
   const count = document.getElementById("selection-count");
   const analyze = document.getElementById("analyze-selected");
   const actions = document.getElementById("selection-actions");
+  const selectionForm = document.getElementById("bulk-selection-form");
+  const selectAll = document.getElementById("select-all-movies");
+  const selectAllLabel = document.getElementById("select-all-label");
+  const clearAll = document.getElementById("clear-all-movies");
+  const warningThreshold = 50;
+  const confirmLargeBatch = (amount) => window.confirm(
+    `You are about to analyze ${amount.toLocaleString()} movies. ` +
+    "This may take a while because provider requests are paced to avoid rate limits. " +
+    "The analysis will run in the background and remain visible in the task widget. Continue?"
+  );
   document.querySelectorAll(".possible-match-link").forEach((link) => {
     const url = new URL(link.href, window.location.origin);
     url.searchParams.set("from", "{{ 'bulk-movie-selected' if direct_selection else 'bulk-movie' }}");
@@ -38,12 +48,46 @@
   if (choices.length && count && analyze && actions) {
     const update = () => {
       const selected = choices.filter(choice => choice.checked);
+      const allSelected = selected.length === choices.length;
+      const partiallySelected = selected.length > 0 && !allSelected;
       count.textContent = `${selected.length} selected`;
       actions.hidden = selected.length === 0;
+      if (selectAll) {
+        selectAll.setAttribute("aria-pressed", String(allSelected));
+        selectAll.classList.toggle("is-partial", partiallySelected);
+        selectAll.classList.toggle("is-selected", allSelected);
+      }
+      if (selectAllLabel) {
+        selectAllLabel.textContent = allSelected ? "All selected" : (partiallySelected ? "Select remaining" : "Select all");
+      }
     };
     choices.forEach(choice => choice.addEventListener("change", update));
+    selectAll?.addEventListener("click", () => {
+      const shouldSelect = !choices.every(choice => choice.checked);
+      choices.forEach(choice => { choice.checked = shouldSelect; });
+      update();
+    });
+    clearAll?.addEventListener("click", () => {
+      choices.forEach(choice => { choice.checked = false; });
+      update();
+    });
+    selectionForm?.addEventListener("submit", (event) => {
+      const selectedCount = choices.filter(choice => choice.checked).length;
+      if (selectedCount > warningThreshold && !confirmLargeBatch(selectedCount)) {
+        event.preventDefault();
+      }
+    });
     update();
   }
+
+  document.querySelectorAll(".large-movie-batch").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      const batchCount = Number.parseInt(form.dataset.batchCount || "0", 10);
+      if (batchCount > warningThreshold && !confirmLargeBatch(batchCount)) {
+        event.preventDefault();
+      }
+    });
+  });
 
   {% if job.status in ['starting', 'running'] %}
   const waitForAnalysis = window.setInterval(async () => {

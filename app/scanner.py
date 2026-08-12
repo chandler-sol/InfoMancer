@@ -158,6 +158,8 @@ def scan_root(
     title_ids: set[int] = set()
     for file in root.rglob("*"):
         try:
+            if ".infomancer-trash" in file.parts:
+                continue
             if not file.is_file() or file.suffix.lower() not in VIDEO_EXTENSIONS:
                 continue
             stat = file.stat()
@@ -255,6 +257,8 @@ def scan_title(
     file_count = 0
     for file in folder.rglob("*"):
         try:
+            if ".infomancer-trash" in file.parts:
+                continue
             if not file.is_file() or file.suffix.lower() not in VIDEO_EXTENSIONS:
                 continue
             stat = file.stat()

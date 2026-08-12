@@ -25,6 +25,8 @@
   {% if current_user %}
   <script>
     try {
+      const savedSidebarWidth = Number.parseInt(window.localStorage.getItem("infomancer-sidebar-width") || "258", 10);
+      document.documentElement.style.setProperty("--app-sidebar-width", `${Math.min(380, Math.max(220, savedSidebarWidth))}px`);
       if (window.localStorage.getItem("infomancer-sidebar-collapsed") === "1") {
         document.body.classList.add("sidebar-collapsed");
       }
@@ -40,6 +42,7 @@
     <button type="button" class="sidebar-collapse-toggle" id="sidebar-collapse-toggle" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"></path></svg>
     </button>
+    <div class="sidebar-resize-handle" id="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" title="Drag to resize sidebar; double-click to reset"></div>
     <div class="topbar-actions">
       <form class="global-search" id="global-search" method="get" action="/library" role="search">
         <label class="sr-only" for="global-search-input">Search the entire library</label>
@@ -51,7 +54,7 @@
       </form>
       <div class="task-widget idle" id="task-widget">
         <button type="button" class="task-widget-toggle" id="task-widget-toggle" aria-expanded="false" aria-controls="task-popover"><span class="task-dot"></span><span class="task-card-copy"><strong id="task-summary">No tasks running</strong><small id="task-card-detail">Background work appears here.</small></span></button>
-        <div class="task-popover" id="task-popover" hidden><strong>Running tasks</strong><div id="task-list"></div></div>
+        <div class="task-popover" id="task-popover" hidden><div class="task-popover-heading"><span><small>BACKGROUND ACTIVITY</small><strong>Running tasks</strong></span><span class="task-popover-controls"><button type="button" id="task-minimize" aria-label="Minimize task panel" title="Minimize">&minus;</button><button type="button" id="task-dismiss" aria-label="Dismiss task panel" title="Dismiss">&times;</button></span></div><div id="task-list"></div></div>
       </div>
       {% if request.url.path == '/' and current_user.id > 0 %}
       <form class="home-layout-toggle" method="post" action="/account/home-layout">
@@ -203,6 +206,7 @@
       const menuToggle = document.getElementById("site-menu-toggle");
       const menuPanel = document.getElementById("site-menu-panel");
       const sidebarToggle = document.getElementById("sidebar-collapse-toggle");
+      const sidebarResize = document.getElementById("sidebar-resize-handle");
 
       const setSearchOpen = (open) => {
         search.classList.toggle("open", open);
@@ -274,6 +278,33 @@
           setSidebarCollapsed(!document.body.classList.contains("sidebar-collapsed"));
         });
       }
+      if (sidebarResize) {
+        const applySidebarWidth = (width, save = false) => {
+          const nextWidth = Math.min(380, Math.max(220, Math.round(width)));
+          document.documentElement.style.setProperty("--app-sidebar-width", `${nextWidth}px`);
+          if (save) {
+            try { window.localStorage.setItem("infomancer-sidebar-width", String(nextWidth)); } catch (_error) {}
+          }
+        };
+        sidebarResize.addEventListener("pointerdown", (event) => {
+          if (document.body.classList.contains("sidebar-collapsed")) return;
+          event.preventDefault();
+          sidebarResize.setPointerCapture(event.pointerId);
+          document.body.classList.add("sidebar-resizing");
+          const move = (moveEvent) => applySidebarWidth(moveEvent.clientX);
+          const finish = (upEvent) => {
+            applySidebarWidth(upEvent.clientX, true);
+            document.body.classList.remove("sidebar-resizing");
+            sidebarResize.removeEventListener("pointermove", move);
+            sidebarResize.removeEventListener("pointerup", finish);
+            sidebarResize.removeEventListener("pointercancel", finish);
+          };
+          sidebarResize.addEventListener("pointermove", move);
+          sidebarResize.addEventListener("pointerup", finish);
+          sidebarResize.addEventListener("pointercancel", finish);
+        });
+        sidebarResize.addEventListener("dblclick", () => applySidebarWidth(258, true));
+      }
       searchToggle.addEventListener("click", () => {
         if (!search.classList.contains("open")) {
           setMenuOpen(false);
@@ -342,14 +373,30 @@
       const summary = document.getElementById("task-summary");
       const cardDetail = document.getElementById("task-card-detail");
       const list = document.getElementById("task-list");
+      const minimize = document.getElementById("task-minimize");
+      const dismiss = document.getElementById("task-dismiss");
       if (!widget || !toggle || !popover || !summary || !cardDetail || !list) return;
-      toggle.addEventListener("click", () => {
-        const open = popover.hidden;
+      let dismissedForRun = false;
+      const setTaskPanelOpen = (open) => {
+        widget.classList.toggle("is-pinned", open);
         popover.hidden = !open;
         toggle.setAttribute("aria-expanded", String(open));
+      };
+      toggle.addEventListener("click", () => {
+        setTaskPanelOpen(!widget.classList.contains("is-pinned"));
+      });
+      minimize?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        setTaskPanelOpen(false);
+      });
+      dismiss?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        dismissedForRun = true;
+        setTaskPanelOpen(false);
+        widget.classList.remove("visible");
       });
       document.addEventListener("click", (event) => {
-        if (!widget.contains(event.target)) {
+        if (!widget.contains(event.target) && !widget.classList.contains("is-pinned")) {
           popover.hidden = true;
           toggle.setAttribute("aria-expanded", "false");
         }
@@ -374,7 +421,7 @@
           widget.classList.toggle("idle", !active);
           if (active) {
             window.clearTimeout(dismissTimer);
-            widget.classList.add("visible");
+            if (!dismissedForRun) widget.classList.add("visible");
             summary.textContent = tasks.length === 1 ? tasks[0].label : `${tasks.length} tasks running`;
             cardDetail.textContent = tasks.length === 1
               ? (tasks[0].detail || "Working in the background")
@@ -395,7 +442,7 @@
             wasActive = true;
           } else if (scheduled.length) {
             window.clearTimeout(dismissTimer);
-            widget.classList.add("visible");
+            if (!dismissedForRun) widget.classList.add("visible");
             summary.textContent = scheduled.length === 1
               ? scheduled[0].label
               : `${scheduled.length} tasks scheduled`;
@@ -414,6 +461,7 @@
             }));
             wasActive = false;
           } else if (wasActive) {
+            dismissedForRun = false;
             summary.textContent = "Task complete";
             cardDetail.textContent = "Finished successfully";
             const row = document.createElement("div");
@@ -429,6 +477,7 @@
               dismissTimer = 0;
             }, 5000);
           } else {
+            dismissedForRun = false;
             summary.textContent = "No tasks running";
             cardDetail.textContent = "Background work appears here.";
             const row = document.createElement("div");

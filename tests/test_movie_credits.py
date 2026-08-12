@@ -427,6 +427,13 @@ class MovieCreditViewTests(unittest.TestCase):
             self.assertIn('value="unmatched" selected', unmatched_movies.text)
             self.assertEqual(bulk.status_code, 200)
             self.assertIn("Analyze all unmatched", bulk.text)
+            self.assertIn('id="select-all-movies"', bulk.text)
+            self.assertIn('id="select-all-label">Select all', bulk.text)
+            self.assertIn("Select remaining", bulk.text)
+            self.assertIn('id="clear-all-movies"', bulk.text)
+            self.assertIn('class="large-movie-batch"', bulk.text)
+            self.assertIn("This may take a while", bulk.text)
+            self.assertIn("remain visible in the task widget", bulk.text)
             self.assertIn('id="selection-actions" hidden', bulk.text)
             self.assertIn("Find another match", bulk_review.text)
             self.assertIn(
@@ -439,6 +446,27 @@ class MovieCreditViewTests(unittest.TestCase):
             self.assertEqual(unchanged_preview.status_code, 200)
             self.assertIn("No changes needed", unchanged_preview.text)
             self.assertNotIn("Apply rename", unchanged_preview.text)
+
+    def test_movie_match_analysis_appears_in_progress_widget(self):
+        with main.movie_match_lock:
+            previous = dict(main.movie_match_job)
+            main.movie_match_job.clear()
+            main.movie_match_job.update({
+                "status": "running", "mode": "selected", "total": 125,
+                "processed": 24, "matched": 19,
+            })
+        try:
+            task = next(
+                item for item in main.active_tasks()["tasks"]
+                if item["id"] == "movie-match-analysis"
+            )
+            self.assertEqual(task["label"], "Analyzing selected movie matches")
+            self.assertIn("24 of 125 checked", task["detail"])
+            self.assertIn("19 suggestions found", task["detail"])
+        finally:
+            with main.movie_match_lock:
+                main.movie_match_job.clear()
+                main.movie_match_job.update(previous)
 
     def test_series_cast_and_episode_crew_render_separately(self):
         with tempfile.TemporaryDirectory() as temporary:

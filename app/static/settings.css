@@ -13,3 +13,26 @@
 .log-filters{display:grid;grid-template-columns:160px 210px minmax(240px,1fr) auto auto;gap:.8rem;align-items:end}.log-filters label{display:grid;gap:.4rem}.log-filters select,.log-filters input{width:100%;box-sizing:border-box}.log-live-status{display:flex;align-items:center;gap:.55rem;color:var(--muted);font-size:.8rem;margin:1rem 0}.log-viewer{padding:0}.log-event{padding:1rem 1.2rem;border-bottom:1px solid var(--line)}.log-event:last-child{border-bottom:0}.log-event-heading{display:grid;grid-template-columns:72px 1fr auto;gap:.75rem;align-items:center}.log-level{text-transform:uppercase;font-size:.68rem;font-weight:800;color:var(--cyan)}.level-warning .log-level{color:#ffd166}.level-error .log-level{color:#ff7979}.level-debug .log-level{color:var(--muted)}.log-event-heading time,.log-event-meta{color:var(--muted);font-size:.76rem}.log-event-meta{margin:.35rem 0 0 72px;text-transform:capitalize}.log-event details{margin:.65rem 0 0 72px}.log-event pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1016;border:1px solid var(--line);padding:.8rem;color:#b8c7d9}.export-actions{display:flex;flex-wrap:wrap;gap:.6rem}.logging-options{display:flex;flex-wrap:wrap;gap:.5rem}.logging-options label{cursor:pointer}.logging-options input{position:absolute;opacity:0}.logging-options span{display:block;border:1px solid var(--line);padding:.65rem .85rem}.logging-options input:checked+span{border-color:var(--lime);color:var(--lime);background:#152213}
 @media(max-width:900px){.log-filters{grid-template-columns:1fr 1fr}.log-search{grid-column:1/-1}}
 @media(max-width:560px){.log-filters{grid-template-columns:1fr}.log-search{grid-column:auto}.log-event-heading{grid-template-columns:65px 1fr}.log-event-heading time{grid-column:2}.log-event-meta,.log-event details{margin-left:0}}
+
+/* System settings use independent vertical stacks so unlike card heights do not
+   create empty grid rows. The compact jump bar keeps the long page navigable. */
+.settings-page-grid{align-items:start}
+.settings-card{align-content:start;gap:1rem;height:auto}
+.settings-jump-nav.full-width{grid-column:1/-1}
+.settings-column-stack{display:grid;align-content:start;gap:1.25rem;min-width:0}
+.system-overview-grid.full-width{grid-column:1/-1}
+.system-overview-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1.25rem;align-items:stretch}
+.system-overview-grid .settings-card{height:100%}
+.system-storage-card{order:1}.system-portable-card{order:2}.system-deployment-card{order:3}
+.settings-jump-nav{display:flex;flex-wrap:wrap;gap:.45rem;padding:.1rem 0}
+.settings-jump-nav a{padding:.55rem .8rem;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:.78rem;text-decoration:none}
+.settings-jump-nav a:hover,.settings-jump-nav a:focus-visible{border-color:#4d682b;background:#152213;color:var(--lime)}
+
+@media(max-width:760px){
+  .settings-jump-nav.full-width{grid-column:auto}
+  .settings-jump-nav{flex-wrap:nowrap;overflow-x:auto;padding-bottom:.35rem}
+  .settings-jump-nav a{white-space:nowrap}
+  .system-overview-grid.full-width{grid-column:auto}
+  .system-overview-grid{grid-template-columns:1fr}
+}
+@media(min-width:761px) and (max-width:1100px){.system-overview-grid{grid-template-columns:1fr 1fr}.system-deployment-card{grid-column:1/-1}}

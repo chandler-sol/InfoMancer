@@ -18,10 +18,27 @@
 {% if message %}<div class="success-banner mie-page-message">{{ message }}</div>{% endif %}
 
 <section class="mie-summary" aria-label="Library Health summary">
+  <a href="#category-scores"><strong>{{ summary.overall_score if summary.overall_score is not none else '—' }}</strong><span>Health score</span></a>
   <a href="/library-health"><strong>{{ summary.active }}</strong><span>Active findings</span></a>
   <a href="/library-health?severity=critical"><strong>{{ summary.critical }}</strong><span>Critical</span></a>
   <a href="/library-health?severity=warning"><strong>{{ summary.warning }}</strong><span>Warnings</span></a>
   <a href="/library-health?status=dismissed"><strong>{{ summary.dismissed }}</strong><span>Dismissed</span></a>
+</section>
+
+<section class="panel duplicate-impact" aria-labelledby="duplicate-impact-title">
+  <header>
+    <div>
+      <p class="eyebrow">DUPLICATE CLEANUP IMPACT</p>
+      <h2 id="duplicate-impact-title">Storage saved</h2>
+      <p>Only files permanently removed from managed Trash or verified as deleted in your file manager count as reclaimed disk space.</p>
+    </div>
+    <div class="button-row"><a class="button" href="/storage-intelligence">Storage Intelligence</a><a class="button" href="/duplicates">Review duplicates</a></div>
+  </header>
+  <div class="duplicate-impact-grid">
+    <div><strong>{{ format_bytes(duplicate_impact.reclaimed_bytes) }}</strong><span>Physically reclaimed</span><small>{{ duplicate_impact.reclaimed_files }} file{{ '' if duplicate_impact.reclaimed_files == 1 else 's' }}</small></div>
+    <div><strong>{{ format_bytes(duplicate_impact.pending_bytes) }}</strong><span>Waiting in managed Trash</span><small>{{ duplicate_impact.pending_files }} file{{ '' if duplicate_impact.pending_files == 1 else 's' }} · still restorable</small></div>
+    <div><strong>{{ format_bytes(duplicate_impact.handled_bytes) }}</strong><span>Removed from active library</span><small>{{ duplicate_impact.handled_files }} duplicate file{{ '' if duplicate_impact.handled_files == 1 else 's' }} handled</small></div>
+  </div>
 </section>
 
 <div class="mie-analysis-note">
@@ -32,7 +49,33 @@
   {% endif %}
 </div>
 
+{% if category_scores %}
+<section id="category-scores" class="panel mie-score-panel">
+  <header><div><p class="eyebrow">TRANSPARENT SCORING</p><h2>Category scores</h2></div><p>Each category starts at 100. Current penalties: {{ calibration.critical_weight }} per critical, {{ calibration.warning_weight }} per warning, and {{ calibration.information_weight }} per information finding.</p></header>
+  <div class="mie-score-grid">
+    {% for item in category_scores %}
+    <article><strong>{{ item.score }}</strong><h3>{{ item.category|title }}</h3><p>{{ item.critical_count }} critical · {{ item.warning_count }} warning · {{ item.information_count }} information</p></article>
+    {% endfor %}
+  </div>
+  {% if summary.suppressed %}<p class="mie-score-note">{{ summary.suppressed }} finding{{ '' if summary.suppressed == 1 else 's' }} excluded by learned feedback in this analysis.</p>{% endif %}
+</section>
+{% endif %}
+
 {% if current_user.is_librarian %}
+<details class="panel mie-quality-profiles mie-calibration">
+  <summary><span><strong>Analysis calibration</strong><small>Adjust when MIE warns and how findings affect health scores.</small></span></summary>
+  <p class="mie-profile-intro">Changes apply on the next analysis and never modify media files.</p>
+  <form class="mie-profile-form" method="post" action="/library-health/calibration">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Identity warning below<input name="identity_warning_threshold" type="number" min="1" max="100" value="{{ calibration.identity_warning_threshold }}"></label>
+    <label>Source stale after (hours)<input name="source_stale_hours" type="number" min="1" max="8760" value="{{ calibration.source_stale_hours }}"></label>
+    <label>Critical score penalty<input name="critical_weight" type="number" min="1" max="100" value="{{ calibration.critical_weight }}"></label>
+    <label>Warning score penalty<input name="warning_weight" type="number" min="1" max="100" value="{{ calibration.warning_weight }}"></label>
+    <label>Information score penalty<input name="information_weight" type="number" min="0" max="100" value="{{ calibration.information_weight }}"></label>
+    <button class="button primary">Save and analyze</button>
+  </form>
+</details>
+
 <details class="panel mie-quality-profiles">
   <summary>
     <span><strong>Quality and consistency profiles</strong><small>Set expectations independently for each media source.</small></span>
@@ -73,6 +116,34 @@
     {% else %}
     <p>No enabled media sources are available. Add a source before creating a quality profile.</p>
     {% endfor %}
+  </div>
+</details>
+
+{% if feedback_rules %}
+<details class="panel mie-quality-profiles mie-feedback-rules">
+  <summary><span><strong>Learned exceptions</strong><small>Review corrections MIE currently applies to future analyses.</small></span></summary>
+  <div class="mie-feedback-list">
+    {% for rule in feedback_rules %}
+    <article>
+      <div><strong>{{ rule.rule_key|replace('-', ' ')|title }}</strong><p>{{ rule.reason|replace('_', ' ')|title }} · {{ rule.scope|title }}{% if rule.scope == 'title' %}: {{ rule.title_name }}{% elif rule.scope == 'source' %}: {{ rule.root_name }}{% endif %}</p>{% if rule.note %}<p>{{ rule.note }}</p>{% endif %}</div>
+      <form method="post" action="/library-health/feedback/{{ rule.id }}/delete">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button">Remove exception</button>
+      </form>
+    </article>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+{% endif %}
+
+{% if analysis_history %}
+<details class="panel mie-quality-profiles mie-history">
+  <summary><span><strong>Analysis history</strong><small>Compare the last {{ analysis_history|length }} health snapshots.</small></span></summary>
+  <div class="mie-history-table">
+    <table><thead><tr><th>Analyzed</th><th>Score</th><th>Active</th><th>Excluded by feedback</th></tr></thead><tbody>
+      {% for run in analysis_history %}<tr><td>{{ local_time(run.analyzed_at) }}</td><td>{{ run.overall_score }}</td><td>{{ run.active_findings }}</td><td>{{ run.suppressed_findings }}</td></tr>{% endfor %}
+    </tbody></table>
   </div>
 </details>
 {% endif %}
@@ -131,10 +202,16 @@
       <div class="actions mie-finding-actions">
         <a class="button{% if finding.status == 'active' %} primary{% endif %}" href="{{ finding.href }}">Review affected media</a>
         {% if current_user.is_librarian and finding.status == 'active' %}
-        <form method="post" action="/library-health/findings/{{ finding.id }}/dismiss">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button class="button">Dismiss finding</button>
-        </form>
+        <details class="mie-feedback-form">
+          <summary class="button">Correct or dismiss</summary>
+          <form method="post" action="/library-health/findings/{{ finding.id }}/dismiss">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label>Reason<select name="reason"><option value="expected">Expected for this media</option><option value="incorrect">Analysis is incorrect</option><option value="resolved_elsewhere">Already handled elsewhere</option><option value="other">Other</option></select></label>
+            <label>Apply to<select name="scope"><option value="finding">This finding only</option>{% if finding.title_id %}<option value="title">This rule for this title</option>{% endif %}{% if finding.root_id %}<option value="source">This rule for this source</option>{% endif %}</select></label>
+            <label>Optional note<textarea name="note" maxlength="500" rows="2" placeholder="What should MIE understand?"></textarea></label>
+            <button class="button">Save feedback</button>
+          </form>
+        </details>
         {% elif current_user.is_librarian and finding.status == 'dismissed' %}
         <form method="post" action="/library-health/findings/{{ finding.id }}/restore">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

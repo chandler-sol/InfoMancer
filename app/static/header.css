@@ -348,7 +348,7 @@
 
 @media (min-width: 981px) {
   body.has-app-sidebar {
-    padding-left: 258px;
+    padding-left: var(--app-sidebar-width, 258px);
     transition: padding-left .34s cubic-bezier(.22, 1, .36, 1);
   }
 
@@ -371,7 +371,7 @@
     z-index: 12;
     top: 0;
     left: 0;
-    width: 258px;
+    width: var(--app-sidebar-width, 258px);
     height: 68px;
     padding: 0 22px;
     border-right: 1px solid var(--line);
@@ -407,10 +407,10 @@
     display: flex;
     height: 30px;
     justify-content: center;
-    left: 243px;
+    left: calc(var(--app-sidebar-width, 258px) - 15px);
     padding: 0;
     position: fixed;
-    top: 50%;
+    top: 86px;
     transform: translateY(-50%);
     transition: left .34s cubic-bezier(.22, 1, .36, 1), transform .34s cubic-bezier(.22, 1, .36, 1), color .16s ease, box-shadow .2s ease;
     width: 30px;
@@ -419,6 +419,34 @@
 
   body.has-app-sidebar .sidebar-collapse-toggle:hover {
     color: var(--lime);
+  }
+
+  body.has-app-sidebar .sidebar-resize-handle {
+    position: fixed;
+    z-index: 13;
+    top: 68px;
+    bottom: 0;
+    left: calc(var(--app-sidebar-width, 258px) - 4px);
+    width: 8px;
+    cursor: col-resize;
+    touch-action: none;
+  }
+
+  body.has-app-sidebar .sidebar-resize-handle::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 3px;
+    width: 1px;
+    background: transparent;
+    transition: background .16s ease, box-shadow .16s ease;
+  }
+
+  body.has-app-sidebar .sidebar-resize-handle:hover::after,
+  body.sidebar-resizing .sidebar-resize-handle::after {
+    background: var(--lime);
+    box-shadow: 0 0 10px rgba(185, 245, 66, .35);
   }
 
   body.has-app-sidebar .sidebar-collapse-toggle svg {
@@ -450,7 +478,7 @@
     top: 68px;
     bottom: 0;
     left: 0;
-    width: 258px;
+    width: var(--app-sidebar-width, 258px);
     border-right: 1px solid var(--line);
     background:
       radial-gradient(circle at 30% 82%, rgba(185, 245, 66, .055), transparent 26%),
@@ -519,7 +547,7 @@
     z-index: 12;
     bottom: 14px;
     left: 14px;
-    width: 230px;
+    width: calc(var(--app-sidebar-width, 258px) - 28px);
     transition: left .3s cubic-bezier(.22, 1, .36, 1), width .3s cubic-bezier(.22, 1, .36, 1);
   }
 
@@ -609,7 +637,7 @@
     z-index: 11;
     bottom: 82px;
     left: 16px;
-    width: 226px;
+    width: calc(var(--app-sidebar-width, 258px) - 32px);
     margin: 0;
     opacity: 0;
     visibility: hidden;
@@ -625,6 +653,16 @@
     pointer-events: auto;
     transform: translateX(0);
     transition-delay: 0s;
+  }
+
+  body.has-app-sidebar .task-widget:hover {
+    width: min(360px, calc(100vw - 32px));
+    z-index: 15;
+  }
+
+  body.has-app-sidebar .task-widget.is-pinned {
+    width: min(450px, calc(100vw - 32px));
+    z-index: 15;
   }
 
   body.has-app-sidebar .task-widget-toggle {
@@ -646,7 +684,7 @@
     right: auto;
     bottom: calc(100% + 8px);
     left: 0;
-    width: 330px;
+    width: 100%;
   }
 
   body.has-app-sidebar .shell {
@@ -682,6 +720,10 @@
     transform: translateY(-50%) rotate(180deg);
   }
 
+  body.has-app-sidebar.sidebar-collapsed .sidebar-resize-handle {
+    display: none;
+  }
+
   body.has-app-sidebar.sidebar-collapsed .site-menu {
     width: 74px;
   }
@@ -690,18 +732,18 @@
   body.has-app-sidebar.sidebar-collapsed .site-menu:focus-within,
   body.has-app-sidebar.sidebar-collapsed .site-menu.tour-menu-open {
     box-shadow: 18px 0 38px rgba(0, 0, 0, .42);
-    width: 258px;
+    width: var(--app-sidebar-width, 258px);
   }
 
   body.has-app-sidebar.sidebar-collapsed:has(.site-menu:hover) .sidebar-collapse-toggle,
   body.has-app-sidebar.sidebar-collapsed:has(.site-menu:focus-within) .sidebar-collapse-toggle,
   body.has-app-sidebar.sidebar-collapsed:has(.site-menu.tour-menu-open) .sidebar-collapse-toggle {
-    left: 243px;
+    left: calc(var(--app-sidebar-width, 258px) - 15px);
   }
 
   body.has-app-sidebar.sidebar-collapsed .site-menu-panel {
     padding-inline: 10px;
-    width: 258px;
+    width: var(--app-sidebar-width, 258px);
   }
 
   body.has-app-sidebar.sidebar-collapsed .site-menu-panel a {

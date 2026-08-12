@@ -222,6 +222,12 @@ class DuplicateService:
             "The stored technical profiles are equivalent. Verify the file contents if you "
             "need to know whether they are byte-for-byte identical; InfoMancer will not delete either file."
         )
+        removable = alternate
+        if removable is None and exact:
+            removable = right
+        recoverable_bytes = (
+            max(0, int(removable.get("size_bytes") or 0)) if removable else 0
+        )
         return {
             "pair": f"{min(left['id'], right['id'])}-{max(left['id'], right['id'])}",
             "title_id": left["title_id"], "title_name": left["title_name"],
@@ -233,6 +239,7 @@ class DuplicateService:
             "recovery_reasons": recovery_reasons,
             "recommended_keep": preferred["filename"] if preferred else "No preference yet",
             "safe_to_remove": False,
+            "recoverable_bytes": recoverable_bytes,
             "verified_at": review.get("verified_at"),
             "file_a": self._file_view(left), "file_b": self._file_view(right),
         }
@@ -251,6 +258,45 @@ class DuplicateService:
             "dynamic_range": row.get("dynamic_range") or "Not inspected",
             "container": row.get("container") or row.get("extension") or "Unknown",
             "root_label": row.get("root_label") or "Unlabeled source",
+        }
+
+    @staticmethod
+    def recovery_opportunity(candidates: list[dict[str, Any]]) -> dict[str, int]:
+        """Estimate reviewable savings once per file, never per comparison pair."""
+        removable: dict[int, tuple[int, str]] = {}
+        for candidate in candidates:
+            classification = candidate.get("classification")
+            if classification not in {"verified_exact", "likely"}:
+                continue
+            files = [candidate["file_a"], candidate["file_b"]]
+            preferred_id = candidate.get("preferred_id")
+            if preferred_id is not None:
+                suggested = next(
+                    (item for item in files if item["id"] != preferred_id), None
+                )
+            elif classification == "verified_exact":
+                # Identical bytes have no quality winner; keep one and count the
+                # other only as an estimate until the user chooses explicitly.
+                suggested = max(files, key=lambda item: int(item["id"]))
+            else:
+                suggested = None
+            if suggested is None:
+                continue
+            file_id = int(suggested["id"])
+            previous = removable.get(file_id)
+            if previous is None or classification == "verified_exact":
+                removable[file_id] = (
+                    max(0, int(suggested.get("size_bytes") or 0)), classification
+                )
+        exact = [value for value in removable.values() if value[1] == "verified_exact"]
+        likely = [value for value in removable.values() if value[1] == "likely"]
+        return {
+            "bytes": sum(value[0] for value in removable.values()),
+            "files": len(removable),
+            "exact_bytes": sum(value[0] for value in exact),
+            "exact_files": len(exact),
+            "likely_bytes": sum(value[0] for value in likely),
+            "likely_files": len(likely),
         }
 
     def decide(self, file_a_id: int, file_b_id: int, decision: str, user_id: int | None) -> bool:

@@ -7,7 +7,11 @@
     <h1>Duplicate Review</h1>
     <p>Compare files that appear to represent the same movie or TV episode. InfoMancer explains the evidence and never deletes media automatically.</p>
   </div>
-  <a class="button" href="/library-health">Back to Library Health</a>
+  <div class="actions duplicate-hero-actions">
+    <a class="button" href="/duplicates?status={{ status }}&evidence={{ evidence }}&refresh=true" aria-label="Refresh duplicate candidates from the current catalog">Refresh candidates</a>
+    <a class="button" href="/duplicates/trash">Trash{% if trash_count %} ({{ trash_count }}){% endif %}</a>
+    <a class="button" href="/library-health">Back to Library Health</a>
+  </div>
 </section>
 
 {% if message %}<div class="notice" role="status">{{ message }}</div>{% endif %}
@@ -18,11 +22,89 @@
   <a href="/duplicates?status=not_duplicate" {% if status == 'not_duplicate' %}class="active"{% endif %}>Intentional alternatives</a>
 </nav>
 
+<form class="panel duplicate-filter-bar" method="get" action="/duplicates">
+  <input type="hidden" name="status" value="{{ status }}"><input type="hidden" name="evidence" value="{{ evidence }}">
+  <label>Search candidates<input name="q" value="{{ q }}" placeholder="Title, filename, or path"></label>
+  <label>Source<select name="source"><option value="">All sources</option>{% for value, label in source_options %}<option value="{{ value }}" {% if source == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+  <label>Sort<select name="sort"><option value="confidence" {% if sort == 'confidence' %}selected{% endif %}>Strongest evidence</option><option value="space" {% if sort == 'space' %}selected{% endif %}>Recoverable space</option><option value="title" {% if sort == 'title' %}selected{% endif %}>Title</option></select></label>
+  <button class="button">Apply filters</button>
+</form>
+
+<form id="duplicate-bulk-form" class="duplicate-bulk-bar" method="post" action="/duplicates/bulk-action">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label><input id="duplicate-select-all" type="checkbox"> Select visible</label>
+  <span id="duplicate-selected-count">0 selected</span>
+  <button class="button" name="action" value="verify">Verify selected</button>
+  <button class="button" name="action" value="ignored">Ignore selected</button>
+  <button class="button" name="action" value="not_duplicate">Keep as intentional alternatives</button>
+</form>
+
+<section class="duplicate-summary" aria-label="Duplicate candidate summary">
+  <div class="duplicate-summary-intro">
+    <p class="eyebrow">CURRENT CATALOG</p>
+    <h2>{{ candidate_total }} candidate pair{% if candidate_total != 1 %}s{% endif %}</h2>
+    <p>Several files for one title can produce multiple comparisons. Only a completed hash check proves that two files are identical.</p>
+  </div>
+  <dl>
+    <div><dt>Verified exact</dt><dd>{{ candidate_counts.verified_exact }}</dd><small>Identical file contents</small></div>
+    <div><dt>Likely duplicates</dt><dd>{{ candidate_counts.likely }}</dd><small>Same size and runtime</small></div>
+    <div><dt>Possible alternates</dt><dd>{{ candidate_counts.alternate }}</dd><small>Different editions or encodes</small></div>
+  </dl>
+</section>
+
+<section class="panel duplicate-impact duplicate-review-impact" aria-labelledby="cleanup-impact-title">
+  <header>
+    <div>
+      <p class="eyebrow">DUPLICATE CLEANUP IMPACT</p>
+      <h2 id="cleanup-impact-title">Storage impact</h2>
+      <p>Potential savings are estimates from exact and likely candidates. Nothing is removed without your review.</p>
+    </div>
+  </header>
+  <div class="duplicate-impact-grid">
+    <div><strong>{{ format_bytes(duplicate_opportunity.bytes) }}</strong><span>Estimated recoverable</span><small>{{ duplicate_opportunity.files }} reviewable file{% if duplicate_opportunity.files != 1 %}s{% endif %}</small></div>
+    <div><strong>{{ format_bytes(duplicate_impact.reclaimed_bytes) }}</strong><span>Physically reclaimed</span><small>{{ duplicate_impact.reclaimed_files }} permanently removed file{% if duplicate_impact.reclaimed_files != 1 %}s{% endif %}</small></div>
+    <div><strong>{{ format_bytes(duplicate_impact.pending_bytes) }}</strong><span>Waiting in managed Trash</span><small>{{ duplicate_impact.pending_files }} restorable file{% if duplicate_impact.pending_files != 1 %}s{% endif %}</small></div>
+  </div>
+  <p class="duplicate-impact-breakdown">The estimate includes {{ duplicate_opportunity.exact_files }} verified exact and {{ duplicate_opportunity.likely_files }} likely duplicate file{% if duplicate_opportunity.exact_files + duplicate_opportunity.likely_files != 1 %}s{% endif %}. Possible alternate editions are excluded.</p>
+</section>
+
+<details class="panel duplicate-history" id="cleanup-history" {% if cleanup_status != 'all' %}open{% endif %}>
+  <summary><span>Cleanup history</span><small>{{ cleanup_history|length }} recent event{% if cleanup_history|length != 1 %}s{% endif %}</small></summary>
+  <div class="duplicate-history-body">
+    <nav class="duplicate-tabs" aria-label="Cleanup history filter">
+      {% for value, label in [('all', 'All'), ('pending', 'Moved to Trash'), ('restored', 'Restored'), ('purged', 'Purged'), ('manual', 'Manual deletion')] %}
+      <a href="/duplicates?status={{ status }}&evidence={{ evidence }}&cleanup_status={{ value }}#cleanup-history" {% if cleanup_status == value %}class="active"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </nav>
+    {% if cleanup_history %}
+    <div class="duplicate-history-list">
+      {% for event in cleanup_history %}
+      <article class="duplicate-history-item">
+        <div><strong>{{ event.action_label }}</strong><span>{{ event.filename }}</span></div>
+        <div><span>{{ event.title_name }}</span><small>{{ format_bytes(event.size_bytes) }}</small></div>
+        <time>{{ local_time(event.occurred_at) }}</time>
+        <details><summary>Show path</summary><p class="path">{{ event.path }}</p></details>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="duplicate-history-empty">No cleanup events match this filter yet.</p>
+    {% endif %}
+  </div>
+</details>
+
+<nav class="duplicate-tabs duplicate-evidence-tabs" aria-label="Duplicate evidence filter">
+  <a href="/duplicates?status={{ status }}&evidence=strong" {% if evidence == 'strong' %}class="active"{% endif %}>Exact &amp; likely ({{ candidate_counts.verified_exact + candidate_counts.likely }})</a>
+  <a href="/duplicates?status={{ status }}&evidence=alternate" {% if evidence == 'alternate' %}class="active"{% endif %}>Possible alternates ({{ candidate_counts.alternate }})</a>
+  <a href="/duplicates?status={{ status }}&evidence=all" {% if evidence == 'all' %}class="active"{% endif %}>All candidates ({{ candidate_total }})</a>
+</nav>
+
 <section class="duplicate-list">
 {% for candidate in candidates %}
   <article class="panel duplicate-candidate duplicate-{{ candidate.classification }}">
     <header>
       <div>
+        <label class="duplicate-select"><input class="duplicate-pair-select" form="duplicate-bulk-form" type="checkbox" name="pairs" value="{{ candidate.file_a.id }}:{{ candidate.file_b.id }}"><span class="sr-only">Select {{ candidate.title_name }}</span></label>
         <div class="mie-labels"><span>{{ candidate.kind|upper }}</span><span>{{ candidate.label }}</span></div>
         <h2><a href="/titles/{{ candidate.title_id }}">{{ candidate.title_name }}</a></h2>
       </div>
@@ -47,6 +129,15 @@
           <div><dt>Container</dt><dd>{{ file.container }}</dd></div>
         </dl>
         <details><summary>Show full path</summary><p class="path">{{ file.path }}</p></details>
+        {% if status == 'active' %}
+        <div class="actions duplicate-file-actions">
+          <a class="button" href="/duplicates/{{ file.id }}/trash-preview">Move this copy to Trash</a>
+          <form method="post" action="/duplicates/{{ file.id }}/verify-removed" onsubmit="return confirm('Verify that this exact file was deleted outside InfoMancer? No catalog entry will be removed unless the file is confirmed missing.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button">I deleted it myself</button>
+          </form>
+        </div>
+        {% endif %}
       </section>
       {% endfor %}
     </div>
@@ -59,17 +150,20 @@
     </div>
     <div class="actions duplicate-actions">
       {% if status == 'active' %}
-      <form method="post" action="/duplicates/{{ candidate.file_a.id }}/{{ candidate.file_b.id }}/verify">
+      <form class="duplicate-action-help" method="post" action="/duplicates/{{ candidate.file_a.id }}/{{ candidate.file_b.id }}/verify">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button class="button">Verify file contents</button>
+        <button class="button" aria-describedby="verify-help-{{ candidate.pair }}">Verify file contents</button>
+        <span class="duplicate-action-tooltip" id="verify-help-{{ candidate.pair }}" role="tooltip">Reads both files byte-for-byte in the background to confirm whether they are identical. No files are changed.</span>
       </form>
-      <form method="post" action="/duplicates/{{ candidate.file_a.id }}/{{ candidate.file_b.id }}/decision">
+      <form class="duplicate-action-help" method="post" action="/duplicates/{{ candidate.file_a.id }}/{{ candidate.file_b.id }}/decision">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="ignored">
-        <button class="button">Ignore for now</button>
+        <button class="button" aria-describedby="ignore-help-{{ candidate.pair }}">Ignore for now</button>
+        <span class="duplicate-action-tooltip" id="ignore-help-{{ candidate.pair }}" role="tooltip">Hides this candidate until either file changes, when InfoMancer will ask you to review it again.</span>
       </form>
-      <form method="post" action="/duplicates/{{ candidate.file_a.id }}/{{ candidate.file_b.id }}/decision">
+      <form class="duplicate-action-help" method="post" action="/duplicates/{{ candidate.file_a.id }}/{{ candidate.file_b.id }}/decision">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="not_duplicate">
-        <button class="button">Keep as intentional alternatives</button>
+        <button class="button" aria-describedby="alternative-help-{{ candidate.pair }}">Keep as intentional alternatives</button>
+        <span class="duplicate-action-tooltip" id="alternative-help-{{ candidate.pair }}" role="tooltip">Marks both files as intentionally different editions or encodes and removes this pair from active review. Neither file is changed.</span>
       </form>
       {% else %}
       <form method="post" action="/duplicates/{{ candidate.file_a.id }}/{{ candidate.file_b.id }}/decision">
@@ -80,7 +174,10 @@
     </div>
   </article>
 {% else %}
-  <div class="panel mie-empty"><span aria-hidden="true">&#10003;</span><div><h2>No duplicate candidates here</h2><p>{% if status == 'active' %}InfoMancer did not find overlapping catalog identities that still need review.{% else %}No pairs have been placed in this review state.{% endif %}</p></div></div>
+  <div class="panel mie-empty"><span aria-hidden="true">&#10003;</span><div><h2>No candidates in this view</h2><p>{% if candidate_total and evidence != 'all' %}Other candidate types may still be available. Choose another evidence filter above to review them.{% elif status == 'active' %}InfoMancer did not find overlapping catalog identities that still need review.{% else %}No pairs have been placed in this review state.{% endif %}</p></div></div>
 {% endfor %}
 </section>
+<script>
+(()=>{const all=document.getElementById('duplicate-select-all');const boxes=[...document.querySelectorAll('.duplicate-pair-select')];const count=document.getElementById('duplicate-selected-count');if(!all)return;const sync=()=>{const n=boxes.filter(box=>box.checked).length;count.textContent=`${n} selected`;all.checked=n===boxes.length&&n>0;all.indeterminate=n>0&&n<boxes.length;};all.addEventListener('change',()=>{boxes.forEach(box=>box.checked=all.checked);sync();});boxes.forEach(box=>box.addEventListener('change',sync));})();
+</script>
 {% endblock %}

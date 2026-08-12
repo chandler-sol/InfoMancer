@@ -209,6 +209,78 @@ class MediaIntelligenceEngineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Separate multiple entries"):
             self.engine.save_quality_profile(1, preferred_video_codecs="H264, not valid!")
 
+    def test_calibration_changes_thresholds_and_validates_score_penalties(self):
+        self.engine.save_calibration(
+            identity_warning_threshold="95", source_stale_hours="48",
+            critical_weight="30", warning_weight="10", information_weight="1",
+        )
+
+        self.engine.analyze()
+        identity = next(
+            item for item in self.engine.findings()
+            if item["rule_key"] == "identity-confidence-low"
+        )
+        self.assertEqual(identity["evidence"]["confidence_score"], "90/100")
+        self.assertEqual(self.engine.calibration()["source_stale_hours"], 48)
+        with self.assertRaisesRegex(ValueError, "descend"):
+            self.engine.save_calibration(
+                identity_warning_threshold="70", source_stale_hours="24",
+                critical_weight="5", warning_weight="10", information_weight="2",
+            )
+
+    def test_analysis_records_transparent_category_scores_and_history(self):
+        self.engine.analyze()
+
+        scores = {item["category"]: item for item in self.engine.category_scores()}
+        self.assertEqual(scores["health"]["score"], 80)
+        self.assertEqual(scores["completeness"]["score"], 92)
+        self.assertEqual(scores["freshness"]["score"], 98)
+        self.assertEqual(self.engine.summary()["overall_score"], 95)
+        history = self.engine.analysis_history()
+        self.assertEqual(history[0]["active_findings"], 3)
+        self.assertEqual(history[0]["suppressed_findings"], 0)
+
+    def test_explicit_feedback_suppresses_matching_future_finding(self):
+        self.engine.analyze()
+        finding = next(
+            item for item in self.engine.findings()
+            if item["rule_key"] == "missing-episodes"
+        )
+        self.assertTrue(self.engine.dismiss(
+            finding["id"], None, reason="expected", scope="title",
+            note="Specials are stored separately.",
+        ))
+
+        self.assertEqual(self.engine.analyze(), 2)
+        self.assertNotIn(
+            "missing-episodes", {item["rule_key"] for item in self.engine.findings()},
+        )
+        feedback = self.engine.feedback()
+        self.assertEqual(feedback[0]["scope"], "title")
+        self.assertEqual(self.engine.summary()["suppressed"], 1)
+
+        self.assertTrue(self.engine.delete_feedback(feedback[0]["id"]))
+        self.assertEqual(self.engine.analyze(), 3)
+        self.assertIn(
+            "missing-episodes", {item["rule_key"] for item in self.engine.findings()},
+        )
+
+    def test_identity_report_explains_independent_evidence(self):
+        report = self.engine.identity_report(1)
+        self.assertIsNotNone(report)
+        self.assertEqual(report["score"], 90)
+        self.assertEqual(
+            {item["key"] for item in report["breakdown"]},
+            {"provider", "title", "year", "folder"},
+        )
+        self.assertIn("TVDB series", report["providers"])
+
+    def test_storage_report_summarizes_sources_and_titles(self):
+        report = self.engine.storage_report()
+        self.assertEqual(report["by_source"][0]["files"], 1)
+        self.assertEqual(report["by_source"][0]["bytes"], 100)
+        self.assertEqual(report["largest_titles"][0]["title"], "Example Show")
+
 
 if __name__ == "__main__":
     unittest.main()

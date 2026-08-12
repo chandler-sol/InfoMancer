@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Managed Trash - {{ app_name }}{% endblock %}
+{% block content %}
+<section class="mie-hero duplicate-hero">
+  <div>
+    <p class="eyebrow">DUPLICATE REVIEW</p>
+    <h1>Managed Trash</h1>
+    <p>Files moved here are outside the active catalog but remain on their original source until restored or their retention date passes.</p>
+  </div>
+  <a class="button" href="/duplicates">Back to Duplicate Review</a>
+</section>
+{% if message %}<div class="notice" role="status">{{ message }}</div>{% endif %}
+<section class="panel trash-settings">
+  <div>
+    <p class="eyebrow">RETENTION</p>
+    <h2>Future trash moves</h2>
+    <p>InfoMancer checks once per day and permanently removes only managed-trash files whose retention date has passed.</p>
+  </div>
+  <form method="post" action="/duplicates/trash/retention" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Keep files for
+      <select name="retention">
+        <option value="7" {% if retention == '7' %}selected{% endif %}>7 days</option>
+        <option value="30" {% if retention == '30' %}selected{% endif %}>30 days</option>
+        <option value="90" {% if retention == '90' %}selected{% endif %}>90 days</option>
+        <option value="365" {% if retention == '365' %}selected{% endif %}>1 year</option>
+        <option value="never" {% if retention == 'never' %}selected{% endif %}>Never automatically</option>
+      </select>
+    </label>
+    <button class="button">Save retention</button>
+  </form>
+</section>
+<section class="trash-list">
+{% for item in items %}
+  <article class="panel trash-item">
+    <div>
+      <p class="eyebrow">{{ item.root_label or 'SOURCE UNAVAILABLE' }}</p>
+      <h2>{{ item.title_name }}</h2>
+      <p>{{ item.original_path }}</p>
+      <small>Moved {{ item.moved_at }}{% if item.purge_after %} · scheduled for removal {{ item.purge_after }}{% else %} · kept until you restore or remove it{% endif %}</small>
+    </div>
+    <form method="post" action="/duplicates/trash/{{ item.id }}/restore">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="button primary">Restore</button>
+    </form>
+  </article>
+{% else %}
+  <div class="panel mie-empty"><span aria-hidden="true">✓</span><div><h2>Managed Trash is empty</h2><p>No duplicate copies are waiting for restoration or scheduled removal.</p></div></div>
+{% endfor %}
+</section>
+{% endblock %}
