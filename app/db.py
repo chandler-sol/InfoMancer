@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS titles (
     metadata_end_year INTEGER,
     metadata_continuing INTEGER,
     metadata_status TEXT,
+    overview TEXT,
     matched_at TEXT,
     discovered_at TEXT,
     last_scanned_at TEXT,
@@ -333,6 +334,14 @@ CREATE TABLE IF NOT EXISTS event_logs (
     user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS user_search_history (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    query TEXT NOT NULL COLLATE NOCASE,
+    searched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, query)
+);
+
 CREATE TABLE IF NOT EXISTS mie_findings (
     id INTEGER PRIMARY KEY,
     fingerprint TEXT NOT NULL UNIQUE,
@@ -439,6 +448,19 @@ CREATE TABLE IF NOT EXISTS duplicate_reviews (
     CHECK(file_a_id < file_b_id)
 );
 
+CREATE TABLE IF NOT EXISTS media_file_hashes (
+    file_id INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
+    sha256 TEXT,
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    modified_at REAL,
+    status TEXT NOT NULL DEFAULT 'queued'
+        CHECK(status IN ('queued', 'running', 'complete', 'error')),
+    error TEXT NOT NULL DEFAULT '',
+    queued_at TEXT,
+    hashed_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS duplicate_trash (
     id INTEGER PRIMARY KEY,
     original_file_id INTEGER,
@@ -506,6 +528,8 @@ CREATE INDEX IF NOT EXISTS idx_user_episode_favorites_user
     ON user_episode_favorites(user_id, updated_at DESC, expected_episode_id);
 CREATE INDEX IF NOT EXISTS idx_user_episode_favorites_episode
     ON user_episode_favorites(expected_episode_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_user_search_history_recent
+    ON user_search_history(user_id, searched_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_user_tags_name
     ON user_tags(user_id, name);
 CREATE INDEX IF NOT EXISTS idx_title_tags_title
@@ -536,6 +560,8 @@ CREATE INDEX IF NOT EXISTS idx_mie_analysis_runs_time
     ON mie_analysis_runs(analyzed_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_duplicate_reviews_decision
     ON duplicate_reviews(decision, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_media_file_hashes_status
+    ON media_file_hashes(status, updated_at);
 """
 
 
@@ -556,6 +582,7 @@ class Database:
                 "metadata_end_year": "INTEGER",
                 "metadata_continuing": "INTEGER",
                 "metadata_status": "TEXT",
+                "overview": "TEXT",
                 "tvdb_movie_id": "INTEGER",
                 "tmdb_id": "TEXT",
                 "imdb_id": "TEXT",

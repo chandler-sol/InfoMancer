@@ -41,7 +41,10 @@ class EventLogTests(unittest.TestCase):
         self.assertIn("runtime_seconds", file_columns)
         self.assertIn("dynamic_range", file_columns)
         self.assertTrue(
-            {"user_title_state", "user_tags", "title_tags", "event_logs"} <= tables
+            {
+                "user_title_state", "user_tags", "title_tags", "event_logs",
+                "user_search_history",
+            } <= tables
         )
 
 

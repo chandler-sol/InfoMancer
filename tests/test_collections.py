@@ -87,6 +87,18 @@ class CollectionTests(unittest.TestCase):
 
         detail = self.client.get(f"/collections/{collection_id}")
         self.assertLess(detail.text.index("First Movie"), detail.text.index("Second Movie"))
+        self.assertIn('class="cover-card collection-cover-card"', detail.text)
+        self.assertIn("Manage Collections", detail.text)
+        self.assertIn("Remove from collection", detail.text)
+        favorite = self.client.post(
+            f"/titles/{self.first_id}/favorite",
+            data={"return_to": f"/collections/{collection_id}#title-{self.first_id}"},
+            follow_redirects=False,
+        )
+        self.assertTrue(
+            favorite.headers["location"].startswith(f"/collections/{collection_id}?message="),
+        )
+        self.assertTrue(favorite.headers["location"].endswith(f"#title-{self.first_id}"))
         moved = self.client.post(
             f"/collections/{collection_id}/titles/{self.second_id}/move",
             data={"direction": "up"},

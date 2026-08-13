@@ -92,7 +92,11 @@ class DuplicateServiceTests(unittest.TestCase):
         self.assertEqual(self.service.candidates(), [])
         with self.database.connect() as conn:
             conn.execute("UPDATE files SET episode_start=1,episode_end=2 WHERE id=2")
-        self.assertEqual(len(self.service.candidates()), 1)
+        candidates = self.service.candidates()
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["file_a"]["season"], 1)
+        self.assertEqual(candidates[0]["file_a"]["episode_start"], 1)
+        self.assertEqual(candidates[0]["file_b"]["episode_end"], 2)
 
     def test_selected_duplicate_can_be_trashed_and_restored(self):
         original = self.base / "first.mkv"

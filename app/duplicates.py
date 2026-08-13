@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import hashlib
 from itertools import combinations
-from pathlib import Path
 from typing import Any
 
 from .db import Database
+from .file_hashes import MediaHashService
 
 
 DECISIONS = {"active", "ignored", "not_duplicate"}
@@ -36,8 +35,9 @@ def _format_resolution(row: dict[str, Any]) -> str:
 class DuplicateService:
     """Find and explain duplicate candidates without changing media files."""
 
-    def __init__(self, database: Database):
+    def __init__(self, database: Database, hashes: MediaHashService | None = None):
         self.database = database
+        self.hashes = hashes or MediaHashService(database)
 
     def candidates(self, *, status: str = "active") -> list[dict[str, Any]]:
         status = status if status in DECISIONS else "active"
@@ -54,6 +54,7 @@ class DuplicateService:
                 (row["file_a_id"], row["file_b_id"]): dict(row)
                 for row in conn.execute("SELECT * FROM duplicate_reviews")
             }
+            hash_records = self.hashes.records()
 
         by_title: dict[int, list[dict[str, Any]]] = {}
         for row in rows:
@@ -81,6 +82,21 @@ class DuplicateService:
                     current_review["file_a_sha256"] = None
                     current_review["file_b_sha256"] = None
                     current_review["verified_at"] = None
+                for row, key in ((left, "file_a"), (right, "file_b")):
+                    record = hash_records.get(int(row["id"]))
+                    row["hash_status"] = record.get("status") if record else "not_verified"
+                    row["hash_error"] = record.get("error") if record else ""
+                    row["hashed_at"] = record.get("hashed_at") if record else None
+                    current = bool(record and MediaHashService._current({
+                        "status": record.get("status"), "sha256": record.get("sha256"),
+                        "hash_size": record.get("size_bytes"), "size_bytes": row.get("size_bytes"),
+                        "hash_modified": record.get("modified_at"), "modified_at": row.get("modified_at"),
+                    }))
+                    if current:
+                        current_review[f"{key}_sha256"] = record["sha256"]
+                        current_review["verified_at"] = record.get("hashed_at")
+                    elif record:
+                        current_review[f"{key}_sha256"] = None
                 candidates.append(self._candidate(
                     left, right, current_review, effective_status
                 ))
@@ -241,14 +257,28 @@ class DuplicateService:
             "safe_to_remove": False,
             "recoverable_bytes": recoverable_bytes,
             "verified_at": review.get("verified_at"),
+            "hash_state": self._hash_state(left, right, exact, verified),
             "file_a": self._file_view(left), "file_b": self._file_view(right),
         }
+
+    @staticmethod
+    def _hash_state(left: dict[str, Any], right: dict[str, Any], exact: bool, verified: bool) -> str:
+        if verified:
+            return "verified_exact" if exact else "verified_different"
+        states = {left.get("hash_status"), right.get("hash_status")}
+        for state in ("running", "queued", "error"):
+            if state in states:
+                return state
+        return "not_verified"
 
     @staticmethod
     def _file_view(row: dict[str, Any]) -> dict[str, Any]:
         return {
             "id": row["id"], "filename": row["filename"], "path": row["path"],
             "root_id": row.get("root_id"),
+            "season": row.get("season"),
+            "episode_start": row.get("episode_start"),
+            "episode_end": row.get("episode_end"),
             "size_bytes": int(row.get("size_bytes") or 0),
             "runtime_seconds": row.get("runtime_seconds"),
             "resolution": _format_resolution(row),
@@ -258,6 +288,9 @@ class DuplicateService:
             "dynamic_range": row.get("dynamic_range") or "Not inspected",
             "container": row.get("container") or row.get("extension") or "Unknown",
             "root_label": row.get("root_label") or "Unlabeled source",
+            "hash_status": row.get("hash_status") or "not_verified",
+            "hash_error": row.get("hash_error") or "",
+            "hashed_at": row.get("hashed_at"),
         }
 
     @staticmethod
@@ -334,15 +367,13 @@ class DuplicateService:
             )]
         if len(rows) != 2:
             raise ValueError("Those files are no longer available in the catalog.")
-        paths = [Path(row["path"]) for row in rows]
-        missing = [path.name for path in paths if not path.is_file()]
-        if missing:
-            raise ValueError(
-                "InfoMancer could not verify the files because storage is unavailable or "
-                f"a file has moved: {', '.join(missing)}. Reconnect the source and rescan it."
-            )
-        hashes = [self._sha256(path) for path in paths]
+        hashes = [self.hashes.hash_file(row["id"], force=True) for row in rows]
         with self.database.connect() as conn:
+            # Hashing may refresh a stale catalog size/mtime. Store the
+            # signatures that correspond to the bytes we actually verified.
+            rows = [dict(row) for row in conn.execute(
+                "SELECT * FROM files WHERE id IN (?,?) ORDER BY id", (a_id, b_id)
+            )]
             conn.execute(
                 """INSERT INTO duplicate_reviews(
                      file_a_id,file_b_id,decision,file_a_signature,file_b_signature,
@@ -360,11 +391,3 @@ class DuplicateService:
                  hashes[0], hashes[1], user_id),
             )
         return "exact" if hashes[0] == hashes[1] else "different"
-
-    @staticmethod
-    def _sha256(path: Path) -> str:
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            while chunk := handle.read(4 * 1024 * 1024):
-                digest.update(chunk)
-        return digest.hexdigest()

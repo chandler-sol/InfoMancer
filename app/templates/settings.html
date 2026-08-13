@@ -57,7 +57,7 @@
     <div class="settings-metrics system-metrics"><div><strong>{{ '{:,}'.format(system_counts.titles) }}</strong><span>Titles</span></div><div><strong>{{ '{:,}'.format(system_counts.files) }}</strong><span>Media files</span></div><div><strong>{{ '{:,}'.format(system_counts.roots) }}</strong><span>Sources</span></div><div><strong>{{ '{:,}'.format(system_counts.active_users) }}</strong><span>Active users</span></div></div>
   </section>
   <nav class="settings-jump-nav full-width" aria-label="System settings sections">
-    <a href="#storage">Storage</a><a href="#backups">Backups</a><a href="#updates">Updates</a><a href="#media-information">Media inspection</a><a href="#logging">Logs</a><a href="#service">Service</a>
+    <a href="#storage">Storage</a><a href="#fingerprints">Fingerprints</a><a href="#backups">Backups</a><a href="#updates">Updates</a><a href="#media-information">Media inspection</a><a href="#logging">Logs</a><a href="#service">Service</a>
   </nav>
   <div class="system-overview-grid full-width">
   <section class="panel settings-card system-storage-card" id="storage">
@@ -77,6 +77,24 @@
     <form class="settings-import-form" method="post" action="/settings/import/preview" enctype="multipart/form-data"><label>Import an InfoMancer settings file<input type="file" name="settings_file" accept="application/json,.json" required></label><button class="button">Review import</button></form>
   </section>
   </div>
+  <section class="panel settings-card full-width" id="fingerprints">
+    <div class="settings-card-head"><div><p class="eyebrow">FILE FINGERPRINTS</p><h2>Content hashing</h2></div><span class="settings-state {{ 'active' if hash_job.status in ['starting','running'] else 'good' }}">{{ 'Running' if hash_job.status in ['starting','running'] else 'Ready' }}</span></div>
+    <p class="muted">SHA-256 fingerprints let Duplicate Review prove whether files are byte-for-byte identical. InfoMancer never deletes a file automatically.</p>
+    <div class="settings-metrics system-metrics"><div><strong>{{ '{:,}'.format(hash_counts.complete or 0) }}</strong><span>Ready</span></div><div><strong>{{ '{:,}'.format(hash_counts.queued or 0) }}</strong><span>Queued</span></div><div><strong>{{ '{:,}'.format(hash_counts.error or 0) }}</strong><span>Need attention</span></div><div><strong>{{ '{:,}'.format(hash_counts.unhashed or 0) }}</strong><span>Not fingerprinted</span></div></div>
+    <form class="settings-form hashing-settings-form" method="post" action="/settings/hashing">
+      <div class="settings-form-grid">
+        <label>Behavior<select name="hash_mode"><option value="automatic" {% if preferences.hash_mode == 'automatic' %}selected{% endif %}>Automatic</option><option value="scheduled" {% if preferences.hash_mode == 'scheduled' %}selected{% endif %}>Scheduled only</option><option value="on_demand" {% if preferences.hash_mode == 'on_demand' %}selected{% endif %}>On demand</option><option value="off" {% if preferences.hash_mode == 'off' %}selected{% endif %}>Off</option></select><small>Automatic fingerprints new media immediately, up to the limit below, and queues the remainder.</small></label>
+        <label>Immediate file limit<input type="number" name="hash_immediate_limit" min="1" max="10000" value="{{ preferences.hash_immediate_limit }}" required><small>This limit is shared by an entire Scan All run. The default is 200 files.</small></label>
+        <label>Schedule<select name="hash_schedule_frequency"><option value="daily" {% if preferences.hash_schedule_frequency == 'daily' %}selected{% endif %}>Daily</option><option value="weekly" {% if preferences.hash_schedule_frequency == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if preferences.hash_schedule_frequency == 'monthly' %}selected{% endif %}>Monthly</option></select></label>
+        <label>Schedule day<input type="number" name="hash_schedule_day" min="0" max="28" value="{{ preferences.hash_schedule_day }}" required><small>Weekly: 0 Monday through 6 Sunday. Monthly: 1 through 28. Daily ignores this value.</small></label>
+        <label>Start time<input type="time" name="hash_schedule_time" value="{{ preferences.hash_schedule_time }}" required><small>Uses the installation time zone. The default is Sunday at 3:00 AM.</small></label>
+        <label>Disk activity<select name="hash_io_intensity"><option value="low" {% if preferences.hash_io_intensity == 'low' %}selected{% endif %}>Low</option><option value="balanced" {% if preferences.hash_io_intensity == 'balanced' %}selected{% endif %}>Balanced</option><option value="high" {% if preferences.hash_io_intensity == 'high' %}selected{% endif %}>High</option></select></label>
+      </div>
+      <label class="checkbox-label"><input type="checkbox" name="hash_pause_for_activity" value="1" {% if preferences.hash_pause_for_activity == '1' %}checked{% endif %}> Pause fingerprinting while scans, matching, or media inspection are running</label>
+      <div class="actions"><button class="button primary">Save fingerprint settings</button></div>
+    </form>
+    <div class="actions hashing-task-actions"><form method="post" action="/hashes/run"><button class="button">Run now</button></form><form method="post" action="/hashes/pause"><button class="button">Pause</button></form><form method="post" action="/hashes/resume"><button class="button">Resume</button></form><form method="post" action="/hashes/cancel"><button class="button danger">Cancel</button></form></div>
+  </section>
   <section class="panel settings-card full-width" id="backups">
     <div class="settings-card-head"><div><p class="eyebrow">BACKUP &amp; RESTORE</p><h2>Complete database protection</h2></div><div class="button-row"><form method="post" action="/maintenance/backups/verify"><button class="button">Verify backups</button></form><form method="post" action="/maintenance/backups"><button class="button">Create backup now</button></form></div></div>
     <p class="muted">Database backups contain the catalog, accounts, settings, collections, favorites, and tags. They do not contain media files, provider-secret files, collection artwork, or deployment environment files.</p>

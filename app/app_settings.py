@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -20,6 +21,13 @@ class AppSettings:
         "search_url_template",
         "log_level",
         "trash_retention_days",
+        "hash_mode",
+        "hash_immediate_limit",
+        "hash_schedule_frequency",
+        "hash_schedule_day",
+        "hash_schedule_time",
+        "hash_io_intensity",
+        "hash_pause_for_activity",
     }
 
     def __init__(self, database: Database, environment_search_url: str) -> None:
@@ -35,6 +43,14 @@ class AppSettings:
             "search_url_template": environment_search_url,
             "log_level": "info",
             "trash_retention_days": "30",
+            "hash_mode": "automatic",
+            "hash_immediate_limit": "200",
+            "hash_schedule_frequency": "weekly",
+            "hash_schedule_day": "6",
+            "hash_schedule_time": "03:00",
+            "hash_io_intensity": "low",
+            "hash_pause_for_activity": "1",
+            "hash_last_scheduled_at": "",
         }
 
     def get(self, key: str) -> str:
@@ -111,6 +127,45 @@ class AppSettings:
             raise AppSettingError("Choose Standard, Verbose, or Debug logging.")
         return {"log_level": level}
 
+    def validate_hashing(
+        self, mode: str, immediate_limit: str, frequency: str,
+        schedule_day: str, schedule_time: str, intensity: str,
+        pause_for_activity: str,
+    ) -> dict[str, str]:
+        mode = mode.strip().casefold()
+        frequency = frequency.strip().casefold()
+        intensity = intensity.strip().casefold()
+        if mode not in {"automatic", "scheduled", "on_demand", "off"}:
+            raise AppSettingError("Choose Automatic, Scheduled, On demand, or Off hashing.")
+        try:
+            limit = int(immediate_limit)
+            day = int(schedule_day)
+        except ValueError as exc:
+            raise AppSettingError("The hashing limit and schedule day must be numbers.") from exc
+        if not 1 <= limit <= 10_000:
+            raise AppSettingError("The immediate hashing limit must be between 1 and 10,000 files.")
+        if frequency not in {"daily", "weekly", "monthly"}:
+            raise AppSettingError("Choose a daily, weekly, or monthly hashing schedule.")
+        if frequency == "weekly" and not 0 <= day <= 6:
+            raise AppSettingError("Choose a valid day of the week for hashing.")
+        if frequency == "monthly" and not 1 <= day <= 28:
+            raise AppSettingError("Choose a monthly hashing day from 1 through 28.")
+        try:
+            datetime.strptime(schedule_time.strip(), "%H:%M")
+        except ValueError as exc:
+            raise AppSettingError("Choose a valid hashing time.") from exc
+        if intensity not in {"low", "balanced", "high"}:
+            raise AppSettingError("Choose Low, Balanced, or High hashing intensity.")
+        return {
+            "hash_mode": mode,
+            "hash_immediate_limit": str(limit),
+            "hash_schedule_frequency": frequency,
+            "hash_schedule_day": str(day),
+            "hash_schedule_time": schedule_time.strip(),
+            "hash_io_intensity": intensity,
+            "hash_pause_for_activity": "1" if pause_for_activity == "1" else "0",
+        }
+
     def validate_import(self, values: object) -> dict[str, str]:
         if not isinstance(values, dict):
             raise AppSettingError(
@@ -165,7 +220,32 @@ class AppSettings:
             validated["trash_retention_days"] = retention
         if "log_level" in text_values:
             validated.update(self.validate_logging(text_values["log_level"]))
+        hashing_keys = {
+            "hash_mode", "hash_immediate_limit", "hash_schedule_frequency",
+            "hash_schedule_day", "hash_schedule_time", "hash_io_intensity",
+            "hash_pause_for_activity",
+        }
+        if hashing_keys.intersection(text_values):
+            current = self.values()
+            validated.update(self.validate_hashing(*(
+                text_values.get(key, current[key]) for key in (
+                    "hash_mode", "hash_immediate_limit", "hash_schedule_frequency",
+                    "hash_schedule_day", "hash_schedule_time", "hash_io_intensity",
+                    "hash_pause_for_activity",
+                )
+            )))
         return {key: validated[key] for key in text_values}
+
+    def set_internal(self, key: str, value: str) -> None:
+        if key not in self.defaults:
+            raise KeyError(key)
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO app_settings(key,value,updated_at)
+                   VALUES (?,?,CURRENT_TIMESTAMP)
+                   ON CONFLICT(key) DO UPDATE SET value=excluded.value,
+                     updated_at=CURRENT_TIMESTAMP""", (key, value),
+            )
 
     def update(self, values: dict[str, str], changed_by: int | None) -> int:
         unknown = set(values) - self.EDITABLE_KEYS

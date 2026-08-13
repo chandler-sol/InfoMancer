@@ -11,12 +11,21 @@
 {% if favorite_titles %}
 <section class="favorites-section">
   <div class="panel-head"><h2>Movies &amp; TV Series <span class="count">{{ favorite_titles|length }}</span></h2></div>
-  <div class="favorite-title-grid">
+  <div class="cover-library favorites-cover-library" aria-label="Favorite movie and TV covers">
     {% for title in favorite_titles %}
-    <article>
-      <a class="favorite-poster" href="/titles/{{ title.id }}">{% if title.poster_url %}<img src="{{ title.poster_url }}" alt="" loading="lazy">{% else %}<span>{{ title_initial(title) }}</span>{% endif %}</a>
-      <div><a href="/titles/{{ title.id }}"><strong>{{ title.metadata_title or title.title }}</strong></a>{% if lifespan(title) %}<small>{{ lifespan(title) }}</small>{% endif %}</div>
-      <details class="episode-menu"><summary aria-label="Actions for {{ title.metadata_title or title.title }}" title="Favorite actions">⋮</summary><div><form method="post" action="/titles/{{ title.id }}/favorite"><input type="hidden" name="return_to" value="/favorites"><button class="favorite-action active"><span>★</span>Remove favorite</button></form><a href="/titles/{{ title.id }}/organize">Organize &amp; Tags</a><a href="/titles/{{ title.id }}/collections?return_to=%2Ffavorites">Add to Collection</a></div></details>
+    <article class="cover-card" id="title-{{ title.id }}">
+      <a class="cover-card-link" href="/titles/{{ title.id }}?library_return={{ ('/favorites#title-' ~ title.id)|urlencode }}">
+        <span class="cover-art">{% if title.poster_url %}<img src="{{ title.poster_url }}" alt="" loading="lazy">{% else %}<span class="cover-art-placeholder">{{ title_initial(title) }}</span>{% endif %}</span>
+        <strong>{{ title.metadata_title or title.title }}</strong>
+        {% if lifespan(title) %}<span class="cover-card-meta"><span>{{ lifespan(title) }}</span></span>{% endif %}
+      </a>
+      <form class="cover-favorite-control" method="post" action="/titles/{{ title.id }}/favorite">
+        <input type="hidden" name="return_to" value="/favorites#title-{{ title.id }}">
+        <button type="submit" class="cover-favorite-button active" aria-label="Remove {{ title.metadata_title or title.title }} from favorites" title="Remove from favorites"><span aria-hidden="true">★</span></button>
+      </form>
+      <div class="cover-card-actions" aria-label="Actions for {{ title.metadata_title or title.title }}">
+        <details class="episode-menu cover-row-menu"><summary aria-label="Actions for {{ title.metadata_title or title.title }}" title="{{ 'Movie' if title.kind == 'movie' else 'Series' }} actions">⋮</summary><div><form method="post" action="/titles/{{ title.id }}/favorite"><input type="hidden" name="return_to" value="/favorites"><button class="favorite-action active"><span>★</span>Remove favorite</button></form><a href="/titles/{{ title.id }}/organize">Organize &amp; Tags</a><a href="/titles/{{ title.id }}/collections?return_to=%2Ffavorites">Manage Collections</a>{% if (title.kind == 'tv' and title.tvdb_id) or (title.kind == 'movie' and title.tvdb_movie_id) %}<a href="/titles/{{ title.id }}/cover">Change Cover</a>{% endif %}<a href="/titles/{{ title.id }}/tvdb">{% if (title.kind == 'tv' and title.tvdb_id) or (title.kind == 'movie' and (title.tvdb_movie_id or title.tmdb_id or title.imdb_id)) %}Fix Match{% else %}Match{% endif %}</a></div></details>
+      </div>
     </article>
     {% endfor %}
   </div>
@@ -40,5 +49,23 @@
 
 {% if not favorite_titles and not favorite_episodes and not error %}
 <section class="panel empty favorites-empty"><span aria-hidden="true">☆</span><div><h2>No favorites yet</h2><p>Use a three-dot menu on a movie, TV series, or episode to add it here.</p></div><a class="button primary" href="/library">Browse library</a></section>
+{% endif %}
+{% if favorite_titles and current_user.is_librarian %}
+<script>
+  document.addEventListener("click", event => {
+    if (!window.matchMedia("(hover: none), (pointer: coarse)").matches) return;
+    const coverLink = event.target.closest(".favorites-cover-library .cover-card-link");
+    if (coverLink) {
+      const card = coverLink.closest(".cover-card");
+      if (!card.classList.contains("actions-visible")) {
+        event.preventDefault();
+        document.querySelectorAll(".cover-card.actions-visible").forEach(other => other.classList.remove("actions-visible"));
+        card.classList.add("actions-visible");
+      }
+    } else if (!event.target.closest(".cover-card")) {
+      document.querySelectorAll(".cover-card.actions-visible").forEach(card => card.classList.remove("actions-visible"));
+    }
+  });
+</script>
 {% endif %}
 {% endblock %}

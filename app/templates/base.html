@@ -45,8 +45,10 @@
     <div class="sidebar-resize-handle" id="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" title="Drag to resize sidebar; double-click to reset"></div>
     <div class="topbar-actions">
       <form class="global-search" id="global-search" method="get" action="/library" role="search">
+        <input type="hidden" name="record_search" value="1">
         <label class="sr-only" for="global-search-input">Search the entire library</label>
         <input id="global-search-input" name="q" value="{{ request.query_params.get('q', '') if request.url.path == '/library' else '' }}" placeholder="Search the library" autocomplete="off" aria-autocomplete="list" aria-controls="global-search-suggestions">
+        <button type="button" class="global-search-history" id="global-search-history" aria-label="Show recent searches" title="Recent searches"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"></path><path d="M3 3v5h5M12 7v5l3 2"></path></svg></button>
         <div class="global-search-suggestions" id="global-search-suggestions" role="listbox" hidden></div>
         <button type="button" class="global-search-toggle" id="global-search-toggle" aria-label="Open library search" aria-expanded="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg>
@@ -201,6 +203,7 @@
       const search = document.getElementById("global-search");
       const searchInput = document.getElementById("global-search-input");
       const searchToggle = document.getElementById("global-search-toggle");
+      const searchHistoryToggle = document.getElementById("global-search-history");
       const searchSuggestions = document.getElementById("global-search-suggestions");
       const menu = document.getElementById("site-menu");
       const menuToggle = document.getElementById("site-menu-toggle");
@@ -216,10 +219,56 @@
       };
       let searchSuggestionTimer;
       let searchSuggestionController;
+      const historyOption = (item) => ({
+        value: item.query, label: item.query, type: "Recent search", detail: ""
+      });
+      const renderSearchOptions = (suggestions, includeClear = false) => {
+        const options = suggestions.map((suggestion) => {
+          const option = document.createElement("button");
+          option.type = "button";
+          option.setAttribute("role", "option");
+          option.innerHTML = "<strong></strong><small></small>";
+          option.querySelector("strong").textContent = suggestion.label;
+          option.querySelector("small").textContent = suggestion.detail
+            ? `${suggestion.type} · ${suggestion.detail}` : suggestion.type;
+          option.addEventListener("click", () => {
+            searchInput.value = suggestion.value;
+            searchSuggestions.hidden = true;
+            search.requestSubmit();
+          });
+          return option;
+        });
+        if (includeClear && options.length) {
+          const clear = document.createElement("button");
+          clear.type = "button";
+          clear.className = "search-history-clear";
+          clear.textContent = "Clear search history";
+          clear.addEventListener("click", async () => {
+            await fetch("/api/search-history/clear", {
+              method: "POST", headers: {"X-CSRF-Token": csrfToken}
+            });
+            searchSuggestions.hidden = true;
+          });
+          options.push(clear);
+        }
+        searchSuggestions.replaceChildren(...options);
+        searchSuggestions.hidden = options.length === 0;
+      };
+      const recentSearches = async () => {
+        const response = await fetch("/api/search-history", {cache: "no-store"});
+        const data = await response.json();
+        return (data.history || []).map(historyOption);
+      };
+      const showRecentSearches = async () => {
+        if (!searchSuggestions) return;
+        try { renderSearchOptions(await recentSearches(), true); }
+        catch (_) { searchSuggestions.hidden = true; }
+      };
       const updateGlobalSearchSuggestions = async () => {
         const query = searchInput.value.trim();
         if (!searchSuggestions || query.length < 2) {
-          if (searchSuggestions) searchSuggestions.hidden = true;
+          if (query) searchSuggestions.hidden = true;
+          else await showRecentSearches();
           return;
         }
         searchSuggestionController?.abort();
@@ -231,25 +280,18 @@
           const response = await fetch(url, {
             signal: searchSuggestionController.signal, cache: "no-store"
           });
-          const data = await response.json();
-          const options = (data.suggestions || []).map((suggestion) => {
-            const option = document.createElement("button");
-            option.type = "button";
-            option.setAttribute("role", "option");
-            option.innerHTML = "<strong></strong><small></small>";
-            option.querySelector("strong").textContent = suggestion.label;
-            option.querySelector("small").textContent = suggestion.detail
-              ? `${suggestion.type} · ${suggestion.detail}`
-              : suggestion.type;
-            option.addEventListener("click", () => {
-              searchInput.value = suggestion.value;
-              searchSuggestions.hidden = true;
-              search.requestSubmit();
-            });
-            return option;
-          });
-          searchSuggestions.replaceChildren(...options);
-          searchSuggestions.hidden = options.length === 0;
+          const [data, history] = await Promise.all([
+            response.json(), recentSearches().catch(() => [])
+          ]);
+          const normalized = query.toLocaleLowerCase();
+          const recentMatches = history.filter(item =>
+            item.value.toLocaleLowerCase().includes(normalized)
+          );
+          const seen = new Set(recentMatches.map(item => item.value.toLocaleLowerCase()));
+          const combined = recentMatches.concat(
+            (data.suggestions || []).filter(item => !seen.has(item.value.toLocaleLowerCase()))
+          ).slice(0, 10);
+          renderSearchOptions(combined, recentMatches.length > 0);
         } catch (error) {
           if (error.name !== "AbortError") searchSuggestions.hidden = true;
         }
@@ -320,6 +362,11 @@
         searchSuggestionTimer = window.setTimeout(updateGlobalSearchSuggestions, 45);
       });
       searchInput.addEventListener("focus", updateGlobalSearchSuggestions);
+      searchHistoryToggle?.addEventListener("click", async () => {
+        setMenuOpen(false);
+        setSearchOpen(true);
+        await showRecentSearches();
+      });
       searchInput.addEventListener("keydown", async (event) => {
         if (event.key === "ArrowDown" && searchSuggestions) {
           event.preventDefault();
