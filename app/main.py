@@ -85,7 +85,7 @@ try:
 except ProviderSecretError as exc:
     stored_provider_secrets = {}
     provider_secret_error = str(exc)
-APP_VERSION = "0.6.0-alpha.1"
+APP_VERSION = "0.6.0-alpha.2"
 app = FastAPI(title="InfoMancer", version=APP_VERSION)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "app" / "static"), name="static")
 COLLECTION_ART_DIR = settings.database.parent / "collection-art"
@@ -4149,7 +4149,7 @@ def library_export_rows(user_id: int) -> list[dict]:
                f.audio_codec, f.audio_channels, f.bitrate, f.container,
                f.dynamic_range, f.media_info_at, f.media_info_error,
                COALESCE(uts.favorite,0) favorite, uts.personal_rating,
-               uts.custom_order,
+               uts.custom_order, uts.sort_title,
                COALESCE((SELECT GROUP_CONCAT(ut.name, ', ')
                  FROM title_tags tt JOIN user_tags ut ON ut.id=tt.tag_id
                  WHERE tt.title_id=t.id AND ut.user_id=?),'') tags,
@@ -4171,6 +4171,7 @@ def library_export_rows(user_id: int) -> list[dict]:
             "favorite": bool(item.pop("favorite")),
             "personal_rating": item.pop("personal_rating"),
             "custom_order": item.pop("custom_order"),
+            "sort_title": item.pop("sort_title"),
         }, ensure_ascii=False)
         exported.append(item)
     return exported
@@ -6077,7 +6078,7 @@ def organize_title_page(request: Request, title_id: int):
 @app.post("/titles/{title_id}/organize")
 def save_title_organization(
     request: Request, title_id: int, favorite: str = Form(""),
-    personal_rating: str = Form(""), custom_order: str = Form(""),
+    personal_rating: str = Form(""), sort_title: str = Form(""),
     tag_names: str = Form(""), selected_tags: list[int] = Form(default=[]),
     selected_collections: list[int] = Form(default=[]),
 ):
@@ -6095,13 +6096,7 @@ def save_title_organization(
             f"/titles/{title_id}/organize",
             "Personal rating must be a number from 0 to 10, or left blank.",
         )
-    try:
-        order_value = int(custom_order) if custom_order.strip() else None
-    except ValueError:
-        return redirect(
-            f"/titles/{title_id}/organize",
-            "Custom order must be a whole number, or left blank.",
-        )
+    sort_value = " ".join(sort_title.strip().split())[:200] or None
     new_names = []
     for raw_name in tag_names.split(","):
         cleaned = " ".join(raw_name.strip().split())
@@ -6117,16 +6112,16 @@ def save_title_organization(
             raise HTTPException(404, "Title not found")
         conn.execute(
             """INSERT INTO user_title_state
-               (user_id,title_id,favorite,personal_rating,custom_order,updated_at)
+               (user_id,title_id,favorite,personal_rating,sort_title,updated_at)
                VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)
                ON CONFLICT(user_id,title_id) DO UPDATE SET
                  favorite=excluded.favorite,
                  personal_rating=excluded.personal_rating,
-                 custom_order=excluded.custom_order,
+                 sort_title=excluded.sort_title,
                  updated_at=CURRENT_TIMESTAMP""",
             (
                 request.state.user.id, title_id, int(favorite == "1"),
-                rating, order_value,
+                rating, sort_value,
             ),
         )
         allowed_ids = {
@@ -6289,6 +6284,75 @@ def organize_titles_bulk(
     })
 
 
+@app.get("/titles/sort-titles", response_class=HTMLResponse)
+def sort_titles_dialog(request: Request):
+    if request.state.user.id <= 0:
+        return redirect("/library", "Sort Titles require a signed-in account.")
+    selected = []
+    for value in request.query_params.getlist("selected")[:200]:
+        if value.isdigit() and int(value) not in selected:
+            selected.append(int(value))
+    if len(selected) < 2:
+        return redirect("/library", "Select at least two titles to append Sort Titles.")
+    placeholders = ",".join("?" for _ in selected)
+    with db.connect() as conn:
+        found = {row["id"]: dict(row) for row in conn.execute(
+            f"""SELECT id,COALESCE(NULLIF(metadata_title,''),title) display_title,
+                       poster_url FROM titles WHERE id IN ({placeholders})""", selected,
+        )}
+    titles = [found[title_id] for title_id in selected if title_id in found]
+    return templates.TemplateResponse(request, "sort_titles_dialog.html", {
+        "titles": titles, "return_to": safe_next(request.query_params.get("return_to") or "/library"),
+        "message": "",
+    })
+
+
+@app.post("/titles/sort-titles")
+def apply_sort_titles(
+    request: Request, selected: list[int] = Form(default=[]),
+    sequence_number: list[int] = Form(default=[]),
+    sequence_letter: list[str] = Form(default=[]), number_style: str = Form("padded"),
+    prefix: str = Form(""), return_to: str = Form("/library"),
+):
+    if request.state.user.id <= 0:
+        return redirect("/library", "Sort Titles require a signed-in account.")
+    ordered = list(dict.fromkeys(title_id for title_id in selected if title_id > 0))[:200]
+    cleaned = " ".join(prefix.strip().split())[:160]
+    if len(ordered) < 2 or not cleaned:
+        destination = "/titles/sort-titles?" + urlencode(
+            [("selected", str(title_id)) for title_id in ordered]
+            + [("return_to", safe_next(return_to))]
+        )
+        return redirect(destination, "Enter a prefix and keep at least two selected titles. Nothing changed.")
+    numbers = [value if 1 <= value <= 9999 else index for index, value in enumerate(sequence_number, 1)]
+    if len(numbers) != len(ordered):
+        numbers = list(range(1, len(ordered) + 1))
+    letters = [value.casefold() if re.fullmatch(r"[a-z]?", value.casefold()) else "" for value in sequence_letter]
+    if len(letters) != len(ordered):
+        letters = [""] * len(ordered)
+    width = max(2, len(str(max(numbers)))) if number_style == "padded" else 0
+    with db.connect() as conn:
+        valid = {row["id"] for row in conn.execute(
+            f"SELECT id FROM titles WHERE id IN ({','.join('?' for _ in ordered)})", ordered,
+        )}
+        assignments = []
+        for title_id, number, letter in zip(ordered, numbers, letters):
+            if title_id not in valid:
+                continue
+            formatted = f"{number:0{width}d}" if width else str(number)
+            assignments.append((request.state.user.id, title_id, f"{cleaned} {formatted}{letter}"))
+        conn.executemany(
+            """INSERT INTO user_title_state(user_id,title_id,sort_title,updated_at)
+               VALUES (?,?,?,CURRENT_TIMESTAMP)
+               ON CONFLICT(user_id,title_id) DO UPDATE SET
+                 sort_title=excluded.sort_title,updated_at=CURRENT_TIMESTAMP""",
+            assignments,
+        )
+    message = f'Applied {len(assignments)} Sort Titles using the prefix "{cleaned}".'
+    record_event("library", message, user_id=request.state.user.id, context={"titles": len(assignments)})
+    return redirect(safe_next(return_to), message)
+
+
 @app.get("/tags", response_class=HTMLResponse)
 def manage_tags(request: Request):
     with db.connect() as conn:
@@ -6400,7 +6464,7 @@ def library(
     sort_key = sort if sort in {
         "title", "release_new", "release_old", "rating", "personal_rating",
         "date_added", "runtime", "resolution", "bitrate", "file_size",
-        "favorites", "random", "custom",
+        "favorites", "random",
     } else "title"
     if q:
         fuzzy_names = [item["person_name"] for item in fuzzy_people(q, kind, 6)]
@@ -6488,31 +6552,36 @@ def library(
             "AND filtered_user_tag.user_id=?)"
         )
         params.extend([tag_id, request.state.user.id])
+    title_sort_base = "COALESCE(NULLIF(uts.sort_title,''),NULLIF(t.metadata_title,''),t.title)"
+    title_sort_sql = (
+        f"CASE WHEN LOWER({title_sort_base}) LIKE 'the %' THEN SUBSTR({title_sort_base},5) "
+        f"WHEN LOWER({title_sort_base}) LIKE 'an %' THEN SUBSTR({title_sort_base},4) "
+        f"WHEN LOWER({title_sort_base}) LIKE 'a %' THEN SUBSTR({title_sort_base},3) "
+        f"ELSE {title_sort_base} END"
+    )
+    title_order = f"{title_sort_sql} COLLATE NOCASE, COALESCE(NULLIF(t.metadata_title,''),t.title) COLLATE NOCASE"
     normalized_letter = letter.upper() if letter else ""
     if normalized_letter == "#":
-        conditions.append("COALESCE(NULLIF(t.metadata_title,''),t.title) GLOB '[0-9]*'")
+        conditions.append(f"{title_sort_sql} GLOB '[0-9]*'")
     elif len(normalized_letter) == 1 and normalized_letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-        conditions.append(
-            "UPPER(SUBSTR(COALESCE(NULLIF(t.metadata_title,''),t.title),1,1))=?"
-        )
+        conditions.append(f"UPPER(SUBSTR({title_sort_sql},1,1))=?")
         params.append(normalized_letter)
     else:
         normalized_letter = ""
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
     sort_sql = {
-        "title": "COALESCE(t.metadata_title,t.title) COLLATE NOCASE",
-        "release_new": "COALESCE(t.metadata_year,t.year,0) DESC, COALESCE(t.metadata_title,t.title) COLLATE NOCASE",
-        "release_old": "COALESCE(t.metadata_year,t.year,9999), COALESCE(t.metadata_title,t.title) COLLATE NOCASE",
-        "rating": "t.imdb_rating IS NULL, t.imdb_rating DESC, COALESCE(t.metadata_title,t.title) COLLATE NOCASE",
-        "personal_rating": "uts.personal_rating IS NULL, uts.personal_rating DESC, COALESCE(t.metadata_title,t.title) COLLATE NOCASE",
+        "title": title_order,
+        "release_new": f"COALESCE(t.metadata_year,t.year,0) DESC, {title_order}",
+        "release_old": f"COALESCE(t.metadata_year,t.year,9999), {title_order}",
+        "rating": f"t.imdb_rating IS NULL, t.imdb_rating DESC, {title_order}",
+        "personal_rating": f"uts.personal_rating IS NULL, uts.personal_rating DESC, {title_order}",
         "date_added": "t.discovered_at IS NULL, t.discovered_at DESC, t.id DESC",
-        "runtime": "COALESCE(fs.runtime_seconds,0) DESC, COALESCE(t.metadata_title,t.title) COLLATE NOCASE",
-        "resolution": "COALESCE(fs.resolution_pixels,0) DESC, COALESCE(t.metadata_title,t.title) COLLATE NOCASE",
-        "bitrate": "COALESCE(fs.max_bitrate,0) DESC, COALESCE(t.metadata_title,t.title) COLLATE NOCASE",
-        "file_size": "COALESCE(fs.bytes,0) DESC, COALESCE(t.metadata_title,t.title) COLLATE NOCASE",
-        "favorites": "COALESCE(uts.favorite,0) DESC, COALESCE(t.metadata_title,t.title) COLLATE NOCASE",
+        "runtime": f"COALESCE(fs.runtime_seconds,0) DESC, {title_order}",
+        "resolution": f"COALESCE(fs.resolution_pixels,0) DESC, {title_order}",
+        "bitrate": f"COALESCE(fs.max_bitrate,0) DESC, {title_order}",
+        "file_size": f"COALESCE(fs.bytes,0) DESC, {title_order}",
+        "favorites": f"COALESCE(uts.favorite,0) DESC, {title_order}",
         "random": "RANDOM()",
-        "custom": "uts.custom_order IS NULL, uts.custom_order, COALESCE(t.metadata_title,t.title) COLLATE NOCASE",
     }[sort_key]
     with db.connect() as conn:
         option_conditions = ["(genres IS NOT NULL OR imdb_title_type IS NOT NULL)"]
@@ -6580,7 +6649,7 @@ def library(
                   COALESCE(fs.episode_count,0) episode_count,
                   COALESCE(ms.missing_count,0) missing_count,
                   COALESCE(uts.favorite,0) favorite,
-                  uts.personal_rating,uts.custom_order,
+                  uts.personal_rating,uts.custom_order,uts.sort_title,
                   (SELECT GROUP_CONCAT(ut.name, ', ')
                    FROM title_tags tt JOIN user_tags ut ON ut.id=tt.tag_id
                    WHERE tt.title_id=t.id AND ut.user_id=?) custom_tags
@@ -6963,7 +7032,7 @@ def title_detail(request: Request, title_id: int):
             (title_id,),
         ).fetchall()
         title_state = conn.execute(
-            """SELECT favorite, personal_rating, custom_order
+            """SELECT favorite, personal_rating, custom_order, sort_title
                FROM user_title_state WHERE user_id=? AND title_id=?""",
             (request.state.user.id, title_id),
         ).fetchone() if request.state.user.id > 0 else None

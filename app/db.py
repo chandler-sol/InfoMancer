@@ -278,6 +278,7 @@ CREATE TABLE IF NOT EXISTS user_title_state (
     favorite INTEGER NOT NULL DEFAULT 0,
     personal_rating REAL,
     custom_order INTEGER,
+    sort_title TEXT,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(user_id, title_id),
     CHECK(personal_rating IS NULL OR (personal_rating >= 0 AND personal_rating <= 10))
@@ -711,6 +712,11 @@ class Database:
             for name, column_type in user_additions.items():
                 if name not in user_columns:
                     conn.execute(f"ALTER TABLE users ADD COLUMN {name} {column_type}")
+            title_state_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(user_title_state)")
+            }
+            if "sort_title" not in title_state_columns:
+                conn.execute("ALTER TABLE user_title_state ADD COLUMN sort_title TEXT")
             trash_columns = {
                 row["name"] for row in conn.execute("PRAGMA table_info(duplicate_trash)")
             }

@@ -380,7 +380,7 @@ def _export_rows(database: Database, username: str | None) -> list[dict]:
             state = {
                 row["title_id"]: dict(row)
                 for row in conn.execute(
-                    """SELECT title_id,favorite,personal_rating,custom_order
+                    """SELECT title_id,favorite,personal_rating,custom_order,sort_title
                        FROM user_title_state WHERE user_id=?""", (user_id,)
                 )
             }
@@ -402,6 +402,7 @@ def _export_rows(database: Database, username: str | None) -> list[dict]:
                 "favorite": bool(personal.get("favorite", 0)),
                 "personal_rating": personal.get("personal_rating"),
                 "custom_order": personal.get("custom_order"),
+                "sort_title": personal.get("sort_title"),
             },
             ensure_ascii=False,
         )
