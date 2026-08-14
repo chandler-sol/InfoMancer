@@ -1350,7 +1350,7 @@ def redirect(path: str, message: str = "") -> RedirectResponse:
     target = base + (f"{separator}message={quote_plus(message)}" if message else "")
     if fragment_marker:
         target += f"#{fragment}"
-    return RedirectResponse(target, status_code=303)
+    return RedirectResponse(safe_next(target), status_code=303)
 
 
 def preauth_response(request: Request, template_name: str, context: dict) -> HTMLResponse:

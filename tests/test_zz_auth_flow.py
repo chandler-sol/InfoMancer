@@ -17,6 +17,11 @@ from app.engagement import EngagementService
 
 
 class AuthenticationFlowTests(unittest.TestCase):
+    def test_redirect_helper_rejects_external_destination(self):
+        response = main.redirect("//example.test/account", "Not allowed")
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/")
+
     def test_first_run_login_csrf_and_profile_flow(self):
         original = (
             main.db, main.settings, main.auth_service, main.app_settings,
