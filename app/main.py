@@ -4471,7 +4471,9 @@ def add_root(
             destination,
             "Choose Movies or TV Shows as the library type, then try again.",
         )
-    candidate = Path(path).expanduser()
+    # Librarian-only, CSRF-protected configuration intentionally accepts an
+    # absolute media root; existence is verified below before it is stored.
+    candidate = Path(path).expanduser()  # lgtm[py/path-injection]
     if not candidate.is_absolute() or "\x00" in path:
         return redirect(
             destination,
