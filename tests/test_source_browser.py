@@ -27,6 +27,16 @@ class SourceBrowserTests(unittest.TestCase):
         with self.assertRaises(SourceBrowserError):
             list_folders(str(self.root.parent), self.allowed)
 
+    def test_rejects_symlink_that_escapes_configured_location(self):
+        outside = Path(self.temp.name).parent
+        link = self.root / "outside-link"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            self.skipTest("Directory symlinks are unavailable on this platform")
+        with self.assertRaises(SourceBrowserError):
+            list_folders(str(link), self.allowed)
+
     def test_movie_preview_understands_alphabet_and_number_buckets(self):
         for bucket in ("A", "# 0-9"):
             (self.root / bucket).mkdir()

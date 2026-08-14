@@ -474,8 +474,15 @@ async def authentication_middleware(request: Request, call_next):
         try:
             claims = auth_service.cloudflare_claims(assertion)
         except AuthenticationError as exc:
+            record_event(
+                "authentication",
+                "Cloudflare Access authentication was rejected.",
+                level="warning", detail=str(exc),
+                context={"operation": "cloudflare-claims"},
+            )
             return await finish(auth_error_response(
-                request, 401, "Authentication required", str(exc)
+                request, 401, "Authentication required",
+                "Cloudflare Access could not verify this request. Sign in through Access again, then retry.",
             ))
         request.state.external_claims = claims
         if not users_exist:
@@ -1041,28 +1048,62 @@ def search_movies_broadly(query: str) -> list[dict]:
 
 def broader_series_queries(title: str) -> list[str]:
     """Generate safe TVDB query variants while leaving final choice to the user."""
-    original = re.sub(r"\s+", " ", title).strip()
+    original = " ".join(title[:1000].split())
     variants: list[str] = []
-    cleaned = re.sub(r"\s*\{(?:tvdb|tmdb|imdb)-[^}]+\}\s*", " ", original, flags=re.I)
-    cleaned = re.sub(
-        r"\s*[([]\s*(?:19|20)\d{2}(?:\s*-\s*(?:(?:19|20)\d{2}|present))?\s*[)\]]\s*$",
-        "", cleaned, flags=re.I,
-    ).strip(" -:.")
+    cleaned_parts: list[str] = []
+    cursor = 0
+    while cursor < len(original):
+        opening = original.find("{", cursor)
+        if opening < 0:
+            cleaned_parts.append(original[cursor:])
+            break
+        closing = original.find("}", opening + 1)
+        marker = original[opening + 1:closing].casefold() if closing >= 0 else ""
+        if closing >= 0 and marker.startswith(("tvdb-", "tmdb-", "imdb-")):
+            cleaned_parts.extend((original[cursor:opening], " "))
+            cursor = closing + 1
+        else:
+            cleaned_parts.append(original[cursor:opening + 1])
+            cursor = opening + 1
+    cleaned = " ".join("".join(cleaned_parts).split())
+    for opening, closing in (("(", ")"), ("[", "]")):
+        if not cleaned.endswith(closing):
+            continue
+        start = cleaned.rfind(opening)
+        if start < 0:
+            continue
+        value = cleaned[start + 1:-1].replace(" ", "").casefold()
+        years = value.split("-", 1)
+        first_year = len(years[0]) == 4 and years[0].isdigit()
+        last_year = len(years) == 1 or years[1] == "present" or (
+            len(years[1]) == 4 and years[1].isdigit()
+        )
+        if first_year and years[0][:2] in {"19", "20"} and last_year:
+            cleaned = cleaned[:start].strip()
+            break
+    cleaned = cleaned.strip(" -:.")
     if cleaned and cleaned.casefold() != original.casefold():
         variants.append(cleaned)
 
     variant_base = cleaned or original
-    if re.search(r"\band\b", variant_base, flags=re.I):
-        variants.append(re.sub(r"\band\b", "&", variant_base, flags=re.I))
+    words = variant_base.split()
+    if any(word.casefold() == "and" for word in words):
+        variants.append(" ".join("&" if word.casefold() == "and" else word for word in words))
     if "&" in variant_base:
         variants.append(variant_base.replace("&", "and"))
 
-    punctuation_cleaned = re.sub(r"[^\w\s&]", " ", variant_base, flags=re.UNICODE)
-    punctuation_cleaned = re.sub(r"\s+", " ", punctuation_cleaned).strip()
+    punctuation_cleaned = " ".join("".join(
+        character if character.isalnum() or character.isspace() or character in "_&" else " "
+        for character in variant_base
+    ).split())
     if punctuation_cleaned and punctuation_cleaned.casefold() != variant_base.casefold():
         variants.append(punctuation_cleaned)
 
-    subtitle = re.split(r"\s*[:–—]\s*", variant_base, maxsplit=1)[0].strip()
+    subtitle_positions = [
+        variant_base.find(character) for character in (":", "–", "—")
+        if character in variant_base
+    ]
+    subtitle = variant_base[:min(subtitle_positions)].strip() if subtitle_positions else variant_base
     if len(subtitle) >= 3 and subtitle.casefold() != variant_base.casefold():
         variants.append(subtitle)
     return list(dict.fromkeys(query for query in variants if query.strip()))[:5]
@@ -1827,8 +1868,11 @@ def complete_getting_started(request: Request):
 def mark_announcement_seen(request: Request, announcement_id: int):
     try:
         engagement.mark_seen(announcement_id, request.state.user.id)
-    except EngagementError as exc:
-        return JSONResponse({"detail": str(exc)}, status_code=404)
+    except EngagementError:
+        return JSONResponse(
+            {"detail": "That announcement is no longer available. Refresh and try again."},
+            status_code=404,
+        )
     return JSONResponse({"saved": True})
 
 
@@ -4427,7 +4471,15 @@ def add_root(
             destination,
             "Choose Movies or TV Shows as the library type, then try again.",
         )
-    resolved = Path(path).expanduser().resolve()
+    # Librarian-only, CSRF-protected configuration intentionally accepts an
+    # absolute media root; existence is verified below before it is stored.
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute() or "\x00" in path:
+        return redirect(
+            destination,
+            "Enter a complete absolute folder path, then try again.",
+        )
+    resolved = candidate.resolve()
     if not resolved.is_dir():
         return redirect(
             destination,
@@ -5267,9 +5319,7 @@ def move_collection_item(
                     f"UPDATE {table} SET position=? WHERE collection_id=? AND {column}=?",
                     (position, collection_id, item["item_id"]),
                 )
-    return RedirectResponse(
-        f"/collections/{collection_id}#{item_type}-{item_id}", status_code=303
-    )
+    return redirect(f"/collections/{collection_id}#{item_type}-{item_id}")
 
 
 @app.post("/collections/{collection_id}/episodes/{episode_id}/move")
@@ -6437,7 +6487,7 @@ def tvdb_search(request: Request, title_id: int, q: str = ""):
     try:
         if title["kind"] == "movie":
             raw_results = search_movies_broadly(query)
-        elif query.strip().isdigit() or "thetvdb.com" in query.casefold():
+        elif query.strip().isdigit() or is_tvdb_series_reference(query):
             series_id = tvdb_series_id_from_reference(query)
             series = tvdb.series(series_id)
             first_aired = str(series.get("firstAired") or series.get("first_aired") or "")
@@ -6472,6 +6522,15 @@ def tvdb_search(request: Request, title_id: int, q: str = ""):
         "entity": "movie" if title["kind"] == "movie" else "series",
         "message": request.query_params.get("message", ""),
     })
+
+
+def is_tvdb_series_reference(reference: str) -> bool:
+    value = reference.strip()
+    if not value:
+        return False
+    candidate_url = value if "://" in value else f"https://{value}"
+    parsed = urlparse(candidate_url)
+    return (parsed.hostname or "").casefold() in {"thetvdb.com", "www.thetvdb.com"}
 
 
 def tvdb_series_id_from_reference(reference: str) -> int:

@@ -82,6 +82,11 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(json.loads(request.read_text())["tag"], "v1.2.3")
         with self.assertRaisesRegex(MaintenanceError, "not valid"):
             write_update_request(self.path, "main; rm -rf", "Librarian")
+        for invalid in ("v1.2.3-", "v1.2", "v1.2.3/../../main", "v１.2.3"):
+            with self.subTest(tag=invalid), self.assertRaisesRegex(
+                MaintenanceError, "not valid"
+            ):
+                write_update_request(self.path, invalid, "Librarian")
         (self.base / "update-status.json").write_text("{broken", encoding="utf-8")
         self.assertEqual(read_update_status(self.path)["status"], "error")
         write_update_status(self.path, {"status": "requested"})
