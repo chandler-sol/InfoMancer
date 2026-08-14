@@ -17,7 +17,7 @@ class SourceBrowserError(ValueError):
 def _resolved(path: Path | str) -> Path:
     # Browser input is rejected by validate_browse_path unless the resolved
     # result remains inside a configured media-browse root.
-    return Path(path).expanduser().resolve(strict=False)  # lgtm[py/path-injection]
+    return Path(path).expanduser().resolve(strict=False)
 
 
 def _inside(path: Path, roots: tuple[Path, ...]) -> bool:

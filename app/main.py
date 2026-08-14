@@ -4473,7 +4473,7 @@ def add_root(
         )
     # Librarian-only, CSRF-protected configuration intentionally accepts an
     # absolute media root; existence is verified below before it is stored.
-    candidate = Path(path).expanduser()  # lgtm[py/path-injection]
+    candidate = Path(path).expanduser()
     if not candidate.is_absolute() or "\x00" in path:
         return redirect(
             destination,
