@@ -4,7 +4,7 @@
   if (!dialog || !body || typeof dialog.showModal !== "function") return;
 
   let opener = null;
-  const dialogPath = /^\/titles\/(?:\d+\/(?:organize|libraries)|sort-titles)$/;
+  const dialogPath = /^(?:\/titles\/(?:\d+\/(?:organize|libraries)|sort-titles)|\/files\/\d+\/edition-version(?:\/preview)?)$/;
   let draggedSortRow = null;
   const sortRowAnimations = new WeakMap();
 
@@ -112,7 +112,7 @@
       animateSortRowPositions(positions);
       return;
     }
-    const link = event.target.closest('a[href*="/organize"]');
+    const link = event.target.closest('a[data-organize-dialog],a[href*="/organize"]');
     if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const url = new URL(link.href, window.location.href);
     if (url.origin !== window.location.origin || !dialogPath.test(url.pathname)) return;

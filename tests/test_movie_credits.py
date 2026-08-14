@@ -392,8 +392,12 @@ class MovieCreditViewTests(unittest.TestCase):
                 'href="/library?q=Lead%20Actor"',
                 detail.text,
             )
-            self.assertIn("movie-file-menu", detail.text)
-            self.assertIn("movie-detail-menu", detail.text)
+            self.assertNotIn("movie-file-menu", detail.text)
+            self.assertEqual(detail.text.count("movie-detail-menu item-action-menu"), 1)
+            self.assertIn("Edit Edition &amp; Version", detail.text)
+            self.assertIn('class="media-dossier"', detail.text)
+            self.assertIn('class="detail-match-badge"', detail.text)
+            self.assertNotIn('class="match-banner"', detail.text)
             self.assertIn(f'action="/titles/{movie_id}/imdb-refresh"', detail.text)
             self.assertIn("https://www.imdb.com/title/tt0000001/", detail.text)
             self.assertEqual(filtered.status_code, 200)

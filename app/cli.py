@@ -26,6 +26,7 @@ EXPORT_FIELDS = [
     "season", "episode_start", "episode_end", "runtime_seconds", "width",
     "height", "video_codec", "audio_codec", "audio_channels", "bitrate",
     "container", "dynamic_range", "media_info_at", "media_info_error",
+    "edition_name", "version_name", "identity_confirmed", "version_preferred",
     "tags", "collections", "custom_fields",
 ]
 
@@ -361,7 +362,8 @@ def _export_rows(database: Database, username: str | None) -> list[dict]:
                f.filename,f.size_bytes,f.season,f.episode_start,f.episode_end,
                f.runtime_seconds,f.width,f.height,f.video_codec,f.audio_codec,
                f.audio_channels,f.bitrate,f.container,f.dynamic_range,
-               f.media_info_at,f.media_info_error
+               f.media_info_at,f.media_info_error,f.edition_name,f.version_name,
+               f.identity_confirmed,f.version_preferred
                FROM titles t JOIN roots r ON r.id=t.root_id
                LEFT JOIN files f ON f.title_id=t.id
                ORDER BY t.kind,title COLLATE NOCASE,f.season,f.episode_start,

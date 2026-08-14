@@ -38,6 +38,7 @@ from .auth import (
 )
 from .db import Database
 from .duplicates import DuplicateService
+from .editions import EditionVersionService, clean_label, identity
 from .duplicate_trash import DuplicateTrashError, DuplicateTrashService
 from .engagement import EngagementError, EngagementService, utc_from_local
 from .event_log import EventLog
@@ -74,6 +75,7 @@ event_log = EventLog(db)
 mie = MediaIntelligenceEngine(db)
 media_hashes = MediaHashService(db)
 duplicates = DuplicateService(db, media_hashes)
+edition_versions = EditionVersionService(db)
 duplicate_trash = DuplicateTrashService(db)
 engagement.seed_official()
 provider_secrets = ProviderSecretStore(
@@ -410,7 +412,7 @@ def librarian_only_path(path: str) -> bool:
         return True
     return bool(re.match(
         r"^/(?:titles/\d+/(?:tvdb|rename|restore|cover|collections)|"
-        r"files/\d+/(?:rename|collections))", path
+        r"files/\d+/(?:rename|collections|edition-version))", path
     ))
 
 
@@ -4129,6 +4131,7 @@ LIBRARY_EXPORT_FIELDS = [
     "season", "episode_start", "episode_end", "runtime_seconds", "width",
     "height", "video_codec", "audio_codec", "audio_channels", "bitrate",
     "container", "dynamic_range", "media_info_at", "media_info_error",
+    "edition_name", "version_name", "identity_confirmed", "version_preferred",
     "tags", "collections", "custom_fields",
 ]
 
@@ -4148,6 +4151,8 @@ def library_export_rows(user_id: int) -> list[dict]:
                f.runtime_seconds, f.width, f.height, f.video_codec,
                f.audio_codec, f.audio_channels, f.bitrate, f.container,
                f.dynamic_range, f.media_info_at, f.media_info_error,
+               f.edition_name, f.version_name, f.identity_confirmed,
+               f.version_preferred,
                COALESCE(uts.favorite,0) favorite, uts.personal_rating,
                uts.custom_order, uts.sort_title,
                COALESCE((SELECT GROUP_CONCAT(ut.name, ', ')
@@ -6892,11 +6897,112 @@ def clear_search_history(request: Request) -> dict:
     return {"cleared": True}
 
 
+def edition_version_context(file_id: int) -> dict:
+    file = edition_versions.file(file_id)
+    if not file:
+        raise HTTPException(404, "File not found")
+    return {
+        "file": file,
+        "current": {
+            "edition_name": file["edition_name"],
+            "version_name": file["version_name"],
+            "preferred": bool(file["version_preferred"]),
+        },
+        "return_to": f"/titles/{file['title_id']}",
+        "message": "",
+    }
+
+
+@app.get("/files/{file_id}/edition-version", response_class=HTMLResponse)
+def edition_version_page(request: Request, file_id: int):
+    context = edition_version_context(file_id)
+    file = context["file"]
+    proposed = dict(context["current"])
+    if not file["identity_confirmed"]:
+        proposed.update({
+            "edition_name": file["suggested_edition"],
+            "version_name": file["suggested_version"],
+        })
+    return templates.TemplateResponse(request, "edition_version.html", {
+        **context, "proposed": proposed, "preview": False,
+    })
+
+
+@app.post("/files/{file_id}/edition-version/preview", response_class=HTMLResponse)
+def preview_edition_version(
+    request: Request, file_id: int, edition_name: str = Form(""),
+    version_name: str = Form(""), preferred: str = Form(""),
+):
+    context = edition_version_context(file_id)
+    return templates.TemplateResponse(request, "edition_version.html", {
+        **context,
+        "proposed": {
+            "edition_name": clean_label(edition_name),
+            "version_name": clean_label(version_name),
+            "preferred": preferred == "1",
+        },
+        "preview": True,
+    })
+
+
+@app.post("/files/{file_id}/edition-version")
+def save_edition_version(
+    request: Request, file_id: int, edition_name: str = Form(""),
+    version_name: str = Form(""), preferred: str = Form(""),
+    confirm: str = Form(""),
+):
+    context = edition_version_context(file_id)
+    if confirm.strip().upper() != "SAVE":
+        return redirect(
+            f"/files/{file_id}/edition-version",
+            "Confirmation did not match SAVE. Nothing changed.",
+        )
+    saved = edition_versions.save(
+        file_id, edition_name=edition_name, version_name=version_name,
+        preferred=preferred == "1",
+    )
+    if not saved:
+        return redirect("/library", "That file is no longer in the catalog. Nothing changed.")
+    saved_identity = identity(saved)
+    for sibling in edition_versions.siblings(file_id):
+        pair = tuple(sorted((file_id, int(sibling["id"]))))
+        sibling_identity = identity(sibling)
+        with db.connect() as conn:
+            review = conn.execute(
+                """SELECT decision,review_source FROM duplicate_reviews
+                   WHERE file_a_id=? AND file_b_id=?""", pair,
+            ).fetchone()
+        if saved_identity and sibling_identity and saved_identity != sibling_identity:
+            duplicates.decide(
+                *pair, "not_duplicate", request.state.user.id,
+                source=(review["review_source"] if review else "edition_version"),
+            )
+        elif review and review["review_source"] == "edition_version":
+            duplicates.decide(
+                *pair, "active", request.state.user.id,
+                source="edition_version",
+            )
+    labels = [value for value in (saved["edition_name"], saved["version_name"]) if value]
+    description = " · ".join(labels) or "Unlabeled"
+    if saved["version_preferred"]:
+        description += " · Preferred"
+    record_event(
+        "library", f"Edition and version updated for {saved['filename']}: {description}.",
+        context={"title_id": saved["title_id"], "file_id": file_id},
+        user_id=request.state.user.id,
+    )
+    return redirect(
+        context["return_to"],
+        f"Edition and version saved for {saved['filename']}. No media files were changed.",
+    )
+
+
 @app.get("/titles/{title_id}", response_class=HTMLResponse)
 def title_detail(request: Request, title_id: int):
     with db.connect() as conn:
         title = conn.execute(
-            """SELECT t.*, r.last_scanned_at root_last_scanned_at
+            """SELECT t.*, r.label source_label,
+                      r.last_scanned_at root_last_scanned_at
                FROM titles t JOIN roots r ON r.id=t.root_id WHERE t.id=?""",
             (title_id,),
         ).fetchone()
@@ -6929,7 +7035,8 @@ def title_detail(request: Request, title_id: int):
                         ),
                     )
                     title = conn.execute(
-                        """SELECT t.*, r.last_scanned_at root_last_scanned_at
+                        """SELECT t.*, r.label source_label,
+                                  r.last_scanned_at root_last_scanned_at
                            FROM titles t JOIN roots r ON r.id=t.root_id WHERE t.id=?""",
                         (title_id,),
                     ).fetchone()
@@ -6947,7 +7054,8 @@ def title_detail(request: Request, title_id: int):
                         (overview, title_id),
                     )
                     title = conn.execute(
-                        """SELECT t.*, r.last_scanned_at root_last_scanned_at
+                        """SELECT t.*, r.label source_label,
+                                  r.last_scanned_at root_last_scanned_at
                            FROM titles t JOIN roots r ON r.id=t.root_id WHERE t.id=?""",
                         (title_id,),
                     ).fetchone()
@@ -7065,6 +7173,32 @@ def title_detail(request: Request, title_id: int):
             title_facts.append(("Episodes", str(len(expected_rows))))
     elif runtime_values:
         title_facts.append(("Runtime", f"{round(max(runtime_values) / 60):.0f} min"))
+    technical_file = next(
+        (row for row in files if row["version_preferred"]),
+        files[0] if files else None,
+    )
+    if technical_file:
+        if technical_file["width"] and technical_file["height"]:
+            width = int(technical_file["width"])
+            height = int(technical_file["height"])
+            resolution = (
+                "4K UHD" if width >= 3800 or height >= 2000
+                else "1440p" if width >= 2500 or height >= 1400
+                else "1080p" if width >= 1900 or height >= 1000
+                else "720p" if width >= 1200 or height >= 700
+                else f"{width} × {height}"
+            )
+            title_facts.append((
+                "Resolution", resolution,
+            ))
+        if technical_file["video_codec"]:
+            title_facts.append(("Video", technical_file["video_codec"].upper()))
+        if technical_file["dynamic_range"]:
+            title_facts.append(("HDR", technical_file["dynamic_range"]))
+        if technical_file["audio_codec"]:
+            title_facts.append(("Audio", technical_file["audio_codec"].upper()))
+    if title["source_label"]:
+        title_facts.append(("Source", title["source_label"]))
     scan_at = title["last_scanned_at"] or title["root_last_scanned_at"]
     with imdb_genre_lock:
         active_title_ids = imdb_genre_job.get("title_ids")

@@ -187,7 +187,11 @@ class DuplicateService:
             )
         left_quality = _quality_score(left)
         right_quality = _quality_score(right)
-        preferred = (
+        explicitly_preferred = (
+            left if left.get("version_preferred") and not right.get("version_preferred") else
+            right if right.get("version_preferred") and not left.get("version_preferred") else None
+        )
+        preferred = explicitly_preferred or (
             left if left_quality > right_quality else
             right if right_quality > left_quality else None
         )
@@ -232,6 +236,9 @@ class DuplicateService:
                 "The contents have not been hash-verified, so neither copy should be removed."
             )
         recommendation = (
+            f"{preferred['filename']} is marked as the preferred version. Keep both "
+            "when their confirmed edition or version labels differ; InfoMancer will not delete either file."
+            if explicitly_preferred else
             f"{preferred['filename']} has the stronger technical profile. "
             "Keep both if they are different editions; InfoMancer will not delete either file."
             if preferred else
@@ -291,6 +298,10 @@ class DuplicateService:
             "hash_status": row.get("hash_status") or "not_verified",
             "hash_error": row.get("hash_error") or "",
             "hashed_at": row.get("hashed_at"),
+            "edition_name": row.get("edition_name") or "",
+            "version_name": row.get("version_name") or "",
+            "identity_confirmed": bool(row.get("identity_confirmed")),
+            "version_preferred": bool(row.get("version_preferred")),
         }
 
     @staticmethod
@@ -332,7 +343,10 @@ class DuplicateService:
             "likely_files": len(likely),
         }
 
-    def decide(self, file_a_id: int, file_b_id: int, decision: str, user_id: int | None) -> bool:
+    def decide(
+        self, file_a_id: int, file_b_id: int, decision: str,
+        user_id: int | None, *, source: str = "manual",
+    ) -> bool:
         if decision not in DECISIONS:
             return False
         a_id, b_id = sorted((file_a_id, file_b_id))
@@ -347,15 +361,19 @@ class DuplicateService:
             conn.execute(
                 """INSERT INTO duplicate_reviews(
                      file_a_id,file_b_id,decision,file_a_signature,file_b_signature,
-                     reviewed_by,updated_at
-                   ) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                     reviewed_by,review_source,updated_at
+                   ) VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
                    ON CONFLICT(file_a_id,file_b_id) DO UPDATE SET
                      decision=excluded.decision,
                      file_a_signature=excluded.file_a_signature,
                      file_b_signature=excluded.file_b_signature,
                      reviewed_by=excluded.reviewed_by,
+                     review_source=excluded.review_source,
                      updated_at=CURRENT_TIMESTAMP""",
-                (a_id, b_id, decision, _signature(rows[0]), _signature(rows[1]), user_id),
+                (
+                    a_id, b_id, decision, _signature(rows[0]), _signature(rows[1]),
+                    user_id, source if source in {"manual", "edition_version"} else "manual",
+                ),
             )
         return True
 
@@ -377,8 +395,9 @@ class DuplicateService:
             conn.execute(
                 """INSERT INTO duplicate_reviews(
                      file_a_id,file_b_id,decision,file_a_signature,file_b_signature,
-                     file_a_sha256,file_b_sha256,verified_at,reviewed_by,updated_at
-                   ) VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP,?,CURRENT_TIMESTAMP)
+                     file_a_sha256,file_b_sha256,verified_at,reviewed_by,
+                     review_source,updated_at
+                   ) VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP,?,'manual',CURRENT_TIMESTAMP)
                    ON CONFLICT(file_a_id,file_b_id) DO UPDATE SET
                      decision='active',
                      file_a_signature=excluded.file_a_signature,
@@ -386,6 +405,7 @@ class DuplicateService:
                      file_a_sha256=excluded.file_a_sha256,
                      file_b_sha256=excluded.file_b_sha256,
                      verified_at=CURRENT_TIMESTAMP,reviewed_by=excluded.reviewed_by,
+                     review_source='manual',
                      updated_at=CURRENT_TIMESTAMP""",
                 (a_id, b_id, "active", _signature(rows[0]), _signature(rows[1]),
                  hashes[0], hashes[1], user_id),

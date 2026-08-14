@@ -40,6 +40,9 @@ class EventLogTests(unittest.TestCase):
             }
         self.assertIn("runtime_seconds", file_columns)
         self.assertIn("dynamic_range", file_columns)
+        self.assertIn("edition_name", file_columns)
+        self.assertIn("version_name", file_columns)
+        self.assertIn("version_preferred", file_columns)
         self.assertTrue(
             {
                 "user_title_state", "user_tags", "title_tags", "event_logs",

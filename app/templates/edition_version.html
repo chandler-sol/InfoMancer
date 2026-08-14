@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Edition &amp; Version · {{ file.title_name }} · InfoMancer{% endblock %}
+{% block content %}<div data-organize-content>
+<a class="back" href="{{ return_to }}">← {{ file.title_name }}</a>
+<header class="page-head"><div><p class="eyebrow">MEDIA IDENTITY</p><h1>Edition &amp; Version</h1><p>Describe this cataloged copy without renaming, moving, or changing the media file.</p></div></header>
+{% if not preview %}
+<form class="panel organize-title-form edition-version-form" method="post" action="/files/{{ file.id }}/edition-version/preview">
+  <section><h2>{{ file.filename }}</h2><p class="muted">Suggestions come from the filename and inspected media details. Review them before saving.</p>
+    <div class="organize-fields">
+      <label>Edition<input name="edition_name" maxlength="80" value="{{ proposed.edition_name }}" placeholder="For example, Director's Cut"><small>The content cut or published edition.</small></label>
+      <label>Version<input name="version_name" maxlength="80" value="{{ proposed.version_name }}" placeholder="For example, 4K HDR REMUX"><small>The technical or source-specific copy.</small></label>
+    </div>
+    <label class="edition-preferred-toggle"><input type="checkbox" name="preferred" value="1" {% if proposed.preferred %}checked{% endif %}><span><strong>Preferred copy</strong><small>Choose this file as the preferred version of this {{ 'episode' if file.kind == 'tv' else 'title' }}.</small></span></label>
+  </section>
+  <div class="actions"><a class="button" href="{{ return_to }}" data-organize-close>Cancel</a><button class="button primary">Preview Changes</button></div>
+</form>
+{% else %}
+<section class="panel edition-version-preview"><h2>Preview proposed changes</h2><p>InfoMancer will update catalog metadata only. The media file and filename will not change.</p>
+  <dl><div><dt>Edition</dt><dd>{{ proposed.edition_name or 'Not labeled' }}</dd></div><div><dt>Version</dt><dd>{{ proposed.version_name or 'Not labeled' }}</dd></div><div><dt>Preferred</dt><dd>{{ 'Yes' if proposed.preferred else 'No' }}</dd></div></dl>
+  {% if current.preferred and not proposed.preferred %}<p class="notice">This file will no longer be the preferred copy.</p>{% endif %}
+  <form class="organize-title-form" method="post" action="/files/{{ file.id }}/edition-version">
+    <input type="hidden" name="edition_name" value="{{ proposed.edition_name }}"><input type="hidden" name="version_name" value="{{ proposed.version_name }}"><input type="hidden" name="preferred" value="{{ '1' if proposed.preferred else '' }}">
+    <label>Type <strong>SAVE</strong> to confirm<input name="confirm" autocomplete="off" required></label>
+    <div class="actions"><a class="button" href="/files/{{ file.id }}/edition-version" data-organize-dialog>Edit</a><button class="button primary">Save Changes</button></div>
+  </form>
+</section>
+{% endif %}
+</div>{% endblock %}

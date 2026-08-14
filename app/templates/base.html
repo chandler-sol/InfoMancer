@@ -566,6 +566,7 @@
         const add = document.createElement("a");
         add.href = `/titles/${match[1]}/libraries?return_to=${encodeURIComponent(location.pathname + location.search)}`;
         add.textContent = "Add to Libraries";
+        add.dataset.organizeDialog = "";
         organizeLink.before(add);
       });
       const currentTitle = location.pathname.match(/^\/titles\/(\d+)/)?.[1];
@@ -576,6 +577,7 @@
         const add = document.createElement("a");
         add.href = `/titles/${currentTitle}/libraries?return_to=${encodeURIComponent(location.pathname + location.search)}`;
         add.textContent = "Add Series to Libraries";
+        add.dataset.organizeDialog = "";
         panel.prepend(add);
       });
       document.addEventListener("click", (event) => {

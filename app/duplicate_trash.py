@@ -15,7 +15,8 @@ FILE_COLUMNS = (
     "season", "episode_start", "episode_end", "parsed_title", "original_filename",
     "runtime_seconds", "width", "height", "video_codec", "audio_codec",
     "audio_channels", "bitrate", "container", "dynamic_range", "media_info_at",
-    "media_info_error", "seen_scan",
+    "media_info_error", "edition_name", "version_name", "identity_confirmed",
+    "version_preferred", "seen_scan",
 )
 
 

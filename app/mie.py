@@ -602,6 +602,40 @@ class MediaIntelligenceEngine:
                     })
 
             duplicate_candidates = self.duplicates.candidates()
+            identity_review_titles: set[int] = set()
+            for duplicate in duplicate_candidates:
+                file_a = duplicate["file_a"]
+                file_b = duplicate["file_b"]
+                if file_a["identity_confirmed"] and file_b["identity_confirmed"]:
+                    continue
+                title_id = int(duplicate["title_id"])
+                if title_id in identity_review_titles:
+                    continue
+                identity_review_titles.add(title_id)
+                title = titles[title_id]
+                title_name = title["metadata_title"] or title["title"]
+                candidates.append({
+                    "fingerprint": f"media-identity-unreviewed:title:{title_id}",
+                    "rule_key": "media-identity-unreviewed",
+                    "category": "identity",
+                    "severity": "information",
+                    "root_id": title["root_id"],
+                    "title_id": title_id,
+                    "file_id": file_a["id"],
+                    "summary": f"Review editions and versions for {title_name}",
+                    "explanation": (
+                        "Multiple cataloged files represent the same movie or episode, "
+                        "but at least one copy has not been identified as an edition or version."
+                    ),
+                    "recommendation": (
+                        "Open the title and review each file's Edition & Version suggestion. "
+                        "Confirm intentional alternatives and choose a preferred copy when useful."
+                    ),
+                    "evidence": {
+                        "file_a": file_a["filename"],
+                        "file_b": file_b["filename"],
+                    },
+                })
             for duplicate in duplicate_candidates:
                 file_a = duplicate["file_a"]
                 file_b = duplicate["file_b"]
@@ -1092,6 +1126,7 @@ class MediaIntelligenceEngine:
                 "metadata-episodes-incomplete": "Refresh episode data",
                 "metadata-stale": "Refresh metadata",
                 "metadata-identifiers-missing": "Review provider match",
+                "media-identity-unreviewed": "Review editions and versions",
             }.get(finding["rule_key"], "Review affected media")
             findings.append(finding)
         return findings

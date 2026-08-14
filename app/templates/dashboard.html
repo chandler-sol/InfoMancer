@@ -94,7 +94,7 @@
           <small>{% if title.metadata_year or title.year %}{{ title.metadata_year or title.year }}{% else %}Year unknown{% endif %}</small>
         </a>
         <div class="home-recent-actions" aria-label="Actions for {{ title.metadata_title or title.title }}">
-          <details class="episode-menu cover-row-menu">
+          <details class="episode-menu cover-row-menu item-action-menu">
             <summary aria-label="Actions for {{ title.metadata_title or title.title }}">&#8942;</summary>
             <div>
               <form method="post" action="/titles/{{ title.id }}/favorite">
@@ -102,11 +102,12 @@
                 <input type="hidden" name="return_to" value="/">
                 <button class="favorite-action{% if title.favorite %} active{% endif %}"><span>&starf;</span>{{ 'Remove favorite' if title.favorite else 'Add favorite' }}</button>
               </form>
-              <a href="/titles/{{ title.id }}/organize">Organize &amp; Tags</a>
+              <a href="/titles/{{ title.id }}/libraries" data-organize-dialog>Add to Libraries</a>
+              <a href="/titles/{{ title.id }}/organize" data-organize-dialog>Organize &amp; Tags</a>
               <a href="/titles/{{ title.id }}/collections?return_to=%2F">Add to Collection</a>
               {% if (title.kind == 'tv' and title.tvdb_id) or (title.kind == 'movie' and title.tvdb_movie_id) %}<a href="/titles/{{ title.id }}/cover">Change Cover</a>{% endif %}
               <a href="/titles/{{ title.id }}/tvdb">{% if title.tvdb_id or title.tvdb_movie_id or title.tmdb_id or title.imdb_id %}Fix Match{% else %}Match{% endif %}</a>
-              {% if title.kind == 'movie' and title.first_file_id %}<a href="/files/{{ title.first_file_id }}/rename-movie">Preview Rename</a>{% elif title.kind == 'tv' and title.tvdb_id %}<a href="/titles/{{ title.id }}/rename-episodes">Review Episode Renames</a>{% endif %}
+              {% if title.kind == 'movie' and title.first_file_id %}<a href="/files/{{ title.first_file_id }}/edition-version" data-organize-dialog>Edit Edition &amp; Version</a><a href="/files/{{ title.first_file_id }}/rename-movie">Preview Rename</a>{% elif title.kind == 'tv' and title.tvdb_id %}<a href="/titles/{{ title.id }}/rename-episodes">Review Episode Renames</a>{% endif %}
             </div>
           </details>
         </div>

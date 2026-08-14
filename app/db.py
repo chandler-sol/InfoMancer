@@ -87,6 +87,10 @@ CREATE TABLE IF NOT EXISTS files (
     dynamic_range TEXT,
     media_info_at TEXT,
     media_info_error TEXT,
+    edition_name TEXT NOT NULL DEFAULT '',
+    version_name TEXT NOT NULL DEFAULT '',
+    identity_confirmed INTEGER NOT NULL DEFAULT 0,
+    version_preferred INTEGER NOT NULL DEFAULT 0,
     seen_scan TEXT NOT NULL
 );
 
@@ -495,6 +499,7 @@ CREATE TABLE IF NOT EXISTS duplicate_reviews (
     file_b_sha256 TEXT,
     verified_at TEXT,
     reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    review_source TEXT NOT NULL DEFAULT 'manual',
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(file_a_id, file_b_id),
     CHECK(file_a_id < file_b_id)
@@ -688,6 +693,10 @@ class Database:
                 "dynamic_range": "TEXT",
                 "media_info_at": "TEXT",
                 "media_info_error": "TEXT",
+                "edition_name": "TEXT NOT NULL DEFAULT ''",
+                "version_name": "TEXT NOT NULL DEFAULT ''",
+                "identity_confirmed": "INTEGER NOT NULL DEFAULT 0",
+                "version_preferred": "INTEGER NOT NULL DEFAULT 0",
             }
             for name, column_type in file_additions.items():
                 if name not in file_columns:
@@ -717,6 +726,13 @@ class Database:
             }
             if "sort_title" not in title_state_columns:
                 conn.execute("ALTER TABLE user_title_state ADD COLUMN sort_title TEXT")
+            review_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(duplicate_reviews)")
+            }
+            if "review_source" not in review_columns:
+                conn.execute(
+                    "ALTER TABLE duplicate_reviews ADD COLUMN review_source TEXT NOT NULL DEFAULT 'manual'"
+                )
             trash_columns = {
                 row["name"] for row in conn.execute("PRAGMA table_info(duplicate_trash)")
             }
