@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% block title %}Duplicate Review - {{ app_name }}{% endblock %}
+{% block content %}
+<section class="mie-hero duplicate-hero">
+  <div>
+    <p class="eyebrow">MEDIA INTELLIGENCE ENGINE</p>
+    <h1>Duplicate Review</h1>
+    <p>Compare files that appear to represent the same movie or TV episode. InfoMancer explains the evidence and never deletes media automatically.</p>
+  </div>
+</section>
+
+{% if message %}<div class="notice" role="status">{{ message }}</div>{% endif %}
+
+<div class="duplicate-review-toolbar">
+  <nav class="duplicate-tabs" aria-label="Duplicate review status">
+    <a href="/duplicates" {% if status == 'active' %}class="active"{% endif %}>Needs review</a>
+    <a href="/duplicates?status=ignored" {% if status == 'ignored' %}class="active"{% endif %}>Ignored</a>
+    <a href="/duplicates?status=not_duplicate" {% if status == 'not_duplicate' %}class="active"{% endif %}>Intentional alternatives</a>
+  </nav>
+  <div class="actions duplicate-hero-actions">
+    <a class="button" href="/duplicates?status={{ status }}&evidence={{ evidence }}&refresh=true" aria-label="Refresh duplicate candidates from the current catalog">Refresh candidates</a>
+    <a class="button" href="/duplicates/trash">Trash{% if trash_count %} ({{ trash_count }}){% endif %}</a>
+    <a class="button" href="/library-health">Back to Library Health</a>
+  </div>
+</div>
+
+<section class="duplicate-summary" aria-label="Duplicate candidate summary">
+  <div class="duplicate-summary-intro">
+    <p class="eyebrow">CURRENT CATALOG</p>
+    <h2>{{ candidate_total }} candidate pair{% if candidate_total != 1 %}s{% endif %}</h2>
+    <p>InfoMancer finds candidates from catalog identity and stored media details.</p>
+    <details class="duplicate-fingerprint-explainer">
+      <summary>What is a file fingerprint?</summary>
+      <p>InfoMancer reads a file's contents and creates a SHA-256 fingerprint. Identical fingerprints prove that two files contain exactly the same bytes, even when their filenames differ. A fingerprint cannot recreate or provide access to either file.</p>
+    </details>
+  </div>
+  <dl>
+    <div><dt>Verified exact</dt><dd>{{ candidate_counts.verified_exact }}</dd><small>Identical file contents</small></div>
+    <div><dt>Likely duplicates</dt><dd>{{ candidate_counts.likely }}</dd><small>Same size and runtime</small></div>
+    <div><dt>Possible alternates</dt><dd>{{ candidate_counts.alternate }}</dd><small>Different editions or encodes</small></div>
+  </dl>
+</section>
+
+<details class="panel duplicate-impact duplicate-review-impact" aria-labelledby="cleanup-impact-title">
+  <summary><span><b id="cleanup-impact-title">Storage impact</b><small>{{ format_bytes(duplicate_opportunity.bytes) }} potentially recoverable</small></span><span>View details</span></summary>
+  <div class="duplicate-impact-grid">
+    <div><strong>{{ format_bytes(duplicate_opportunity.bytes) }}</strong><span>Estimated recoverable</span><small>{{ duplicate_opportunity.files }} reviewable file{% if duplicate_opportunity.files != 1 %}s{% endif %}</small></div>
+    <div><strong>{{ format_bytes(duplicate_impact.reclaimed_bytes) }}</strong><span>Physically reclaimed</span><small>{{ duplicate_impact.reclaimed_files }} permanently removed file{% if duplicate_impact.reclaimed_files != 1 %}s{% endif %}</small></div>
+    <div><strong>{{ format_bytes(duplicate_impact.pending_bytes) }}</strong><span>Waiting in managed Trash</span><small>{{ duplicate_impact.pending_files }} restorable file{% if duplicate_impact.pending_files != 1 %}s{% endif %}</small></div>
+  </div>
+  <p class="duplicate-impact-breakdown">The estimate includes {{ duplicate_opportunity.exact_files }} verified exact and {{ duplicate_opportunity.likely_files }} likely duplicate file{% if duplicate_opportunity.exact_files + duplicate_opportunity.likely_files != 1 %}s{% endif %}. Possible alternate editions are excluded.</p>
+</details>
+
+<details class="panel duplicate-history" id="cleanup-history" {% if cleanup_status != 'all' %}open{% endif %}>
+  <summary><span>Cleanup history</span><small>{{ cleanup_history|length }} recent event{% if cleanup_history|length != 1 %}s{% endif %}</small></summary>
+  <div class="duplicate-history-body">
+    <nav class="duplicate-tabs" aria-label="Cleanup history filter">
+      {% for value, label in [('all', 'All'), ('pending', 'Moved to Trash'), ('restored', 'Restored'), ('purged', 'Purged'), ('manual', 'Manual deletion')] %}
+      <a href="/duplicates?status={{ status }}&evidence={{ evidence }}&cleanup_status={{ value }}#cleanup-history" {% if cleanup_status == value %}class="active"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </nav>
+    {% if cleanup_history %}
+    <div class="duplicate-history-list">
+      {% for event in cleanup_history %}
+      <article class="duplicate-history-item">
+        <div><strong>{{ event.action_label }}</strong><span>{{ event.filename }}</span></div>
+        <div><span>{{ event.title_name }}</span><small>{{ format_bytes(event.size_bytes) }}</small></div>
+        <time>{{ local_time(event.occurred_at) }}</time>
+        <details><summary>Show path</summary><p class="path">{{ event.path }}</p></details>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="duplicate-history-empty">No cleanup events match this filter yet.</p>
+    {% endif %}
+  </div>
+</details>
+
+<nav class="duplicate-tabs duplicate-evidence-tabs" aria-label="Duplicate evidence filter">
+  <a href="/duplicates?status={{ status }}&evidence=strong" {% if evidence == 'strong' %}class="active"{% endif %}>Exact &amp; likely ({{ candidate_counts.verified_exact + candidate_counts.likely }})</a>
+  <a href="/duplicates?status={{ status }}&evidence=alternate" {% if evidence == 'alternate' %}class="active"{% endif %}>Possible alternates ({{ candidate_counts.alternate }})</a>
+  <a href="/duplicates?status={{ status }}&evidence=all" {% if evidence == 'all' %}class="active"{% endif %}>All candidates ({{ candidate_total }})</a>
+</nav>
+
+<details class="panel duplicate-controls" {% if q or source or sort != 'confidence' %}open{% endif %}>
+  <summary><span>Find and sort candidates</span><small>{% if q or source or sort != 'confidence' %}Filters applied{% else %}Optional filters{% endif %}</small></summary>
+  <form class="duplicate-filter-bar" method="get" action="/duplicates">
+    <input type="hidden" name="status" value="{{ status }}"><input type="hidden" name="evidence" value="{{ evidence }}">
+    <label>Search<input name="q" value="{{ q }}" placeholder="Title, filename, or path"></label>
+    <label>Source<select name="source"><option value="">All sources</option>{% for value, label in source_options %}<option value="{{ value }}" {% if source == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label>Sort<select name="sort"><option value="confidence" {% if sort == 'confidence' %}selected{% endif %}>Strongest evidence</option><option value="space" {% if sort == 'space' %}selected{% endif %}>Recoverable space</option><option value="title" {% if sort == 'title' %}selected{% endif %}>Title</option></select></label>
+    <button class="button">Apply filters</button>
+  </form>
+</details>
+
+<form id="duplicate-bulk-form" class="duplicate-bulk-bar" method="post" action="/duplicates/bulk-action">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label class="duplicate-select-all"><input id="duplicate-select-all" type="checkbox"><span>Select all shown</span></label>
+  <span id="duplicate-selected-count" aria-live="polite">0 selected</span>
+  <div class="duplicate-bulk-actions">
+    <button class="button" name="action" value="verify" disabled>Verify selected</button>
+    <button class="button" name="action" value="ignored" disabled>Ignore selected</button>
+    <button class="button" name="action" value="not_duplicate" disabled>Keep as alternatives</button>
+  </div>
+</form>
+
+<section class="duplicate-list">
+{% for candidate in candidates %}
+  <article class="panel duplicate-candidate duplicate-{{ candidate.classification }}">
+    <header>
+      <label class="duplicate-select"><input class="duplicate-pair-select" form="duplicate-bulk-form" type="checkbox" name="pairs" value="{{ candidate.file_a.id }}:{{ candidate.file_b.id }}"><span class="sr-only">Select {{ candidate.title_name }}</span></label>
+      <div class="duplicate-candidate-title">
+        <h2><a href="/titles/{{ candidate.title_id }}">{{ candidate.title_name }}</a></h2>
+        {% if candidate.kind == 'tv' and candidate.file_a.season is defined and candidate.file_a.season is not none and candidate.file_a.episode_start is defined and candidate.file_a.episode_start is not none %}
+        <p class="duplicate-episode-identity">Season {{ '%02d'|format(candidate.file_a.season|int) }} &middot; Episode {{ '%02d'|format(candidate.file_a.episode_start|int) }}{% if candidate.file_a.episode_end is defined and candidate.file_a.episode_end and candidate.file_a.episode_end != candidate.file_a.episode_start %}&ndash;{{ '%02d'|format(candidate.file_a.episode_end|int) }}{% endif %}</p>
+        {% endif %}
+        <div class="mie-labels"><span>{{ candidate.kind|upper }}</span><span>{{ candidate.label }}</span></div>
+      </div>
+      <span class="duplicate-fingerprint-help">
+        <span class="duplicate-hash-state hash-{{ candidate.hash_state }}"{% if candidate.hash_state == 'verified_exact' %} aria-describedby="fingerprint-help-{{ candidate.pair }}" tabindex="0"{% endif %}>
+          {% if candidate.hash_state == 'verified_exact' %}Fingerprint: identical
+          {% elif candidate.hash_state == 'verified_different' %}Fingerprint: different
+          {% elif candidate.hash_state == 'running' %}Fingerprinting now
+          {% elif candidate.hash_state == 'queued' %}Fingerprint queued
+          {% elif candidate.hash_state == 'error' %}Fingerprint needs attention
+          {% else %}Not fingerprinted{% endif %}
+        </span>
+        {% if candidate.hash_state == 'verified_exact' %}<span class="duplicate-fingerprint-tooltip" id="fingerprint-help-{{ candidate.pair }}" role="tooltip">Both files produced the same SHA-256 fingerprint, confirming they are byte-for-byte identical.</span>{% endif %}
+      </span>
+    </header>
+    {% if candidate.classification != 'verified_exact' %}<div class="duplicate-reason"><strong>Why it was flagged</strong><p>{{ candidate.explanation }}</p></div>{% endif %}
+    {% if candidate.verified_at and candidate.classification != 'verified_exact' %}
+    <div class="duplicate-verification-result {% if candidate.classification == 'verified_exact' %}is-identical{% else %}is-different{% endif %}" role="status">
+      <strong>Hash result:</strong>
+      {% if candidate.classification == 'verified_exact' %}Byte-for-byte identical. The SHA-256 hashes match.{% else %}Different contents. The SHA-256 hashes do not match; keep both unless you confirm one is unwanted.{% endif %}
+    </div>
+    {% endif %}
+    <div class="duplicate-comparison">
+      {% for file in [candidate.file_a, candidate.file_b] %}
+      <section class="duplicate-file{% if file.id == candidate.preferred_id %} preferred{% endif %}">
+        <div class="duplicate-file-heading">
+          <h3>{{ file.filename }}</h3>
+          {% if file.id == candidate.preferred_id %}<span>Stronger technical profile</span>{% endif %}
+        </div>
+        <dl class="duplicate-file-summary">
+          <div><dt>Source</dt><dd>{{ file.root_label }}</dd></div>
+          <div><dt>Size</dt><dd>{{ format_bytes(file.size_bytes) }}</dd></div>
+          <div><dt>Runtime</dt><dd>{% if file.runtime_seconds %}{% set seconds = file.runtime_seconds|round|int %}{{ '%02d:%02d:%02d'|format(seconds // 3600, (seconds % 3600) // 60, seconds % 60) }}{% else %}Not inspected{% endif %}</dd></div>
+          <div><dt>Resolution</dt><dd>{{ file.resolution }}</dd></div>
+          <div><dt>Total bitrate</dt><dd>{% if file.bitrate %}{{ (file.bitrate / 1000000)|round(2) }} Mbps{% else %}Not inspected{% endif %}</dd></div>
+          <div><dt>Video</dt><dd>{{ file.video_codec }}</dd></div>
+          <div><dt>Audio</dt><dd>{{ file.audio_codec }}</dd></div>
+          <div><dt>Dynamic range</dt><dd>{{ file.dynamic_range }}</dd></div>
+          <div><dt>Container</dt><dd>{{ file.container }}</dd></div>
+        </dl>
+        <div class="duplicate-file-path"><span>Full path</span><p class="path">{{ file.path }}</p></div>
+        <div class="duplicate-file-hash hash-{{ file.hash_status }}">
+          <span>SHA-256</span>
+          <p>{% if file.hash_status == 'complete' %}Ready{% elif file.hash_status == 'running' %}Running now{% elif file.hash_status == 'queued' %}Queued{% elif file.hash_status == 'error' %}Could not be read{% else %}Not verified{% endif %}{% if file.hash_error %} &middot; {{ file.hash_error }}{% endif %}</p>
+        </div>
+        {% if status == 'active' %}
+        <div class="actions duplicate-file-actions">
+          <a class="button" href="/duplicates/{{ file.id }}/trash-preview">Move this copy to Trash</a>
+          <form method="post" action="/duplicates/{{ file.id }}/verify-removed" onsubmit="return confirm('Verify that this exact file was deleted outside InfoMancer? No catalog entry will be removed unless the file is confirmed missing.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button">I deleted it myself</button>
+          </form>
+        </div>
+        {% endif %}
+      </section>
+      {% endfor %}
+    </div>
+    <div class="duplicate-advice"><strong>Recommendation</strong><p>{{ candidate.recommendation }}</p></div>
+    <details class="duplicate-recovery">
+      <summary>Storage-recovery evidence</summary>
+      <p>Recommended copy to preserve first: <b>{{ candidate.recommended_keep }}</b></p>
+      <ul>{% for reason in candidate.recovery_reasons %}<li>{{ reason }}</li>{% endfor %}</ul>
+      <p class="muted">MIE never considers either copy safe to remove automatically. Verify playback, editions, backups, and storage availability before making a manual change.</p>
+    </details>
+    <div class="actions duplicate-actions">
+      {% if status == 'active' %}
+      <form class="duplicate-action-help" method="post" action="/duplicates/{{ candidate.file_a.id }}/{{ candidate.file_b.id }}/verify">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button" aria-describedby="verify-help-{{ candidate.pair }}">Verify file contents</button>
+        <span class="duplicate-action-tooltip" id="verify-help-{{ candidate.pair }}" role="tooltip">Reads both files byte-for-byte in the background to confirm whether they are identical. No files are changed.</span>
+      </form>
+      <form class="duplicate-action-help" method="post" action="/duplicates/{{ candidate.file_a.id }}/{{ candidate.file_b.id }}/decision">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="ignored">
+        <button class="button" aria-describedby="ignore-help-{{ candidate.pair }}">Ignore for now</button>
+        <span class="duplicate-action-tooltip" id="ignore-help-{{ candidate.pair }}" role="tooltip">Hides this candidate until either file changes, when InfoMancer will ask you to review it again.</span>
+      </form>
+      <form class="duplicate-action-help" method="post" action="/duplicates/{{ candidate.file_a.id }}/{{ candidate.file_b.id }}/decision">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="not_duplicate">
+        <button class="button" aria-describedby="alternative-help-{{ candidate.pair }}">Keep as intentional alternatives</button>
+        <span class="duplicate-action-tooltip" id="alternative-help-{{ candidate.pair }}" role="tooltip">Marks both files as intentionally different editions or encodes and removes this pair from active review. Neither file is changed.</span>
+      </form>
+      {% else %}
+      <form method="post" action="/duplicates/{{ candidate.file_a.id }}/{{ candidate.file_b.id }}/decision">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="active">
+        <button class="button primary">Return to review</button>
+      </form>
+      {% endif %}
+    </div>
+  </article>
+{% else %}
+  <div class="panel mie-empty"><span aria-hidden="true">&#10003;</span><div><h2>No candidates in this view</h2><p>{% if candidate_total and evidence != 'all' %}Other candidate types may still be available. Choose another evidence filter above to review them.{% elif status == 'active' %}InfoMancer did not find overlapping catalog identities that still need review.{% else %}No pairs have been placed in this review state.{% endif %}</p></div></div>
+{% endfor %}
+</section>
+<script>
+  (()=>{const all=document.getElementById('duplicate-select-all');const boxes=[...document.querySelectorAll('.duplicate-pair-select')];const count=document.getElementById('duplicate-selected-count');const buttons=[...document.querySelectorAll('#duplicate-bulk-form button')];if(!all)return;const sync=()=>{const n=boxes.filter(box=>box.checked).length;count.textContent=`${n} selected`;all.checked=n===boxes.length&&n>0;all.indeterminate=n>0&&n<boxes.length;buttons.forEach(button=>button.disabled=n===0);document.getElementById('duplicate-bulk-form').classList.toggle('has-selection',n>0);};all.addEventListener('change',()=>{boxes.forEach(box=>box.checked=all.checked);sync();});boxes.forEach(box=>box.addEventListener('change',sync));sync();})();
+  (()=>{const shouldMonitor={{ 'true' if message and message.startswith('Verification started') else 'false' }};if(!shouldMonitor)return;const poll=async()=>{try{const response=await fetch('/api/duplicate-verification',{headers:{Accept:'application/json'}});if(!response.ok)throw new Error('status unavailable');const job=await response.json();if(job.status==='complete'||job.status==='error'){const url=new URL(window.location.href);url.searchParams.set('message',job.detail||'Duplicate verification finished.');window.location.replace(url);return;}}catch(error){}window.setTimeout(poll,1200);};poll();})();
+</script>
+{% endblock %}

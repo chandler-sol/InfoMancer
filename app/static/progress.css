@@ -39,6 +39,8 @@ button:disabled {
   position: relative;
   margin-left: auto;
   margin-right: 24px;
+  transition: width .32s cubic-bezier(.22, 1, .36, 1), opacity .24s ease,
+              transform .38s cubic-bezier(.22, 1, .36, 1);
 }
 
 .task-widget[hidden],
@@ -57,6 +59,23 @@ button:disabled {
   background: #151d25;
   font-size: 11px;
   text-overflow: ellipsis;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  transition: border-color .18s ease, background .18s ease, box-shadow .18s ease,
+              opacity .2s ease, filter .2s ease, transform .2s ease;
+}
+
+.task-widget:hover .task-widget-toggle,
+.task-widget.is-pinned .task-widget-toggle {
+  border-color: rgba(185, 245, 66, .38);
+  background: linear-gradient(135deg, #141d25, #10171e);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .32), inset 2px 0 var(--lime);
+}
+
+.task-widget.is-pinned .task-widget-toggle {
+  opacity: .46;
+  filter: saturate(.55);
+  transform: scale(.985);
 }
 
 .task-widget-toggle span:last-child {
@@ -85,20 +104,65 @@ button:disabled {
   top: calc(100% + 10px);
   right: 0;
   width: 330px;
-  padding: 15px;
-  border: 1px solid var(--line);
-  background: #121820;
-  box-shadow: 0 15px 35px rgba(0, 0, 0, .35);
+  padding: 20px;
+  border: 1px solid rgba(185, 245, 66, .24);
+  border-radius: 7px;
+  background: linear-gradient(145deg, #141d26, #0e151c 72%);
+  box-shadow: 0 22px 48px rgba(0, 0, 0, .48), inset 0 1px rgba(255, 255, 255, .025);
 }
 
-.task-popover > strong {
-  display: block;
-  margin-bottom: 9px;
-  font: 500 17px var(--serif);
+.task-popover-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 13px;
+}
+
+.task-popover-heading span:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.task-popover-heading small {
+  color: var(--lime);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .13em;
+}
+
+.task-popover-heading strong {
+  font-size: 22px;
+  letter-spacing: -.02em;
+}
+
+.task-popover-controls {
+  display: flex;
+  gap: 4px;
+}
+
+.task-popover-controls button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #111820;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.task-popover-controls button:hover,
+.task-popover-controls button:focus-visible {
+  border-color: #4a632b;
+  color: var(--lime);
 }
 
 .task-row {
-  padding: 10px 0;
+  padding: 15px 0;
   border-top: 1px solid var(--line);
 }
 
@@ -114,10 +178,15 @@ button:disabled {
   display: block;
 }
 
+.task-row strong {
+  font-size: 15px;
+}
+
 .task-row small {
-  margin: 2px 0 8px;
+  margin: 4px 0 10px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12.5px;
+  line-height: 1.45;
 }
 
 .task-track {

@@ -4,6 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', path='infomancer-icon.svg') }}" type="image/svg+xml">
+  <link rel="shortcut icon" href="{{ url_for('static', path='infomancer-icon.svg') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', path='infomancer-icon.svg') }}">
   <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v={{ static_version }}">
   <link rel="stylesheet" href="{{ url_for('static', path='progress.css') }}?v={{ static_version }}">
   <link rel="stylesheet" href="{{ url_for('static', path='library.css') }}?v={{ static_version }}">
@@ -14,26 +17,65 @@
   <link rel="stylesheet" href="{{ url_for('static', path='settings.css') }}?v={{ static_version }}">
   <link rel="stylesheet" href="{{ url_for('static', path='engagement.css') }}?v={{ static_version }}">
   <link rel="stylesheet" href="{{ url_for('static', path='tour-demo.css') }}?v={{ static_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='modern.css') }}?v={{ static_version }}">
   <script src="{{ url_for('static', path='password-visibility.js') }}?v={{ static_version }}" defer></script>
   <script src="{{ url_for('static', path='engagement.js') }}?v={{ static_version }}" defer></script>
 </head>
-<body class="{% if current_user %}role-{{ current_user.role }}{% else %}signed-out{% endif %}">
+<body class="{% if current_user %}role-{{ current_user.role }} has-app-sidebar{% if current_user.high_contrast %} high-contrast{% endif %}{% else %}signed-out{% endif %}">
+  {% if current_user %}
+  <script>
+    try {
+      const savedSidebarWidth = Number.parseInt(window.localStorage.getItem("infomancer-sidebar-width") || "258", 10);
+      document.documentElement.style.setProperty("--app-sidebar-width", `${Math.min(380, Math.max(220, savedSidebarWidth))}px`);
+      if (window.localStorage.getItem("infomancer-sidebar-collapsed") === "1") {
+        document.body.classList.add("sidebar-collapsed");
+      }
+    } catch (_error) {}
+  </script>
+  {% endif %}
   <header class="topbar">
-    <a class="brand" href="/"><span class="brand-mark">I</span><span class="brand-label">InfoMancer</span></a>
+    <a class="brand" href="/" aria-label="InfoMancer Home">
+      <img class="brand-lockup" src="{{ url_for('static', path='infomancer-lockup.svg') }}" alt="InfoMancer">
+      <img class="brand-icon" src="{{ url_for('static', path='infomancer-icon.svg') }}" alt="">
+    </a>
     {% if current_user %}
+    <button type="button" class="sidebar-collapse-toggle" id="sidebar-collapse-toggle" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"></path></svg>
+    </button>
+    <div class="sidebar-resize-handle" id="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" title="Drag to resize sidebar; double-click to reset"></div>
     <div class="topbar-actions">
       <form class="global-search" id="global-search" method="get" action="/library" role="search">
+        <input type="hidden" name="record_search" value="1">
         <label class="sr-only" for="global-search-input">Search the entire library</label>
         <input id="global-search-input" name="q" value="{{ request.query_params.get('q', '') if request.url.path == '/library' else '' }}" placeholder="Search the library" autocomplete="off" aria-autocomplete="list" aria-controls="global-search-suggestions">
+        <button type="button" class="global-search-history" id="global-search-history" aria-label="Show recent searches" title="Recent searches"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"></path><path d="M3 3v5h5M12 7v5l3 2"></path></svg></button>
         <div class="global-search-suggestions" id="global-search-suggestions" role="listbox" hidden></div>
         <button type="button" class="global-search-toggle" id="global-search-toggle" aria-label="Open library search" aria-expanded="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg>
         </button>
       </form>
       <div class="task-widget idle" id="task-widget">
-        <button type="button" class="task-widget-toggle" id="task-widget-toggle" aria-expanded="false" aria-controls="task-popover"><span class="task-dot"></span><span id="task-summary">No tasks running</span></button>
-        <div class="task-popover" id="task-popover" hidden><strong>Running tasks</strong><div id="task-list"></div></div>
+        <button type="button" class="task-widget-toggle" id="task-widget-toggle" aria-expanded="false" aria-controls="task-popover"><span class="task-dot"></span><span class="task-card-copy"><strong id="task-summary">No tasks running</strong><small id="task-card-detail">Background work appears here.</small></span></button>
+        <div class="task-popover" id="task-popover" hidden><div class="task-popover-heading"><span><small>BACKGROUND ACTIVITY</small><strong>Running tasks</strong></span><span class="task-popover-controls"><button type="button" id="task-minimize" aria-label="Minimize task panel" title="Minimize">&minus;</button><button type="button" id="task-dismiss" aria-label="Dismiss task panel" title="Dismiss">&times;</button></span></div><div id="task-list"></div></div>
       </div>
+      {% if request.url.path == '/' and current_user.id > 0 %}
+      <form class="home-layout-toggle" method="post" action="/account/home-layout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" aria-label="Switch to {{ 'Classic' if current_user.home_layout == 'modern' else 'Modern' }} Home" title="Switch to {{ 'Classic' if current_user.home_layout == 'modern' else 'Modern' }} Home">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            {% if current_user.home_layout == 'modern' %}
+            <rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 10h18M9 10v10"></path>
+            {% else %}
+            <rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 9h18M8 9v11M16 9v11"></path>
+            {% endif %}
+          </svg>
+        </button>
+      </form>
+      {% endif %}
+      <a class="announcement-button" href="/announcements" aria-label="Announcements{% if announcement_due_count %}: {{ announcement_due_count }} unread{% endif %}" title="Announcements">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h3l9 5V6l-9 5H4z"></path><path d="M7 13v6h3l1-4M19 9a4 4 0 0 1 0 6M21 6a8 8 0 0 1 0 12"></path></svg>
+        {% if announcement_due_count %}<b>{{ announcement_due_count }}</b>{% endif %}
+      </a>
       <div class="site-menu" id="site-menu">
         <button type="button" class="site-menu-toggle" id="site-menu-toggle" aria-label="Open navigation menu" aria-expanded="false" aria-controls="site-menu-panel"><span></span><span></span><span></span></button>
         <nav class="site-menu-panel" id="site-menu-panel" aria-hidden="true">
@@ -43,18 +85,20 @@
           <a href="/shows" {% if request.url.path.startswith('/shows') and not request.url.path.startswith('/shows/bulk-match') %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"></rect><path d="m8 2 4 4 4-4M8 15h8"></path></svg><span>TV Shows</span></a>
           <a href="/collections" {% if request.url.path.startswith('/collections') %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="13" height="15" rx="1"></rect><path d="M8 2h12v15M7 9h7M7 13h7"></path></svg><span>Collections</span></a>
           <a href="/favorites" {% if request.url.path.startswith('/favorites') %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3.1-5.8 3.1 1.1-6.5-4.7-4.6 6.5-.9z"></path></svg><span>Favorites</span></a>
+          <a href="/library-health" {% if request.url.path.startswith('/library-health') %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-6 4 12 2-6h6"></path><path d="M20 5.8A8.5 8.5 0 0 0 12 3a8.5 8.5 0 0 0-8 2.8"></path><path d="M4.5 17.5A18 18 0 0 0 12 22a18 18 0 0 0 7.5-4.5"></path></svg><span>Library Health</span></a>
           <a href="/announcements" {% if request.url.path == '/announcements' %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9a7 7 0 0 1 14 0c0 8 3 8 3 8H2s3 0 3-8"></path><path d="M9 21h6M12 2V1"></path></svg><span>Announcements</span>{% if announcement_due_count %}<b class="menu-count">{{ announcement_due_count }}</b>{% endif %}</a>
           <a href="/help" {% if request.url.path == '/help' %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.7 9a2.5 2.5 0 1 1 3.7 2.2c-.9.5-1.4 1.1-1.4 2.3"></path><path d="M12 17.5h.01"></path></svg><span>Help</span></a>
           <a href="/about" {% if request.url.path == '/about' %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 10v7M12 7h.01"></path></svg><span>About</span></a>
           {% if current_user.is_librarian %}
           <span class="site-menu-label site-menu-section">Librarian</span>
+          <a href="/duplicates" {% if request.url.path.startswith('/duplicates') %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="13" rx="2"></rect><rect x="8" y="8" width="13" height="13" rx="2"></rect></svg><span>Duplicate Review</span></a>
           <a href="/bulk-match" {% if request.url.path.startswith('/bulk-match') or request.url.path.startswith('/movies/bulk-match') or request.url.path.startswith('/shows/bulk-match') %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M4 12h10M4 18h7"></path><path d="m16 15 2 2 4-5"></path></svg><span>Bulk Match</span></a>
           <a href="/settings" {% if request.url.path.startswith('/settings') or request.url.path.startswith('/sources') %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"></path></svg><span>Settings</span></a>
           {% endif %}
         </nav>
       </div>
       {% if auth_mode != 'disabled' %}<details class="account-menu series-menu">
-        <summary aria-label="Open account menu for {{ current_user.display_name }}" title="{{ current_user.display_name }}"><span class="account-avatar">{{ current_user.symbol }}</span></summary>
+        <summary aria-label="Open account menu for {{ current_user.display_name }}" title="{{ current_user.display_name }}"><span class="account-avatar">{{ current_user.symbol }}</span><span class="account-summary-copy"><strong class="{% if current_user.display_name|length > 24 %}account-name-very-long{% elif current_user.display_name|length > 17 %}account-name-long{% elif current_user.display_name|length > 12 %}account-name-medium{% endif %}">{{ current_user.display_name }}</strong><small>{{ current_user.role|title }}</small></span><span class="account-summary-chevron">&rsaquo;</span></summary>
         <div class="series-menu-popover account-menu-popover">
           <div class="account-menu-identity"><strong>{{ current_user.display_name }}</strong><small>@{{ current_user.username }} · {{ current_user.role|title }}</small></div>
           <a href="/account/profile">Profile</a><a href="/tour">Take the Tour</a>
@@ -159,10 +203,13 @@
       const search = document.getElementById("global-search");
       const searchInput = document.getElementById("global-search-input");
       const searchToggle = document.getElementById("global-search-toggle");
+      const searchHistoryToggle = document.getElementById("global-search-history");
       const searchSuggestions = document.getElementById("global-search-suggestions");
       const menu = document.getElementById("site-menu");
       const menuToggle = document.getElementById("site-menu-toggle");
       const menuPanel = document.getElementById("site-menu-panel");
+      const sidebarToggle = document.getElementById("sidebar-collapse-toggle");
+      const sidebarResize = document.getElementById("sidebar-resize-handle");
 
       const setSearchOpen = (open) => {
         search.classList.toggle("open", open);
@@ -172,10 +219,56 @@
       };
       let searchSuggestionTimer;
       let searchSuggestionController;
+      const historyOption = (item) => ({
+        value: item.query, label: item.query, type: "Recent search", detail: ""
+      });
+      const renderSearchOptions = (suggestions, includeClear = false) => {
+        const options = suggestions.map((suggestion) => {
+          const option = document.createElement("button");
+          option.type = "button";
+          option.setAttribute("role", "option");
+          option.innerHTML = "<strong></strong><small></small>";
+          option.querySelector("strong").textContent = suggestion.label;
+          option.querySelector("small").textContent = suggestion.detail
+            ? `${suggestion.type} · ${suggestion.detail}` : suggestion.type;
+          option.addEventListener("click", () => {
+            searchInput.value = suggestion.value;
+            searchSuggestions.hidden = true;
+            search.requestSubmit();
+          });
+          return option;
+        });
+        if (includeClear && options.length) {
+          const clear = document.createElement("button");
+          clear.type = "button";
+          clear.className = "search-history-clear";
+          clear.textContent = "Clear search history";
+          clear.addEventListener("click", async () => {
+            await fetch("/api/search-history/clear", {
+              method: "POST", headers: {"X-CSRF-Token": csrfToken}
+            });
+            searchSuggestions.hidden = true;
+          });
+          options.push(clear);
+        }
+        searchSuggestions.replaceChildren(...options);
+        searchSuggestions.hidden = options.length === 0;
+      };
+      const recentSearches = async () => {
+        const response = await fetch("/api/search-history", {cache: "no-store"});
+        const data = await response.json();
+        return (data.history || []).map(historyOption);
+      };
+      const showRecentSearches = async () => {
+        if (!searchSuggestions) return;
+        try { renderSearchOptions(await recentSearches(), true); }
+        catch (_) { searchSuggestions.hidden = true; }
+      };
       const updateGlobalSearchSuggestions = async () => {
         const query = searchInput.value.trim();
         if (!searchSuggestions || query.length < 2) {
-          if (searchSuggestions) searchSuggestions.hidden = true;
+          if (query) searchSuggestions.hidden = true;
+          else await showRecentSearches();
           return;
         }
         searchSuggestionController?.abort();
@@ -187,25 +280,18 @@
           const response = await fetch(url, {
             signal: searchSuggestionController.signal, cache: "no-store"
           });
-          const data = await response.json();
-          const options = (data.suggestions || []).map((suggestion) => {
-            const option = document.createElement("button");
-            option.type = "button";
-            option.setAttribute("role", "option");
-            option.innerHTML = "<strong></strong><small></small>";
-            option.querySelector("strong").textContent = suggestion.label;
-            option.querySelector("small").textContent = suggestion.detail
-              ? `${suggestion.type} · ${suggestion.detail}`
-              : suggestion.type;
-            option.addEventListener("click", () => {
-              searchInput.value = suggestion.value;
-              searchSuggestions.hidden = true;
-              search.requestSubmit();
-            });
-            return option;
-          });
-          searchSuggestions.replaceChildren(...options);
-          searchSuggestions.hidden = options.length === 0;
+          const [data, history] = await Promise.all([
+            response.json(), recentSearches().catch(() => [])
+          ]);
+          const normalized = query.toLocaleLowerCase();
+          const recentMatches = history.filter(item =>
+            item.value.toLocaleLowerCase().includes(normalized)
+          );
+          const seen = new Set(recentMatches.map(item => item.value.toLocaleLowerCase()));
+          const combined = recentMatches.concat(
+            (data.suggestions || []).filter(item => !seen.has(item.value.toLocaleLowerCase()))
+          ).slice(0, 10);
+          renderSearchOptions(combined, recentMatches.length > 0);
         } catch (error) {
           if (error.name !== "AbortError") searchSuggestions.hidden = true;
         }
@@ -218,6 +304,49 @@
       };
 
       if (!search || !searchToggle || !menu || !menuToggle || !menuPanel) return;
+      const setSidebarCollapsed = (collapsed) => {
+        document.body.classList.toggle("sidebar-collapsed", collapsed);
+        if (!sidebarToggle) return;
+        sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+        sidebarToggle.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+        sidebarToggle.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+        try {
+          window.localStorage.setItem("infomancer-sidebar-collapsed", collapsed ? "1" : "0");
+        } catch (_error) {}
+      };
+      if (sidebarToggle) {
+        setSidebarCollapsed(document.body.classList.contains("sidebar-collapsed"));
+        sidebarToggle.addEventListener("click", () => {
+          setSidebarCollapsed(!document.body.classList.contains("sidebar-collapsed"));
+        });
+      }
+      if (sidebarResize) {
+        const applySidebarWidth = (width, save = false) => {
+          const nextWidth = Math.min(380, Math.max(220, Math.round(width)));
+          document.documentElement.style.setProperty("--app-sidebar-width", `${nextWidth}px`);
+          if (save) {
+            try { window.localStorage.setItem("infomancer-sidebar-width", String(nextWidth)); } catch (_error) {}
+          }
+        };
+        sidebarResize.addEventListener("pointerdown", (event) => {
+          if (document.body.classList.contains("sidebar-collapsed")) return;
+          event.preventDefault();
+          sidebarResize.setPointerCapture(event.pointerId);
+          document.body.classList.add("sidebar-resizing");
+          const move = (moveEvent) => applySidebarWidth(moveEvent.clientX);
+          const finish = (upEvent) => {
+            applySidebarWidth(upEvent.clientX, true);
+            document.body.classList.remove("sidebar-resizing");
+            sidebarResize.removeEventListener("pointermove", move);
+            sidebarResize.removeEventListener("pointerup", finish);
+            sidebarResize.removeEventListener("pointercancel", finish);
+          };
+          sidebarResize.addEventListener("pointermove", move);
+          sidebarResize.addEventListener("pointerup", finish);
+          sidebarResize.addEventListener("pointercancel", finish);
+        });
+        sidebarResize.addEventListener("dblclick", () => applySidebarWidth(258, true));
+      }
       searchToggle.addEventListener("click", () => {
         if (!search.classList.contains("open")) {
           setMenuOpen(false);
@@ -233,6 +362,11 @@
         searchSuggestionTimer = window.setTimeout(updateGlobalSearchSuggestions, 45);
       });
       searchInput.addEventListener("focus", updateGlobalSearchSuggestions);
+      searchHistoryToggle?.addEventListener("click", async () => {
+        setMenuOpen(false);
+        setSearchOpen(true);
+        await showRecentSearches();
+      });
       searchInput.addEventListener("keydown", async (event) => {
         if (event.key === "ArrowDown" && searchSuggestions) {
           event.preventDefault();
@@ -284,29 +418,61 @@
       const toggle = document.getElementById("task-widget-toggle");
       const popover = document.getElementById("task-popover");
       const summary = document.getElementById("task-summary");
+      const cardDetail = document.getElementById("task-card-detail");
       const list = document.getElementById("task-list");
-      if (!widget || !toggle || !popover || !summary || !list) return;
-      toggle.addEventListener("click", () => {
-        const open = popover.hidden;
+      const minimize = document.getElementById("task-minimize");
+      const dismiss = document.getElementById("task-dismiss");
+      if (!widget || !toggle || !popover || !summary || !cardDetail || !list) return;
+      let dismissedForRun = false;
+      const setTaskPanelOpen = (open) => {
+        widget.classList.toggle("is-pinned", open);
         popover.hidden = !open;
         toggle.setAttribute("aria-expanded", String(open));
+      };
+      toggle.addEventListener("click", () => {
+        setTaskPanelOpen(!widget.classList.contains("is-pinned"));
+      });
+      minimize?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        setTaskPanelOpen(false);
+      });
+      dismiss?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        dismissedForRun = true;
+        setTaskPanelOpen(false);
+        widget.classList.remove("visible");
       });
       document.addEventListener("click", (event) => {
-        if (!widget.contains(event.target)) {
+        if (!widget.contains(event.target) && !widget.classList.contains("is-pinned")) {
           popover.hidden = true;
           toggle.setAttribute("aria-expanded", "false");
         }
       });
+      let wasActive = false;
+      let dismissTimer = 0;
       const poll = async () => {
         let active = false;
         try {
           const response = await fetch("/api/tasks", { cache: "no-store" });
           const data = await response.json();
           const tasks = data.tasks || [];
+          const scheduled = data.scheduled || [];
           active = tasks.length > 0;
+          document.dispatchEvent(new CustomEvent("infomancer:tasks", {
+            detail: {active, tasks, scheduled}
+          }));
+          if (widget.dataset.tourDemo === "1") {
+            window.setTimeout(poll, 4000);
+            return;
+          }
           widget.classList.toggle("idle", !active);
           if (active) {
+            window.clearTimeout(dismissTimer);
+            if (!dismissedForRun) widget.classList.add("visible");
             summary.textContent = tasks.length === 1 ? tasks[0].label : `${tasks.length} tasks running`;
+            cardDetail.textContent = tasks.length === 1
+              ? (tasks[0].detail || "Working in the background")
+              : "Open for task details";
             list.replaceChildren(...tasks.map((task) => {
               const row = document.createElement("div");
               row.className = "task-row";
@@ -320,12 +486,52 @@
               row.append(label, detail, track);
               return row;
             }));
+            wasActive = true;
+          } else if (scheduled.length) {
+            window.clearTimeout(dismissTimer);
+            if (!dismissedForRun) widget.classList.add("visible");
+            summary.textContent = scheduled.length === 1
+              ? scheduled[0].label
+              : `${scheduled.length} tasks scheduled`;
+            cardDetail.textContent = scheduled.length === 1
+              ? (scheduled[0].detail || "Scheduled")
+              : "Open for schedule details";
+            list.replaceChildren(...scheduled.map((task) => {
+              const row = document.createElement("div");
+              row.className = "task-row scheduled";
+              const label = document.createElement("strong");
+              label.textContent = task.label;
+              const detail = document.createElement("small");
+              detail.textContent = task.detail;
+              row.append(label, detail);
+              return row;
+            }));
+            wasActive = false;
+          } else if (wasActive) {
+            dismissedForRun = false;
+            summary.textContent = "Task complete";
+            cardDetail.textContent = "Finished successfully";
+            const row = document.createElement("div");
+            row.className = "task-empty complete";
+            row.textContent = "Background work finished successfully.";
+            list.replaceChildren(row);
+            wasActive = false;
+            window.clearTimeout(dismissTimer);
+            dismissTimer = window.setTimeout(() => {
+              widget.classList.remove("visible");
+              popover.hidden = true;
+              toggle.setAttribute("aria-expanded", "false");
+              dismissTimer = 0;
+            }, 5000);
           } else {
+            dismissedForRun = false;
             summary.textContent = "No tasks running";
+            cardDetail.textContent = "Background work appears here.";
             const row = document.createElement("div");
             row.className = "task-empty";
             row.textContent = "No background tasks are currently active.";
             list.replaceChildren(row);
+            if (!dismissTimer) widget.classList.remove("visible");
           }
         } catch (_) {}
         window.setTimeout(poll, active ? 1500 : 4000);

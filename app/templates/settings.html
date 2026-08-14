@@ -56,29 +56,52 @@
     <div class="settings-card-head"><div><p class="eyebrow">STATUS</p><h2>InfoMancer {{ app_version }}</h2></div><span class="settings-state good">Running</span></div>
     <div class="settings-metrics system-metrics"><div><strong>{{ '{:,}'.format(system_counts.titles) }}</strong><span>Titles</span></div><div><strong>{{ '{:,}'.format(system_counts.files) }}</strong><span>Media files</span></div><div><strong>{{ '{:,}'.format(system_counts.roots) }}</strong><span>Sources</span></div><div><strong>{{ '{:,}'.format(system_counts.active_users) }}</strong><span>Active users</span></div></div>
   </section>
-  <section class="panel settings-card">
+  <nav class="settings-jump-nav full-width" aria-label="System settings sections">
+    <a href="#storage">Storage</a><a href="#fingerprints">Fingerprints</a><a href="#backups">Backups</a><a href="#updates">Updates</a><a href="#media-information">Media inspection</a><a href="#logging">Logs</a><a href="#service">Service</a>
+  </nav>
+  <div class="system-overview-grid full-width">
+  <section class="panel settings-card system-storage-card" id="storage">
     <p class="eyebrow">DATABASE</p><h2>Catalog storage</h2>
     <dl class="settings-facts"><div><dt>Location</dt><dd><code>{{ database_path }}</code></dd></div><div><dt>Catalog size</dt><dd>{{ format_bytes(database_stats.size) }}{% if database_stats.wal_size %} + {{ format_bytes(database_stats.wal_size) }} pending WAL{% endif %}</dd></div><div><dt>SQLite</dt><dd>{{ sqlite_version }}</dd></div></dl>
     <form method="post" action="/maintenance/optimize-database"><input type="hidden" name="return_to" value="/settings/system"><button class="button">Optimize database</button></form>
   </section>
-  <section class="panel settings-card">
+  <section class="panel settings-card system-deployment-card">
+    <p class="eyebrow">DEPLOYMENT</p><h2>Protected configuration</h2>
+    <dl class="settings-facts"><div><dt>Authentication</dt><dd>{{ auth_mode|title }}</dd></div><div><dt>Session lifetime</dt><dd>{{ settings_session_days }} day{% if settings_session_days != 1 %}s{% endif %}</dd></div><div><dt>Secure cookie</dt><dd>{{ cookie_secure_setting|title }}</dd></div><div><dt>Cloudflare identity</dt><dd>{{ 'Configured' if cloudflare_configured else 'Not configured in InfoMancer' }}</dd></div><div><dt>Accessible storage locations</dt><dd>{% for root in browse_roots %}<code>{{ root }}</code>{% if not loop.last %}<br>{% endif %}{% endfor %}<small>Paths visible inside InfoMancer. Docker maps your Windows, macOS, or Linux folders into these locations.</small></dd></div></dl>
+    <p class="muted">Authentication, secrets, trusted filesystem paths, and Cloudflare identity validation require server configuration and an application restart.</p>
+  </section>
+  <section class="panel settings-card system-portable-card">
     <p class="eyebrow">PORTABLE CONFIGURATION</p><h2>Export or import settings</h2>
     <p class="muted">Move interface defaults, time zone, external-search configuration, and logging level between installations. Passwords, accounts, sessions, API credentials, encryption keys, sources, and media are excluded.</p>
     <div class="actions"><a class="button" href="/settings/export">Export settings</a></div>
     <form class="settings-import-form" method="post" action="/settings/import/preview" enctype="multipart/form-data"><label>Import an InfoMancer settings file<input type="file" name="settings_file" accept="application/json,.json" required></label><button class="button">Review import</button></form>
   </section>
-  <section class="panel settings-card">
-    <p class="eyebrow">DEPLOYMENT</p><h2>Protected configuration</h2>
-    <dl class="settings-facts"><div><dt>Authentication</dt><dd>{{ auth_mode|title }}</dd></div><div><dt>Session lifetime</dt><dd>{{ settings_session_days }} day{% if settings_session_days != 1 %}s{% endif %}</dd></div><div><dt>Secure cookie</dt><dd>{{ cookie_secure_setting|title }}</dd></div><div><dt>Cloudflare identity</dt><dd>{{ 'Configured' if cloudflare_configured else 'Not configured in InfoMancer' }}</dd></div><div><dt>Accessible storage locations</dt><dd>{% for root in browse_roots %}<code>{{ root }}</code>{% if not loop.last %}<br>{% endif %}{% endfor %}<small>Paths visible inside InfoMancer. Docker maps your Windows, macOS, or Linux folders into these locations.</small></dd></div></dl>
-    <p class="muted">Authentication, secrets, trusted filesystem paths, and Cloudflare identity validation require server configuration and an application restart.</p>
+  </div>
+  <section class="panel settings-card full-width" id="fingerprints">
+    <div class="settings-card-head"><div><p class="eyebrow">FILE FINGERPRINTS</p><h2>Content hashing</h2></div><span class="settings-state {{ 'active' if hash_job.status in ['starting','running'] else 'good' }}">{{ 'Running' if hash_job.status in ['starting','running'] else 'Ready' }}</span></div>
+    <p class="muted">SHA-256 fingerprints let Duplicate Review prove whether files are byte-for-byte identical. InfoMancer never deletes a file automatically.</p>
+    <div class="settings-metrics system-metrics"><div><strong>{{ '{:,}'.format(hash_counts.complete or 0) }}</strong><span>Ready</span></div><div><strong>{{ '{:,}'.format(hash_counts.queued or 0) }}</strong><span>Queued</span></div><div><strong>{{ '{:,}'.format(hash_counts.error or 0) }}</strong><span>Need attention</span></div><div><strong>{{ '{:,}'.format(hash_counts.unhashed or 0) }}</strong><span>Not fingerprinted</span></div></div>
+    <form class="settings-form hashing-settings-form" method="post" action="/settings/hashing">
+      <div class="settings-form-grid">
+        <label>Behavior<select name="hash_mode"><option value="automatic" {% if preferences.hash_mode == 'automatic' %}selected{% endif %}>Automatic</option><option value="scheduled" {% if preferences.hash_mode == 'scheduled' %}selected{% endif %}>Scheduled only</option><option value="on_demand" {% if preferences.hash_mode == 'on_demand' %}selected{% endif %}>On demand</option><option value="off" {% if preferences.hash_mode == 'off' %}selected{% endif %}>Off</option></select><small>Automatic fingerprints new media immediately, up to the limit below, and queues the remainder.</small></label>
+        <label>Immediate file limit<input type="number" name="hash_immediate_limit" min="1" max="10000" value="{{ preferences.hash_immediate_limit }}" required><small>This limit is shared by an entire Scan All run. The default is 200 files.</small></label>
+        <label>Schedule<select name="hash_schedule_frequency"><option value="daily" {% if preferences.hash_schedule_frequency == 'daily' %}selected{% endif %}>Daily</option><option value="weekly" {% if preferences.hash_schedule_frequency == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if preferences.hash_schedule_frequency == 'monthly' %}selected{% endif %}>Monthly</option></select></label>
+        <label>Schedule day<input type="number" name="hash_schedule_day" min="0" max="28" value="{{ preferences.hash_schedule_day }}" required><small>Weekly: 0 Monday through 6 Sunday. Monthly: 1 through 28. Daily ignores this value.</small></label>
+        <label>Start time<input type="time" name="hash_schedule_time" value="{{ preferences.hash_schedule_time }}" required><small>Uses the installation time zone. The default is Sunday at 3:00 AM.</small></label>
+        <label>Disk activity<select name="hash_io_intensity"><option value="low" {% if preferences.hash_io_intensity == 'low' %}selected{% endif %}>Low</option><option value="balanced" {% if preferences.hash_io_intensity == 'balanced' %}selected{% endif %}>Balanced</option><option value="high" {% if preferences.hash_io_intensity == 'high' %}selected{% endif %}>High</option></select></label>
+      </div>
+      <label class="checkbox-label"><input type="checkbox" name="hash_pause_for_activity" value="1" {% if preferences.hash_pause_for_activity == '1' %}checked{% endif %}> Pause fingerprinting while scans, matching, or media inspection are running</label>
+      <div class="actions"><button class="button primary">Save fingerprint settings</button></div>
+    </form>
+    <div class="actions hashing-task-actions"><form method="post" action="/hashes/run"><button class="button">Run now</button></form><form method="post" action="/hashes/pause"><button class="button">Pause</button></form><form method="post" action="/hashes/resume"><button class="button">Resume</button></form><form method="post" action="/hashes/cancel"><button class="button danger">Cancel</button></form></div>
   </section>
-  <section class="panel settings-card full-width">
-    <div class="settings-card-head"><div><p class="eyebrow">BACKUP &amp; RESTORE</p><h2>Complete database protection</h2></div><form method="post" action="/maintenance/backups"><button class="button">Create backup now</button></form></div>
+  <section class="panel settings-card full-width" id="backups">
+    <div class="settings-card-head"><div><p class="eyebrow">BACKUP &amp; RESTORE</p><h2>Complete database protection</h2></div><div class="button-row"><form method="post" action="/maintenance/backups/verify"><button class="button">Verify backups</button></form><form method="post" action="/maintenance/backups"><button class="button">Create backup now</button></form></div></div>
     <p class="muted">Database backups contain the catalog, accounts, settings, collections, favorites, and tags. They do not contain media files, provider-secret files, collection artwork, or deployment environment files.</p>
     {% if database_backups %}<div class="settings-history"><table><thead><tr><th>Backup</th><th>Size</th><th>Created</th><th>Actions</th></tr></thead><tbody>{% for backup in database_backups %}<tr><td><code>{{ backup.name }}</code></td><td>{{ format_bytes(backup.size) }}</td><td>{{ local_time(backup.modified_at) }}</td><td><a class="button compact" href="/maintenance/backups/{{ backup.name }}">Download</a><form class="inline-form" method="post" action="/maintenance/restore/server" onsubmit="return confirm('Restore this database? Current accounts, catalog data, settings, and organization will be replaced. A safety backup will be created first.');"><input type="hidden" name="backup_name" value="{{ backup.name }}"><input type="hidden" name="confirm" value="RESTORE"><button class="button danger compact">Restore</button></form></td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="muted">No server backups have been created yet.</p>{% endif %}
     <form class="settings-restore-upload" method="post" action="/maintenance/restore/upload" enctype="multipart/form-data" onsubmit="return confirm('Restore this uploaded database? Current accounts, catalog data, settings, and organization will be replaced. A safety backup will be created first.');"><label>Restore an uploaded InfoMancer database<input type="file" name="database_file" accept=".db,application/vnd.sqlite3,application/x-sqlite3" required></label><input type="hidden" name="confirm" value="RESTORE"><button class="button danger">Validate and restore</button></form>
   </section>
-  <section class="panel settings-card full-width">
+  <section class="panel settings-card full-width" id="updates">
     <div class="settings-card-head"><div><p class="eyebrow">APPLICATION UPDATES</p><h2>InfoMancer releases</h2></div><span class="settings-state {{ 'warn' if update_status.status == 'available' else 'good' if update_status.status == 'current' else '' }}">{{ update_status.status|replace('_',' ')|title }}</span></div>
     <p class="muted">Check the official <code>{{ update_repository }}</code> GitHub releases. Applying an update creates a database backup, asks the restricted host updater to rebuild, verifies application health, and rolls back the source if startup fails.</p>
     {% if update_status.status in ['available','current'] %}<dl class="settings-facts"><div><dt>Installed</dt><dd>{{ update_status.current_version or app_version }}</dd></div><div><dt>Latest release</dt><dd>{{ update_status.latest_version }}{% if update_status.release_url %} · <a href="{{ update_status.release_url }}" target="_blank" rel="noopener noreferrer">Release notes ↗</a>{% endif %}</dd></div><div><dt>Last checked</dt><dd>{{ local_time(update_status.checked_at) }}</dd></div></dl>{% endif %}
@@ -86,7 +109,7 @@
     <div class="actions"><form method="post" action="/maintenance/updates/check"><button class="button">Check for updates</button></form>{% if update_status.status == 'available' %}<form method="post" action="/maintenance/updates/apply" onsubmit="return confirm('Update to {{ update_status.latest_version }}? Active scans will be interrupted during the restart.');"><input type="hidden" name="tag" value="{{ update_status.latest_version }}"><input type="hidden" name="confirm" value="UPDATE"><button class="button primary">Back up and update</button></form>{% endif %}</div>
     <p class="muted"><small>Automatic installation requires the optional InfoMancer host updater. Without it, update requests remain safely queued until the helper is run.</small></p>
   </section>
-  <section class="panel settings-card">
+  <section class="panel settings-card" id="media-information">
     <div class="settings-card-head"><div><p class="eyebrow">MEDIA INFORMATION</p><h2>Inspect technical details</h2></div><span class="settings-state {{ 'good' if (media_counts.inspected or 0) >= (media_counts.total or 0) else 'warn' }}">{{ '{:,}'.format(media_counts.inspected or 0) }} / {{ '{:,}'.format(media_counts.total or 0) }}</span></div>
     <p class="muted">Read runtime, resolution, codecs, bitrate, container, and HDR/SDR status directly from each media file. Inspection does not modify the files.</p>
     {% if media_counts.failed %}<div class="form-error media-failure-alert"><span><strong>{{ '{:,}'.format(media_counts.failed) }} file{% if media_counts.failed != 1 %}s need{% else %} needs{% endif %} attention.</strong> Review what failed, why it happened, and what to try next.</span><a class="button" href="/media-info/failures">Review affected files</a></div>{% endif %}
@@ -98,12 +121,12 @@
     <div class="export-actions"><a class="button" href="/exports/library?format=csv">CSV</a><a class="button" href="/exports/library?format=json">JSON</a><a class="button" href="/exports/library?format=xml">XML</a></div>
     <p class="muted export-help-note">Not sure which format to choose? <a href="/help#exports">Compare export formats and their common uses.</a></p>
   </section>
-  <section class="panel settings-card full-width">
-    <div class="settings-card-head"><div><p class="eyebrow">TROUBLESHOOTING</p><h2>Application logging</h2></div><a class="button" href="/logs">Open live logs</a></div>
+  <section class="panel settings-card full-width" id="logging">
+    <div class="settings-card-head"><div><p class="eyebrow">TROUBLESHOOTING</p><h2>Application logging</h2></div><div class="button-row"><a class="button" href="/maintenance/diagnostics">Download diagnostics</a><a class="button" href="/logs">Open live logs</a></div></div>
     <p class="muted">Standard records important actions and failures. Verbose adds per-file and metadata activity. Debug adds diagnostic details and can grow the log more quickly.</p>
     <form method="post" action="/settings/logging"><div class="logging-options">{% for value,label in [('info','Standard'),('verbose','Verbose'),('debug','Debug')] %}<label><input type="radio" name="log_level" value="{{ value }}" {% if preferences.log_level == value %}checked{% endif %}><span>{{ label }}</span></label>{% endfor %}</div><div class="actions"><button class="button primary">Save logging level</button><a class="button" href="/logs/export">Export logs</a></div></form>
   </section>
-  <section class="panel settings-card full-width">
+  <section class="panel settings-card full-width" id="service">
     <div class="settings-card-head"><div><p class="eyebrow">SERVICE</p><h2>Restart application</h2></div></div>
     <p class="muted">Restarting interrupts active scans and metadata work. Docker's restart policy should bring InfoMancer back online automatically.</p>
     <form method="post" action="/maintenance/restart" onsubmit="return confirm('Restart InfoMancer now? Running scans and metadata updates will be interrupted.');"><input type="hidden" name="return_to" value="/settings/system"><input type="hidden" name="confirm" value="RESTART"><button class="button danger">Restart InfoMancer</button></form>

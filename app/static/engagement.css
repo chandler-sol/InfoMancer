@@ -13,6 +13,9 @@
 .tour-progress span{order:2}
 .tour-actions,.announcement-popup-actions{display:flex;justify-content:space-between;gap:.75rem;margin-top:1.5rem}
 .tour-highlight{box-shadow:0 0 0 4px var(--lime),0 0 0 10px rgba(185,245,66,.25)!important}
+.tour-task-demo .task-widget-toggle{grid-template-rows:auto auto}
+.tour-task-demo-progress{grid-column:1/-1;display:block;height:3px;margin-top:8px;overflow:hidden;border-radius:3px;background:#26303a}
+.tour-task-demo-progress i{display:block;width:var(--tour-task-progress,27%);height:100%;background:var(--lime);transition:width .8s ease}
 .site-menu.tour-menu-open .site-menu-panel{opacity:1;visibility:visible;transform:translateY(0) scale(1);pointer-events:auto;transition-delay:0s}
 .announcement-popup{left:50%;top:50%;transform:translate(-50%,-50%);width:min(650px,calc(100vw - 2rem));padding:clamp(1.5rem,5vw,2.75rem);border-top:4px solid var(--cyan)}
 .announcement-popup.update{border-top-color:var(--lime)}

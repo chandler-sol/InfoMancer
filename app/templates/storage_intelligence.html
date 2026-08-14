@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="mie-hero compact storage-hero">
+  <div>
+    <p class="eyebrow">STORAGE INTELLIGENCE</p>
+    <h1>Where your library lives</h1>
+    <p>Catalog measurements, largest titles, and duplicate cleanup results. No storage is modified here.</p>
+  </div>
+  <a class="button" href="/library-health">Library Health</a>
+</section>
+
+<section class="mie-summary storage-summary-strip" aria-label="Duplicate cleanup summary">
+  <div><strong>{{ format_bytes(duplicate_impact.reclaimed_bytes) }}</strong><span>Duplicate space reclaimed</span></div>
+  <div><strong>{{ format_bytes(duplicate_impact.pending_bytes) }}</strong><span>Restorable in Trash</span></div>
+  <div><strong>{{ duplicate_impact.handled_files }}</strong><span>Duplicates handled</span></div>
+</section>
+
+<section class="panel storage-sources-panel">
+  <p class="eyebrow">BY SOURCE</p>
+  <h2>Storage locations</h2>
+  <div class="storage-bars">
+    {% for item in report.by_source %}
+    <a href="/library?source={{ item.id }}">
+      <span><strong>{{ item.label }}</strong><small>{{ item.titles }} titles &middot; {{ item.files }} files</small></span>
+      <b>{{ format_bytes(item.bytes) }}</b>
+    </a>
+    {% else %}
+    <p>No source measurements are available yet.</p>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel storage-ranking-panel">
+  <header class="storage-ranking-header">
+    <div>
+      <p class="eyebrow">LARGEST ITEMS</p>
+      <h2>What uses the most space</h2>
+      <p class="storage-section-copy">Your largest catalog entries, with the media totals they contribute to.</p>
+    </div>
+    <div class="storage-kind-summary" aria-label="Media type totals">
+      {% for item in report.by_kind %}
+      <div>
+        <span>{{ 'Movies' if item.kind == 'movie' else 'TV Shows' }}</span>
+        <strong>{{ format_bytes(item.bytes) }}</strong>
+        <small>{{ item.titles }} titles</small>
+      </div>
+      {% else %}
+      <p>No media-type measurements are available yet.</p>
+      {% endfor %}
+    </div>
+  </header>
+
+  <ol class="storage-list storage-title-list storage-expandable-list" id="largest-titles-list">
+    {% for item in report.largest_titles %}
+    <li class="{% if loop.index > 5 %}storage-list-extra{% endif %}">
+      <a href="/titles/{{ item.id }}">
+        <strong>{{ item.title }}</strong>
+        <span>{{ format_bytes(item.bytes) }} &middot; {{ item.files }} files</span>
+      </a>
+    </li>
+    {% else %}
+    <li>No catalog measurements are available yet.</li>
+    {% endfor %}
+  </ol>
+  {% if report.largest_titles|length > 5 %}
+  <button class="button storage-list-toggle" type="button" data-storage-list-toggle="largest-titles-list" aria-expanded="false">
+    <span>Show all {{ report.largest_titles|length }} entries</span><b aria-hidden="true">⌄</b>
+  </button>
+  {% endif %}
+</section>
+
+<section class="report-grid storage-secondary-grid">
+  <article class="panel storage-folder-panel">
+    <p class="eyebrow">LARGEST FOLDERS</p>
+    <h2>Folders using the most space</h2>
+    <p class="storage-section-copy">Paths stay secondary so the titles and storage impact remain easy to scan.</p>
+    <ol class="storage-list storage-folder-list storage-expandable-list" id="largest-folders-list">
+      {% for item in report.largest_folders %}
+      <li class="{% if loop.index > 5 %}storage-list-extra{% endif %}">
+        <strong>{{ item.title }}</strong>
+        <span>{{ format_bytes(item.bytes) }} &middot; {{ item.files }} files</span>
+        <small title="{{ item.folder_path }}">{{ item.folder_path }}</small>
+      </li>
+      {% else %}
+      <li>No folder measurements are available yet.</li>
+      {% endfor %}
+    </ol>
+    {% if report.largest_folders|length > 5 %}
+    <button class="button storage-list-toggle" type="button" data-storage-list-toggle="largest-folders-list" aria-expanded="false">
+      <span>Show all {{ report.largest_folders|length }} folders</span><b aria-hidden="true">⌄</b>
+    </button>
+    {% endif %}
+  </article>
+
+  <article class="panel storage-cleanup-panel">
+    <p class="eyebrow">CLEANUP HISTORY</p>
+    <h2>Space recovered by day</h2>
+    <ol class="storage-list storage-compact-list">
+      {% for item in report.cleanup_trend %}
+      <li><strong>{{ item.day }}</strong><span>{{ format_bytes(item.bytes) }} &middot; {{ item.files }} files</span></li>
+      {% else %}
+      <li>No duplicate cleanup has been recorded yet.</li>
+      {% endfor %}
+    </ol>
+  </article>
+</section>
+
+<script>
+  document.querySelectorAll('[data-storage-list-toggle]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const list = document.getElementById(button.dataset.storageListToggle);
+      if (!list) return;
+      const expanded = button.getAttribute('aria-expanded') === 'true';
+      button.setAttribute('aria-expanded', String(!expanded));
+      list.classList.toggle('is-expanded', !expanded);
+      const count = list.querySelectorAll('li').length;
+      const noun = list.id.includes('folders') ? 'folders' : 'entries';
+      button.querySelector('span').textContent = expanded ? `Show all ${count} ${noun}` : 'Show top 5';
+    });
+  });
+</script>
+{% endblock %}

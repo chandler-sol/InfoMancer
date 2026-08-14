@@ -76,6 +76,24 @@ class AuthServiceTests(unittest.TestCase):
         self.auth.revoke_session(session.id, user.id)
         self.assertIsNone(self.auth.session_from_token(raw))
 
+    def test_home_preferences_survive_session_reload(self):
+        user = self.auth.create_user(
+            "homeprefs", "home@example.com", "Home Preferences",
+            "another long password", role="member",
+        )
+        raw, _ = self.auth.create_session(user, self.request)
+
+        toggled = self.auth.toggle_home_layout(user.id)
+        self.assertEqual(toggled.home_layout, "classic")
+        self.auth.update_profile(
+            user.id, user.display_name, user.email, user.profile_icon, False, True,
+        )
+
+        session_user = self.auth.session_from_token(raw).user
+        self.assertEqual(session_user.home_layout, "classic")
+        self.assertFalse(session_user.show_home_hero)
+        self.assertTrue(session_user.high_contrast)
+
     def test_final_active_librarian_cannot_be_demoted(self):
         librarian = self.auth.create_user(
             "librarian", "admin@example.com", "Admin",

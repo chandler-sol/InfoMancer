@@ -9,6 +9,50 @@ TOUR_KEY = "welcome-v1"
 
 OFFICIAL_ANNOUNCEMENTS = (
     {
+        "source_key": "release-notes-since-0.4-2026-08-06",
+        "title": "Since InfoMancer 0.4: explainable library intelligence",
+        "body": (
+            "Release notes since 0.4\n\n"
+            "MEDIA INTELLIGENCE\n"
+            "- Library Health now explains identity, completeness, quality, "
+            "freshness, storage, and unreadable-media findings with supporting "
+            "evidence and recommended next steps.\n"
+            "- Librarians can calibrate identity and stale-source thresholds, "
+            "see transparent category scores and analysis history, and teach MIE "
+            "from corrections scoped to one finding, title, or source.\n"
+            "- Per-source quality profiles detect files below your preferred "
+            "technical standards and files that differ from a title's usual profile.\n\n"
+            "SAFER DUPLICATE REVIEW\n"
+            "- Duplicate Intelligence compares episode coverage and technical "
+            "quality, recommends the stronger copy, and can verify exact matches "
+            "with SHA-256. It never deletes media automatically.\n\n"
+            "EVERYDAY EXPERIENCE\n"
+            "- The dashboard, responsive library, navigation, persistent sidebar, "
+            "branding, search, filters, guided tour, and background-task feedback "
+            "have been redesigned and polished.\n"
+            "- Local account recovery, sessions, Librarian administration, profile "
+            "choices, and home-layout preferences are more capable and clearer.\n\n"
+            "This remains an alpha release. Back up the InfoMancer database before "
+            "updating an important library and review every proposed filesystem change."
+        ),
+        "category": "update",
+        "starts_at": "2026-08-06 00:00:00",
+    },
+    {
+        "source_key": "release-0.5.0-alpha.1",
+        "title": "InfoMancer 0.5: your library, understood",
+        "body": (
+            "This alpha introduces the first Media Intelligence Engine health "
+            "analysis, a redesigned dashboard and navigation system, improved "
+            "library discovery and search, clearer background-task feedback, "
+            "and a more polished guided tour. It also strengthens local account "
+            "recovery and administration while preserving InfoMancer's "
+            "explainable, review-first approach."
+        ),
+        "category": "update",
+        "starts_at": "2026-07-30 00:00:00",
+    },
+    {
         "source_key": "release-0.4.0-alpha.1",
         "title": "InfoMancer 0.4: safer administration and richer libraries",
         "body": (

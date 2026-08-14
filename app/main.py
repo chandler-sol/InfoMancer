@@ -12,6 +12,7 @@ import sqlite3
 import tempfile
 import threading
 import time
+import zipfile
 import urllib.error
 import urllib.request
 from xml.etree import ElementTree
@@ -36,13 +37,20 @@ from .auth import (
     secure_cookie_for,
 )
 from .db import Database
+from .duplicates import DuplicateService
+from .duplicate_trash import DuplicateTrashError, DuplicateTrashService
 from .engagement import EngagementError, EngagementService, utc_from_local
 from .event_log import EventLog
+from .file_hashes import MediaHashService
 from .imdb import sync_genres
 from .media_info import MediaInspectionError, inspect_media
+from .mie import CATEGORIES as MIE_CATEGORIES
+from .mie import SEVERITIES as MIE_SEVERITIES
+from .mie import MediaIntelligenceEngine
 from .maintenance import (
     MaintenanceError, create_database_backup, install_database_backup,
     list_database_backups, read_update_status, resolve_backup,
+    validate_database_backup,
     write_update_request, write_update_status,
 )
 from .naming import (
@@ -62,6 +70,10 @@ auth_service = AuthService(db, settings)
 app_settings = AppSettings(db, settings.search_url_template)
 engagement = EngagementService(db)
 event_log = EventLog(db)
+mie = MediaIntelligenceEngine(db)
+media_hashes = MediaHashService(db)
+duplicates = DuplicateService(db, media_hashes)
+duplicate_trash = DuplicateTrashService(db)
 engagement.seed_official()
 provider_secrets = ProviderSecretStore(
     settings.database.parent / "provider-secrets.enc", settings.application_secret
@@ -72,7 +84,7 @@ try:
 except ProviderSecretError as exc:
     stored_provider_secrets = {}
     provider_secret_error = str(exc)
-APP_VERSION = "0.4.0-alpha.1"
+APP_VERSION = "0.5.0-alpha.3"
 app = FastAPI(title="InfoMancer", version=APP_VERSION)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "app" / "static"), name="static")
 COLLECTION_ART_DIR = settings.database.parent / "collection-art"
@@ -145,6 +157,221 @@ tv_match_job: dict = {"status": "idle"}
 tv_match_lock = threading.Lock()
 media_info_job: dict = {"status": "idle"}
 media_info_lock = threading.Lock()
+duplicate_verify_job: dict = {"status": "idle"}
+duplicate_verify_lock = threading.Lock()
+media_hash_job: dict = {"status": "idle"}
+media_hash_lock = threading.Lock()
+media_hash_pause = threading.Event()
+media_hash_cancel = threading.Event()
+background_scheduler_stop = threading.Event()
+hash_schedule_last_check = 0.0
+trash_cleanup_job: dict = {"status": "idle"}
+trash_cleanup_lock = threading.Lock()
+trash_cleanup_last_check = 0.0
+
+
+def _file_signatures(*, root_id: int | None = None, title_id: int | None = None) -> dict[int, tuple[int, float]]:
+    where, value = ("t.root_id", root_id) if root_id is not None else ("f.title_id", title_id)
+    with db.connect() as conn:
+        return {
+            int(row["id"]): (int(row["size_bytes"] or 0), float(row["modified_at"] or 0))
+            for row in conn.execute(
+                f"""SELECT f.id,f.size_bytes,f.modified_at FROM files f
+                    JOIN titles t ON t.id=f.title_id WHERE {where}=?""", (value,)
+            )
+        }
+
+
+def _changed_file_ids(before: dict[int, tuple[int, float]], after: dict[int, tuple[int, float]]) -> list[int]:
+    return [file_id for file_id, signature in after.items() if before.get(file_id) != signature]
+
+
+def run_media_hashing(file_ids: list[int], reason: str) -> None:
+    ids = list(dict.fromkeys(file_ids))
+    media_hash_cancel.clear()
+    media_hash_pause.clear()
+    with media_hash_lock:
+        media_hash_job.clear()
+        media_hash_job.update({
+            "status": "running", "processed": 0, "total": len(ids),
+            "current": "", "reason": reason, "complete": 0, "failed": 0,
+        })
+
+    def progress(processed: int, total: int, current: str) -> None:
+        with media_hash_lock:
+            media_hash_job.update({"processed": processed, "total": total, "current": current})
+
+    result = media_hashes.hash_many(
+        ids, progress=progress, cancelled=media_hash_cancel.is_set,
+        paused=lambda: media_hash_pause.is_set() or (
+            app_settings.get("hash_pause_for_activity") == "1"
+            and _other_background_work_running()
+        ),
+        intensity=app_settings.get("hash_io_intensity"),
+    )
+    status = "cancelled" if media_hash_cancel.is_set() else "complete"
+    with media_hash_lock:
+        media_hash_job.update({"status": status, **result, "current": ""})
+    record_event(
+        "media", f"File fingerprinting finished: {result['complete']:,} checked and {result['failed']:,} could not be read.",
+        level="warning" if result["failed"] else "info",
+        context={"reason": reason, **result},
+    )
+
+
+def start_media_hashing(file_ids: list[int], reason: str, *, queue_files: bool = True) -> bool:
+    ids = media_hashes.queue(file_ids) if queue_files else list(dict.fromkeys(file_ids))
+    if not ids:
+        return False
+    with media_hash_lock:
+        if media_hash_job.get("status") in {"starting", "running"}:
+            return False
+        media_hash_job.clear()
+        media_hash_job.update({"status": "starting", "processed": 0, "total": len(ids), "reason": reason})
+    threading.Thread(target=run_media_hashing, args=(ids, reason), daemon=True).start()
+    return True
+
+
+def handle_import_hashing(file_ids: list[int], reason: str) -> None:
+    mode = app_settings.get("hash_mode")
+    if mode in {"off", "on_demand"} or not file_ids:
+        return
+    queued = media_hashes.queue(file_ids)
+    if mode == "automatic" and queued:
+        limit = int(app_settings.get("hash_immediate_limit"))
+        immediate = queued[:limit]
+        deferred = queued[limit:]
+        started = start_media_hashing(immediate, reason, queue_files=False)
+        if immediate and not started:
+            record_event(
+                "media",
+                f"{len(queued):,} new or changed files were queued because another "
+                "fingerprinting task is already running.",
+                context={"queued": len(queued), "reason": reason},
+            )
+        if deferred:
+            record_event(
+                "media",
+                f"{len(queued):,} new or changed files need fingerprints. "
+                f"{len(immediate):,} {'are being checked now' if started else 'remain queued'} "
+                f"and {len(deferred):,} were queued for scheduled or manual processing.",
+                context={"queued": len(queued), "immediate": len(immediate), "deferred": len(deferred)},
+            )
+    elif queued:
+        record_event(
+            "media",
+            f"{len(queued):,} new or changed files were queued for scheduled fingerprinting.",
+            context={"queued": len(queued)},
+        )
+
+
+def _other_background_work_running() -> bool:
+    with scan_all_lock, scan_lock, title_scan_lock, movie_match_lock, tv_match_lock, media_info_lock:
+        return any((
+            scan_all_job.get("status") in {"starting", "running"},
+            any(job.get("status") in {"starting", "running"} for job in scan_jobs.values()),
+            any(job.get("status") in {"starting", "running"} for job in title_scan_jobs.values()),
+            movie_match_job.get("status") in {"starting", "running"},
+            tv_match_job.get("status") in {"starting", "running"},
+            media_info_job.get("status") in {"starting", "running"},
+        ))
+
+
+def maybe_start_scheduled_hashing() -> None:
+    global hash_schedule_last_check
+    now_epoch = time.time()
+    if now_epoch - hash_schedule_last_check < 30:
+        return
+    hash_schedule_last_check = now_epoch
+    prefs = app_settings.values()
+    if prefs["hash_mode"] not in {"automatic", "scheduled"}:
+        return
+    if prefs["hash_pause_for_activity"] == "1" and _other_background_work_running():
+        return
+    local_now = datetime.now(ZoneInfo(prefs["timezone"]))
+    hour, minute = (int(part) for part in prefs["hash_schedule_time"].split(":"))
+    if (local_now.hour, local_now.minute) < (hour, minute):
+        return
+    frequency, day = prefs["hash_schedule_frequency"], int(prefs["hash_schedule_day"])
+    if frequency == "weekly" and local_now.weekday() != day:
+        return
+    if frequency == "monthly" and local_now.day != day:
+        return
+    last_text = prefs.get("hash_last_scheduled_at", "")
+    if last_text:
+        last = datetime.fromisoformat(last_text)
+        if (frequency == "daily" and last.date() == local_now.date()
+                or frequency == "weekly" and last.isocalendar()[:2] == local_now.isocalendar()[:2]
+                or frequency == "monthly" and (last.year, last.month) == (local_now.year, local_now.month)):
+            return
+    ids = media_hashes.eligible_ids()
+    if ids and start_media_hashing(ids, "Scheduled file fingerprinting"):
+        app_settings.set_internal("hash_last_scheduled_at", local_now.isoformat())
+
+
+def run_background_scheduler() -> None:
+    """Run installation schedules even when no browser is open."""
+    while not background_scheduler_stop.wait(30):
+        try:
+            maybe_start_scheduled_hashing()
+            maybe_start_trash_cleanup()
+        except Exception as exc:
+            record_event(
+                "system",
+                "A scheduled maintenance check could not be completed. InfoMancer will try again automatically.",
+                level="error", detail=str(exc),
+            )
+
+
+@app.on_event("startup")
+def start_background_scheduler() -> None:
+    background_scheduler_stop.clear()
+    threading.Thread(
+        target=run_background_scheduler, name="infomancer-scheduler", daemon=True,
+    ).start()
+
+
+@app.on_event("shutdown")
+def stop_background_scheduler() -> None:
+    background_scheduler_stop.set()
+
+
+def trash_retention_days() -> int | None:
+    value = app_settings.get("trash_retention_days")
+    return None if value == "never" else int(value)
+
+
+def maybe_start_trash_cleanup() -> None:
+    """Check for expired managed-trash items at most once per day."""
+    global trash_cleanup_last_check
+    now = time.time()
+    with trash_cleanup_lock:
+        if now - trash_cleanup_last_check < 86_400:
+            return
+        trash_cleanup_last_check = now
+        trash_cleanup_job.clear()
+        trash_cleanup_job.update({"status": "starting", "detail": "Checking retention dates"})
+
+    def run() -> None:
+        try:
+            with trash_cleanup_lock:
+                trash_cleanup_job.update({
+                    "status": "running", "detail": "Removing expired managed-trash items",
+                })
+            purged = duplicate_trash.purge_expired()
+            with trash_cleanup_lock:
+                trash_cleanup_job.update({
+                    "status": "complete", "detail": f"{purged:,} expired item(s) removed",
+                })
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            with trash_cleanup_lock:
+                trash_cleanup_job.update({
+                    "status": "error",
+                    "detail": "Trash cleanup could not finish. Open Logs for details.",
+                    "error": str(exc),
+                })
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 def record_event(
@@ -170,7 +397,7 @@ LIBRARIAN_GET_PREFIXES = (
     "/api/scan-all", "/api/movie-match-analysis", "/api/tv-match-analysis",
     "/api/logs",
     "/settings", "/getting-started",
-    "/logs", "/exports", "/media-info/failures", "/maintenance",
+    "/logs", "/exports", "/media-info/failures", "/maintenance", "/duplicates",
 )
 
 
@@ -1057,10 +1284,12 @@ def store_movie_match(title_id: int, movie_id: int) -> str:
         conn.execute(
             """UPDATE titles SET tvdb_movie_id=?, tmdb_id=?, imdb_id=?, poster_url=?,
                metadata_title=?, metadata_title_language=?, metadata_year=?,
+               overview=?,
                matched_at=CURRENT_TIMESTAMP,
                imdb_checked_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?""",
             (movie_id, tmdb_id, imdb_id, poster_from(movie), metadata_title,
-             title_language or None, metadata_year, title_id),
+             title_language or None, metadata_year,
+             str(movie.get("overview") or "").strip(), title_id),
         )
         conn.execute("DELETE FROM movie_match_suggestions WHERE title_id=?", (title_id,))
     return f"TMDB {tmdb_id}" if tmdb_id else (f"IMDb {imdb_id}" if imdb_id else "TVDB metadata")
@@ -1075,8 +1304,11 @@ templates.env.globals["static_version"] = str(int(time.time()))
 
 
 def redirect(path: str, message: str = "") -> RedirectResponse:
-    separator = "&" if "?" in path else "?"
-    target = path + (f"{separator}message={quote_plus(message)}" if message else "")
+    base, fragment_marker, fragment = path.partition("#")
+    separator = "&" if "?" in base else "?"
+    target = base + (f"{separator}message={quote_plus(message)}" if message else "")
+    if fragment_marker:
+        target += f"#{fragment}"
     return RedirectResponse(target, status_code=303)
 
 
@@ -1298,15 +1530,30 @@ def account_profile(request: Request):
 @app.post("/account/profile")
 def update_account_profile(
     request: Request, display_name: str = Form(...), email: str = Form(""),
-    profile_icon: str = Form("initials"),
+    profile_icon: str = Form("initials"), show_home_hero: str = Form(""),
+    high_contrast: str = Form(""),
 ):
     try:
-        auth_service.update_profile(request.state.user.id, display_name, email, profile_icon)
+        auth_service.update_profile(
+            request.state.user.id, display_name, email, profile_icon,
+            show_home_hero == "1", high_contrast == "1",
+        )
     except AuthenticationError as exc:
         return templates.TemplateResponse(request, "account_profile.html", {
             "profile_icons": PROFILE_ICONS, "message": "", "error": str(exc),
         }, status_code=400)
     return redirect("/account/profile", "Profile saved")
+
+
+@app.post("/account/home-layout")
+def toggle_account_home_layout(request: Request):
+    if request.state.user.id <= 0:
+        return redirect(
+            "/",
+            "Home layout preferences require a signed-in account.",
+        )
+    auth_service.toggle_home_layout(request.state.user.id)
+    return RedirectResponse("/", status_code=303)
 
 
 @app.get("/account/security", response_class=HTMLResponse)
@@ -1884,7 +2131,8 @@ def run_media_inspection(file_ids: list[int] | None = None) -> None:
     )
 
 
-def run_scan(root_id: int) -> None:
+def run_scan(root_id: int, *, hash_after: bool = True) -> list[int]:
+    before = _file_signatures(root_id=root_id)
     with scan_lock:
         scan_jobs[root_id] = {"status": "running", "files": 0, "titles": 0}
 
@@ -1911,6 +2159,10 @@ def run_scan(root_id: int) -> None:
             f"Source scan finished: {result['files']:,} video files across {result['titles']:,} titles.",
             context={"root_id": root_id, **result},
         )
+        changed = _changed_file_ids(before, _file_signatures(root_id=root_id))
+        if hash_after:
+            handle_import_hashing(changed, "New or changed media found during a source scan")
+        return changed
     except Exception as exc:
         with scan_lock:
             scan_jobs[root_id] = {"status": "error", "error": str(exc)}
@@ -1918,6 +2170,7 @@ def run_scan(root_id: int) -> None:
             "scan", "Source scan could not finish.",
             level="error", detail=str(exc), context={"root_id": root_id},
         )
+        return []
 
 
 def run_scan_all(roots: list[tuple[int, str]]) -> None:
@@ -1930,13 +2183,14 @@ def run_scan_all(roots: list[tuple[int, str]]) -> None:
         })
     errors = 0
     record_event("scan", f"Scan all started for {len(roots):,} sources.")
+    changed_files: list[int] = []
     for completed, (root_id, label) in enumerate(roots):
         with scan_all_lock:
             scan_all_job.update({
                 "current_root_id": root_id, "current_label": label,
                 "completed": completed, "files": 0, "titles": 0,
             })
-        run_scan(root_id)
+        changed_files.extend(run_scan(root_id, hash_after=False))
         with scan_lock:
             if scan_jobs.get(root_id, {}).get("status") == "error":
                 errors += 1
@@ -1947,6 +2201,9 @@ def run_scan_all(roots: list[tuple[int, str]]) -> None:
             "status": "complete", "completed": len(roots), "errors": errors,
             "current_root_id": None, "current_label": "",
         })
+    handle_import_hashing(
+        changed_files, "Fingerprinting new or changed media from all sources"
+    )
     record_event(
         "scan",
         f"Scan all finished: {len(roots) - errors:,} sources completed and {errors:,} failed.",
@@ -1956,6 +2213,7 @@ def run_scan_all(roots: list[tuple[int, str]]) -> None:
 
 
 def run_title_scan(title_id: int) -> None:
+    before = _file_signatures(title_id=title_id)
     with title_scan_lock:
         title_scan_jobs[title_id] = {"status": "running", "files": 0, "label": "Series"}
 
@@ -1980,6 +2238,10 @@ def run_title_scan(title_id: int) -> None:
             "scan",
             f"Series rescan finished for {title['metadata_title'] or title['title']}: {result['files']:,} files found.",
             context={"title_id": title_id, **result},
+        )
+        handle_import_hashing(
+            _changed_file_ids(before, _file_signatures(title_id=title_id)),
+            f"New or changed media found while rescanning {title['metadata_title'] or title['title']}",
         )
     except Exception as exc:
         with title_scan_lock:
@@ -2142,6 +2404,8 @@ def imdb_genre_status() -> dict:
 
 @app.get("/api/tasks")
 def active_tasks() -> dict:
+    maybe_start_trash_cleanup()
+    maybe_start_scheduled_hashing()
     tasks = []
     with scan_all_lock:
         all_scan = dict(scan_all_job)
@@ -2244,9 +2508,15 @@ def active_tasks() -> dict:
     with movie_match_lock:
         match_job = dict(movie_match_job)
     if match_job.get("status") in {"starting", "running"}:
+        match_mode = match_job.get("mode")
+        match_label = (
+            "Analyzing selected movie matches"
+            if match_mode == "selected"
+            else "Analyzing movie matches"
+        )
         tasks.append({
             "id": "movie-match-analysis",
-            "label": "Analyzing movie matches",
+            "label": match_label,
             "detail": (
                 f"{match_job.get('processed', 0):,} of {match_job.get('total', 0):,} checked"
                 + (f" · {match_job.get('matched', 0):,} suggestions found" if match_job.get("processed") else "")
@@ -2278,13 +2548,65 @@ def active_tasks() -> dict:
                 )
             ),
         })
-    return {"tasks": tasks}
+    with media_hash_lock:
+        hash_job = dict(media_hash_job)
+    if hash_job.get("status") in {"starting", "running"}:
+        hash_counts = media_hashes.counts()
+        paused = media_hash_pause.is_set() or (
+            app_settings.get("hash_pause_for_activity") == "1"
+            and _other_background_work_running()
+        )
+        tasks.append({
+            "id": "media-fingerprints",
+            "label": "File fingerprinting paused" if paused else "Fingerprinting media files",
+            "detail": (
+                f"{hash_job.get('processed', 0):,} of {hash_job.get('total', 0):,} checked"
+                f" · {hash_counts.get('queued', 0):,} queued"
+            ),
+        })
+    elif app_settings.get("hash_mode") in {"automatic", "scheduled"}:
+        hash_counts = media_hashes.counts()
+        if hash_counts.get("queued", 0):
+            frequency = app_settings.get("hash_schedule_frequency").capitalize()
+            tasks.append({
+                "id": "media-fingerprints-queued",
+                "label": "File fingerprints scheduled",
+                "detail": (
+                    f"{hash_counts['queued']:,} files queued · {frequency} at "
+                    f"{app_settings.get('hash_schedule_time')}"
+                ),
+            })
+    with duplicate_verify_lock:
+        duplicate_job = dict(duplicate_verify_job)
+    if duplicate_job.get("status") in {"starting", "running"}:
+        tasks.append({
+            "id": "duplicate-verification",
+            "label": "Verifying duplicate files",
+            "detail": duplicate_job.get("detail") or "Reading both files byte for byte",
+        })
+    with trash_cleanup_lock:
+        cleanup_job = dict(trash_cleanup_job)
+    if cleanup_job.get("status") in {"starting", "running"}:
+        tasks.append({
+            "id": "duplicate-trash-cleanup",
+            "label": "Cleaning managed trash",
+            "detail": cleanup_job.get("detail") or "Checking retention dates",
+        })
+    # Scheduled work can be added here without changing the task-widget contract.
+    return {"tasks": tasks, "scheduled": []}
 
 
 @app.get("/api/movie-match-analysis")
 def movie_match_analysis_status() -> dict:
     with movie_match_lock:
         return dict(movie_match_job)
+
+
+@app.get("/api/duplicate-verification")
+def duplicate_verification_status() -> dict:
+    """Report duplicate hash-verification completion to the review page."""
+    with duplicate_verify_lock:
+        return dict(duplicate_verify_job)
 
 
 @app.get("/api/tv-match-analysis")
@@ -2446,10 +2768,9 @@ def refresh_episode_imdb_metadata(file_id: int):
     )
 
 
-@app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request):
+def dashboard_counts(user_id: int):
     with db.connect() as conn:
-        counts = conn.execute(
+        return conn.execute(
             """SELECT
               (SELECT COUNT(*) FROM titles WHERE kind='movie') movies,
               (SELECT COUNT(*) FROM titles WHERE kind='tv') shows,
@@ -2472,22 +2793,682 @@ def dashboard(request: Request):
               (SELECT COUNT(*) FROM titles t WHERE t.discovered_at IS NOT NULL AND
                  ((t.kind='tv' AND t.tvdb_id IS NULL) OR
                   (t.kind='movie' AND t.tvdb_movie_id IS NULL))) ready"""
-        , (request.state.user.id, request.state.user.id)).fetchone()
+        , (user_id, user_id)).fetchone()
+
+
+@app.get("/api/dashboard-metrics")
+def dashboard_metrics(request: Request) -> dict:
+    counts = dashboard_counts(request.state.user.id)
+    return {
+        "movies": {"value": counts["movies"], "display": f"{counts['movies']:,}"},
+        "shows": {"value": counts["shows"], "display": f"{counts['shows']:,}"},
+        "episodes": {
+            "value": counts["episodes"], "display": f"{counts['episodes']:,}",
+        },
+        "missing": {
+            "value": counts["missing"], "display": f"{counts['missing']:,}",
+        },
+        "bytes": {
+            "value": counts["bytes"], "display": format_bytes(counts["bytes"]),
+        },
+    }
+
+
+@app.get("/", response_class=HTMLResponse)
+def dashboard(request: Request):
+    counts = dashboard_counts(request.state.user.id)
+    with db.connect() as conn:
         roots = conn.execute(
             """SELECT r.*, COUNT(DISTINCT t.id) title_count, COUNT(f.id) file_count
                FROM roots r LEFT JOIN titles t ON t.root_id=r.id
                LEFT JOIN files f ON f.title_id=t.id GROUP BY r.id ORDER BY r.kind, r.label, r.path"""
         ).fetchall()
         recent = conn.execute(
-            "SELECT * FROM titles ORDER BY updated_at DESC LIMIT 8"
+            """SELECT t.*,COALESCE(uts.favorite,0) favorite,
+                      (SELECT MIN(f.id) FROM files f WHERE f.title_id=t.id)
+                        first_file_id
+               FROM titles t
+               LEFT JOIN user_title_state uts
+                 ON uts.title_id=t.id AND uts.user_id=?
+               ORDER BY t.updated_at DESC LIMIT 8""",
+            (request.state.user.id,),
+        ).fetchall()
+        favorites = conn.execute(
+            """SELECT t.*,1 favorite,
+                      (SELECT MIN(f.id) FROM files f WHERE f.title_id=t.id)
+                        first_file_id
+               FROM titles t
+               JOIN user_title_state uts
+                 ON uts.title_id=t.id AND uts.user_id=? AND uts.favorite=1
+               ORDER BY uts.updated_at DESC,t.title COLLATE NOCASE LIMIT 8""",
+            (request.state.user.id,),
         ).fetchall()
     with scan_all_lock:
         all_scan_job = dict(scan_all_job)
-    return templates.TemplateResponse(request, "dashboard.html", {
-        "counts": counts, "roots": roots, "recent": recent, "jobs": scan_jobs,
+    mie_summary = mie.summary()
+    requested_layout = request.query_params.get("layout", "")
+    home_layout = (
+        requested_layout if requested_layout in {"modern", "classic"}
+        else getattr(request.state.user, "home_layout", "modern")
+    )
+    home_template = (
+        "dashboard_classic.html" if home_layout == "classic" else "dashboard.html"
+    )
+    return templates.TemplateResponse(request, home_template, {
+        "counts": counts, "roots": roots, "recent": recent, "favorites": favorites,
+        "jobs": scan_jobs,
         "scan_all_job": all_scan_job,
+        "mie_summary": mie_summary,
         "message": request.query_params.get("message", ""),
     })
+
+
+@app.get("/library-health", response_class=HTMLResponse)
+def library_health(
+    request: Request, status: str = "active", severity: str = "",
+    category: str = "",
+):
+    status = status if status in {"active", "dismissed", "resolved"} else "active"
+    severity = severity if severity in MIE_SEVERITIES else ""
+    category = category if category in MIE_CATEGORIES else ""
+    summary = mie.summary()
+    if not summary["last_analyzed_at"]:
+        try:
+            mie.analyze()
+            summary = mie.summary()
+        except sqlite3.Error as exc:
+            record_event(
+                "mie", "Library Health analysis could not start.",
+                level="error", detail=str(exc),
+                context={"operation": "initial-analysis"},
+                user_id=request.state.user.id,
+            )
+            return templates.TemplateResponse(
+                request, "library_health.html", {
+                    "summary": summary, "findings": [], "status": status,
+                    "severity": severity, "category": category,
+                    "categories": sorted(MIE_CATEGORIES),
+                    "severities": ["critical", "warning", "information"],
+                    "quality_profiles": mie.quality_profiles(),
+                    "calibration": mie.calibration(),
+                    "category_scores": mie.category_scores(),
+                    "analysis_history": mie.analysis_history(),
+                    "feedback_rules": mie.feedback(),
+                    "duplicate_impact": duplicate_trash.impact(),
+                    "message": "",
+                    "error": (
+                        "InfoMancer could not analyze the catalog because its "
+                        "findings could not be saved. No media files were changed. "
+                        "Try again; if it continues, open Logs for the technical details."
+                    ),
+                }, status_code=500,
+            )
+    return templates.TemplateResponse(request, "library_health.html", {
+        "summary": summary,
+        "findings": mie.findings(
+            status=status, severity=severity, category=category,
+        ),
+        "status": status, "severity": severity, "category": category,
+        "categories": sorted(MIE_CATEGORIES),
+        "severities": ["critical", "warning", "information"],
+        "quality_profiles": mie.quality_profiles(),
+        "calibration": mie.calibration(),
+        "category_scores": mie.category_scores(),
+        "analysis_history": mie.analysis_history(),
+        "feedback_rules": mie.feedback(),
+        "duplicate_impact": duplicate_trash.impact(),
+        "message": request.query_params.get("message", ""),
+        "error": "",
+    })
+
+
+@app.get("/storage-intelligence", response_class=HTMLResponse)
+def storage_intelligence(request: Request):
+    return templates.TemplateResponse(request, "storage_intelligence.html", {
+        "report": mie.storage_report(),
+        "duplicate_impact": duplicate_trash.impact(),
+    })
+
+
+@app.get("/titles/{title_id}/identity", response_class=HTMLResponse)
+def title_identity(request: Request, title_id: int):
+    report = mie.identity_report(title_id)
+    if report is None:
+        raise HTTPException(404, "That library title no longer exists.")
+    return templates.TemplateResponse(request, "identity_report.html", {"report": report})
+
+
+@app.post("/library-health/analyze")
+def analyze_library_health(request: Request):
+    try:
+        finding_count = mie.analyze()
+    except sqlite3.Error as exc:
+        record_event(
+            "mie", "Library Health analysis could not be completed.",
+            level="error", detail=str(exc),
+            context={"operation": "analysis"},
+            user_id=request.state.user.id,
+        )
+        return redirect(
+            "/library-health",
+            "Library Health could not refresh because the findings could not be "
+            "saved. No media files were changed. Try again, then check Logs if "
+            "the problem continues.",
+        )
+    record_event(
+        "mie",
+        f"Library Health analysis completed with {finding_count} current findings.",
+        context={"finding_count": finding_count},
+        user_id=request.state.user.id,
+    )
+    return redirect(
+        "/library-health",
+        f"Library Health refreshed. InfoMancer found {finding_count} current "
+        f"issue{'s' if finding_count != 1 else ''}. No media files were changed.",
+    )
+
+
+@app.post("/library-health/quality-profiles/{root_id}")
+def save_library_quality_profile(
+    request: Request, root_id: int,
+    minimum_width: str = Form(""), minimum_height: str = Form(""),
+    minimum_bitrate_mbps: str = Form(""),
+    preferred_video_codecs: str = Form(""),
+    preferred_containers: str = Form(""),
+    minimum_audio_channels: str = Form(""),
+    dynamic_range: str = Form("any"), detect_outliers: str = Form(""),
+):
+    try:
+        mie.save_quality_profile(
+            root_id,
+            minimum_width=minimum_width,
+            minimum_height=minimum_height,
+            minimum_bitrate_mbps=minimum_bitrate_mbps,
+            preferred_video_codecs=preferred_video_codecs,
+            preferred_containers=preferred_containers,
+            minimum_audio_channels=minimum_audio_channels,
+            dynamic_range=dynamic_range,
+            detect_outliers=detect_outliers == "on",
+            user_id=request.state.user.id,
+        )
+        finding_count = mie.analyze()
+    except (ValueError, sqlite3.Error) as exc:
+        record_event(
+            "mie", "A Library Health quality profile could not be saved.",
+            level="error", detail=str(exc), context={"root_id": root_id},
+            user_id=request.state.user.id,
+        )
+        return redirect(
+            "/library-health",
+            f"The quality profile was not saved. {exc}",
+        )
+    record_event(
+        "mie", "A Library Health quality profile was saved.",
+        context={"root_id": root_id, "finding_count": finding_count},
+        user_id=request.state.user.id,
+    )
+    return redirect(
+        "/library-health",
+        "Quality profile saved and Library Health refreshed. No media files were changed.",
+    )
+
+
+@app.post("/library-health/calibration")
+def save_library_health_calibration(
+    request: Request,
+    identity_warning_threshold: str = Form("70"),
+    source_stale_hours: str = Form("24"),
+    critical_weight: str = Form("20"),
+    warning_weight: str = Form("8"),
+    information_weight: str = Form("2"),
+):
+    try:
+        mie.save_calibration(
+            identity_warning_threshold=identity_warning_threshold,
+            source_stale_hours=source_stale_hours,
+            critical_weight=critical_weight,
+            warning_weight=warning_weight,
+            information_weight=information_weight,
+            user_id=request.state.user.id,
+        )
+        finding_count = mie.analyze()
+    except (ValueError, sqlite3.Error) as exc:
+        record_event(
+            "mie", "Library Health calibration could not be saved.",
+            level="error", detail=str(exc), context={"operation": "calibration"},
+            user_id=request.state.user.id,
+        )
+        return redirect(
+            "/library-health", f"Calibration was not saved. {exc} Correct the settings and try again."
+        )
+    record_event(
+        "mie", "Library Health calibration was saved.",
+        context={"finding_count": finding_count}, user_id=request.state.user.id,
+    )
+    return redirect(
+        "/library-health",
+        "Calibration saved and Library Health refreshed. No media files were changed.",
+    )
+
+
+@app.post("/library-health/quality-profiles/{root_id}/delete")
+def delete_library_quality_profile(request: Request, root_id: int):
+    if not mie.delete_quality_profile(root_id):
+        return redirect(
+            "/library-health",
+            "That quality profile no longer exists. Refresh Library Health to see current settings.",
+        )
+    finding_count = mie.analyze()
+    record_event(
+        "mie", "A Library Health quality profile was removed.",
+        context={"root_id": root_id, "finding_count": finding_count},
+        user_id=request.state.user.id,
+    )
+    return redirect(
+        "/library-health",
+        "Quality profile removed and related findings refreshed. No media files were changed.",
+    )
+
+
+@app.post("/library-health/findings/{finding_id}/dismiss")
+def dismiss_library_health_finding(
+    request: Request, finding_id: int, reason: str = Form("other"),
+    scope: str = Form("finding"), note: str = Form(""),
+):
+    try:
+        dismissed = mie.dismiss(
+            finding_id, request.state.user.id, reason=reason, scope=scope, note=note,
+        )
+    except ValueError as exc:
+        return redirect(
+            "/library-health", f"The finding was not dismissed. {exc} Review the feedback and try again."
+        )
+    if not dismissed:
+        return redirect(
+            "/library-health",
+            "That finding was not dismissed because it is no longer active. "
+            "Refresh Library Health to see its current status.",
+        )
+    record_event(
+        "mie", f"Library Health finding {finding_id} was dismissed.",
+        context={"finding_id": finding_id, "reason": reason, "scope": scope},
+        user_id=request.state.user.id,
+    )
+    return redirect(
+        "/library-health",
+        "Feedback saved and finding dismissed. MIE will apply that correction to the selected scope.",
+    )
+
+
+@app.post("/library-health/findings/{finding_id}/restore")
+def restore_library_health_finding(request: Request, finding_id: int):
+    if not mie.restore(finding_id):
+        return redirect(
+            "/library-health?status=dismissed",
+            "That finding could not be restored because it is no longer dismissed. "
+            "Refresh Library Health to see its current status.",
+        )
+    record_event(
+        "mie", f"Library Health finding {finding_id} was restored.",
+        context={"finding_id": finding_id}, user_id=request.state.user.id,
+    )
+    return redirect(
+        "/library-health?status=dismissed",
+        "Finding restored to the active Library Health list.",
+    )
+
+
+@app.post("/library-health/feedback/{feedback_id}/delete")
+def delete_library_health_feedback(request: Request, feedback_id: int):
+    if not mie.delete_feedback(feedback_id):
+        return redirect(
+            "/library-health",
+            "That learned exception was not removed because it is no longer active. Refresh and try again.",
+        )
+    finding_count = mie.analyze()
+    record_event(
+        "mie", f"Library Health feedback {feedback_id} was removed.",
+        context={"feedback_id": feedback_id, "finding_count": finding_count},
+        user_id=request.state.user.id,
+    )
+    return redirect(
+        "/library-health",
+        "Learned exception removed and Library Health refreshed. Matching findings may appear again.",
+    )
+
+
+@app.get("/duplicates", response_class=HTMLResponse)
+def duplicate_review(
+    request: Request, status: str = "active", evidence: str | None = None,
+    refresh: bool = False, cleanup_status: str = "all", q: str = "",
+    source: str = "", sort: str = "confidence",
+):
+    status = status if status in {"active", "ignored", "not_duplicate"} else "active"
+    evidence = evidence if evidence in {"strong", "alternate", "all"} else (
+        "strong" if status == "active" else "all"
+    )
+    all_candidates = duplicates.candidates(status=status)
+    cleanup_status = cleanup_status if cleanup_status in {
+        "all", "pending", "purged", "restored", "manual",
+    } else "all"
+    duplicate_opportunity = duplicates.recovery_opportunity(all_candidates)
+    duplicate_impact = duplicate_trash.impact()
+    cleanup_history = duplicate_trash.history(cleanup_status, limit=50)
+    counts = {
+        "verified_exact": sum(
+            candidate["classification"] == "verified_exact"
+            for candidate in all_candidates
+        ),
+        "likely": sum(
+            candidate["classification"] == "likely"
+            for candidate in all_candidates
+        ),
+        "alternate": sum(
+            candidate["classification"] == "alternate"
+            for candidate in all_candidates
+        ),
+    }
+    if evidence == "strong":
+        candidates = [
+            candidate for candidate in all_candidates
+            if candidate["classification"] in {"verified_exact", "likely"}
+        ]
+    elif evidence == "alternate":
+        candidates = [
+            candidate for candidate in all_candidates
+            if candidate["classification"] == "alternate"
+        ]
+    else:
+        candidates = all_candidates
+    source_options = sorted({
+        (str(item["file_a"].get("root_id") or ""), item["file_a"]["root_label"])
+        for item in all_candidates
+    } | {
+        (str(item["file_b"].get("root_id") or ""), item["file_b"]["root_label"])
+        for item in all_candidates
+    }, key=lambda item: item[1].casefold())
+    query = q.strip().casefold()
+    if query:
+        candidates = [item for item in candidates if query in " ".join([
+            item["title_name"], item["file_a"]["filename"], item["file_a"]["path"],
+            item["file_b"]["filename"], item["file_b"]["path"],
+        ]).casefold()]
+    if source:
+        candidates = [item for item in candidates if source in {
+            str(item["file_a"].get("root_id") or ""),
+            str(item["file_b"].get("root_id") or ""),
+        }]
+    sort = sort if sort in {"confidence", "space", "title"} else "confidence"
+    if sort == "space":
+        candidates.sort(key=lambda item: (-item["recoverable_bytes"], item["title_name"].casefold()))
+    elif sort == "title":
+        candidates.sort(key=lambda item: item["title_name"].casefold())
+    message = request.query_params.get("message", "")
+    if refresh and not message:
+        message = (
+            f"Duplicate candidates refreshed from the current catalog. "
+            f"InfoMancer found {len(all_candidates):,} pair"
+            f"{'s' if len(all_candidates) != 1 else ''} in this review state."
+        )
+    return templates.TemplateResponse(request, "duplicates.html", {
+        "candidates": candidates,
+        "candidate_counts": counts,
+        "candidate_total": len(all_candidates),
+        "status": status,
+        "evidence": evidence,
+        "message": message,
+        "trash_count": len(duplicate_trash.items()),
+        "duplicate_opportunity": duplicate_opportunity,
+        "duplicate_impact": duplicate_impact,
+        "cleanup_history": cleanup_history,
+        "cleanup_status": cleanup_status,
+        "q": q.strip(), "source": source, "sort": sort,
+        "source_options": source_options,
+    })
+
+
+@app.post("/duplicates/bulk-action")
+def bulk_duplicate_action(
+    request: Request, pairs: list[str] = Form(default=[]), action: str = Form(...),
+):
+    allowed = {"ignored", "not_duplicate", "active", "verify"}
+    if action not in allowed:
+        return redirect("/duplicates", "That bulk review choice was not recognized. Nothing changed.")
+    parsed: list[tuple[int, int]] = []
+    for value in list(dict.fromkeys(pairs))[:500]:
+        if not re.fullmatch(r"\d+:\d+", value):
+            continue
+        left, right = (int(part) for part in value.split(":", 1))
+        if left != right:
+            parsed.append((left, right))
+    if not parsed:
+        return redirect("/duplicates", "Select at least one duplicate candidate first.")
+    user_id = request.state.user.id
+    if action != "verify":
+        changed = sum(duplicates.decide(left, right, action, user_id) for left, right in parsed)
+        labels = {"ignored": "ignored for now", "not_duplicate": "kept as intentional alternatives", "active": "returned to review"}
+        message = f"{changed:,} duplicate candidate pair{'s' if changed != 1 else ''} {labels[action]}. No media files were changed."
+        record_event("duplicates", message, context={"pairs": changed, "action": action}, user_id=user_id)
+        return redirect("/duplicates", message)
+    with duplicate_verify_lock:
+        if duplicate_verify_job.get("status") in {"starting", "running"}:
+            return redirect("/duplicates", "A duplicate verification is already running. Its progress is shown in the task panel.")
+        duplicate_verify_job.clear()
+        duplicate_verify_job.update({"status": "starting", "total": len(parsed), "processed": 0, "detail": "Preparing selected file comparisons"})
+
+    def run_bulk_verification() -> None:
+        exact = different = failed = 0
+        for index, (left, right) in enumerate(parsed, 1):
+            with duplicate_verify_lock:
+                duplicate_verify_job.update({"status": "running", "processed": index - 1, "detail": f"Verifying pair {index:,} of {len(parsed):,}"})
+            try:
+                result = duplicates.verify(left, right, user_id)
+                exact += result == "exact"
+                different += result != "exact"
+            except (OSError, ValueError):
+                failed += 1
+            with duplicate_verify_lock:
+                duplicate_verify_job["processed"] = index
+        message = f"Verified {len(parsed):,} pairs: {exact:,} exact, {different:,} different, {failed:,} unavailable. No files were changed."
+        record_event("duplicates", message, context={"pairs": len(parsed), "exact": exact, "different": different, "failed": failed}, user_id=user_id)
+        with duplicate_verify_lock:
+            duplicate_verify_job.update({"status": "complete", "detail": message})
+
+    threading.Thread(target=run_bulk_verification, daemon=True).start()
+    return redirect("/duplicates", f"Verification started for {len(parsed):,} selected pairs. Progress is shown in the task panel.")
+
+
+@app.get("/duplicates/{file_id}/trash-preview")
+def preview_duplicate_trash(request: Request, file_id: int):
+    try:
+        preview = duplicate_trash.preview(file_id, trash_retention_days())
+    except DuplicateTrashError as exc:
+        return redirect("/duplicates", str(exc))
+    return templates.TemplateResponse(request, "duplicate_trash_preview.html", {
+        "preview": preview,
+        "message": request.query_params.get("message", ""),
+    })
+
+
+@app.post("/duplicates/{file_id}/trash")
+def move_duplicate_to_trash(request: Request, file_id: int):
+    try:
+        duplicate_trash.move(file_id, trash_retention_days(), request.state.user.id)
+    except (DuplicateTrashError, OSError, sqlite3.Error) as exc:
+        return redirect(
+            f"/duplicates/{file_id}/trash-preview",
+            str(exc) if isinstance(exc, DuplicateTrashError) else
+            "InfoMancer could not move the file into managed trash. The original file was left in place. Check that the source is writable, then try again.",
+        )
+    message = (
+        "The selected copy was moved into managed trash and removed from the active catalog. "
+        "You can restore it from Duplicate Review → Trash until its retention date."
+    )
+    record_event(
+        "duplicates", message, context={"file_id": file_id},
+        user_id=request.state.user.id,
+    )
+    return redirect("/duplicates/trash", message)
+
+
+@app.post("/duplicates/{file_id}/verify-removed")
+def verify_duplicate_removed(request: Request, file_id: int):
+    try:
+        path = duplicate_trash.verify_manually_removed(file_id, request.state.user.id)
+    except DuplicateTrashError as exc:
+        return redirect("/duplicates", str(exc))
+    message = (
+        "Deletion verified. The file was no longer present, so InfoMancer removed its stale "
+        "catalog entry. No other file was changed."
+    )
+    record_event(
+        "duplicates", message, context={"file_id": file_id, "path": path},
+        user_id=request.state.user.id,
+    )
+    return redirect("/duplicates", message)
+
+
+@app.get("/duplicates/trash")
+def duplicate_trash_page(request: Request):
+    maybe_start_trash_cleanup()
+    return templates.TemplateResponse(request, "duplicate_trash.html", {
+        "items": duplicate_trash.items(),
+        "retention": app_settings.get("trash_retention_days"),
+        "message": request.query_params.get("message", ""),
+    })
+
+
+@app.post("/duplicates/trash/retention")
+def update_duplicate_trash_retention(
+    request: Request, retention: str = Form(...),
+):
+    retention = retention.strip().casefold()
+    if retention not in {"never", "7", "30", "90", "365"}:
+        return redirect(
+            "/duplicates/trash",
+            "Choose Never, 7 days, 30 days, 90 days, or 1 year. The retention setting was not changed.",
+        )
+    app_settings.update(
+        {"trash_retention_days": retention}, request.state.user.id,
+    )
+    label = "Never automatically" if retention == "never" else f"After {retention} days"
+    return redirect(
+        "/duplicates/trash",
+        f"Managed-trash retention updated: {label}. This applies to files moved to trash from now on.",
+    )
+
+
+@app.post("/duplicates/trash/{trash_id}/restore")
+def restore_duplicate_trash(request: Request, trash_id: int):
+    try:
+        path = duplicate_trash.restore(trash_id)
+    except (DuplicateTrashError, OSError, sqlite3.Error) as exc:
+        return redirect(
+            "/duplicates/trash",
+            str(exc) if isinstance(exc, DuplicateTrashError) else
+            "InfoMancer could not restore that file. Nothing was overwritten. Check that the source is mounted and writable, then try again.",
+        )
+    message = f"File restored to its original location and returned to the catalog: {path}"
+    record_event(
+        "duplicates", message, context={"trash_id": trash_id, "path": path},
+        user_id=request.state.user.id,
+    )
+    return redirect("/duplicates/trash", message)
+
+
+@app.post("/duplicates/{file_a_id}/{file_b_id}/decision")
+def decide_duplicate(
+    request: Request, file_a_id: int, file_b_id: int,
+    decision: str = Form(...),
+):
+    labels = {
+        "ignored": (
+            "Candidate ignored. It will return if either file changes so the new "
+            "version can be reviewed."
+        ),
+        "not_duplicate": (
+            "Files marked as intentional alternatives. InfoMancer will not show "
+            "this pair as an active duplicate candidate."
+        ),
+        "active": "Candidate restored to the active duplicate review list.",
+    }
+    if decision not in labels:
+        return redirect(
+            "/duplicates",
+            "That review choice was not recognized, so nothing changed. Refresh the page and try again.",
+        )
+    if not duplicates.decide(file_a_id, file_b_id, decision, request.state.user.id):
+        return redirect(
+            "/duplicates",
+            "InfoMancer could not save that choice because one or both files are no longer in the catalog. Rescan the source and review the current candidates.",
+        )
+    record_event(
+        "duplicates", labels[decision],
+        context={"file_a_id": file_a_id, "file_b_id": file_b_id, "decision": decision},
+        user_id=request.state.user.id,
+    )
+    destination = "/duplicates"
+    return redirect(destination, labels[decision])
+
+
+@app.post("/duplicates/{file_a_id}/{file_b_id}/verify")
+def verify_duplicate(request: Request, file_a_id: int, file_b_id: int):
+    with duplicate_verify_lock:
+        if duplicate_verify_job.get("status") in {"starting", "running"}:
+            return redirect(
+                "/duplicates",
+                "A duplicate verification is already running. Its progress is shown in the task panel.",
+            )
+        duplicate_verify_job.clear()
+        duplicate_verify_job.update({
+            "status": "starting",
+            "detail": "Preparing to read both files byte for byte",
+        })
+
+    user_id = request.state.user.id
+
+    def run_verification() -> None:
+        try:
+            with duplicate_verify_lock:
+                duplicate_verify_job.update({
+                    "status": "running",
+                    "detail": "Reading both files byte for byte; large files may take several minutes",
+                })
+            result = duplicates.verify(file_a_id, file_b_id, user_id)
+            message = (
+                "Verification finished: the files are byte-for-byte identical. "
+                "InfoMancer did not delete or move either file."
+                if result == "exact" else
+                "Verification finished: the files contain different bytes. They may be "
+                "different encodes or editions, and InfoMancer did not change either file."
+            )
+            record_event(
+                "duplicates", message,
+                context={"file_a_id": file_a_id, "file_b_id": file_b_id, "result": result},
+                user_id=user_id,
+            )
+            with duplicate_verify_lock:
+                duplicate_verify_job.update({
+                    "status": "complete", "detail": message, "result": result,
+                })
+        except (OSError, ValueError) as exc:
+            message = str(exc)
+            record_event(
+                "duplicates", "Duplicate verification could not be completed.",
+                level="error", detail=message,
+                context={"file_a_id": file_a_id, "file_b_id": file_b_id},
+                user_id=user_id,
+            )
+            with duplicate_verify_lock:
+                duplicate_verify_job.update({
+                    "status": "error", "detail": message, "error": message,
+                })
+
+    threading.Thread(target=run_verification, daemon=True).start()
+    return redirect(
+        "/duplicates",
+        "Verification started in the background. InfoMancer will read both files without changing them; progress is shown in the task panel.",
+    )
 
 
 @app.get("/intake", response_class=HTMLResponse)
@@ -2590,6 +3571,8 @@ def settings_page_context(
             ),
             "setting_history": app_settings.history(),
             "media_counts": media_counts,
+            "hash_counts": media_hashes.counts(),
+            "hash_job": dict(media_hash_job),
             "log_categories": event_log.categories(),
             "database_backups": list_database_backups(db.path),
             "update_status": read_update_status(db.path),
@@ -2839,6 +3822,54 @@ def create_backup_from_ui(request: Request):
         "/settings/system",
         f"Database backup {path.name} was created successfully.",
     )
+
+
+@app.post("/maintenance/backups/verify")
+def verify_all_backups(request: Request):
+    backups = list_database_backups(db.path)
+    failures: list[str] = []
+    for item in backups:
+        try:
+            validate_database_backup(resolve_backup(db.path, item["name"]))
+        except MaintenanceError:
+            failures.append(item["name"])
+    if failures:
+        message = (
+            f"{len(failures)} backup{'s' if len(failures) != 1 else ''} could not be read. "
+            "The live catalog was not changed. Create a fresh backup before restoring anything."
+        )
+        record_event("backup", message, level="error", context={"failed": failures}, user_id=request.state.user.id)
+        return redirect("/settings/system", message)
+    message = f"Verified {len(backups)} database backup{'s' if len(backups) != 1 else ''}. Each is readable and contains the required InfoMancer tables."
+    record_event("backup", message, context={"verified": len(backups)}, user_id=request.state.user.id)
+    return redirect("/settings/system", message)
+
+
+@app.get("/maintenance/diagnostics")
+def download_diagnostics(request: Request):
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("summary.json", json.dumps({
+            "app_version": APP_VERSION,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "database_size": db.path.stat().st_size if db.path.exists() else 0,
+            "library_health": mie.summary(),
+            "backup_count": len(list_database_backups(db.path)),
+        }, indent=2, default=str))
+        events = []
+        for row in event_log.query(limit=1000):
+            item = dict(row)
+            item.pop("user_id", None)
+            events.append(item)
+        archive.writestr("recent-events.json", json.dumps(events, indent=2, default=str))
+        archive.writestr("README.txt", (
+            "InfoMancer diagnostic bundle\n\nThis bundle contains application status and recent "
+            "events. It excludes passwords, sessions, API credentials, provider secrets, and the media database.\n"
+        ))
+    record_event("diagnostics", "A diagnostic bundle was exported.", user_id=request.state.user.id)
+    return Response(output.getvalue(), media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="infomancer-diagnostics-{datetime.now().strftime("%Y%m%d-%H%M%S")}.zip"'
+    })
 
 
 @app.get("/maintenance/backups/{name}")
@@ -3211,6 +4242,82 @@ def save_logging_settings(request: Request, log_level: str = Form(...)):
     return redirect("/settings/system", message)
 
 
+@app.post("/settings/hashing")
+def save_hashing_settings(
+    request: Request,
+    hash_mode: str = Form(...),
+    hash_immediate_limit: str = Form(...),
+    hash_schedule_frequency: str = Form(...),
+    hash_schedule_day: str = Form(...),
+    hash_schedule_time: str = Form(...),
+    hash_io_intensity: str = Form(...),
+    hash_pause_for_activity: str = Form("0"),
+):
+    submitted = {
+        "hash_mode": hash_mode, "hash_immediate_limit": hash_immediate_limit,
+        "hash_schedule_frequency": hash_schedule_frequency,
+        "hash_schedule_day": hash_schedule_day,
+        "hash_schedule_time": hash_schedule_time,
+        "hash_io_intensity": hash_io_intensity,
+        "hash_pause_for_activity": hash_pause_for_activity,
+    }
+    try:
+        validated = app_settings.validate_hashing(
+            hash_mode, hash_immediate_limit, hash_schedule_frequency,
+            hash_schedule_day, hash_schedule_time, hash_io_intensity,
+            hash_pause_for_activity,
+        )
+        changed = app_settings.update(validated, request.state.user.id)
+    except AppSettingError as exc:
+        return render_settings(request, "system", str(exc), submitted, 400)
+    return redirect(
+        "/settings/system",
+        "Fingerprint settings saved." if changed else
+        "Fingerprint settings were already up to date; nothing changed.",
+    )
+
+
+@app.post("/hashes/run")
+def run_hashes_now():
+    ids = media_hashes.eligible_ids()
+    if not ids:
+        return redirect("/settings/system", "Every current media file already has a fingerprint.")
+    if not start_media_hashing(ids, "Manual file fingerprinting"):
+        return redirect("/settings/system", "Fingerprinting is already running. Progress remains visible in the task widget.")
+    return redirect("/settings/system", f"Fingerprinting started for {len(ids):,} files. You can continue using InfoMancer while it runs.")
+
+
+@app.post("/hashes/pause")
+def pause_hashes():
+    with media_hash_lock:
+        running = media_hash_job.get("status") in {"starting", "running"}
+    if not running:
+        return redirect("/settings/system", "There is no fingerprinting task to pause.")
+    media_hash_pause.set()
+    return redirect("/settings/system", "Fingerprinting paused after the current file. Select Resume when you are ready.")
+
+
+@app.post("/hashes/resume")
+def resume_hashes():
+    with media_hash_lock:
+        running = media_hash_job.get("status") in {"starting", "running"}
+    if not running:
+        return redirect("/settings/system", "There is no paused fingerprinting task to resume.")
+    media_hash_pause.clear()
+    return redirect("/settings/system", "Fingerprinting resumed.")
+
+
+@app.post("/hashes/cancel")
+def cancel_hashes():
+    with media_hash_lock:
+        running = media_hash_job.get("status") in {"starting", "running"}
+    if not running:
+        return redirect("/settings/system", "There is no fingerprinting task to cancel.")
+    media_hash_cancel.set()
+    media_hash_pause.clear()
+    return redirect("/settings/system", "Fingerprinting is stopping after the current file. Unfinished files remain available for the next run.")
+
+
 @app.post("/settings/metadata/tvdb-test")
 def test_tvdb_settings_connection():
     if not tvdb.api_key:
@@ -3403,11 +4510,19 @@ def delete_root(root_id: int, confirm: str = Form("")):
 
 def title_return_path(title_id: int, return_to: str = "") -> str:
     parsed = urlparse(return_to)
+    collection_return = (
+        parsed.path.startswith("/collections/")
+        and parsed.path.removeprefix("/collections/").isdigit()
+    )
     if (
         return_to and not parsed.scheme and not parsed.netloc
-        and parsed.path in {
-            "/library", "/movies", "/shows", "/favorites", f"/titles/{title_id}"
-        }
+        and (
+            parsed.path in {
+                "/", "/library", "/movies", "/shows", "/favorites",
+                f"/titles/{title_id}",
+            }
+            or collection_return
+        )
     ):
         return return_to
     return f"/titles/{title_id}"
@@ -3423,7 +4538,11 @@ def toggle_favorite(
             "Favorites require a signed-in user account so InfoMancer knows whose list to update.",
         )
     with db.connect() as conn:
-        title = conn.execute("SELECT id FROM titles WHERE id=?", (title_id,)).fetchone()
+        title = conn.execute(
+            """SELECT id,COALESCE(NULLIF(metadata_title,''),title) name
+               FROM titles WHERE id=?""",
+            (title_id,),
+        ).fetchone()
         if not title:
             raise HTTPException(404, "Title not found")
         current = conn.execute(
@@ -3444,7 +4563,10 @@ def toggle_favorite(
     )
     return redirect(
         title_return_path(title_id, return_to),
-        "Added to your favorites." if favorite else "Removed from your favorites.",
+        (
+            f'"{title["name"]}" has been added to favorites.'
+            if favorite else f'"{title["name"]}" has been removed from favorites.'
+        ),
     )
 
 
@@ -3628,13 +4750,16 @@ def next_collection_position(conn, collection_id: int) -> int:
     return row["next_position"]
 
 
-def collection_items(conn, collection_id: int):
+def collection_items(conn, collection_id: int, user_id: int = 0):
     return conn.execute(
         """SELECT 'title' item_type,t.id item_id,t.id title_id,
                   COALESCE(NULLIF(t.metadata_title,''),t.title) display_title,
                   CASE WHEN t.kind='tv' THEN 'TV series' ELSE 'Movie' END item_label,
                   COALESCE(t.metadata_year,t.year) display_year,
-                  t.poster_url,NULL season,NULL episode,ct.position
+                  t.poster_url,NULL season,NULL episode,ct.position,t.kind,
+                  t.tvdb_id,t.tvdb_movie_id,t.tmdb_id,t.imdb_id,
+                  COALESCE((SELECT uts.favorite FROM user_title_state uts
+                            WHERE uts.user_id=? AND uts.title_id=t.id),0) favorite
            FROM collection_titles ct JOIN titles t ON t.id=ct.title_id
            WHERE ct.collection_id=?
            UNION ALL
@@ -3643,13 +4768,16 @@ def collection_items(conn, collection_id: int):
                     printf('S%02dE%02d',e.season,e.episode)),
                   COALESCE(NULLIF(t.metadata_title,''),t.title),
                   COALESCE(t.metadata_year,t.year),t.poster_url,
-                  e.season,e.episode,ce.position
+                  e.season,e.episode,ce.position,t.kind,
+                  t.tvdb_id,t.tvdb_movie_id,t.tmdb_id,t.imdb_id,
+                  COALESCE((SELECT uts.favorite FROM user_title_state uts
+                            WHERE uts.user_id=? AND uts.title_id=t.id),0)
            FROM collection_episodes ce
            JOIN expected_episodes e ON e.id=ce.expected_episode_id
            JOIN titles t ON t.id=e.title_id
            WHERE ce.collection_id=?
            ORDER BY position,item_type,item_id""",
-        (collection_id, collection_id),
+        (user_id, collection_id, user_id, collection_id),
     ).fetchall()
 
 
@@ -3957,7 +5085,7 @@ def collection_detail(request: Request, collection_id: int, q: str = ""):
         ).fetchone()
         if not collection:
             raise HTTPException(404, "Collection not found")
-        items = collection_items(conn, collection_id)
+        items = collection_items(conn, collection_id, request.state.user.id)
         candidates = []
         if q.strip():
             term = f"%{q.strip()}%"
@@ -4528,8 +5656,26 @@ def library(
     genre: str = "", title_type: str = "", root: str = "",
     person: str = "", person_name: str = "", credit_role: str = "",
     match: str = "", gaps: str = "", favorite: str = "", tag: str = "",
-    sort: str = "title",
+    sort: str = "title", record_search: str = "",
 ):
+    q = q.strip()[:200]
+    if q and record_search == "1" and request.state.user.id > 0:
+        with db.connect() as conn:
+            conn.execute(
+                """INSERT INTO user_search_history(user_id,query,searched_at)
+                   VALUES (?,?,CURRENT_TIMESTAMP)
+                   ON CONFLICT(user_id,query) DO UPDATE SET
+                     query=excluded.query,searched_at=CURRENT_TIMESTAMP""",
+                (request.state.user.id, q),
+            )
+            conn.execute(
+                """DELETE FROM user_search_history
+                   WHERE user_id=? AND id NOT IN (
+                     SELECT id FROM user_search_history WHERE user_id=?
+                     ORDER BY searched_at DESC,id DESC LIMIT 10
+                   )""",
+                (request.state.user.id, request.state.user.id),
+            )
     conditions, params = [], []
     root_id = int(root) if root.isdigit() else None
     person_id = person if re.fullmatch(r"nm\d+", person) else ""
@@ -4941,6 +6087,30 @@ def library_suggestions(request: Request, q: str = "", kind: str = "all") -> dic
     return {"suggestions": suggestions}
 
 
+@app.get("/api/search-history")
+def search_history(request: Request) -> dict:
+    if request.state.user.id <= 0:
+        return {"history": []}
+    with db.connect() as conn:
+        rows = conn.execute(
+            """SELECT query,searched_at FROM user_search_history
+               WHERE user_id=? ORDER BY searched_at DESC,id DESC LIMIT 10""",
+            (request.state.user.id,),
+        ).fetchall()
+    return {"history": [dict(row) for row in rows]}
+
+
+@app.post("/api/search-history/clear")
+def clear_search_history(request: Request) -> dict:
+    if request.state.user.id > 0:
+        with db.connect() as conn:
+            conn.execute(
+                "DELETE FROM user_search_history WHERE user_id=?",
+                (request.state.user.id,),
+            )
+    return {"cleared": True}
+
+
 @app.get("/titles/{title_id}", response_class=HTMLResponse)
 def title_detail(request: Request, title_id: int):
     with db.connect() as conn:
@@ -4953,7 +6123,7 @@ def title_detail(request: Request, title_id: int):
             raise HTTPException(404, "Title not found")
         if (title["kind"] == "tv" and title["tvdb_id"]
                 and (not title["poster_url"] or not title["imdb_id"]
-                     or not title["metadata_title_language"])):
+                     or not title["metadata_title_language"] or not title["overview"])):
             try:
                 series = tvdb.series(title["tvdb_id"])
                 poster_url = poster_from(series)
@@ -4968,11 +6138,13 @@ def title_detail(request: Request, title_id: int):
                            imdb_id=COALESCE(NULLIF(?, ''), imdb_id),
                            metadata_title=COALESCE(NULLIF(?, ''), metadata_title),
                            metadata_title_language=?,
+                           overview=COALESCE(NULLIF(?, ''), overview),
                            imdb_checked_at=CURRENT_TIMESTAMP
                            WHERE id=?""",
                         (
                             poster_url, imdb_id, metadata_title,
-                            title_language or "preserved", title_id,
+                            title_language or "preserved",
+                            str(series.get("overview") or "").strip(), title_id,
                         ),
                     )
                     title = conn.execute(
@@ -4983,6 +6155,23 @@ def title_detail(request: Request, title_id: int):
             except TVDBError:
                 # Poster enrichment is optional and should never block the
                 # locally cataloged show detail page.
+                pass
+        elif title["kind"] == "movie" and title["tvdb_movie_id"] and not title["overview"]:
+            try:
+                movie = tvdb.movie(title["tvdb_movie_id"])
+                overview = str(movie.get("overview") or "").strip()
+                if overview:
+                    conn.execute(
+                        "UPDATE titles SET overview=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (overview, title_id),
+                    )
+                    title = conn.execute(
+                        """SELECT t.*, r.last_scanned_at root_last_scanned_at
+                           FROM titles t JOIN roots r ON r.id=t.root_id WHERE t.id=?""",
+                        (title_id,),
+                    ).fetchone()
+            except TVDBError:
+                # Synopsis enrichment is optional and must not block local details.
                 pass
         file_rows = conn.execute(
             """SELECT f.* FROM files f
@@ -5084,6 +6273,17 @@ def title_detail(request: Request, title_id: int):
     directors = [row for row in credit_rows if row["role"] == "director"]
     actors = [row for row in credit_rows if row["role"] == "actor"]
     writers = [row for row in credit_rows if row["role"] == "writer"]
+    runtime_values = [row["runtime_seconds"] for row in files if row["runtime_seconds"]]
+    title_facts = []
+    if title["metadata_status"]:
+        title_facts.append(("Status", title["metadata_status"]))
+    if title["kind"] == "tv":
+        if seasons:
+            title_facts.append(("Seasons", str(len([season for season in seasons if season > 0]))))
+        if expected_rows:
+            title_facts.append(("Episodes", str(len(expected_rows))))
+    elif runtime_values:
+        title_facts.append(("Runtime", f"{round(max(runtime_values) / 60):.0f} min"))
     scan_at = title["last_scanned_at"] or title["root_last_scanned_at"]
     with imdb_genre_lock:
         active_title_ids = imdb_genre_job.get("title_ids")
@@ -5095,6 +6295,7 @@ def title_detail(request: Request, title_id: int):
         "title": title, "files": files, "missing": missing_view,
         "seasons": seasons, "genres": genres,
         "directors": directors, "actors": actors, "writers": writers,
+        "title_facts": title_facts,
         "credit_update_active": credit_update_active,
         "scan_at": scan_at, "scan_stale": scan_is_stale(scan_at),
         "series_search_url": series_provider_search_url(title),
@@ -5485,6 +6686,12 @@ def bulk_movie_match_review(
                JOIN titles t ON t.id=s.title_id
                    WHERE t.kind='movie'"""
         ).fetchone()[0]
+        unanalyzed_count = conn.execute(
+            """SELECT COUNT(*) FROM titles t
+               LEFT JOIN movie_match_suggestions s ON s.title_id=t.id
+               WHERE t.kind='movie' AND t.tvdb_movie_id IS NULL
+                 AND s.title_id IS NULL"""
+        ).fetchone()[0]
         no_result_count = conn.execute(
             """SELECT COUNT(*) FROM movie_match_suggestions s
                JOIN titles t ON t.id=s.title_id
@@ -5537,6 +6744,7 @@ def bulk_movie_match_review(
         })
     return templates.TemplateResponse(request, "bulk_movie_match.html", {
         "movies": available, "available_count": len(available),
+        "unanalyzed_count": unanalyzed_count,
         "suggestions": suggestions, "analyzed": review, "error": "",
         "cached_count": cached_count, "no_result_count": no_result_count,
         "offset": max(0, offset), "job": job,
@@ -5661,12 +6869,13 @@ def store_tv_match(title_id: int, series_id: int) -> int:
             """UPDATE titles SET tvdb_id=?, metadata_title=?,
                metadata_title_language=?, metadata_year=?,
                metadata_end_year=?, metadata_continuing=?, metadata_status=?,
-               poster_url=?, imdb_id=?, imdb_checked_at=CURRENT_TIMESTAMP,
+               overview=?, poster_url=?, imdb_id=?, imdb_checked_at=CURRENT_TIMESTAMP,
                matched_at=CURRENT_TIMESTAMP,
                updated_at=CURRENT_TIMESTAMP WHERE id=?""",
             (series_id, metadata_title, title_language or None, metadata_year,
              metadata_end_year, metadata_continuing, metadata_status,
-             poster_from(series), imdb_id, title_id),
+             str(series.get("overview") or "").strip(), poster_from(series), imdb_id,
+             title_id),
         )
         conn.execute("DELETE FROM expected_episodes WHERE title_id=?", (title_id,))
         conn.execute("DELETE FROM tv_match_suggestions WHERE title_id=?", (title_id,))

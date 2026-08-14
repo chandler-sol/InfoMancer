@@ -3,6 +3,7 @@ import re
 import tempfile
 import unittest
 from dataclasses import replace
+from html import unescape
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -109,6 +110,11 @@ class FavoriteTests(unittest.TestCase):
             data={"csrf_token": self.csrf, "return_to": "/favorites"},
         )
         self.assertEqual(title_saved.status_code, 303)
+        confirmation = self.client.get(title_saved.headers["location"])
+        self.assertIn(
+            '"Favorite Film" has been added to favorites.',
+            unescape(confirmation.text),
+        )
         chooser = self.client.get(f"/files/{self.file_id}/favorite")
         self.assertIn("First Favorite", chooser.text)
         self.assertIn("Why is this a favorite?", chooser.text)
@@ -134,12 +140,33 @@ class FavoriteTests(unittest.TestCase):
         )
         favorites = self.client.get("/favorites")
         self.assertIn("Favorite Film", favorites.text)
+        self.assertIn('class="cover-card"', favorites.text)
+        self.assertIn('class="cover-favorite-button active"', favorites.text)
+        self.assertIn("Manage Collections", favorites.text)
         self.assertIn("Second Favorite", favorites.text)
         self.assertIn("The ending always gets me.", favorites.text)
         self.assertNotIn("First Favorite", favorites.text)
         home = self.client.get("/")
         self.assertIn('href="/favorites"', home.text)
         self.assertIn("2 saved items", home.text)
+
+        detail = self.client.get(f"/titles/{self.movie_id}")
+        self.assertLess(detail.text.index("★ Favorite"), detail.text.index("On Disk"))
+
+    def test_search_history_is_saved_for_the_account_and_can_be_cleared(self):
+        self.client.get("/library?q=David+Krumholtz&record_search=1")
+        self.client.get("/library?q=Favorite+Film&record_search=1")
+        history = self.client.get("/api/search-history").json()["history"]
+        self.assertEqual(
+            [item["query"] for item in history],
+            ["Favorite Film", "David Krumholtz"],
+        )
+        cleared = self.client.post(
+            "/api/search-history/clear",
+            headers={"X-CSRF-Token": self.csrf},
+        )
+        self.assertEqual(cleared.status_code, 200)
+        self.assertEqual(self.client.get("/api/search-history").json()["history"], [])
 
     def test_account_control_is_a_single_avatar(self):
         page = self.client.get("/favorites")

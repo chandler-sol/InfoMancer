@@ -1,5 +1,5 @@
 # InfoMancer
-![Screenshot](docs/infomancer1.jpg)
+![InfoMancer library intelligence dashboard](docs/Infomancer1.png)
 A local-first, lightweight movie and TV inventory for multiple disks. InfoMancer scans media into SQLite, helps match titles through TVDB and IMDb metadata, reports missing episodes, and previews Plex-compatible filesystem changes before applying them.
 
 ## What works
@@ -16,6 +16,9 @@ A local-first, lightweight movie and TV inventory for multiple disks. InfoMancer
 - Episode renames to `Show - S01E01 - Episode Name.ext`
 - Targeted series rescans, original-filename restoration, and match removal
 - Persistent background-task status and a new-media intake queue
+- Explainable Library Health findings with identity confidence and multi-episode evidence
+- Duplicate-copy review with hash verification and storage-recovery recommendations
+- Per-source quality profiles and title-level technical consistency checks
 - Local user accounts with Argon2id passwords, revocable sessions, and CSRF protection
 - Fixed Librarian and Member roles with Librarian-managed user access
 - Optional Cloudflare Access identity validation and account linking

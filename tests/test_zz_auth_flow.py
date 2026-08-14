@@ -74,6 +74,14 @@ class AuthenticationFlowTests(unittest.TestCase):
                     self.assertIn("account_notice=1", created.headers["location"])
                     self.assertIn("Librarian+account+created+successfully", created.headers["location"])
                     self.assertIn("infomancer_session", client.cookies)
+                    metrics = client.get("/api/dashboard-metrics")
+                    self.assertEqual(metrics.status_code, 200)
+                    self.assertEqual(metrics.json()["movies"], {
+                        "value": 0, "display": "0",
+                    })
+                    self.assertEqual(metrics.json()["bytes"], {
+                        "value": 0, "display": "0 bytes",
+                    })
                     self.assertIn("onboarding-tour", client.get("/").text)
                     empty_library_tour = client.get("/movies?tour=1&tour_step=2")
                     self.assertIn("tour-library-demo", empty_library_tour.text)

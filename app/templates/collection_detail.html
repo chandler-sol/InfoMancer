@@ -37,19 +37,28 @@
 </section>
 {% endif %}
 
-<section class="collection-title-list">
+<section class="cover-library collection-cover-library" aria-label="{{ collection.name }} covers">
 {% for item in items %}
-  <article class="panel collection-title" id="{{ item.item_type }}-{{ item.item_id }}">
-    <a href="/titles/{{ item.title_id }}{% if item.item_type == 'episode' %}#season-{{ item.season }}{% endif %}" class="collection-title-main">
-      <span class="collection-title-position">{{ loop.index }}</span>
-      <span class="collection-title-poster">{% if item.poster_url %}<img src="{{ item.poster_url }}" alt="" loading="lazy">{% else %}{{ item.display_title[:1]|upper }}{% endif %}</span>
-      <span><strong>{{ item.display_title }}</strong><small>{% if item.item_type == 'episode' %}{{ item.item_label }} · S{{ '%02d'|format(item.season) }}E{{ '%02d'|format(item.episode) }}{% else %}{{ item.item_label }}{% if item.display_year %} · {{ item.display_year }}{% endif %}{% endif %}</small></span>
+  <article class="cover-card collection-cover-card" id="{{ item.item_type }}-{{ item.item_id }}">
+    <a href="/titles/{{ item.title_id }}{% if item.item_type == 'episode' %}#season-{{ item.season }}{% else %}?library_return={{ ('/collections/' ~ collection.id ~ '#' ~ item.item_type ~ '-' ~ item.item_id)|urlencode }}{% endif %}" class="cover-card-link">
+      <span class="cover-art">{% if item.poster_url %}<img src="{{ item.poster_url }}" alt="" loading="lazy">{% else %}<span class="cover-art-placeholder">{{ item.display_title[:1]|upper }}</span>{% endif %}</span>
+      <strong>{{ item.display_title }}</strong>
+      <span class="cover-card-meta"><span>{% if item.item_type == 'episode' %}{{ item.item_label }} · S{{ '%02d'|format(item.season) }}E{{ '%02d'|format(item.episode) }}{% else %}{{ item.item_label }}{% if item.display_year %} · {{ item.display_year }}{% endif %}{% endif %}</span></span>
     </a>
+    {% if item.item_type == 'title' %}
+    <form class="cover-favorite-control" method="post" action="/titles/{{ item.title_id }}/favorite">
+      <input type="hidden" name="return_to" value="/collections/{{ collection.id }}#{{ item.item_type }}-{{ item.item_id }}">
+      <button type="submit" class="cover-favorite-button{% if item.favorite %} active{% endif %}" aria-label="{{ 'Remove' if item.favorite else 'Add' }} {{ item.display_title }} {{ 'from' if item.favorite else 'to' }} favorites" title="{{ 'Remove from favorites' if item.favorite else 'Add to favorites' }}"><span aria-hidden="true">★</span></button>
+    </form>
+    {% endif %}
     {% if current_user.is_librarian %}
-    <div class="collection-title-actions">
-      <form method="post" action="/collections/{{ collection.id }}/{{ 'episodes' if item.item_type == 'episode' else 'titles' }}/{{ item.item_id }}/move"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="direction" value="up"><button class="button small" {% if loop.first %}disabled{% endif %} aria-label="Move {{ item.display_title }} earlier">↑</button></form>
-      <form method="post" action="/collections/{{ collection.id }}/{{ 'episodes' if item.item_type == 'episode' else 'titles' }}/{{ item.item_id }}/move"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="direction" value="down"><button class="button small" {% if loop.last %}disabled{% endif %} aria-label="Move {{ item.display_title }} later">↓</button></form>
-      <form method="post" action="/collections/{{ collection.id }}/{{ 'episodes' if item.item_type == 'episode' else 'titles' }}/{{ item.item_id }}/remove"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button small danger">Remove</button></form>
+    <div class="cover-card-actions" aria-label="Actions for {{ item.display_title }}">
+      <details class="episode-menu cover-row-menu"><summary aria-label="Actions for {{ item.display_title }}" title="Collection item actions">⋮</summary><div>
+        {% if item.item_type == 'title' %}<form method="post" action="/titles/{{ item.title_id }}/favorite"><input type="hidden" name="return_to" value="/collections/{{ collection.id }}"><button class="favorite-action{% if item.favorite %} active{% endif %}"><span>★</span>{{ 'Remove favorite' if item.favorite else 'Add favorite' }}</button></form><a href="/titles/{{ item.title_id }}/organize">Organize &amp; Tags</a><a href="/titles/{{ item.title_id }}/collections?return_to={{ ('/collections/' ~ collection.id)|urlencode }}">Manage Collections</a>{% endif %}
+        <form method="post" action="/collections/{{ collection.id }}/{{ 'episodes' if item.item_type == 'episode' else 'titles' }}/{{ item.item_id }}/move"><input type="hidden" name="direction" value="up"><button {% if loop.first %}disabled{% endif %}>Move earlier</button></form>
+        <form method="post" action="/collections/{{ collection.id }}/{{ 'episodes' if item.item_type == 'episode' else 'titles' }}/{{ item.item_id }}/move"><input type="hidden" name="direction" value="down"><button {% if loop.last %}disabled{% endif %}>Move later</button></form>
+        <form method="post" action="/collections/{{ collection.id }}/{{ 'episodes' if item.item_type == 'episode' else 'titles' }}/{{ item.item_id }}/remove"><button class="danger">Remove from collection</button></form>
+      </div></details>
     </div>
     {% endif %}
   </article>
@@ -57,6 +66,25 @@
   <div class="panel empty"><h2>This collection is empty</h2><p>{% if current_user.is_librarian %}Add a movie, TV series, or individual episode to begin.{% else %}A Librarian has not added any items yet.{% endif %}</p></div>
 {% endfor %}
 </section>
+
+{% if items and current_user.is_librarian %}
+<script>
+  document.addEventListener("click", event => {
+    if (!window.matchMedia("(hover: none), (pointer: coarse)").matches) return;
+    const coverLink = event.target.closest(".collection-cover-library .cover-card-link");
+    if (coverLink) {
+      const card = coverLink.closest(".cover-card");
+      if (!card.classList.contains("actions-visible")) {
+        event.preventDefault();
+        document.querySelectorAll(".cover-card.actions-visible").forEach(other => other.classList.remove("actions-visible"));
+        card.classList.add("actions-visible");
+      }
+    } else if (!event.target.closest(".cover-card")) {
+      document.querySelectorAll(".cover-card.actions-visible").forEach(card => card.classList.remove("actions-visible"));
+    }
+  });
+</script>
+{% endif %}
 
 {% if current_user.is_librarian %}
 <details class="collection-delete">

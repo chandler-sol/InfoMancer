@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     env_file: .env.sandbox
     ports:
-      - "127.0.0.1:8788:8787"
+      - "8788:8787"
     volumes:
       - ./data-sandbox:/app/data
       - ./sandbox-media:/media

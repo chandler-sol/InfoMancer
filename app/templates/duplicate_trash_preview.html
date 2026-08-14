@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Preview Trash Move - {{ app_name }}{% endblock %}
+{% block content %}
+<section class="mie-hero duplicate-hero">
+  <div>
+    <p class="eyebrow">REVERSIBLE FILESYSTEM CHANGE</p>
+    <h1>Move this copy to Trash?</h1>
+    <p>InfoMancer will move only the selected file. The other copy is not changed, and this file remains restorable until its retention date.</p>
+  </div>
+  <a class="button" href="/duplicates">Back to Duplicate Review</a>
+</section>
+{% if message %}<div class="notice error" role="alert">{{ message }}</div>{% endif %}
+<section class="panel trash-preview">
+  <p class="eyebrow">SELECTED COPY</p>
+  <h2>{{ preview.file.filename }}</h2>
+  <dl class="trash-paths">
+    <div><dt>Current location</dt><dd class="path">{{ preview.source }}</dd></div>
+    <div><dt>Managed trash</dt><dd class="path">{{ preview.destination }}</dd></div>
+    <div><dt>Automatic removal</dt><dd>{% if preview.purge_after %}After {{ preview.retention_days }} days{% else %}Never; restore or remove it manually{% endif %}</dd></div>
+  </dl>
+  <div class="notice warning">
+    Confirm playback and edition differences before continuing. Moving this file removes it from the active catalog, but does not permanently delete it now.
+  </div>
+  <div class="actions">
+    <a class="button" href="/duplicates">Cancel</a>
+    <form method="post" action="/duplicates/{{ preview.file.id }}/trash">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="button primary">Move selected copy to Trash</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

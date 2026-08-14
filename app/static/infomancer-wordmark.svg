@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 260" role="img" aria-labelledby="title desc">
+  <title id="title">InfoMancer wordmark</title>
+  <desc id="desc">The word InfoMancer with Info in white and Mancer in lime.</desc>
+  <text x="24" y="185" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="176" font-weight="650" letter-spacing="-7">
+    <tspan fill="#FFFFFF">Info</tspan><tspan fill="#B7FF2A">Mancer</tspan>
+  </text>
+</svg>
