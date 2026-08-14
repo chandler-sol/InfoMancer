@@ -114,7 +114,7 @@ class ScanTests(unittest.TestCase):
             [("1917", 2019), ("8 Mile", 2002)],
         )
 
-    def test_rescan_removes_missing_file_from_catalog_only(self):
+    def test_source_guard_preserves_catalog_when_source_becomes_empty(self):
         show = self.root / "Example Show (2020)" / "Season 01"
         show.mkdir(parents=True)
         media = show / "Example.Show.S01E01.1080p.mkv"
@@ -122,7 +122,18 @@ class ScanTests(unittest.TestCase):
         root_row = self.add_root("tv")
         scan_root(self.conn, root_row)
         media.unlink()
-        scan_root(self.conn, root_row)
+        result = scan_root(self.conn, root_row)
+        self.assertEqual(result["source_status"], "degraded")
+        self.assertEqual(result["preserved"], 1)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM files").fetchone()[0], 1)
+        status = self.conn.execute(
+            "SELECT health_status,guard_preserved_count FROM roots WHERE id=?",
+            (root_row["id"],),
+        ).fetchone()
+        self.assertEqual((status["health_status"], status["guard_preserved_count"]), ("degraded", 1))
+
+        reconciled = scan_root(self.conn, root_row, force_cleanup=True)
+        self.assertEqual(reconciled["source_status"], "healthy")
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM files").fetchone()[0], 0)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM titles").fetchone()[0], 0)
 
@@ -179,6 +190,22 @@ class ScanTests(unittest.TestCase):
         self.assertIsNotNone(
             self.conn.execute("SELECT last_scanned_at FROM titles").fetchone()["last_scanned_at"]
         )
+
+    def test_series_rescan_does_not_clear_catalog_when_folder_appears_empty(self):
+        show = self.root / "Example Show (2020)" / "Season 01"
+        show.mkdir(parents=True)
+        media = show / "Example.Show.S01E01.mkv"
+        media.write_bytes(b"one")
+        root_row = self.add_root("tv")
+        scan_root(self.conn, root_row)
+        title = self.conn.execute("SELECT * FROM titles").fetchone()
+        media.unlink()
+
+        result = scan_title(self.conn, title)
+
+        self.assertEqual(result["source_status"], "degraded")
+        self.assertEqual(result["preserved"], 1)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM files").fetchone()[0], 1)
 
 
 if __name__ == "__main__":

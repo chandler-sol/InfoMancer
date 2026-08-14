@@ -19,9 +19,13 @@ class MediaIntelligenceEngineTests(unittest.TestCase):
             )
             conn.execute(
                 """INSERT INTO titles(
-                     id,root_id,kind,title,folder_path,tvdb_id,metadata_title
+                     id,root_id,kind,title,folder_path,tvdb_id,metadata_title,poster_url
                    ) VALUES (1,1,'tv','Example Show','/media/tv/Example Show',
-                             123,'Example Show')"""
+                             123,'Example Show','https://example.test/poster.jpg')"""
+            )
+            conn.execute(
+                """INSERT INTO title_credits(title_id,imdb_person_id,person_name,role)
+                   VALUES (1,'nm1','Example Actor','actor')"""
             )
             conn.execute(
                 """INSERT INTO files(
@@ -81,6 +85,33 @@ class MediaIntelligenceEngineTests(unittest.TestCase):
                 conn.execute("SELECT COUNT(*) FROM titles").fetchone()[0],
                 title_count_before,
             )
+
+    def test_source_guard_status_replaces_stale_finding_with_actionable_health(self):
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE roots SET health_status='offline',last_checked_at=?,
+                   last_seen_at=?,last_error=?,last_file_count=1 WHERE id=1""",
+                ("2026-01-02T03:04:05+00:00", "2026-01-01T03:04:05+00:00",
+                 "The network path was not found."),
+            )
+        self.engine.analyze()
+        findings = self.engine.findings()
+        rules = {finding["rule_key"] for finding in findings}
+        self.assertIn("source-offline", rules)
+        self.assertNotIn("source-stale", rules)
+        offline = next(item for item in findings if item["rule_key"] == "source-offline")
+        self.assertEqual(offline["severity"], "critical")
+        self.assertEqual(offline["evidence"]["protected_catalog_files"], 1)
+        self.assertIn("preserved", offline["explanation"])
+
+    def test_metadata_health_flags_missing_artwork_and_credits(self):
+        with self.database.connect() as conn:
+            conn.execute("UPDATE titles SET poster_url=NULL WHERE id=1")
+            conn.execute("DELETE FROM title_credits WHERE title_id=1")
+        self.engine.analyze()
+        rules = {finding["rule_key"] for finding in self.engine.findings()}
+        self.assertIn("metadata-artwork-missing", rules)
+        self.assertIn("metadata-credits-missing", rules)
 
     def test_dismissed_findings_stay_dismissed_until_restored(self):
         self.engine.analyze()

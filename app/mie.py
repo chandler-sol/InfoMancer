@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .db import Database
@@ -108,7 +108,10 @@ class MediaIntelligenceEngine:
             titles = {
                 row["id"]: row for row in conn.execute(
                     """SELECT id,root_id,kind,title,year,metadata_title,
-                              metadata_year,tvdb_id,tvdb_movie_id,tmdb_id,imdb_id
+                              metadata_year,tvdb_id,tvdb_movie_id,tmdb_id,imdb_id,
+                              poster_url,metadata_refreshed_at,
+                              (SELECT COUNT(*) FROM title_credits tc WHERE tc.title_id=titles.id) credit_count,
+                              (SELECT COUNT(*) FROM expected_episodes ee WHERE ee.title_id=titles.id) episode_count
                        FROM titles"""
                 )
             }
@@ -190,6 +193,71 @@ class MediaIntelligenceEngine:
                         "kind": title["kind"],
                     },
                 })
+
+            for title in titles.values():
+                matched = any((title["tvdb_id"], title["tvdb_movie_id"], title["tmdb_id"], title["imdb_id"]))
+                if not matched:
+                    name = title["metadata_title"] or title["title"]
+                    candidates.append({
+                        "fingerprint": f"metadata-identifiers:title:{title['id']}",
+                        "rule_key": "metadata-identifiers-missing", "category": "identity",
+                        "severity": "warning", "root_id": title["root_id"], "title_id": title["id"],
+                        "summary": f"{name} has no provider identifier",
+                        "explanation": "The catalog title is not linked to TVDB, TMDB, or IMDb metadata.",
+                        "recommendation": "Review and confirm a provider match before refreshing metadata.",
+                        "evidence": {"provider_identifiers": []},
+                    })
+                    continue
+                name = title["metadata_title"] or title["title"]
+                common = {"root_id": title["root_id"], "title_id": title["id"]}
+                if not title["poster_url"]:
+                    candidates.append({
+                        "fingerprint": f"metadata-artwork:title:{title['id']}",
+                        "rule_key": "metadata-artwork-missing", "category": "completeness",
+                        "severity": "information", **common,
+                        "summary": f"{name} has no artwork",
+                        "explanation": "The title is matched, but no poster artwork is stored in the catalog.",
+                        "recommendation": "Refresh this title's metadata or choose artwork from its title page.",
+                        "evidence": {"provider_ids_present": True},
+                    })
+                if not title["credit_count"]:
+                    candidates.append({
+                        "fingerprint": f"metadata-credits:title:{title['id']}",
+                        "rule_key": "metadata-credits-missing", "category": "completeness",
+                        "severity": "information", **common,
+                        "summary": f"{name} has no stored credits",
+                        "explanation": "No cast, director, or writer credits are stored for this matched title.",
+                        "recommendation": "Queue an incremental metadata refresh for this title.",
+                        "evidence": {"credit_count": 0},
+                    })
+                if title["kind"] == "tv" and not title["episode_count"]:
+                    candidates.append({
+                        "fingerprint": f"metadata-episodes:title:{title['id']}",
+                        "rule_key": "metadata-episodes-incomplete", "category": "completeness",
+                        "severity": "warning", **common,
+                        "summary": f"{name} has no provider episode data",
+                        "explanation": "The series is matched, but its expected episode list is empty.",
+                        "recommendation": "Refresh the series match and episode metadata before checking for gaps.",
+                        "evidence": {"expected_episode_count": 0},
+                    })
+                refreshed = str(title["metadata_refreshed_at"] or "")
+                try:
+                    refreshed_at = datetime.fromisoformat(refreshed.replace("Z", "+00:00"))
+                    if refreshed_at.tzinfo is None:
+                        refreshed_at = refreshed_at.replace(tzinfo=timezone.utc)
+                    is_stale = refreshed_at < datetime.now(timezone.utc) - timedelta(days=30)
+                except ValueError:
+                    is_stale = bool(refreshed)
+                if is_stale:
+                    candidates.append({
+                        "fingerprint": f"metadata-stale:title:{title['id']}",
+                        "rule_key": "metadata-stale", "category": "freshness",
+                        "severity": "information", **common,
+                        "summary": f"{name} metadata may be stale",
+                        "explanation": "The saved provider metadata has not been refreshed recently.",
+                        "recommendation": "Queue an incremental refresh; existing metadata remains available if it fails.",
+                        "evidence": {"last_refreshed_at": refreshed},
+                    })
 
             for title_id, title_files in files_by_title.items():
                 title = titles.get(title_id)
@@ -282,7 +350,10 @@ class MediaIntelligenceEngine:
                 })
 
             for root in conn.execute(
-                """SELECT r.id,r.label,r.path,r.last_scanned_at,
+                """SELECT r.id,r.label,r.path,r.last_scanned_at,r.health_status,
+                           r.last_checked_at,r.last_seen_at,r.last_error,
+                           r.last_file_count,r.last_observed_file_count,
+                           r.guard_preserved_count,
                           SUM(CASE WHEN f.id IS NOT NULL
                                     AND f.media_info_at IS NULL
                                     AND COALESCE(f.media_info_error,'')=''
@@ -294,8 +365,54 @@ class MediaIntelligenceEngine:
                    GROUP BY r.id"""
             ):
                 label = root["label"] or root["path"]
+                source_status = root["health_status"] or "unknown"
+                if source_status == "offline":
+                    candidates.append({
+                        "fingerprint": f"source-offline:root:{root['id']}",
+                        "rule_key": "source-offline", "category": "health",
+                        "severity": "critical", "root_id": root["id"],
+                        "summary": f"{label} is unavailable",
+                        "explanation": (
+                            "Source Guard could not open the configured media folder. "
+                            "The existing catalog was preserved and no missing-file cleanup ran."
+                        ),
+                        "recommendation": (
+                            "Check the NAS, mount, drive mapping, and service permissions, "
+                            "then run Check connection before scanning again."
+                        ),
+                        "evidence": {
+                            "root": label, "path": root["path"],
+                            "last_checked_at": root["last_checked_at"],
+                            "last_seen_at": root["last_seen_at"],
+                            "protected_catalog_files": root["last_file_count"],
+                            "connection_error": root["last_error"],
+                        },
+                    })
+                elif source_status == "degraded":
+                    candidates.append({
+                        "fingerprint": f"source-degraded:root:{root['id']}",
+                        "rule_key": "source-degraded", "category": "health",
+                        "severity": "warning", "root_id": root["id"],
+                        "summary": f"{label} returned an incomplete view",
+                        "explanation": (
+                            "Source Guard detected read errors, an unexpectedly empty mount, "
+                            "or a sharp file-count drop. Catalog cleanup was blocked."
+                        ),
+                        "recommendation": (
+                            "Restore the storage connection and scan again. If the change was "
+                            "intentional, preview and explicitly confirm catalog reconciliation."
+                        ),
+                        "evidence": {
+                            "root": label, "path": root["path"],
+                            "last_known_files": root["last_file_count"],
+                            "observed_files": root["last_observed_file_count"],
+                            "protected_catalog_files": root["guard_preserved_count"],
+                            "last_checked_at": root["last_checked_at"],
+                            "details": root["last_error"],
+                        },
+                    })
                 missing_details = int(root["missing_details"] or 0)
-                if missing_details:
+                if missing_details and source_status != "offline":
                     candidates.append({
                         "fingerprint": f"technical-details:root:{root['id']}",
                         "rule_key": "technical-details-missing",
@@ -330,7 +447,7 @@ class MediaIntelligenceEngine:
                         f"-{calibration['source_stale_hours']} hours",
                     ),
                 ).fetchone()[0]
-                if stale:
+                if stale and source_status not in {"offline", "degraded"}:
                     candidates.append({
                         "fingerprint": f"source-stale:root:{root['id']}",
                         "rule_key": "source-stale",
@@ -959,6 +1076,23 @@ class MediaIntelligenceEngine:
             except (TypeError, ValueError):
                 finding["evidence"] = {}
             finding["href"] = self.finding_href(finding)
+            finding["review_label"] = {
+                "missing-episodes": "Review missing episodes",
+                "identity-confidence-low": "Review identity match",
+                "unmatched-title": "Review match options",
+                "duplicate-candidates": "Review duplicate candidates",
+                "duplicate-storage-recovery": "Review recoverable storage",
+                "media-unreadable": "Review unreadable media",
+                "technical-details-missing": "Review media inspection",
+                "source-stale": "Review source scan",
+                "source-offline": "Review source connection",
+                "source-degraded": "Review protected catalog",
+                "metadata-artwork-missing": "Review artwork",
+                "metadata-credits-missing": "Refresh credits",
+                "metadata-episodes-incomplete": "Refresh episode data",
+                "metadata-stale": "Refresh metadata",
+                "metadata-identifiers-missing": "Review provider match",
+            }.get(finding["rule_key"], "Review affected media")
             findings.append(finding)
         return findings
 

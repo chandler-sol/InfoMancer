@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import sqlite3
 import uuid
@@ -14,6 +15,23 @@ VIDEO_EXTENSIONS = {
     ".mov", ".mp4", ".mpeg", ".mpg", ".mts", ".ogm", ".ogv", ".ts",
     ".vob", ".webm", ".wmv",
 }
+
+
+class SourceUnavailableError(ValueError):
+    """The configured source could not be reached safely."""
+
+
+def _walk_files(root: Path, errors: list[str]):
+    def on_error(error: OSError) -> None:
+        errors.append(str(error))
+
+    for directory, names, filenames in os.walk(
+        root, topdown=True, onerror=on_error, followlinks=False,
+    ):
+        names[:] = [name for name in names if name != ".infomancer-trash"]
+        folder = Path(directory)
+        for filename in filenames:
+            yield folder / filename
 EPISODE_RE = re.compile(
     r"(?i)(?:^|[. _\-])s(?P<season>\d{1,3})[. _\-]*e(?P<start>\d{1,3})"
     r"(?:[. _\-]*(?:e|-e?)(?P<end>\d{1,3}))?"
@@ -148,22 +166,27 @@ def scan_root(
     conn: sqlite3.Connection,
     root_row: sqlite3.Row,
     progress: Callable[[int, int], None] | None = None,
+    *, force_cleanup: bool = False,
 ) -> dict[str, int | str]:
     root = Path(root_row["path"])
     if not root.exists() or not root.is_dir():
-        raise ValueError(f"Media path is not an accessible directory: {root}")
+        raise SourceUnavailableError(f"Media path is not an accessible directory: {root}")
 
     scan_id = uuid.uuid4().hex
     file_count = 0
     title_ids: set[int] = set()
-    for file in root.rglob("*"):
+    read_errors: list[str] = []
+    previous_count = int(conn.execute(
+        """SELECT COUNT(*) FROM files f JOIN titles t ON t.id=f.title_id
+           WHERE t.root_id=?""", (root_row["id"],),
+    ).fetchone()[0])
+    for file in _walk_files(root, read_errors):
         try:
-            if ".infomancer-trash" in file.parts:
-                continue
             if not file.is_file() or file.suffix.lower() not in VIDEO_EXTENSIONS:
                 continue
             stat = file.stat()
-        except OSError:
+        except OSError as exc:
+            read_errors.append(str(exc))
             continue
 
         folder = _show_folder(root, file) if root_row["kind"] == "tv" else file.parent
@@ -225,23 +248,55 @@ def scan_root(
         if progress and (file_count == 1 or file_count % 100 == 0):
             progress(file_count, len(title_ids))
 
-    conn.execute(
-        "DELETE FROM files WHERE title_id IN (SELECT id FROM titles WHERE root_id = ?) AND seen_scan != ?",
-        (root_row["id"], scan_id),
-    )
-    conn.execute(
-        "DELETE FROM titles WHERE root_id = ? AND NOT EXISTS (SELECT 1 FROM files WHERE files.title_id=titles.id)",
-        (root_row["id"],),
-    )
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    suspicious_drop = previous_count > 0 and (
+        file_count == 0 or (previous_count >= 10 and file_count * 4 < previous_count)
+    )
+    degraded = bool(read_errors or (suspicious_drop and not force_cleanup))
+    preserved_count = int(conn.execute(
+        """SELECT COUNT(*) FROM files f JOIN titles t ON t.id=f.title_id
+           WHERE t.root_id=? AND f.seen_scan!=?""",
+        (root_row["id"], scan_id),
+    ).fetchone()[0])
+    if not degraded:
+        conn.execute(
+            "DELETE FROM files WHERE title_id IN (SELECT id FROM titles WHERE root_id = ?) AND seen_scan != ?",
+            (root_row["id"], scan_id),
+        )
+        conn.execute(
+            "DELETE FROM titles WHERE root_id = ? AND NOT EXISTS (SELECT 1 FROM files WHERE files.title_id=titles.id)",
+            (root_row["id"],),
+        )
     for title_id in title_ids:
         conn.execute(
             "UPDATE titles SET last_scanned_at=? WHERE id=?", (now, title_id)
         )
-    conn.execute("UPDATE roots SET last_scanned_at = ? WHERE id = ?", (now, root_row["id"]))
+    if degraded:
+        reason = (
+            f"The source returned {len(read_errors)} read error(s)."
+            if read_errors else
+            f"Only {file_count:,} of the previous {previous_count:,} files were visible."
+        )
+        conn.execute(
+            """UPDATE roots SET health_status='degraded',last_checked_at=?,last_seen_at=?,
+               last_error=?,last_observed_file_count=?,guard_preserved_count=? WHERE id=?""",
+            (now, now, reason, file_count, preserved_count, root_row["id"]),
+        )
+    else:
+        conn.execute(
+            """UPDATE roots SET last_scanned_at=?,health_status='healthy',last_checked_at=?,
+               last_seen_at=?,last_error='',last_file_count=?,last_observed_file_count=?,
+               guard_preserved_count=0 WHERE id=?""",
+            (now, now, now, file_count, file_count, root_row["id"]),
+        )
     if progress:
         progress(file_count, len(title_ids))
-    return {"files": file_count, "titles": len(title_ids), "scan_id": scan_id}
+    return {
+        "files": file_count, "titles": len(title_ids), "scan_id": scan_id,
+        "source_status": "degraded" if degraded else "healthy",
+        "preserved": preserved_count if degraded else 0,
+        "read_errors": len(read_errors),
+    }
 
 
 def scan_title(
@@ -251,18 +306,21 @@ def scan_title(
 ) -> dict[str, int | str]:
     folder = Path(title_row["folder_path"])
     if title_row["kind"] != "tv" or not folder.exists() or not folder.is_dir():
-        raise ValueError(f"Series path is not an accessible directory: {folder}")
+        raise SourceUnavailableError(f"Series path is not an accessible directory: {folder}")
 
     scan_id = uuid.uuid4().hex
     file_count = 0
-    for file in folder.rglob("*"):
+    read_errors: list[str] = []
+    previous_count = int(conn.execute(
+        "SELECT COUNT(*) FROM files WHERE title_id=?", (title_row["id"],),
+    ).fetchone()[0])
+    for file in _walk_files(folder, read_errors):
         try:
-            if ".infomancer-trash" in file.parts:
-                continue
             if not file.is_file() or file.suffix.lower() not in VIDEO_EXTENSIONS:
                 continue
             stat = file.stat()
-        except OSError:
+        except OSError as exc:
+            read_errors.append(str(exc))
             continue
         parsed = parse_episode(file.name)
         conn.execute(
@@ -294,15 +352,39 @@ def scan_title(
         if progress and (file_count == 1 or file_count % 100 == 0):
             progress(file_count, 1)
 
-    conn.execute(
-        "DELETE FROM files WHERE title_id=? AND seen_scan != ?",
-        (title_row["id"], scan_id),
-    )
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    suspicious_drop = previous_count > 0 and (
+        file_count == 0 or (previous_count >= 10 and file_count * 4 < previous_count)
+    )
+    degraded = bool(read_errors or suspicious_drop)
+    preserved_count = int(conn.execute(
+        "SELECT COUNT(*) FROM files WHERE title_id=? AND seen_scan!=?",
+        (title_row["id"], scan_id),
+    ).fetchone()[0])
+    if not degraded:
+        conn.execute(
+            "DELETE FROM files WHERE title_id=? AND seen_scan != ?",
+            (title_row["id"], scan_id),
+        )
+    else:
+        reason = (
+            f"The series scan returned {len(read_errors)} read error(s)."
+            if read_errors else
+            f"Only {file_count:,} of the previous {previous_count:,} series files were visible."
+        )
+        conn.execute(
+            """UPDATE roots SET health_status='degraded',last_checked_at=?,last_seen_at=?,
+               last_error=?,guard_preserved_count=guard_preserved_count+? WHERE id=?""",
+            (now, now, reason, preserved_count, title_row["root_id"]),
+        )
     conn.execute(
         "UPDATE titles SET last_scanned_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
         (now, title_row["id"]),
     )
     if progress:
         progress(file_count, 1)
-    return {"files": file_count, "titles": 1, "scan_id": scan_id}
+    return {
+        "files": file_count, "titles": 1, "scan_id": scan_id,
+        "source_status": "degraded" if degraded else "healthy",
+        "preserved": preserved_count if degraded else 0,
+    }

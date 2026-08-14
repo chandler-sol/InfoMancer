@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Activity · InfoMancer{% endblock %}
+{% block content %}
+<header class="page-head"><div><p class="eyebrow">ACCOUNT ACTIVITY</p><h1>Activity</h1><p>Completed work, new findings, and failures from InfoMancer's existing action history.</p></div><div class="actions"><a class="button" href="/activity{% if not unread_only %}?unread=1{% endif %}">{{ 'Show all' if unread_only else 'Unread only' }}</a>{% if activity_unread_count %}<form method="post" action="/activity/read"><input type="hidden" name="all_events" value="1"><button class="button">Mark all read</button></form>{% endif %}</div></header>
+<section class="activity-list">
+{% for item in items %}
+<article class="panel activity-item{% if item.unread %} unread{% endif %}">
+  <span class="activity-state {{ item.level }}" aria-hidden="true"></span>
+  <div><p class="eyebrow">{{ item.category.replace('-', ' ') }}</p><h2>{{ item.message }}</h2>{% if item.detail %}<p class="muted">{{ item.detail }}</p>{% endif %}<small>{{ local_time(item.created_at) }}</small></div>
+  <div class="actions"><a class="button small" href="{{ item.href }}">Open</a>{% if item.unread %}<form method="post" action="/activity/read"><input type="hidden" name="event_ids" value="{{ item.id }}"><button class="button small">Mark read</button></form>{% endif %}</div>
+</article>
+{% else %}<div class="panel empty"><h2>{{ 'Nothing unread' if unread_only else 'No activity yet' }}</h2><p>Completed scans, metadata work, duplicate verification, findings, and failures will appear here.</p></div>{% endfor %}
+</section>
+{% endblock %}

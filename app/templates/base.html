@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>{% block title %}{{ app_name }}{% endblock %}</title>
   <link rel="icon" href="{{ url_for('static', path='infomancer-icon.svg') }}" type="image/svg+xml">
   <link rel="shortcut icon" href="{{ url_for('static', path='infomancer-icon.svg') }}">
@@ -18,6 +18,7 @@
   <link rel="stylesheet" href="{{ url_for('static', path='engagement.css') }}?v={{ static_version }}">
   <link rel="stylesheet" href="{{ url_for('static', path='tour-demo.css') }}?v={{ static_version }}">
   <link rel="stylesheet" href="{{ url_for('static', path='modern.css') }}?v={{ static_version }}">
+  <script src="{{ url_for('static', path='organize-dialog.js') }}?v={{ static_version }}" defer></script>
   <script src="{{ url_for('static', path='password-visibility.js') }}?v={{ static_version }}" defer></script>
   <script src="{{ url_for('static', path='engagement.js') }}?v={{ static_version }}" defer></script>
 </head>
@@ -55,7 +56,7 @@
         </button>
       </form>
       <div class="task-widget idle" id="task-widget">
-        <button type="button" class="task-widget-toggle" id="task-widget-toggle" aria-expanded="false" aria-controls="task-popover"><span class="task-dot"></span><span class="task-card-copy"><strong id="task-summary">No tasks running</strong><small id="task-card-detail">Background work appears here.</small></span></button>
+        <button type="button" class="task-widget-toggle" id="task-widget-toggle" aria-label="No background tasks or notifications" aria-expanded="false" aria-controls="task-popover"><span class="task-dot"></span><span class="task-card-copy"><strong id="task-summary">No tasks running</strong><small id="task-card-detail">Background work appears here.</small></span></button>
         <div class="task-popover" id="task-popover" hidden><div class="task-popover-heading"><span><small>BACKGROUND ACTIVITY</small><strong>Running tasks</strong></span><span class="task-popover-controls"><button type="button" id="task-minimize" aria-label="Minimize task panel" title="Minimize">&minus;</button><button type="button" id="task-dismiss" aria-label="Dismiss task panel" title="Dismiss">&times;</button></span></div><div id="task-list"></div></div>
       </div>
       {% if request.url.path == '/' and current_user.id > 0 %}
@@ -84,9 +85,11 @@
           <a href="/movies" {% if request.url.path == '/movies' %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M7 5 9 9m4-4 2 4m4-4 2 4M3 10h18"></path></svg><span>Movies</span></a>
           <a href="/shows" {% if request.url.path.startswith('/shows') and not request.url.path.startswith('/shows/bulk-match') %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"></rect><path d="m8 2 4 4 4-4M8 15h8"></path></svg><span>TV Shows</span></a>
           <a href="/collections" {% if request.url.path.startswith('/collections') %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="13" height="15" rx="1"></rect><path d="M8 2h12v15M7 9h7M7 13h7"></path></svg><span>Collections</span></a>
+          <a href="/libraries" {% if request.url.path.startswith('/libraries') %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M8 4v16M13 8h5M13 12h5"></path></svg><span>Libraries</span></a>
           <a href="/favorites" {% if request.url.path.startswith('/favorites') %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3.1-5.8 3.1 1.1-6.5-4.7-4.6 6.5-.9z"></path></svg><span>Favorites</span></a>
           <a href="/library-health" {% if request.url.path.startswith('/library-health') %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-6 4 12 2-6h6"></path><path d="M20 5.8A8.5 8.5 0 0 0 12 3a8.5 8.5 0 0 0-8 2.8"></path><path d="M4.5 17.5A18 18 0 0 0 12 22a18 18 0 0 0 7.5-4.5"></path></svg><span>Library Health</span></a>
           <a href="/announcements" {% if request.url.path == '/announcements' %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9a7 7 0 0 1 14 0c0 8 3 8 3 8H2s3 0 3-8"></path><path d="M9 21h6M12 2V1"></path></svg><span>Announcements</span>{% if announcement_due_count %}<b class="menu-count">{{ announcement_due_count }}</b>{% endif %}</a>
+          <a href="/activity" {% if request.url.path == '/activity' %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M8 9h8M8 13h5"></path></svg><span>Activity</span>{% if activity_unread_count %}<b class="menu-count">{{ activity_unread_count }}</b>{% endif %}</a>
           <a href="/help" {% if request.url.path == '/help' %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.7 9a2.5 2.5 0 1 1 3.7 2.2c-.9.5-1.4 1.1-1.4 2.3"></path><path d="M12 17.5h.01"></path></svg><span>Help</span></a>
           <a href="/about" {% if request.url.path == '/about' %}class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 10v7M12 7h.01"></path></svg><span>About</span></a>
           {% if current_user.is_librarian %}
@@ -116,6 +119,12 @@
     {% block content %}{% endblock %}
   </main>
   <footer><a href="/about">InfoMancer {{ app_version }}</a> · Local-first media catalog · Metadata provided by <a href="https://thetvdb.com" target="_blank" rel="noopener noreferrer">TheTVDB</a>. Please consider <a href="https://thetvdb.com/subscribe" target="_blank" rel="noopener noreferrer">adding missing information or subscribing</a>. · Selected data from <a href="https://developer.imdb.com/non-commercial-datasets/" target="_blank" rel="noopener noreferrer">IMDb’s Non-Commercial Datasets</a>.</footer>
+  <dialog class="organize-dialog" id="organize-dialog" aria-labelledby="organize-dialog-title">
+    <div class="organize-dialog-frame">
+      <button class="organize-dialog-close" type="button" data-organize-close aria-label="Close organize title dialog">&times;</button>
+      <div class="organize-dialog-body" id="organize-dialog-body"></div>
+    </div>
+  </dialog>
   {% if show_onboarding_tour %}
   <div class="tour-layer tour-intro" id="onboarding-tour" role="dialog" aria-modal="true" aria-labelledby="tour-title" data-csrf-token="{{ csrf_token }}" data-setup-pending="{{ '1' if setup_choice_pending else '0' }}">
     <div class="tour-scrim" id="tour-scrim" aria-hidden="true">
@@ -467,6 +476,8 @@
           }
           widget.classList.toggle("idle", !active);
           if (active) {
+            widget.classList.remove("has-attention");
+            toggle.setAttribute("aria-label", tasks.length === 1 ? tasks[0].label : `${tasks.length} tasks running`);
             window.clearTimeout(dismissTimer);
             if (!dismissedForRun) widget.classList.add("visible");
             summary.textContent = tasks.length === 1 ? tasks[0].label : `${tasks.length} tasks running`;
@@ -488,6 +499,8 @@
             }));
             wasActive = true;
           } else if (scheduled.length) {
+            widget.classList.add("has-attention");
+            toggle.setAttribute("aria-label", scheduled.length === 1 ? scheduled[0].label : `${scheduled.length} tasks scheduled`);
             window.clearTimeout(dismissTimer);
             if (!dismissedForRun) widget.classList.add("visible");
             summary.textContent = scheduled.length === 1
@@ -508,6 +521,8 @@
             }));
             wasActive = false;
           } else if (wasActive) {
+            widget.classList.add("has-attention");
+            toggle.setAttribute("aria-label", "Task complete. Open background activity.");
             dismissedForRun = false;
             summary.textContent = "Task complete";
             cardDetail.textContent = "Finished successfully";
@@ -524,6 +539,8 @@
               dismissTimer = 0;
             }, 5000);
           } else {
+            widget.classList.remove("has-attention");
+            toggle.setAttribute("aria-label", "No background tasks or notifications");
             dismissedForRun = false;
             summary.textContent = "No tasks running";
             cardDetail.textContent = "Background work appears here.";
@@ -542,6 +559,25 @@
   <script>
     (() => {
       const actionMenus = ".series-menu, .episode-menu, .account-menu";
+      document.querySelectorAll('details a[href^="/titles/"][href$="/organize"]').forEach((organizeLink) => {
+        const match = organizeLink.getAttribute("href").match(/^\/titles\/(\d+)\/organize$/);
+        const menu = organizeLink.closest("details");
+        if (!match || !menu || menu.querySelector('a[href^="/titles/"][href*="/libraries"]')) return;
+        const add = document.createElement("a");
+        add.href = `/titles/${match[1]}/libraries?return_to=${encodeURIComponent(location.pathname + location.search)}`;
+        add.textContent = "Add to Libraries";
+        organizeLink.before(add);
+      });
+      const currentTitle = location.pathname.match(/^\/titles\/(\d+)/)?.[1];
+      if (currentTitle) document.querySelectorAll("details.episode-menu").forEach((menu) => {
+        if (menu.querySelector('a[href*="/libraries"]') || !menu.querySelector('a[href^="/files/"]')) return;
+        const panel = menu.querySelector(":scope > div");
+        if (!panel) return;
+        const add = document.createElement("a");
+        add.href = `/titles/${currentTitle}/libraries?return_to=${encodeURIComponent(location.pathname + location.search)}`;
+        add.textContent = "Add Series to Libraries";
+        panel.prepend(add);
+      });
       document.addEventListener("click", (event) => {
         document.querySelectorAll(`${actionMenus}[open]`).forEach((menu) => {
           if (!menu.contains(event.target)) menu.removeAttribute("open");

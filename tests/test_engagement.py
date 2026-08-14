@@ -52,6 +52,10 @@ class EngagementTests(unittest.TestCase):
         self.assertIn("SHA-256", release["body"])
         self.assertIn("never deletes media automatically", release["body"])
 
+    def test_alpha_6_release_notes_document_installation_name_deprecation(self):
+        release_notes = Path("docs/releases/0.6.0-alpha.1.md").read_text(encoding="utf-8")
+        self.assertIn("Custom installation names are deprecated", release_notes)
+
     def test_member_announcement_audience_and_recurrence(self):
         announcement_id = self.service.create(
             "Server maintenance", "The library will be briefly unavailable.",

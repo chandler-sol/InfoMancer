@@ -17,7 +17,15 @@ CREATE TABLE IF NOT EXISTS roots (
     kind TEXT NOT NULL CHECK(kind IN ('movie', 'tv')),
     label TEXT NOT NULL DEFAULT '',
     enabled INTEGER NOT NULL DEFAULT 1,
-    last_scanned_at TEXT
+    last_scanned_at TEXT,
+    health_status TEXT NOT NULL DEFAULT 'unknown'
+        CHECK(health_status IN ('unknown','healthy','degraded','offline')),
+    last_checked_at TEXT,
+    last_seen_at TEXT,
+    last_error TEXT NOT NULL DEFAULT '',
+    last_file_count INTEGER NOT NULL DEFAULT 0,
+    last_observed_file_count INTEGER NOT NULL DEFAULT 0,
+    guard_preserved_count INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS titles (
@@ -45,6 +53,9 @@ CREATE TABLE IF NOT EXISTS titles (
     metadata_end_year INTEGER,
     metadata_continuing INTEGER,
     metadata_status TEXT,
+    metadata_refreshed_at TEXT,
+    metadata_refresh_error TEXT NOT NULL DEFAULT '',
+    metadata_provider TEXT NOT NULL DEFAULT '',
     overview TEXT,
     matched_at TEXT,
     discovered_at TEXT,
@@ -267,6 +278,7 @@ CREATE TABLE IF NOT EXISTS user_title_state (
     favorite INTEGER NOT NULL DEFAULT 0,
     personal_rating REAL,
     custom_order INTEGER,
+    sort_title TEXT,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(user_id, title_id),
     CHECK(personal_rating IS NULL OR (personal_rating >= 0 AND personal_rating <= 10))
@@ -332,6 +344,46 @@ CREATE TABLE IF NOT EXISTS event_logs (
     detail TEXT NOT NULL DEFAULT '',
     context_json TEXT NOT NULL DEFAULT '{}',
     user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS custom_libraries (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    library_kind TEXT NOT NULL DEFAULT 'mixed'
+        CHECK(library_kind IN ('movie','tv','mixed')),
+    description TEXT NOT NULL DEFAULT '',
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    collection_type TEXT NOT NULL DEFAULT 'manual',
+    filter_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS custom_library_titles (
+    library_id INTEGER NOT NULL REFERENCES custom_libraries(id) ON DELETE CASCADE,
+    title_id INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
+    added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(library_id,title_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_event_reads (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    event_id INTEGER NOT NULL REFERENCES event_logs(id) ON DELETE CASCADE,
+    read_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(user_id, event_id)
+);
+
+CREATE TABLE IF NOT EXISTS metadata_refresh_queue (
+    title_id INTEGER PRIMARY KEY REFERENCES titles(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'queued'
+        CHECK(status IN ('queued','running','complete','failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TEXT,
+    completed_at TEXT,
+    provider TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS user_search_history (
@@ -582,6 +634,9 @@ class Database:
                 "metadata_end_year": "INTEGER",
                 "metadata_continuing": "INTEGER",
                 "metadata_status": "TEXT",
+                "metadata_refreshed_at": "TEXT",
+                "metadata_refresh_error": "TEXT NOT NULL DEFAULT ''",
+                "metadata_provider": "TEXT NOT NULL DEFAULT ''",
                 "overview": "TEXT",
                 "tvdb_movie_id": "INTEGER",
                 "tmdb_id": "TEXT",
@@ -599,6 +654,26 @@ class Database:
             for name, column_type in additions.items():
                 if name not in columns:
                     conn.execute(f"ALTER TABLE titles ADD COLUMN {name} {column_type}")
+            root_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(roots)")
+            }
+            root_additions = {
+                "health_status": "TEXT NOT NULL DEFAULT 'unknown'",
+                "last_checked_at": "TEXT",
+                "last_seen_at": "TEXT",
+                "last_error": "TEXT NOT NULL DEFAULT ''",
+                "last_file_count": "INTEGER NOT NULL DEFAULT 0",
+                "last_observed_file_count": "INTEGER NOT NULL DEFAULT 0",
+                "guard_preserved_count": "INTEGER NOT NULL DEFAULT 0",
+            }
+            for name, column_type in root_additions.items():
+                if name not in root_columns:
+                    conn.execute(f"ALTER TABLE roots ADD COLUMN {name} {column_type}")
+            collection_columns = {row["name"] for row in conn.execute("PRAGMA table_info(collections)")}
+            if "collection_type" not in collection_columns:
+                conn.execute("ALTER TABLE collections ADD COLUMN collection_type TEXT NOT NULL DEFAULT 'manual'")
+            if "filter_json" not in collection_columns:
+                conn.execute("ALTER TABLE collections ADD COLUMN filter_json TEXT NOT NULL DEFAULT '{}'")
             file_columns = {row["name"] for row in conn.execute("PRAGMA table_info(files)")}
             file_additions = {
                 "original_filename": "TEXT",
@@ -637,6 +712,11 @@ class Database:
             for name, column_type in user_additions.items():
                 if name not in user_columns:
                     conn.execute(f"ALTER TABLE users ADD COLUMN {name} {column_type}")
+            title_state_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(user_title_state)")
+            }
+            if "sort_title" not in title_state_columns:
+                conn.execute("ALTER TABLE user_title_state ADD COLUMN sort_title TEXT")
             trash_columns = {
                 row["name"] for row in conn.execute("PRAGMA table_info(duplicate_trash)")
             }

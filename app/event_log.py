@@ -7,6 +7,10 @@ from .db import Database
 
 
 LEVELS = {"debug", "info", "warning", "error"}
+ACTIVITY_CATEGORIES = {
+    "scan", "source-guard", "hashing", "duplicates", "metadata", "mie",
+    "media", "media-info", "library",
+}
 
 
 class EventLog:
@@ -92,3 +96,67 @@ class EventLog:
                     "SELECT DISTINCT category FROM event_logs ORDER BY category"
                 )
             ]
+
+    @staticmethod
+    def _activity_href(context: dict[str, Any]) -> str:
+        if context.get("finding_id"):
+            return f"/library-health#finding-{int(context['finding_id'])}"
+        if context.get("title_id"):
+            return f"/titles/{int(context['title_id'])}"
+        if context.get("collection_id"):
+            return f"/collections/{int(context['collection_id'])}"
+        if context.get("library_id"):
+            return f"/libraries/{int(context['library_id'])}"
+        if context.get("root_id"):
+            return "/sources"
+        if context.get("file_id"):
+            return f"/files/{int(context['file_id'])}"
+        category = str(context.get("category") or "")
+        return {
+            "duplicates": "/duplicates", "metadata": "/settings/metadata",
+            "media": "/settings/system", "hashing": "/settings/system",
+            "scan": "/sources", "source-guard": "/sources",
+        }.get(category, "/library-health")
+
+    def activity(self, user_id: int, *, unread_only: bool = False, limit: int = 100) -> list[dict]:
+        placeholders = ",".join("?" for _ in ACTIVITY_CATEGORIES)
+        unread = "AND ur.event_id IS NULL" if unread_only else ""
+        params = [user_id, *sorted(ACTIVITY_CATEGORIES), max(1, min(limit, 250))]
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                f"""SELECT e.*,ur.read_at FROM event_logs e
+                    LEFT JOIN user_event_reads ur ON ur.event_id=e.id AND ur.user_id=?
+                    WHERE e.category IN ({placeholders})
+                      AND (e.user_id IS NULL OR e.user_id=?) {unread}
+                    ORDER BY e.id DESC LIMIT ?""",
+                [user_id, *sorted(ACTIVITY_CATEGORIES), user_id, params[-1]],
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            try:
+                context = json.loads(item["context_json"] or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                context = {}
+            item["context"] = context
+            context.setdefault("category", item["category"])
+            item["href"] = self._activity_href(context)
+            item["unread"] = item["read_at"] is None
+            result.append(item)
+        return result
+
+    def unread_count(self, user_id: int) -> int:
+        return len(self.activity(user_id, unread_only=True, limit=250)) if user_id > 0 else 0
+
+    def mark_read(self, user_id: int, event_ids: list[int] | None = None) -> int:
+        if user_id <= 0:
+            return 0
+        events = self.activity(user_id, unread_only=True, limit=250)
+        allowed = {item["id"] for item in events}
+        selected = allowed if event_ids is None else allowed.intersection(event_ids)
+        with self.database.connect() as conn:
+            conn.executemany(
+                "INSERT OR IGNORE INTO user_event_reads(user_id,event_id) VALUES (?,?)",
+                [(user_id, event_id) for event_id in selected],
+            )
+        return len(selected)

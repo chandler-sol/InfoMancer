@@ -112,6 +112,32 @@ class CollectionTests(unittest.TestCase):
         self.assertNotIn("Weekend Shelf", library.text)
         self.assertIn("First Movie", library.text)
 
+    def test_smart_collection_previews_and_updates_from_saved_filters(self):
+        preview = self.client.post(
+            "/collections/smart/preview",
+            data={"genre": "", "year_from": "2021", "year_to": "", "resolution": "",
+                  "quality": "", "root_id": "", "favorite": "", "missing_episodes": "",
+                  "health_category": ""},
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertIn("Second Movie", preview.text)
+        self.assertNotIn("First Movie", preview.text)
+        created = self.client.post(
+            "/collections/smart",
+            data={"name": "Recent Releases", "description": "", "genre": "",
+                  "year_from": "2021", "year_to": "", "resolution": "", "quality": "",
+                  "root_id": "", "favorite": "", "missing_episodes": "",
+                  "health_category": ""}, follow_redirects=False,
+        )
+        collection_id = int(created.headers["location"].split("/")[2].split("?")[0])
+        detail = self.client.get(f"/collections/{collection_id}")
+        self.assertIn("Second Movie", detail.text)
+        with self.database.connect() as conn:
+            conn.execute("UPDATE titles SET year=2019 WHERE id=?", (self.second_id,))
+        self.assertNotIn("Second Movie", self.client.get(f"/collections/{collection_id}").text)
+        chooser = self.client.get(f"/titles/{self.first_id}/collections")
+        self.assertNotIn("Recent Releases", chooser.text)
+
     def test_collection_accepts_image_artwork_and_rejects_unknown_files(self):
         created = self.client.post(
             "/collections", data={"name": "Artwork Test"}, follow_redirects=False

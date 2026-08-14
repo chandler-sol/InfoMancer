@@ -20,16 +20,16 @@
       <select id="source-filter" name="root" aria-label="Filter by source"><option value="">All Sources</option>{% for source in root_options %}<option value="{{ source.id }}" {% if root_id == source.id %}selected{% endif %}>{{ source.label or source.path }}</option>{% endfor %}</select>
       <select id="match-filter" name="match" aria-label="Filter by match status"><option value="">All Matches</option><option value="matched" {% if match_status == 'matched' %}selected{% endif %}>Matched Only</option><option value="unmatched" {% if match_status == 'unmatched' %}selected{% endif %}>Unmatched Only</option></select>
       {% if kind != 'movie' %}<select id="gap-filter" name="gaps" aria-label="Filter by missing episodes"><option value="">All Episode Statuses</option><option value="missing" {% if gap_status == 'missing' %}selected{% endif %}>Missing Episodes</option><option value="complete" {% if gap_status == 'complete' %}selected{% endif %}>No Known Gaps</option></select>{% endif %}
-      <select id="sort-filter" name="sort" aria-label="Sort library"><option value="title" {% if sort_key == 'title' %}selected{% endif %}>Alphabetical</option><option value="favorites" {% if sort_key == 'favorites' %}selected{% endif %}>Favorites First</option><option value="release_new" {% if sort_key == 'release_new' %}selected{% endif %}>Newest Release</option><option value="release_old" {% if sort_key == 'release_old' %}selected{% endif %}>Oldest Release</option><option value="rating" {% if sort_key == 'rating' %}selected{% endif %}>IMDb Rating</option><option value="personal_rating" {% if sort_key == 'personal_rating' %}selected{% endif %}>Personal Rating</option><option value="date_added" {% if sort_key == 'date_added' %}selected{% endif %}>Date Added</option><option value="runtime" {% if sort_key == 'runtime' %}selected{% endif %}>Runtime</option><option value="resolution" {% if sort_key == 'resolution' %}selected{% endif %}>Resolution</option><option value="bitrate" {% if sort_key == 'bitrate' %}selected{% endif %}>Bitrate</option><option value="file_size" {% if sort_key == 'file_size' %}selected{% endif %}>File Size</option><option value="custom" {% if sort_key == 'custom' %}selected{% endif %}>Custom Order</option><option value="random" {% if sort_key == 'random' %}selected{% endif %}>Random</option></select>
+      <select id="sort-filter" name="sort" aria-label="Sort library"><option value="title" {% if sort_key == 'title' %}selected{% endif %}>Alphabetical</option><option value="favorites" {% if sort_key == 'favorites' %}selected{% endif %}>Favorites First</option><option value="release_new" {% if sort_key == 'release_new' %}selected{% endif %}>Newest Release</option><option value="release_old" {% if sort_key == 'release_old' %}selected{% endif %}>Oldest Release</option><option value="rating" {% if sort_key == 'rating' %}selected{% endif %}>IMDb Rating</option><option value="personal_rating" {% if sort_key == 'personal_rating' %}selected{% endif %}>Personal Rating</option><option value="date_added" {% if sort_key == 'date_added' %}selected{% endif %}>Date Added</option><option value="runtime" {% if sort_key == 'runtime' %}selected{% endif %}>Runtime</option><option value="resolution" {% if sort_key == 'resolution' %}selected{% endif %}>Resolution</option><option value="bitrate" {% if sort_key == 'bitrate' %}selected{% endif %}>Bitrate</option><option value="file_size" {% if sort_key == 'file_size' %}selected{% endif %}>File Size</option><option value="random" {% if sort_key == 'random' %}selected{% endif %}>Random</option></select>
     </div>
   </details>
 </form>
+<div class="library-display-toolbar">
 <nav class="alphabet" aria-label="Filter titles by first character">
   <a href="{{ request.url.path }}{% if filter_query %}?{{ filter_query }}{% endif %}" {% if not letter %}class="active"{% endif %}>All</a>
   <a href="{{ request.url.path }}?{% if filter_query %}{{ filter_query }}&amp;{% endif %}letter=%23" {% if letter == '#' %}class="active"{% endif %}>#</a>
   {% for character in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' %}<a href="{{ request.url.path }}?{% if filter_query %}{{ filter_query }}&amp;{% endif %}letter={{ character }}" {% if letter == character %}class="active"{% endif %}>{{ character }}</a>{% endfor %}
 </nav>
-<p class="sr-only" id="search-state" aria-live="polite"></p>
 <div class="library-view-toolbar" aria-label="Library display options">
   <div class="library-view-controls">
     <div class="library-view-toggle" role="group" aria-label="Library view">
@@ -43,6 +43,8 @@
     </div>
   </div>
 </div>
+</div>
+<p class="sr-only" id="search-state" aria-live="polite"></p>
 {% if show_onboarding_tour and not rows %}
 <section class="tour-library-demo" data-view="list" aria-label="Example library used by the walkthrough">
   <p class="tour-demo-caption"><span>EXAMPLE LIBRARY</span> These fictional titles demonstrate InfoMancer without adding anything to your collection.</p>
@@ -59,6 +61,7 @@
   </div>
 </section>
 {% endif %}
+<div class="review-actions selection-actions library-selection-actions" id="library-selection-actions" hidden><span class="selection-count" id="library-selection-count">0 selected</span><button class="button subtle" type="button" id="deselect-library-titles">Deselect all</button><button class="button" type="button" id="append-sort-titles">Append Sort Titles</button><button class="button" form="library-bulk-form" formaction="/titles/organize-bulk" formmethod="post">Organize &amp; Tags</button><button class="button" form="library-bulk-form" formaction="/metadata/queue" formmethod="post">Refresh metadata</button>{% if kind in ['movie', 'all'] %}<button class="button primary" form="library-bulk-form" id="analyze-library-movies" data-match-kind="movie" formaction="/movies/bulk-match/analyze">Match selected movies</button>{% endif %}{% if kind in ['tv', 'all'] %}<button class="button primary" form="library-bulk-form" id="analyze-library-shows" data-match-kind="tv" formaction="/shows/bulk-match/analyze">Match selected TV shows</button>{% endif %}</div>
 <section class="cover-library" id="cover-library" aria-label="Library covers" hidden>
 {% for row in rows %}
   <article class="cover-card" id="title-{{ row.id }}">
@@ -71,13 +74,14 @@
       <input type="hidden" name="return_to" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}#title-{{ row.id }}">
       <button type="submit" class="cover-favorite-button{% if row.favorite %} active{% endif %}" aria-label="{{ 'Remove' if row.favorite else 'Add' }} {{ row.metadata_title or row.title }} {{ 'from' if row.favorite else 'to' }} favorites" title="{{ 'Remove from favorites' if row.favorite else 'Add to favorites' }}"><span aria-hidden="true">★</span></button>
     </form>
+    <div class="cover-select-zone"><label class="cover-select-control" title="Select {{ row.metadata_title or row.title }}"><input class="library-title-choice library-cover-choice" type="checkbox" name="selected" value="{{ row.id }}" form="library-bulk-form" data-kind="{{ row.kind }}" data-matched="{% if row.kind == 'tv' %}{{ 'true' if row.tvdb_id else 'false' }}{% else %}{{ 'true' if row.tvdb_movie_id or row.tmdb_id or row.imdb_id else 'false' }}{% endif %}" data-initial="{{ title_initial(row) }}" data-title="{{ row.metadata_title or row.title }}" aria-label="Select {{ row.metadata_title or row.title }}"><span aria-hidden="true">✓</span></label></div>
     <div class="cover-card-actions" aria-label="Actions for {{ row.metadata_title or row.title }}">
       <details class="episode-menu cover-row-menu"><summary aria-label="Actions for {{ row.metadata_title or row.title }}" title="{{ 'Movie' if row.kind == 'movie' else 'Series' }} actions">⋮</summary><div><form method="post" action="/titles/{{ row.id }}/favorite"><input type="hidden" name="return_to" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}"><button class="favorite-action{% if row.favorite %} active{% endif %}"><span>★</span>{{ 'Remove favorite' if row.favorite else 'Add favorite' }}</button></form><a href="/titles/{{ row.id }}/organize">Organize &amp; Tags</a><a href="/titles/{{ row.id }}/collections?return_to={{ (request.url.path ~ ('?' ~ request.url.query if request.url.query else ''))|urlencode }}">Add to Collection</a>{% if (row.kind == 'tv' and row.tvdb_id) or (row.kind == 'movie' and row.tvdb_movie_id) %}<a href="/titles/{{ row.id }}/cover">Change Cover</a>{% endif %}{% if row.kind == 'movie' %}{% if row.tvdb_movie_id or row.tmdb_id or row.imdb_id %}<a href="/titles/{{ row.id }}/tvdb">Fix Match</a>{% if row.first_file_id %}<a href="/files/{{ row.first_file_id }}/rename-movie">Preview Rename</a>{% endif %}{% else %}<a href="/titles/{{ row.id }}/tvdb">Match</a>{% endif %}{% else %}<a href="/titles/{{ row.id }}/tvdb">{% if row.tvdb_id %}Fix Match{% else %}Match{% endif %}</a>{% if row.tvdb_id %}<a href="/titles/{{ row.id }}/rename-episodes">Review Episode Renames</a><a href="/titles/{{ row.id }}/rename-folder">Preview Folder Rename</a>{% endif %}{% endif %}</div></details>
     </div>
   </article>
 {% else %}<div class="empty cover-library-empty">{% if q or genre or title_type or letter or root_id or match_status or person_id or person_name %}No titles match the current filters.{% else %}No titles found. Add and scan a library root.{% endif %}</div>{% endfor %}
 </section>
-<form method="post" action="{{ '/shows/bulk-match/analyze' if kind == 'tv' else '/movies/bulk-match/analyze' }}" id="library-bulk-form"><input type="hidden" name="mode" value="selected"><input type="hidden" name="return_to" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}"><div class="review-actions selection-actions library-selection-actions" id="library-selection-actions" hidden><span class="selection-count" id="library-selection-count">0 selected</span><button class="button" formaction="/titles/organize-bulk" formmethod="post">Organize &amp; Tags</button>{% if kind in ['movie', 'all'] %}<button class="button primary" id="analyze-library-movies" data-match-kind="movie" formaction="/movies/bulk-match/analyze">Match selected movies</button>{% endif %}{% if kind in ['tv', 'all'] %}<button class="button primary" id="analyze-library-shows" data-match-kind="tv" formaction="/shows/bulk-match/analyze">Match selected TV shows</button>{% endif %}</div>
+<form method="post" action="{{ '/shows/bulk-match/analyze' if kind == 'tv' else '/movies/bulk-match/analyze' }}" id="library-bulk-form"><input type="hidden" name="mode" value="selected"><input type="hidden" name="return_to" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
 <section class="panel table-wrap library-table" data-library-kind="{{ kind }}"><table><thead><tr><th class="select-heading"><input type="checkbox" id="select-all-titles" aria-label="Select all visible titles"></th><th>Title</th><th>Type</th><th>Match</th>{% if kind != 'movie' %}<th>Episodes</th><th>Missing</th>{% endif %}<th class="row-actions-heading"><span class="sr-only">Actions</span></th></tr></thead><tbody>
 {% set grouping = namespace(initial='') %}
 {% for row in rows %}
@@ -130,9 +134,11 @@
     const state = document.getElementById("search-state");
     const librarySelectionActions = document.getElementById("library-selection-actions");
     const librarySelectionCount = document.getElementById("library-selection-count");
+    const deselectLibraryTitles = document.getElementById("deselect-library-titles");
     const selectAllTitles = document.getElementById("select-all-titles");
     const analyzeLibraryMovies = document.getElementById("analyze-library-movies");
     const analyzeLibraryShows = document.getElementById("analyze-library-shows");
+    const appendSortTitles = document.getElementById("append-sort-titles");
     if (!input || !tableBody) return;
 
     let timer;
@@ -141,6 +147,7 @@
     let suggestionTimer;
     let requestNumber = 0;
     let coverSizeValueTimer;
+    let selectionOrder = [];
     const savedLibraryView = localStorage.getItem("infomancer-library-view");
     let currentLibraryView = ["list", "covers"].includes(savedLibraryView)
       ? savedLibraryView
@@ -175,8 +182,7 @@
       coverViewButton?.classList.toggle("active", covers);
       listViewButton?.setAttribute("aria-pressed", String(!covers));
       coverViewButton?.setAttribute("aria-pressed", String(covers));
-      if (covers && librarySelectionActions) librarySelectionActions.hidden = true;
-      else updateTitleSelection();
+      updateTitleSelection();
       if (persist) localStorage.setItem("infomancer-library-view", currentLibraryView);
     };
 
@@ -190,8 +196,14 @@
 
     const updateTitleSelection = () => {
       if (!librarySelectionActions || !librarySelectionCount) return;
-      const choices = Array.from(document.querySelectorAll(".library-title-choice"));
+      const allChoices = Array.from(document.querySelectorAll(".library-title-choice"));
+      const choices = Array.from(new Map(allChoices.map(choice => [choice.value, choice])).values());
       const selected = choices.filter(choice => choice.checked);
+      const selectedIds = new Set(selected.map(choice => choice.value));
+      selectionOrder = selectionOrder.filter(titleId => selectedIds.has(titleId));
+      selected.forEach(choice => {
+        if (!selectionOrder.includes(choice.value)) selectionOrder.push(choice.value);
+      });
       const unmatched = selected.filter(choice => choice.dataset.matched !== "true");
       const selectedMovies = unmatched.filter(choice => choice.dataset.kind === "movie");
       const selectedShows = unmatched.filter(choice => choice.dataset.kind === "tv");
@@ -200,6 +212,7 @@
         ? `${selected.length} selected · ${unmatched.length} unmatched`
         : `${selected.length} selected`;
       librarySelectionActions.hidden = selected.length === 0;
+      if (appendSortTitles) appendSortTitles.hidden = selected.length < 2;
       if (analyzeLibraryMovies) {
         analyzeLibraryMovies.hidden = selectedMovies.length === 0;
         analyzeLibraryMovies.textContent = `Match ${selectedMovies.length} selected ${selectedMovies.length === 1 ? "movie" : "movies"}`;
@@ -218,6 +231,15 @@
         letterChoice.checked = group.length > 0 && selectedGroup.length === group.length;
         letterChoice.indeterminate = selectedGroup.length > 0 && selectedGroup.length < group.length;
       });
+    };
+
+    const setTitleSelected = (source, checked) => {
+      document.querySelectorAll(`.library-title-choice[value="${CSS.escape(source.value)}"]`).forEach(choice => {
+        choice.checked = checked;
+      });
+      selectionOrder = selectionOrder.filter(titleId => titleId !== source.value);
+      if (checked) selectionOrder.push(source.value);
+      updateTitleSelection();
     };
 
     const updateResults = async () => {
@@ -381,19 +403,40 @@
     matchFilter.addEventListener("change", updateResults);
     gapFilter?.addEventListener("change", updateResults);
     selectAllTitles?.addEventListener("change", () => {
-      document.querySelectorAll(".library-title-choice").forEach(choice => {
-        choice.checked = selectAllTitles.checked;
+      const unique = new Map();
+      document.querySelectorAll(".library-title-choice").forEach(choice => unique.set(choice.value, choice));
+      unique.forEach(choice => {
+        setTitleSelected(choice, selectAllTitles.checked);
       });
+    });
+    deselectLibraryTitles?.addEventListener("click", () => {
+      document.querySelectorAll(".library-title-choice").forEach(choice => {
+        choice.checked = false;
+      });
+      selectionOrder = [];
       updateTitleSelection();
     });
     tableBody.addEventListener("change", event => {
       if (event.target.matches(".letter-title-choice")) {
         const letter = event.target.dataset.letter;
+        const unique = new Map();
         document.querySelectorAll('.library-title-choice').forEach(choice => {
-          if (choice.dataset.initial === letter) choice.checked = event.target.checked;
+          if (choice.dataset.initial === letter) unique.set(choice.value, choice);
         });
-        updateTitleSelection();
-      } else if (event.target.matches(".library-title-choice")) updateTitleSelection();
+        unique.forEach(choice => setTitleSelected(choice, event.target.checked));
+      } else if (event.target.matches(".library-title-choice")) setTitleSelected(event.target, event.target.checked);
+    });
+    document.addEventListener("change", event => {
+      if (event.target.matches(".library-cover-choice")) setTitleSelected(event.target, event.target.checked);
+    });
+    appendSortTitles?.addEventListener("click", () => {
+      if (selectionOrder.length < 2) return;
+      const url = new URL("/titles/sort-titles", window.location.origin);
+      selectionOrder.forEach(titleId => url.searchParams.append("selected", titleId));
+      url.searchParams.set("return_to", window.location.pathname + window.location.search);
+      document.dispatchEvent(new CustomEvent("infomancer:open-dialog", {
+        detail: {url: url.href, trigger: appendSortTitles},
+      }));
     });
     document.addEventListener("click", event => {
       {% if current_user.is_librarian %}if (window.matchMedia("(hover: none), (pointer: coarse)").matches) {
