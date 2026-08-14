@@ -44,7 +44,10 @@ def normalize_email(value: str) -> str:
 
 def safe_next(value: str, fallback: str = "/") -> str:
     candidate = value.strip()
-    if not candidate.startswith("/") or candidate.startswith("//"):
+    if (
+        not candidate.startswith("/") or candidate.startswith("//")
+        or "\\" in candidate or any(ord(character) < 32 for character in candidate)
+    ):
         return fallback
     return candidate
 

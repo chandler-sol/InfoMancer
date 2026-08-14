@@ -4,7 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.auth import AuthService, AuthenticationError, password_hasher
+from app.auth import AuthService, AuthenticationError, password_hasher, safe_next
 from app.config import Settings
 from app.db import Database
 
@@ -29,6 +29,12 @@ class AuthServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temporary.cleanup()
+
+    def test_safe_next_rejects_external_and_backslash_redirects(self):
+        self.assertEqual(safe_next("/movies?sort=title"), "/movies?sort=title")
+        for unsafe in ("https://example.test", "//example.test", "/\\example.test", "/ok\nLocation: bad"):
+            with self.subTest(destination=unsafe):
+                self.assertEqual(safe_next(unsafe), "/")
 
     def test_password_is_argon2id_and_login_accepts_email(self):
         user = self.auth.create_user(

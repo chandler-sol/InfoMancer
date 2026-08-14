@@ -12,7 +12,7 @@ import app.main as main
 from app.db import Database
 from app.main import (
     broader_movie_queries, broader_series_queries, localized_tvdb_title,
-    match_confidence,
+    match_confidence, is_tvdb_series_reference,
 )
 
 
@@ -256,9 +256,21 @@ class MovieCreditViewTests(unittest.TestCase):
     def test_broader_series_queries_clean_folder_style_searches(self):
         lifecycle = broader_series_queries("The Show (2021 - Present)")
         punctuation = broader_series_queries("Law & Order: Special Victims Unit")
+        identifiers = broader_series_queries("The Show {tvdb-123} {imdb-tt123} (2021)")
         self.assertIn("The Show", lifecycle)
         self.assertIn("Law and Order: Special Victims Unit", punctuation)
         self.assertIn("Law & Order", punctuation)
+        self.assertIn("The Show", identifiers)
+
+    def test_broader_series_queries_bounds_adversarial_input(self):
+        variants = broader_series_queries("The Show " + "{" * 100_000)
+        self.assertLessEqual(max(map(len, variants), default=0), 1000)
+
+    def test_tvdb_reference_requires_exact_trusted_hostname(self):
+        self.assertTrue(is_tvdb_series_reference("https://thetvdb.com/series/1923"))
+        self.assertTrue(is_tvdb_series_reference("www.thetvdb.com/series/1923"))
+        self.assertFalse(is_tvdb_series_reference("https://thetvdb.com.example.test/series/1923"))
+        self.assertFalse(is_tvdb_series_reference("https://example.test/thetvdb.com/series/1923"))
 
     def test_match_confidence_uses_title_and_release_year(self):
         exact = match_confidence("Astro Boy", 2009, {"name": "Astro Boy", "year": "2009"})

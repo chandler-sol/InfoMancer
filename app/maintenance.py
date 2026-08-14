@@ -110,8 +110,11 @@ def list_database_backups(database_path: Path) -> list[dict]:
 def resolve_backup(database_path: Path, name: str) -> Path:
     if not SAFE_BACKUP_NAME.fullmatch(name):
         raise MaintenanceError("That backup name is not valid.")
-    path = backup_directory(database_path) / name
-    if not path.is_file():
+    path = next((
+        candidate for candidate in backup_directory(database_path).iterdir()
+        if candidate.is_file() and candidate.name == name
+    ), None)
+    if path is None:
         raise MaintenanceError("That database backup no longer exists.")
     return path
 
@@ -180,7 +183,25 @@ def write_update_status(database_path: Path, value: dict) -> Path:
 
 
 def write_update_request(database_path: Path, tag: str, requested_by: str) -> Path:
-    if not re.fullmatch(r"v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", tag):
+    candidate = tag[1:] if tag.startswith("v") else tag
+    core = candidate
+    suffix = ""
+    has_suffix_marker = False
+    for marker in ("-", "+"):
+        if marker in core:
+            core, suffix = core.split(marker, 1)
+            has_suffix_marker = True
+            break
+    version_parts = core.split(".")
+    valid_suffix = (not has_suffix_marker or bool(suffix)) and all(
+        character.isascii() and (character.isalnum() or character in ".-")
+        for character in suffix
+    )
+    if (
+        not tag or len(tag) > 100 or len(version_parts) != 3
+        or not all(part.isascii() and part.isdigit() and part for part in version_parts)
+        or not valid_suffix
+    ):
         raise MaintenanceError("The selected release tag is not valid.")
     request_path = update_request_path(database_path)
     temporary = request_path.with_suffix(".tmp")
