@@ -47,6 +47,23 @@ class EventLogTests(unittest.TestCase):
             } <= tables
         )
 
+    def test_activity_reuses_events_with_per_account_read_state_and_links(self):
+        with self.database.connect() as conn:
+            user_id = conn.execute(
+                """INSERT INTO users(username,display_name,role,password_hash)
+                   VALUES ('reader','Reader','member','test')"""
+            ).lastrowid
+        self.logs.write(
+            "mie", "A new finding needs review.",
+            context={"finding_id": 42}, user_id=user_id,
+        )
+        activity = self.logs.activity(user_id)
+        self.assertEqual(activity[0]["href"], "/library-health#finding-42")
+        self.assertTrue(activity[0]["unread"])
+        self.assertEqual(self.logs.unread_count(user_id), 1)
+        self.assertEqual(self.logs.mark_read(user_id, [activity[0]["id"]]), 1)
+        self.assertEqual(self.logs.unread_count(user_id), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

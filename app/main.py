@@ -56,8 +56,9 @@ from .maintenance import (
 from .naming import (
     contained_destination, plex_episode_filename, plex_movie_filename, plex_show_folder,
 )
-from .scanner import scan_root, scan_title
+from .scanner import SourceUnavailableError, scan_root, scan_title
 from .source_browser import SourceBrowserError, list_folders, preview_folder
+from .smart_collections import decode_filters, encode_filters, matching_titles, normalize_filters
 from .tvdb import TVDBClient, TVDBError
 from .provider_secrets import ProviderSecretError, ProviderSecretStore
 from .timezones import timezone_groups
@@ -84,7 +85,7 @@ try:
 except ProviderSecretError as exc:
     stored_provider_secrets = {}
     provider_secret_error = str(exc)
-APP_VERSION = "0.5.0-alpha.3"
+APP_VERSION = "0.6.0-alpha.1"
 app = FastAPI(title="InfoMancer", version=APP_VERSION)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "app" / "static"), name="static")
 COLLECTION_ART_DIR = settings.database.parent / "collection-art"
@@ -123,7 +124,9 @@ def shared_template_context(request: Request) -> dict:
         "sandbox_mode": settings.sandbox,
         "minimum_password_length": settings.minimum_password_length,
         "app_version": APP_VERSION,
-        "app_name": preferences["installation_name"],
+        # Retain installation_name in portable settings for compatibility while
+        # presenting one consistent product identity everywhere.
+        "app_name": "InfoMancer",
         "default_library_view": preferences["default_library_view"],
         "default_cover_size": int(preferences["default_cover_size"]),
         "search_provider_name": preferences["search_provider_name"],
@@ -132,6 +135,7 @@ def shared_template_context(request: Request) -> dict:
         "show_setup_choice": show_setup_choice,
         "next_announcement": next_announcement,
         "announcement_due_count": announcement_due_count,
+        "activity_unread_count": event_log.unread_count(current_user.id) if current_user else 0,
     }
 
 
@@ -1748,22 +1752,19 @@ def getting_started_step(request: Request, step: str):
 
 @app.post("/getting-started/general")
 def save_getting_started_general(
-    request: Request, installation_name: str = Form(...),
-    timezone_name: str = Form(...),
+    request: Request, timezone_name: str = Form(...),
 ):
     if request.state.user.id <= 0:
         return redirect("/sources", "Setup Assistant requires local or external user accounts.")
     try:
         values = app_settings.validate_general(
-            installation_name, timezone_name, "list",
+            app_settings.get("installation_name"), timezone_name, "list",
             app_settings.get("default_cover_size"),
         )
         app_settings.update(values, request.state.user.id)
     except AppSettingError as exc:
         context = setup_assistant_context(request, "general", str(exc))
-        context["preferences"].update({
-            "installation_name": installation_name, "timezone": timezone_name,
-        })
+        context["preferences"].update({"timezone": timezone_name})
         return templates.TemplateResponse(
             request, "getting_started.html", context, status_code=400
         )
@@ -2175,7 +2176,9 @@ def run_media_inspection(file_ids: list[int] | None = None) -> None:
     )
 
 
-def run_scan(root_id: int, *, hash_after: bool = True) -> list[int]:
+def run_scan(
+    root_id: int, *, hash_after: bool = True, force_cleanup: bool = False,
+) -> list[int]:
     before = _file_signatures(root_id=root_id)
     with scan_lock:
         scan_jobs[root_id] = {"status": "running", "files": 0, "titles": 0}
@@ -2195,26 +2198,104 @@ def run_scan(root_id: int, *, hash_after: bool = True) -> list[int]:
             root = conn.execute("SELECT * FROM roots WHERE id=?", (root_id,)).fetchone()
             if not root:
                 raise ValueError("Library root no longer exists")
-            result = scan_root(conn, root, report_progress)
+            result = scan_root(
+                conn, root, report_progress, force_cleanup=force_cleanup,
+            )
         with scan_lock:
             scan_jobs[root_id] = {"status": "complete", **result}
-        record_event(
-            "scan",
-            f"Source scan finished: {result['files']:,} video files across {result['titles']:,} titles.",
-            context={"root_id": root_id, **result},
-        )
+        if result.get("source_status") == "degraded":
+            record_event(
+                "scan",
+                f"Source Guard preserved {result['preserved']:,} catalog files because the source scan was incomplete.",
+                level="warning", context={"root_id": root_id, **result},
+            )
+        else:
+            record_event(
+                "scan",
+                f"Source scan finished: {result['files']:,} video files across {result['titles']:,} titles.",
+                context={"root_id": root_id, **result},
+            )
         changed = _changed_file_ids(before, _file_signatures(root_id=root_id))
         if hash_after:
             handle_import_hashing(changed, "New or changed media found during a source scan")
+        try:
+            analyze_library_health_with_activity()
+        except sqlite3.Error as exc:
+            record_event(
+                "mie", "Library Health could not refresh after a source scan.",
+                level="error", detail=str(exc), context={"root_id": root_id},
+            )
         return changed
     except Exception as exc:
+        if isinstance(exc, (SourceUnavailableError, OSError)):
+            checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            with db.connect() as conn:
+                conn.execute(
+                    """UPDATE roots SET health_status='offline',last_checked_at=?,
+                       last_error=? WHERE id=?""",
+                    (checked_at, str(exc)[:1000], root_id),
+                )
         with scan_lock:
             scan_jobs[root_id] = {"status": "error", "error": str(exc)}
         record_event(
             "scan", "Source scan could not finish.",
             level="error", detail=str(exc), context={"root_id": root_id},
         )
+        if isinstance(exc, (SourceUnavailableError, OSError)):
+            try:
+                analyze_library_health_with_activity()
+            except sqlite3.Error:
+                pass
         return []
+
+
+def check_source_health(root_id: int) -> dict:
+    checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with db.connect() as conn:
+        root = conn.execute("SELECT * FROM roots WHERE id=?", (root_id,)).fetchone()
+        if not root:
+            raise ValueError("That source no longer exists.")
+        path = Path(root["path"])
+        try:
+            if not path.is_dir():
+                raise OSError("The configured folder is not available.")
+            with os.scandir(path) as entries:
+                has_entries = next(entries, None) is not None
+        except OSError as exc:
+            conn.execute(
+                """UPDATE roots SET health_status='offline',last_checked_at=?,
+                   last_error=? WHERE id=?""",
+                (checked_at, str(exc)[:1000], root_id),
+            )
+            return {"status": "offline", "path": str(path), "error": str(exc)}
+        baseline = int(root["last_file_count"] or 0)
+        if baseline and not has_entries:
+            message = (
+                f"The folder opened, but it appears empty while {baseline:,} catalog files are protected."
+            )
+            conn.execute(
+                """UPDATE roots SET health_status='degraded',last_checked_at=?,last_seen_at=?,
+                   last_error=?,last_observed_file_count=0,guard_preserved_count=? WHERE id=?""",
+                (checked_at, checked_at, message, baseline, root_id),
+            )
+            return {"status": "degraded", "path": str(path), "error": message}
+        if root["health_status"] == "degraded":
+            message = (
+                "The source root is reachable, but a complete guarded scan is still required "
+                "to confirm that every catalog location is available."
+            )
+            conn.execute(
+                """UPDATE roots SET last_checked_at=?,last_seen_at=?,last_error=?
+                   WHERE id=?""",
+                (checked_at, checked_at, message, root_id),
+            )
+            return {"status": "degraded", "path": str(path), "error": message}
+        conn.execute(
+            """UPDATE roots SET health_status='healthy',last_checked_at=?,last_seen_at=?,
+               last_error='' WHERE id=?""",
+            (checked_at, checked_at, root_id),
+        )
+        return {"status": "healthy", "path": str(path), "error": ""}
 
 
 def run_scan_all(roots: list[tuple[int, str]]) -> None:
@@ -2222,10 +2303,11 @@ def run_scan_all(roots: list[tuple[int, str]]) -> None:
         scan_all_job.clear()
         scan_all_job.update({
             "status": "running", "total": len(roots), "completed": 0,
-            "errors": 0, "current_root_id": None, "current_label": "",
+            "errors": 0, "protected": 0, "current_root_id": None, "current_label": "",
             "files": 0, "titles": 0,
         })
     errors = 0
+    protected = 0
     record_event("scan", f"Scan all started for {len(roots):,} sources.")
     changed_files: list[int] = []
     for completed, (root_id, label) in enumerate(roots):
@@ -2238,8 +2320,13 @@ def run_scan_all(roots: list[tuple[int, str]]) -> None:
         with scan_lock:
             if scan_jobs.get(root_id, {}).get("status") == "error":
                 errors += 1
+            elif scan_jobs.get(root_id, {}).get("source_status") == "degraded":
+                protected += 1
         with scan_all_lock:
-            scan_all_job.update({"completed": completed + 1, "errors": errors})
+            scan_all_job.update({
+                "completed": completed + 1, "errors": errors,
+                "protected": protected,
+            })
     with scan_all_lock:
         scan_all_job.update({
             "status": "complete", "completed": len(roots), "errors": errors,
@@ -2248,11 +2335,57 @@ def run_scan_all(roots: list[tuple[int, str]]) -> None:
     handle_import_hashing(
         changed_files, "Fingerprinting new or changed media from all sources"
     )
+
+
+def analyze_library_health_with_activity() -> int:
+    with db.connect() as conn:
+        before = {row["fingerprint"] for row in conn.execute(
+            "SELECT fingerprint FROM mie_findings WHERE status='active'"
+        )}
+    count = mie.analyze()
+    with db.connect() as conn:
+        new_rows = conn.execute(
+            """SELECT id,fingerprint,severity,summary,title_id,root_id,file_id
+               FROM mie_findings WHERE status='active' ORDER BY id DESC"""
+        ).fetchall()
+    for finding in new_rows:
+        if finding["fingerprint"] in before:
+            continue
+        record_event(
+            "mie", f"New Library Health finding: {finding['summary']}",
+            level="warning" if finding["severity"] in {"critical", "warning"} else "info",
+            context={"finding_id": finding["id"]} | {
+                key: finding[key] for key in ("title_id", "root_id", "file_id")
+                if finding[key] is not None
+            },
+        )
+    return count
+
+
+@app.get("/activity", response_class=HTMLResponse)
+def activity_page(request: Request, unread: str = ""):
+    items = event_log.activity(
+        request.state.user.id, unread_only=unread == "1", limit=150,
+    )
+    return templates.TemplateResponse(request, "activity.html", {
+        "items": items, "unread_only": unread == "1",
+        "message": request.query_params.get("message", ""),
+    })
+
+
+@app.post("/activity/read")
+def mark_activity_read(
+    request: Request, event_ids: list[int] = Form(default=[]), all_events: str = Form(""),
+):
+    changed = event_log.mark_read(
+        request.state.user.id, None if all_events == "1" else event_ids,
+    )
+    return redirect("/activity", f"Marked {changed:,} notification{'s' if changed != 1 else ''} as read.")
     record_event(
         "scan",
-        f"Scan all finished: {len(roots) - errors:,} sources completed and {errors:,} failed.",
-        level="warning" if errors else "info",
-        context={"sources": len(roots), "errors": errors},
+        f"Scan all finished: {len(roots) - errors:,} sources completed, {errors:,} failed, and {protected:,} protected by Source Guard.",
+        level="warning" if errors or protected else "info",
+        context={"sources": len(roots), "errors": errors, "protected": protected},
     )
 
 
@@ -2278,22 +2411,49 @@ def run_title_scan(title_id: int) -> None:
                 "status": "complete", "label": title["metadata_title"] or title["title"],
                 **result,
             }
-        record_event(
-            "scan",
-            f"Series rescan finished for {title['metadata_title'] or title['title']}: {result['files']:,} files found.",
-            context={"title_id": title_id, **result},
-        )
+        if result.get("source_status") == "degraded":
+            record_event(
+                "source-guard",
+                f"Series rescan preserved {result['preserved']:,} catalog files because the source view was incomplete.",
+                level="warning", context={"title_id": title_id, **result},
+            )
+        else:
+            record_event(
+                "scan",
+                f"Series rescan finished for {title['metadata_title'] or title['title']}: {result['files']:,} files found.",
+                context={"title_id": title_id, **result},
+            )
         handle_import_hashing(
             _changed_file_ids(before, _file_signatures(title_id=title_id)),
             f"New or changed media found while rescanning {title['metadata_title'] or title['title']}",
         )
+        try:
+            analyze_library_health_with_activity()
+        except sqlite3.Error as exc:
+            record_event(
+                "mie", "Library Health could not refresh after a series rescan.",
+                level="error", detail=str(exc), context={"title_id": title_id},
+            )
     except Exception as exc:
+        if isinstance(exc, (SourceUnavailableError, OSError)) and 'title' in locals() and title:
+            checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            with db.connect() as conn:
+                conn.execute(
+                    """UPDATE roots SET health_status='offline',last_checked_at=?,
+                       last_error=? WHERE id=?""",
+                    (checked_at, str(exc)[:1000], title["root_id"]),
+                )
         with title_scan_lock:
             title_scan_jobs[title_id] = {"status": "error", "error": str(exc)}
         record_event(
             "scan", "Series rescan could not finish.",
             level="error", detail=str(exc), context={"title_id": title_id},
         )
+        if isinstance(exc, (SourceUnavailableError, OSError)):
+            try:
+                analyze_library_health_with_activity()
+            except sqlite3.Error:
+                pass
 
 
 def run_imdb_genre_sync(
@@ -2311,6 +2471,14 @@ def run_imdb_genre_sync(
             "scope_label": scope_label,
             "title_ids": list(title_scope) if title_ids is not None else None,
         })
+    if title_scope:
+        with db.connect() as conn:
+            conn.execute(
+                f"""UPDATE metadata_refresh_queue SET status='running',
+                    started_at=CURRENT_TIMESTAMP, attempts=attempts+1, error=''
+                    WHERE title_id IN ({','.join('?' for _ in title_scope)})""",
+                title_scope,
+            )
 
     with db.connect() as conn:
         scope_filter = ""
@@ -2384,6 +2552,18 @@ def run_imdb_genre_sync(
                    WHERE (imdb_id IS NULL OR imdb_id='') AND imdb_checked_at IS NULL
                      AND (tvdb_id IS NOT NULL OR tvdb_movie_id IS NOT NULL)"""
             ).fetchone()["count"]
+            if title_scope:
+                placeholders = ",".join("?" for _ in title_scope)
+                conn.execute(
+                    f"""UPDATE titles SET metadata_refreshed_at=CURRENT_TIMESTAMP,
+                        metadata_refresh_error='', metadata_provider='IMDb/TVDB'
+                        WHERE id IN ({placeholders})""", title_scope,
+                )
+                conn.execute(
+                    f"""UPDATE metadata_refresh_queue SET status='complete',
+                        completed_at=CURRENT_TIMESTAMP, provider='IMDb/TVDB', error=''
+                        WHERE title_id IN ({placeholders})""", title_scope,
+                )
         with imdb_genre_lock:
             imdb_genre_job.clear()
             imdb_genre_job.update({
@@ -2392,10 +2572,35 @@ def run_imdb_genre_sync(
                 "id_found": id_found, "id_missing": id_missing,
                 "id_errors": id_errors, "id_pending": pending, **result,
             })
+        record_event(
+            "metadata",
+            (f"Metadata refresh finished for {len(title_scope):,} selected title(s)."
+             if title_scope else "Catalog metadata refresh finished."),
+            context=({"title_id": title_scope[0]} if len(title_scope) == 1 else
+                     {"refreshed": len(title_scope), "category": "metadata"}),
+        )
     except Exception as exc:
+        if title_scope:
+            with db.connect() as conn:
+                placeholders = ",".join("?" for _ in title_scope)
+                conn.execute(
+                    f"UPDATE titles SET metadata_refresh_error=? WHERE id IN ({placeholders})",
+                    (str(exc), *title_scope),
+                )
+                conn.execute(
+                    f"""UPDATE metadata_refresh_queue SET status='failed',
+                        completed_at=CURRENT_TIMESTAMP, error=?
+                        WHERE title_id IN ({placeholders})""", (str(exc), *title_scope),
+                )
         with imdb_genre_lock:
             imdb_genre_job.clear()
             imdb_genre_job.update({"status": "error", "error": str(exc)})
+        record_event(
+            "metadata", "Metadata refresh failed. It can be retried from Metadata Settings.",
+            level="error", detail=str(exc),
+            context=({"title_id": title_scope[0]} if len(title_scope) == 1 else
+                     {"failed": len(title_scope), "category": "metadata"}),
+        )
 
 
 @app.get("/health")
@@ -2756,6 +2961,55 @@ def start_scoped_imdb_sync(
     return None
 
 
+def queue_metadata_refresh(title_ids: list[int], user_id: int, label: str) -> str:
+    ids = list(dict.fromkeys(int(value) for value in title_ids if int(value) > 0))[:1000]
+    if not ids:
+        return "No titles were selected for metadata refresh."
+    with imdb_genre_lock:
+        if imdb_genre_job.get("status") in {"starting", "running"}:
+            return "Another metadata refresh is already running. Try again when it finishes."
+    with db.connect() as conn:
+        placeholders = ",".join("?" for _ in ids)
+        valid = [row["id"] for row in conn.execute(
+            f"SELECT id FROM titles WHERE id IN ({placeholders})", ids,
+        )]
+        conn.executemany(
+            """INSERT INTO metadata_refresh_queue(title_id,status,requested_by,requested_at,error)
+               VALUES (?,'queued',?,CURRENT_TIMESTAMP,'')
+               ON CONFLICT(title_id) DO UPDATE SET status='queued',requested_by=excluded.requested_by,
+               requested_at=CURRENT_TIMESTAMP,started_at=NULL,completed_at=NULL,error=''""",
+            [(title_id, user_id if user_id > 0 else None) for title_id in valid],
+        )
+    error = start_scoped_imdb_sync(valid, None, label)
+    return error or f"Metadata refresh queued for {len(valid):,} title(s)."
+
+
+@app.post("/metadata/queue")
+def enqueue_metadata_refresh(
+    request: Request, selected: list[int] = Form(default=[]), scope: str = Form("selected"),
+    return_to: str = Form("/settings/metadata"),
+):
+    if scope == "stale":
+        with db.connect() as conn:
+            selected = [row["id"] for row in conn.execute(
+                """SELECT id FROM titles WHERE metadata_refreshed_at IS NULL
+                   OR metadata_refreshed_at < datetime('now','-30 days') ORDER BY id LIMIT 1000"""
+            )]
+    message = queue_metadata_refresh(selected, request.state.user.id, "Incremental metadata refresh")
+    destination = return_to if return_to.startswith("/") and not return_to.startswith("//") else "/settings/metadata"
+    return redirect(destination, message)
+
+
+@app.post("/metadata/retry-failed")
+def retry_failed_metadata(request: Request):
+    with db.connect() as conn:
+        ids = [row["title_id"] for row in conn.execute(
+            "SELECT title_id FROM metadata_refresh_queue WHERE status='failed' ORDER BY requested_at LIMIT 1000"
+        )]
+    message = queue_metadata_refresh(ids, request.state.user.id, "Retry failed metadata")
+    return redirect("/settings/metadata", message)
+
+
 @app.post("/titles/{title_id}/imdb-refresh")
 def refresh_title_imdb_metadata(title_id: int):
     with db.connect() as conn:
@@ -2985,7 +3239,7 @@ def title_identity(request: Request, title_id: int):
 @app.post("/library-health/analyze")
 def analyze_library_health(request: Request):
     try:
-        finding_count = mie.analyze()
+        finding_count = analyze_library_health_with_activity()
     except sqlite3.Error as exc:
         record_event(
             "mie", "Library Health analysis could not be completed.",
@@ -3009,6 +3263,220 @@ def analyze_library_health(request: Request):
         "/library-health",
         f"Library Health refreshed. InfoMancer found {finding_count} current "
         f"issue{'s' if finding_count != 1 else ''}. No media files were changed.",
+    )
+
+
+def remediation_context(finding_id: int) -> dict | None:
+    with db.connect() as conn:
+        row = conn.execute(
+            """SELECT mf.*,r.label root_label,r.path root_path,r.health_status,
+                      r.last_file_count,r.last_observed_file_count,
+                      r.guard_preserved_count,r.last_error
+               FROM mie_findings mf LEFT JOIN roots r ON r.id=mf.root_id
+               WHERE mf.id=? AND mf.status='active'""",
+            (finding_id,),
+        ).fetchone()
+    if not row:
+        return None
+    finding = dict(row)
+    try:
+        finding["evidence"] = json.loads(finding["evidence_json"] or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        finding["evidence"] = {}
+    actions = []
+    if finding["rule_key"] in {"source-offline", "source-degraded"}:
+        actions.append({
+            "key": "check", "label": "Check connection", "confirm": "CHECK",
+            "changes": "Reads the source root and updates only its availability status. No catalog or media files are removed.",
+            "danger": False,
+        })
+    if finding["rule_key"] == "source-stale":
+        actions.append({
+            "key": "scan", "label": "Scan source", "confirm": "SCAN",
+            "changes": "Starts a source scan. Source Guard blocks catalog cleanup if the source is offline, unreadable, unexpectedly empty, or sharply incomplete. Media files are never changed.",
+            "danger": False,
+        })
+    if finding["rule_key"] == "source-degraded":
+        actions.append({
+            "key": "reconcile", "label": "Accept current source contents",
+            "confirm": "RECONCILE",
+            "changes": (
+                f"Runs a complete scan and, only if no read errors occur, permits removal of up to "
+                f"{int(finding['guard_preserved_count'] or 0):,} stale catalog file records. "
+                "Files on disk are never deleted."
+            ),
+            "danger": True,
+        })
+    if finding["rule_key"] == "missing-episodes" and finding.get("title_id"):
+        actions.append({
+            "key": "rescan_title", "label": "Rescan this series",
+            "confirm": "RESCAN",
+            "changes": (
+                "Reads this series folder and refreshes its catalog entries. Source Guard "
+                "preserves existing records if the folder is unavailable, empty, or incomplete. "
+                "Media files are never changed."
+            ),
+            "danger": False,
+        })
+    if finding["rule_key"] == "technical-details-missing":
+        actions.append({
+            "key": "inspect_source", "label": "Inspect missing media details",
+            "confirm": "INSPECT",
+            "changes": (
+                f"Runs FFprobe against the {int(finding['evidence'].get('file_count') or 0):,} "
+                "catalog files missing technical details. It updates catalog metadata only and "
+                "does not alter media files."
+            ),
+            "danger": False,
+        })
+    if finding["rule_key"] == "media-unreadable" and finding.get("file_id"):
+        actions.append({
+            "key": "inspect_file", "label": "Reinspect this file",
+            "confirm": "INSPECT",
+            "changes": (
+                "Runs FFprobe against this one cataloged file and replaces its stored inspection "
+                "result. The media file is not altered."
+            ),
+            "danger": False,
+        })
+    return {"finding": finding, "actions": actions}
+
+
+@app.get("/library-health/findings/{finding_id}/remediate", response_class=HTMLResponse)
+def preview_library_health_remediation(request: Request, finding_id: int):
+    context = remediation_context(finding_id)
+    if not context or not context["actions"]:
+        return redirect(
+            "/library-health",
+            "That finding has no automatic fix. Review the affected media and its recommended next step.",
+        )
+    return templates.TemplateResponse(request, "library_health_remediation.html", {
+        **context, "message": request.query_params.get("message", ""),
+    })
+
+
+@app.post("/library-health/findings/{finding_id}/remediate")
+def apply_library_health_remediation(
+    request: Request, finding_id: int, action: str = Form(...),
+    confirm: str = Form(""),
+):
+    context = remediation_context(finding_id)
+    allowed = {item["key"]: item for item in (context or {}).get("actions", [])}
+    selected = allowed.get(action)
+    if not context or not selected:
+        return redirect("/library-health", "That remediation is no longer available. Nothing changed.")
+    if confirm.strip().upper() != selected["confirm"]:
+        return redirect(
+            f"/library-health/findings/{finding_id}/remediate",
+            f"Confirmation did not match {selected['confirm']}. Nothing changed.",
+        )
+    root_id = context["finding"].get("root_id")
+    if not root_id:
+        return redirect("/library-health", "That finding is no longer tied to a source. Nothing changed.")
+    if action == "check":
+        result = check_source_health(int(root_id))
+        mie.analyze()
+        record_event(
+            "source-guard", f"Source connection check completed: {result['status']}.",
+            level="warning" if result["status"] != "healthy" else "info",
+            context={"root_id": root_id, **result}, user_id=request.state.user.id,
+        )
+        messages = {
+            "healthy": "Connection confirmed. The source is available; no catalog or media files were changed.",
+            "degraded": "The source opened but still appears incomplete. Source Guard continues protecting the existing catalog.",
+            "offline": "The source is still unavailable. Source Guard preserved the existing catalog; check the NAS, mount, and permissions.",
+        }
+        return redirect("/library-health", messages[result["status"]])
+    if action in {"rescan_title", "inspect_source", "inspect_file"}:
+        source = check_source_health(int(root_id))
+        if source["status"] != "healthy":
+            mie.analyze()
+            return redirect(
+                "/library-health",
+                "The action was not started because Source Guard cannot confirm a complete source connection. Restore the source and run a guarded source scan first.",
+            )
+    if action == "rescan_title":
+        title_id = int(context["finding"]["title_id"])
+        with title_scan_lock:
+            if title_scan_jobs.get(title_id, {}).get("status") in {"starting", "running"}:
+                return redirect("/library-health", "That series is already scanning. Nothing else was started.")
+            title_scan_jobs[title_id] = {"status": "starting", "files": 0}
+        threading.Thread(target=run_title_scan, args=(title_id,), daemon=True).start()
+        return redirect(
+            "/library-health",
+            "Guarded series rescan started. Progress is shown in the task panel. Media files will not be changed.",
+        )
+    if action in {"inspect_source", "inspect_file"}:
+        with db.connect() as conn:
+            if action == "inspect_file":
+                file_ids = [int(context["finding"]["file_id"])]
+            else:
+                file_ids = [int(row["id"]) for row in conn.execute(
+                    """SELECT f.id FROM files f JOIN titles t ON t.id=f.title_id
+                       WHERE t.root_id=? AND (f.media_info_at IS NULL OR
+                         COALESCE(f.media_info_error,'')!='') ORDER BY f.id""",
+                    (root_id,),
+                )]
+        if not file_ids:
+            mie.analyze()
+            return redirect("/library-health", "Every affected file already has current media details. Nothing was started.")
+        with media_info_lock:
+            if media_info_job.get("status") in {"starting", "running"}:
+                return redirect("/library-health", "Media inspection is already running. Nothing else was started.")
+            media_info_job.clear()
+            media_info_job.update({"status": "starting", "processed": 0, "total": len(file_ids)})
+        threading.Thread(target=run_media_inspection, args=(file_ids,), daemon=True).start()
+        return redirect(
+            "/library-health",
+            f"Media inspection started for {len(file_ids):,} file{'s' if len(file_ids) != 1 else ''}. Progress is shown in the task panel; media files will not be changed.",
+        )
+    with scan_lock:
+        if scan_jobs.get(int(root_id), {}).get("status") in {"starting", "running"}:
+            return redirect("/library-health", "That source is already scanning. Nothing else was started.")
+        scan_jobs[int(root_id)] = {"status": "starting", "files": 0, "titles": 0}
+    threading.Thread(
+        target=run_scan, args=(int(root_id),),
+        kwargs={"force_cleanup": action == "reconcile"}, daemon=True,
+    ).start()
+    label = "reconciliation" if action == "reconcile" else "guarded scan"
+    record_event(
+        "source-guard", f"Source {label} was confirmed and started.",
+        context={"root_id": root_id, "action": action}, user_id=request.state.user.id,
+    )
+    return redirect(
+        "/library-health",
+        f"Source {label} started. Progress is shown in the task panel. Media files will not be changed.",
+    )
+
+
+@app.post("/library-health/remediate-batch")
+def batch_library_health_remediation(
+    request: Request, findings: list[str] = Form(default=[]),
+    action: str = Form("check_sources"), confirm: str = Form(""),
+):
+    if action != "check_sources" or confirm.strip().upper() != "CHECK":
+        return redirect("/library-health", "Batch source check was not confirmed. Nothing changed.")
+    ids = [int(value) for value in dict.fromkeys(findings) if value.isdigit()][:100]
+    if not ids:
+        return redirect("/library-health", "Select at least one source finding first.")
+    placeholders = ",".join("?" for _ in ids)
+    with db.connect() as conn:
+        roots = conn.execute(
+            f"""SELECT DISTINCT root_id FROM mie_findings
+                 WHERE id IN ({placeholders}) AND status='active'
+                   AND rule_key IN ('source-offline','source-degraded')
+                   AND root_id IS NOT NULL""", ids,
+        ).fetchall()
+    results = [check_source_health(int(row["root_id"])) for row in roots]
+    mie.analyze()
+    healthy = sum(result["status"] == "healthy" for result in results)
+    record_event(
+        "source-guard", f"Batch connection check completed for {len(results):,} sources.",
+        context={"sources": len(results), "healthy": healthy}, user_id=request.state.user.id,
+    )
+    return redirect(
+        "/library-health",
+        f"Checked {len(results):,} sources: {healthy:,} available and {len(results)-healthy:,} still protected. No catalog or media files were changed.",
     )
 
 
@@ -3563,6 +4031,21 @@ def settings_page_context(
                    (SELECT COUNT(*) FROM episode_credits) episode_credits
                    FROM titles"""
             ).fetchone()
+            context["metadata_freshness"] = conn.execute(
+                """SELECT COUNT(*) total,
+                   SUM(CASE WHEN metadata_refreshed_at >= datetime('now','-30 days') THEN 1 ELSE 0 END) fresh,
+                   SUM(CASE WHEN metadata_refreshed_at IS NULL OR metadata_refreshed_at < datetime('now','-30 days') THEN 1 ELSE 0 END) stale,
+                   SUM(CASE WHEN COALESCE(poster_url,'')='' THEN 1 ELSE 0 END) artwork_missing,
+                   SUM(CASE WHEN COALESCE(imdb_id,'')='' AND tvdb_id IS NULL AND tvdb_movie_id IS NULL AND COALESCE(tmdb_id,'')='' THEN 1 ELSE 0 END) identifiers_missing,
+                   SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM title_credits tc WHERE tc.title_id=titles.id) THEN 1 ELSE 0 END) credits_missing
+                   FROM titles"""
+            ).fetchone()
+            context["metadata_queue"] = conn.execute(
+                """SELECT q.*,COALESCE(t.metadata_title,t.title) display_title
+                   FROM metadata_refresh_queue q JOIN titles t ON t.id=q.title_id
+                   ORDER BY CASE q.status WHEN 'failed' THEN 0 WHEN 'running' THEN 1
+                            WHEN 'queued' THEN 2 ELSE 3 END,q.requested_at DESC LIMIT 25"""
+            ).fetchall()
         with imdb_genre_lock:
             context["imdb_job"] = dict(imdb_genre_job)
         context["tvdb_status"] = {
@@ -4216,19 +4699,18 @@ def settings_section(request: Request, section: str):
 
 @app.post("/settings/general")
 def save_general_settings(
-    request: Request,
-    installation_name: str = Form(...), timezone_name: str = Form(...),
+    request: Request, timezone_name: str = Form(...),
     default_library_view: str = Form(...), default_cover_size: str = Form(...),
 ):
     submitted = {
-        "installation_name": installation_name,
         "timezone": timezone_name,
         "default_library_view": default_library_view,
         "default_cover_size": default_cover_size,
     }
     try:
         validated = app_settings.validate_general(
-            installation_name, timezone_name, default_library_view, default_cover_size,
+            app_settings.get("installation_name"), timezone_name,
+            default_library_view, default_cover_size,
         )
         changed = app_settings.update(validated, request.state.user.id)
     except AppSettingError as exc:
@@ -4519,6 +5001,26 @@ def start_scan(root_id: int):
     thread = threading.Thread(target=run_scan, args=(root_id,), daemon=True)
     thread.start()
     return redirect("/sources", "Scan started")
+
+
+@app.post("/roots/{root_id}/check")
+def check_root_connection(request: Request, root_id: int):
+    try:
+        result = check_source_health(root_id)
+    except ValueError as exc:
+        return redirect("/sources", str(exc))
+    mie.analyze()
+    record_event(
+        "source-guard", f"Source connection check completed: {result['status']}.",
+        level="warning" if result["status"] != "healthy" else "info",
+        context={"root_id": root_id, **result}, user_id=request.state.user.id,
+    )
+    if result["status"] == "healthy":
+        return redirect("/sources", "Connection confirmed. The source is available; nothing was changed.")
+    return redirect(
+        "/sources",
+        "The source is unavailable or incomplete. Source Guard is preserving its catalog records. Check the NAS, mount, and permissions.",
+    )
 
 
 @app.post("/roots/{root_id}/label")
@@ -4875,7 +5377,7 @@ def title_collections_page(request: Request, title_id: int):
             """SELECT c.id,c.name,
                       EXISTS(SELECT 1 FROM collection_titles ct
                              WHERE ct.collection_id=c.id AND ct.title_id=?) selected
-               FROM collections c ORDER BY c.name COLLATE NOCASE""",
+               FROM collections c WHERE c.collection_type='manual' ORDER BY c.name COLLATE NOCASE""",
             (title_id,),
         ).fetchall()
     return templates.TemplateResponse(request, "title_collections.html", {
@@ -4899,12 +5401,13 @@ def save_title_collections(
         if not title:
             return redirect("/collections", "That library title no longer exists.")
         valid = {
-            row["id"] for row in conn.execute("SELECT id FROM collections").fetchall()
+            row["id"] for row in conn.execute("SELECT id FROM collections WHERE collection_type='manual'").fetchall()
         }
         selected &= valid
         previous = {
             row["collection_id"] for row in conn.execute(
-                "SELECT collection_id FROM collection_titles WHERE title_id=?",
+                """SELECT ct.collection_id FROM collection_titles ct JOIN collections c ON c.id=ct.collection_id
+                   WHERE ct.title_id=? AND c.collection_type='manual'""",
                 (title_id,),
             ).fetchall()
         }
@@ -4951,7 +5454,7 @@ def episode_collections_page(request: Request, file_id: int):
             ),
         ).fetchall()
         collections = conn.execute(
-            "SELECT id,name FROM collections ORDER BY name COLLATE NOCASE"
+            "SELECT id,name FROM collections WHERE collection_type='manual' ORDER BY name COLLATE NOCASE"
         ).fetchall()
         memberships = {
             (row["expected_episode_id"], row["collection_id"])
@@ -5062,13 +5565,168 @@ def collections_page(request: Request):
                       ) fallback_poster
                FROM collections c ORDER BY c.name COLLATE NOCASE"""
         ).fetchall()
-    collections = [
-        {**dict(row), "artwork_url": collection_artwork_url(row)} for row in rows
-    ]
+        roots = conn.execute("SELECT id,label,path FROM roots ORDER BY label,path").fetchall()
+        genres = sorted({genre.strip() for row in conn.execute("SELECT genres FROM titles WHERE genres IS NOT NULL") for genre in (row["genres"] or "").split(",") if genre.strip()}, key=str.casefold)
+        collections = []
+        for row in rows:
+            item = dict(row)
+            if item.get("collection_type") == "smart":
+                matches = matching_titles(conn, decode_filters(item["filter_json"]), request.state.user.id)
+                item["title_count"] = len(matches)
+                item["fallback_poster"] = next((title.get("poster_url") for title in matches if title.get("poster_url")), None)
+            item["artwork_url"] = collection_artwork_url(item)
+            collections.append(item)
     return templates.TemplateResponse(request, "collections.html", {
         "collections": collections,
+        "roots": roots, "genres": genres, "health_categories": sorted(MIE_CATEGORIES),
         "message": request.query_params.get("message", ""),
     })
+
+
+def smart_filter_form(form) -> dict[str, str]:
+    return normalize_filters({key: form.get(key, "") for key in (
+        "genre", "year_from", "year_to", "resolution", "quality", "root_id",
+        "favorite", "missing_episodes", "health_category",
+    )})
+
+
+@app.post("/collections/smart/preview", response_class=HTMLResponse)
+async def preview_smart_collection(request: Request):
+    form = await request.form()
+    try:
+        filters = smart_filter_form(form)
+    except ValueError as exc:
+        return redirect("/collections", f"Smart Collection preview could not be created. {exc}")
+    with db.connect() as conn:
+        titles = matching_titles(conn, filters, request.state.user.id)[:100]
+    return templates.TemplateResponse(request, "smart_collection_preview.html", {
+        "filters": filters, "filter_json": encode_filters(filters), "titles": titles,
+        "name": " ".join(str(form.get("name") or "").split())[:80],
+        "description": str(form.get("description") or "").strip()[:1000], "message": "",
+    })
+
+
+@app.post("/collections/smart")
+async def create_smart_collection(request: Request):
+    form = await request.form()
+    name = str(form.get("name") or "")
+    description = str(form.get("description") or "")
+    cleaned = " ".join(name.split())[:80]
+    try:
+        encoded = str(form.get("filter_json") or "")
+        filters = normalize_filters(decode_filters(encoded)) if encoded else smart_filter_form(form)
+        if not cleaned:
+            raise ValueError("Enter a collection name.")
+        with db.connect() as conn:
+            collection_id = conn.execute(
+                """INSERT INTO collections(name,description,created_by,collection_type,filter_json)
+                   VALUES (?,?,?,'smart',?)""",
+                (cleaned, description.strip()[:1000], request.state.user.id if request.state.user.id > 0 else None, encode_filters(filters)),
+            ).lastrowid
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        return redirect("/collections", f"Smart Collection was not saved. {exc}")
+    record_event("library", f'Smart Collection "{cleaned}" created.', user_id=request.state.user.id, context={"collection_id": collection_id})
+    return redirect(f"/collections/{collection_id}", f'Smart Collection "{cleaned}" saved and will update automatically.')
+
+
+@app.get("/libraries", response_class=HTMLResponse)
+def custom_libraries_page(request: Request):
+    with db.connect() as conn:
+        libraries = conn.execute(
+            """SELECT l.*,COUNT(lt.title_id) title_count,
+                      (SELECT t.poster_url FROM custom_library_titles first_lt
+                       JOIN titles t ON t.id=first_lt.title_id
+                       WHERE first_lt.library_id=l.id ORDER BY first_lt.added_at LIMIT 1) poster_url
+               FROM custom_libraries l LEFT JOIN custom_library_titles lt ON lt.library_id=l.id
+               GROUP BY l.id ORDER BY l.name COLLATE NOCASE"""
+        ).fetchall()
+    return templates.TemplateResponse(request, "custom_libraries.html", {
+        "libraries": libraries, "message": request.query_params.get("message", ""),
+    })
+
+
+@app.post("/libraries")
+def create_custom_library(
+    request: Request, name: str = Form(...), library_kind: str = Form("mixed"),
+    description: str = Form(""), return_to: str = Form("/libraries"),
+):
+    cleaned = " ".join(name.split())[:80]
+    kind = library_kind if library_kind in {"movie", "tv", "mixed"} else "mixed"
+    if not cleaned:
+        return redirect(safe_next(return_to), "Enter a library name. Nothing was created.")
+    try:
+        with db.connect() as conn:
+            library_id = conn.execute(
+                "INSERT INTO custom_libraries(name,library_kind,description,created_by) VALUES (?,?,?,?)",
+                (cleaned, kind, description.strip()[:1000], request.state.user.id if request.state.user.id > 0 else None),
+            ).lastrowid
+    except sqlite3.IntegrityError:
+        return redirect(safe_next(return_to), f'A library named "{cleaned}" already exists.')
+    record_event("library", f'Custom library "{cleaned}" created.', user_id=request.state.user.id, context={"library_id": library_id})
+    return redirect(safe_next(return_to), f'Library "{cleaned}" created.')
+
+
+@app.get("/libraries/{library_id}", response_class=HTMLResponse)
+def custom_library_detail(request: Request, library_id: int):
+    with db.connect() as conn:
+        library_row = conn.execute("SELECT * FROM custom_libraries WHERE id=?", (library_id,)).fetchone()
+        if not library_row:
+            raise HTTPException(404, "Library not found")
+        titles = conn.execute(
+            """SELECT t.*,COALESCE(NULLIF(t.metadata_title,''),t.title) display_title,
+                      COALESCE(t.metadata_year,t.year) display_year,COALESCE(uts.favorite,0) favorite
+               FROM custom_library_titles lt JOIN titles t ON t.id=lt.title_id
+               LEFT JOIN user_title_state uts ON uts.title_id=t.id AND uts.user_id=?
+               WHERE lt.library_id=? ORDER BY display_title COLLATE NOCASE""",
+            (request.state.user.id, library_id),
+        ).fetchall()
+    return templates.TemplateResponse(request, "custom_library_detail.html", {
+        "library": library_row, "titles": titles,
+        "message": request.query_params.get("message", ""),
+    })
+
+
+@app.get("/titles/{title_id}/libraries", response_class=HTMLResponse)
+def title_libraries_page(request: Request, title_id: int):
+    with db.connect() as conn:
+        title = conn.execute("SELECT id,kind,COALESCE(NULLIF(metadata_title,''),title) display_title FROM titles WHERE id=?", (title_id,)).fetchone()
+        if not title:
+            raise HTTPException(404, "Title not found")
+        libraries = conn.execute(
+            """SELECT l.*,EXISTS(SELECT 1 FROM custom_library_titles lt
+                   WHERE lt.library_id=l.id AND lt.title_id=?) selected
+               FROM custom_libraries l WHERE l.library_kind IN ('mixed',?)
+               ORDER BY l.name COLLATE NOCASE""", (title_id, title["kind"]),
+        ).fetchall()
+    return templates.TemplateResponse(request, "title_libraries.html", {
+        "title": title, "libraries": libraries,
+        "return_to": request.query_params.get("return_to", f"/titles/{title_id}"),
+        "message": request.query_params.get("message", ""),
+    })
+
+
+@app.post("/titles/{title_id}/libraries")
+def save_title_libraries(
+    request: Request, title_id: int, selected: list[int] = Form(default=[]),
+    new_library_name: str = Form(""), return_to: str = Form(""),
+):
+    with db.connect() as conn:
+        title = conn.execute("SELECT id,kind,COALESCE(NULLIF(metadata_title,''),title) display_title FROM titles WHERE id=?", (title_id,)).fetchone()
+        if not title:
+            return redirect("/library", "That title no longer exists. Nothing changed.")
+        new_name = " ".join(new_library_name.split())[:80]
+        if new_name:
+            conn.execute("INSERT OR IGNORE INTO custom_libraries(name,library_kind,created_by) VALUES (?,'mixed',?)", (new_name, request.state.user.id if request.state.user.id > 0 else None))
+            created = conn.execute("SELECT id FROM custom_libraries WHERE name=? COLLATE NOCASE", (new_name,)).fetchone()
+            if created:
+                selected.append(created["id"])
+        allowed = {row["id"] for row in conn.execute("SELECT id FROM custom_libraries WHERE library_kind IN ('mixed',?)", (title["kind"],))}
+        chosen = allowed.intersection(selected)
+        conn.execute("DELETE FROM custom_library_titles WHERE title_id=?", (title_id,))
+        conn.executemany("INSERT INTO custom_library_titles(library_id,title_id) VALUES (?,?)", [(library_id,title_id) for library_id in chosen])
+    message = f'Updated libraries for "{title["display_title"]}". No media files were copied or moved.'
+    record_event("library", message, user_id=request.state.user.id, context={"title_id": title_id})
+    return redirect(safe_next(return_to or f"/titles/{title_id}"), message)
 
 
 @app.post("/collections")
@@ -5137,9 +5795,13 @@ def collection_detail(request: Request, collection_id: int, q: str = ""):
         ).fetchone()
         if not collection:
             raise HTTPException(404, "Collection not found")
-        items = collection_items(conn, collection_id, request.state.user.id)
+        if collection["collection_type"] == "smart":
+            smart_titles = matching_titles(conn, decode_filters(collection["filter_json"]), request.state.user.id)
+            items = [{**title, "item_type": "title", "item_id": title["id"], "title_id": title["id"], "item_label": "TV series" if title["kind"] == "tv" else "Movie"} for title in smart_titles]
+        else:
+            items = collection_items(conn, collection_id, request.state.user.id)
         candidates = []
-        if q.strip():
+        if collection["collection_type"] == "manual" and q.strip():
             term = f"%{q.strip()}%"
             candidates = conn.execute(
                 """SELECT t.id,t.kind,t.poster_url,
@@ -5402,7 +6064,7 @@ def organize_title_page(request: Request, title_id: int):
             """SELECT c.*,ct.title_id IS NOT NULL selected
                FROM collections c LEFT JOIN collection_titles ct
                  ON ct.collection_id=c.id AND ct.title_id=?
-               ORDER BY c.name COLLATE NOCASE""",
+               WHERE c.collection_type='manual' ORDER BY c.name COLLATE NOCASE""",
             (title_id,),
         ).fetchall()
     return templates.TemplateResponse(request, "organize.html", {
@@ -5560,7 +6222,7 @@ def organize_titles_bulk(
             """SELECT c.*,COUNT(ct.title_id) title_count
                FROM collections c LEFT JOIN collection_titles ct
                  ON ct.collection_id=c.id
-               GROUP BY c.id ORDER BY c.name COLLATE NOCASE"""
+               WHERE c.collection_type='manual' GROUP BY c.id ORDER BY c.name COLLATE NOCASE"""
         ).fetchall()
         if apply == "1":
             allowed = {row["id"] for row in tags}

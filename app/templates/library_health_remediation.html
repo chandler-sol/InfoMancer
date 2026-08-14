@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Preview remediation · InfoMancer{% endblock %}
+{% block content %}
+<header class="page-head"><div><p class="eyebrow">LIBRARY HEALTH · SAFE REMEDIATION</p><h1>Preview proposed action</h1><p>Review exactly what InfoMancer will do before confirming it.</p></div><a class="button" href="/library-health">Back to Library Health</a></header>
+<section class="panel remediation-preview">
+  <div class="mie-labels"><span class="mie-severity">{{ finding.severity|title }}</span><span>{{ finding.rule_key|replace('-', ' ')|title }}</span></div>
+  <h2>{{ finding.summary }}</h2>
+  <p>{{ finding.explanation }}</p>
+  <dl class="remediation-source-facts">
+    <div><dt>Source</dt><dd>{{ finding.root_label or finding.root_path }}</dd></div>
+    <div><dt>Path</dt><dd><code>{{ finding.root_path }}</code></dd></div>
+    <div><dt>Current status</dt><dd>{{ (finding.health_status or 'unknown')|title }}</dd></div>
+    <div><dt>Last known catalog</dt><dd>{{ finding.last_file_count or 0 }} files</dd></div>
+    <div><dt>Last observed</dt><dd>{{ finding.last_observed_file_count or 0 }} files</dd></div>
+  </dl>
+</section>
+<section class="remediation-actions">
+  {% for action in actions %}
+  <article class="panel{% if action.danger %} remediation-danger{% endif %}">
+    <h2>{{ action.label }}</h2>
+    <p>{{ action.changes }}</p>
+    <form method="post" action="/library-health/findings/{{ finding.id }}/remediate" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="action" value="{{ action.key }}">
+      <label>Type <strong>{{ action.confirm }}</strong> to confirm<input name="confirm" autocomplete="off" required></label>
+      <button class="button{% if action.danger %} danger{% else %} primary{% endif %}">{{ action.label }}</button>
+    </form>
+  </article>
+  {% endfor %}
+</section>
+{% endblock %}

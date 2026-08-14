@@ -7,7 +7,7 @@
   <p>Complete four short steps. You can leave at any time and resume from Help, Settings, or your Profile menu.</p>
 </header>
 <nav class="setup-progress" aria-label="Setup progress">
-  {% for item, label in [('general','Installation'),('metadata','Metadata'),('sources','Sources'),('finish','Finish')] %}
+  {% for item, label in [('general','Region'),('metadata','Metadata'),('sources','Sources'),('finish','Finish')] %}
   <a href="/getting-started/{{ item }}" class="{% if item == step %}active{% elif steps.index(item) < steps.index(step) %}complete{% endif %}"><span>{{ loop.index }}</span><b>{{ label }}</b></a>
   {% endfor %}
 </nav>
@@ -15,9 +15,8 @@
 
 {% if step == 'general' %}
 <form class="setup-step panel" method="post" action="/getting-started/general">
-  <div class="setup-step-copy"><p class="eyebrow">STEP 1 OF 4</p><h2>Set your library name and time zone</h2><p>Your library name personalizes page titles and setup summaries. The InfoMancer name and logo always remain in the header.</p></div>
-  <div class="setup-fields two-column compact-fields">
-    <label>Library name<input name="installation_name" value="{{ preferences.installation_name }}" minlength="1" maxlength="50" required><small>You can change this later in App Settings.</small></label>
+  <div class="setup-step-copy"><p class="eyebrow">STEP 1 OF 4</p><h2>Set your time zone</h2><p>InfoMancer stores timestamps in UTC and uses this location for scan times, sessions, and announcements.</p></div>
+  <div class="setup-fields compact-fields">
     <label>Time zone<select id="setup-timezone" name="timezone_name" required>{% for group_name, zones in timezone_groups %}<optgroup label="{{ group_name }}">{% for zone, label in zones %}<option value="{{ zone }}" {% if zone == preferences.timezone %}selected{% endif %}>{{ label }}</option>{% endfor %}</optgroup>{% endfor %}</select><small>Choose your location. Used for scan times, sessions, and announcements.</small></label>
   </div>
   <div class="setup-step-actions"><a class="button" href="/">Exit for now</a><button class="button primary">Save and continue</button></div>
@@ -89,7 +88,7 @@
 <section class="setup-step panel setup-finish">
   <div class="setup-finish-mark" aria-hidden="true">✓</div>
   <div class="setup-step-copy"><p class="eyebrow">STEP 4 OF 4</p><h2>Your library is ready for its first scan</h2><p>InfoMancer is connected to your metadata provider and knows where your media lives. Finish setup to open Home and follow scan progress from the task widget.</p></div>
-  <div class="setup-review"><div><span>Library</span><strong>{{ preferences.installation_name }}</strong></div><div><span>Time zone</span><strong>{{ preferences.timezone.replace('_', ' ') }}</strong></div><div><span>TVDB</span><strong>{{ 'Connected' if tvdb_status.configured else 'Skipped for testing' }}</strong></div><div><span>Media sources</span><strong>{{ roots|length }}</strong></div></div>
+  <div class="setup-review"><div><span>Application</span><strong>InfoMancer</strong></div><div><span>Time zone</span><strong>{{ preferences.timezone.replace('_', ' ') }}</strong></div><div><span>TVDB</span><strong>{{ 'Connected' if tvdb_status.configured else 'Skipped for testing' }}</strong></div><div><span>Media sources</span><strong>{{ roots|length }}</strong></div></div>
   <div class="setup-step-actions"><a class="button" href="/getting-started/sources">Back</a><form method="post" action="/getting-started/complete"><button class="button primary">Finish setup</button></form></div>
 </section>
 {% endif %}

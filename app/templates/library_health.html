@@ -173,9 +173,18 @@
 
 <section class="mie-findings" aria-live="polite">
   {% if findings %}
+    {% if current_user.is_librarian and status == 'active' %}
+    <form id="source-batch-form" class="panel mie-batch-actions" method="post" action="/library-health/remediate-batch">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="action" value="check_sources">
+      <label>Batch source check <span class="muted">Select unavailable or degraded source findings below.</span><input name="confirm" placeholder="Type CHECK" autocomplete="off"></label>
+      <button class="button">Check selected sources</button>
+    </form>
+    {% endif %}
     {% for finding in findings %}
     <article class="panel mie-finding severity-{{ finding.severity }}">
       <div class="mie-finding-head">
+        {% if current_user.is_librarian and finding.status == 'active' and finding.rule_key in ('source-offline','source-degraded') %}<input type="checkbox" name="findings" value="{{ finding.id }}" form="source-batch-form" aria-label="Select {{ finding.summary }} for a connection check">{% endif %}
         <div>
           <div class="mie-labels">
             <span class="mie-severity">{{ finding.severity|title }}</span>
@@ -200,7 +209,8 @@
       </details>
       {% endif %}
       <div class="actions mie-finding-actions">
-        <a class="button{% if finding.status == 'active' %} primary{% endif %}" href="{{ finding.href }}">Review affected media</a>
+        <a class="button{% if finding.status == 'active' %} primary{% endif %}" href="{{ finding.href }}">{{ finding.review_label }}</a>
+        {% if current_user.is_librarian and finding.status == 'active' and finding.rule_key in ('source-offline','source-degraded','source-stale','missing-episodes','technical-details-missing','media-unreadable') %}<a class="button" href="/library-health/findings/{{ finding.id }}/remediate">Preview fix</a>{% endif %}
         {% if current_user.is_librarian and finding.status == 'active' %}
         <details class="mie-feedback-form">
           <summary class="button">Correct or dismiss</summary>

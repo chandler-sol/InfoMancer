@@ -99,6 +99,10 @@ button:disabled {
   animation: none;
 }
 
+.task-widget.idle.has-attention .task-dot {
+  background: var(--lime);
+}
+
 .task-popover {
   position: absolute;
   top: calc(100% + 10px);
@@ -221,4 +225,20 @@ button:disabled {
 @media (max-width: 900px) {
   .task-widget { margin-right: 10px; }
   .task-widget-toggle { max-width: 150px; }
+}
+
+@media (max-width: 760px) {
+  .task-widget-toggle {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
+    padding: 0;
+    border-radius: 8px;
+  }
+
+  .task-widget-toggle .task-card-copy { display: none; }
+  .task-dot { width: 10px; height: 10px; }
+  .task-widget.idle:not(.has-attention) .task-widget-toggle { opacity: .55; }
 }

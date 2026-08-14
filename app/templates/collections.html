@@ -12,12 +12,29 @@
   <label>Description <span class="muted">optional</span><input name="description" maxlength="1000" placeholder="What belongs in this collection?"></label>
   <button class="button primary">Create collection</button>
 </form>
+<details class="panel collection-create smart-collection-create">
+  <summary><strong>Create a Smart Collection</strong> <span class="muted">Saved filters that update automatically</span></summary>
+  <form method="post" action="/collections/smart/preview" class="smart-filter-grid">
+    <label>Name<input name="name" maxlength="80" required placeholder="For example, Favorite 4K Movies"></label>
+    <label>Genre<select name="genre"><option value="">Any genre</option>{% for genre in genres %}<option>{{ genre }}</option>{% endfor %}</select></label>
+    <label>Year from<input name="year_from" type="number" min="1800" max="2200"></label><label>Year to<input name="year_to" type="number" min="1800" max="2200"></label>
+    <label>Resolution<select name="resolution"><option value="">Any</option><option value="720">720p+</option><option value="1080">1080p+</option><option value="2160">4K</option></select></label>
+    <label>Quality<select name="quality"><option value="">Any</option><option value="hdr">HDR</option><option value="sdr">SDR</option><option value="high-bitrate">High bitrate</option></select></label>
+    <label>Source<select name="root_id"><option value="">Any source</option>{% for root in roots %}<option value="{{ root.id }}">{{ root.label or root.path }}</option>{% endfor %}</select></label>
+    <label>Favorite<select name="favorite"><option value="">Either</option><option value="yes">Favorite</option><option value="no">Not favorite</option></select></label>
+    <label>Missing episodes<select name="missing_episodes"><option value="">Either</option><option value="yes">Has gaps</option><option value="no">Complete</option></select></label>
+    <label>Health category<select name="health_category"><option value="">Any</option>{% for category in health_categories %}<option value="{{ category }}">{{ category.replace('-', ' ')|title }}</option>{% endfor %}</select></label>
+    <label class="full-width">Description <span class="muted">optional</span><input name="description" maxlength="1000"></label>
+    <button class="button primary full-width">Preview matching titles</button>
+  </form>
+</details>
 {% endif %}
 <section class="collection-grid">
 {% for collection in collections %}
   <a class="collection-card" href="/collections/{{ collection.id }}">
     <span class="collection-art">{% if collection.artwork_url %}<img src="{{ collection.artwork_url }}" alt="" loading="lazy">{% else %}<span>{{ collection.name[:1]|upper }}</span>{% endif %}</span>
     <strong>{{ collection.name }}</strong>
+    {% if collection.collection_type == 'smart' %}<span class="kind">Smart</span>{% endif %}
     <small>{{ collection.title_count }} item{% if collection.title_count != 1 %}s{% endif %}</small>
     {% if collection.description %}<p>{{ collection.description }}</p>{% endif %}
   </a>

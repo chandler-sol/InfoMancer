@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Organize {{ title.metadata_title or title.title }} · InfoMancer{% endblock %}
 {% block content %}
+<div class="organize-page" data-organize-content data-title-id="{{ title.id }}">
 <a class="back" href="/titles/{{ title.id }}">← {{ title.metadata_title or title.title }}</a>
 <header class="page-head"><div><p class="eyebrow">PERSONAL LIBRARY</p><h1>Organize title</h1><p>Favorites, ratings, order, and tags belong to your account and do not change the media files.</p></div><a class="button" href="/tags">Manage tags</a></header>
 <form class="panel organize-title-form" method="post" action="/titles/{{ title.id }}/organize">
@@ -26,4 +27,5 @@
   {% endif %}
   <div class="actions"><a class="button" href="/titles/{{ title.id }}">Cancel</a><button class="button primary">Save organization</button></div>
 </form>
+</div>
 {% endblock %}

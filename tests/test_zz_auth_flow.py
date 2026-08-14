@@ -121,10 +121,11 @@ class AuthenticationFlowTests(unittest.TestCase):
                     self.assertEqual(setup_choice.status_code, 303)
                     self.assertEqual(setup_choice.headers["location"], "/getting-started/general")
                     setup_general = client.get("/getting-started/general")
-                    self.assertIn("Set your library name and time zone", setup_general.text)
+                    self.assertIn("Set your time zone", setup_general.text)
+                    self.assertNotIn("Library name", setup_general.text)
                     setup_general_saved = client.post("/getting-started/general", data={
                         "csrf_token": session.csrf_token,
-                        "installation_name": "InfoMancer", "timezone_name": "UTC",
+                        "timezone_name": "UTC",
                     })
                     self.assertEqual(setup_general_saved.status_code, 303)
                     self.assertIn("/getting-started/metadata", setup_general_saved.headers["location"])
@@ -175,14 +176,13 @@ class AuthenticationFlowTests(unittest.TestCase):
                     self.assertIn('href="/help"', help_page.text)
                     saved_settings = client.post("/settings/general", data={
                         "csrf_token": session.csrf_token,
-                        "installation_name": "Family Archive",
                         "timezone_name": "America/New_York",
                         "default_library_view": "covers",
                         "default_cover_size": "220",
                     })
                     self.assertEqual(saved_settings.status_code, 303)
                     self.assertEqual(
-                        main.app_settings.get("installation_name"), "Family Archive"
+                        main.app_settings.get("installation_name"), "InfoMancer"
                     )
                     system_settings = client.get("/settings/system")
                     self.assertEqual(system_settings.status_code, 200)

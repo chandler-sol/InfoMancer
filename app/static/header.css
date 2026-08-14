@@ -896,6 +896,7 @@
 @media (max-width: 760px) {
   .topbar {
     height: 62px;
+    padding-top: env(safe-area-inset-top);
   }
 
   .topbar-actions {
@@ -983,4 +984,17 @@ body.high-contrast :is(
   .home-destination-copy em, .home-organize em
 ) {
   color: #fff !important;
+}
+
+footer a {
+  color: #aab3bd;
+  text-decoration-color: rgba(170, 179, 189, .32);
+  text-underline-offset: .18em;
+  transition: color .16s ease, text-decoration-color .16s ease;
+}
+
+footer a:hover,
+footer a:focus-visible {
+  color: var(--text);
+  text-decoration-color: rgba(237, 242, 246, .7);
 }
