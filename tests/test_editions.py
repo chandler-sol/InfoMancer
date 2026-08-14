@@ -99,6 +99,45 @@ class EditionVersionTests(unittest.TestCase):
         for file_id in self.file_ids:
             self.assertIn(f'/files/{file_id}/edition-version', page.text)
 
+    def test_movie_detail_recovers_synopsis_only_from_matching_external_id(self):
+        class FakeTVDB:
+            def search_movies(self, query, year=None):
+                return [{"id": 77, "name": "Example Movie", "year": "2020"}]
+
+            def movie(self, movie_id):
+                return {
+                    "id": movie_id,
+                    "overview": "A recovered movie synopsis.",
+                    "remoteIds": [
+                        {"sourceName": "TheMovieDB.com", "id": "500"},
+                        {"sourceName": "IMDB", "id": "tt0000500"},
+                    ],
+                }
+
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE titles SET metadata_title='Example Movie',
+                   metadata_year=2020,tmdb_id='500',imdb_id='tt0000500'
+                   WHERE id=?""",
+                (self.title_id,),
+            )
+        original_tvdb = main.tvdb
+        main.tvdb = FakeTVDB()
+        try:
+            page = self.client.get(f"/titles/{self.title_id}")
+        finally:
+            main.tvdb = original_tvdb
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("A recovered movie synopsis.", page.text)
+        with self.database.connect() as conn:
+            title = conn.execute(
+                "SELECT overview,tvdb_movie_id FROM titles WHERE id=?",
+                (self.title_id,),
+            ).fetchone()
+        self.assertEqual(title["overview"], "A recovered movie synopsis.")
+        self.assertEqual(title["tvdb_movie_id"], 77)
+
     def test_preview_and_typed_confirmation_precede_catalog_change(self):
         preview = self.client.post(
             f"/files/{self.file_ids[0]}/edition-version/preview",

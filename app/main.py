@@ -7044,14 +7044,46 @@ def title_detail(request: Request, title_id: int):
                 # Poster enrichment is optional and should never block the
                 # locally cataloged show detail page.
                 pass
-        elif title["kind"] == "movie" and title["tvdb_movie_id"] and not title["overview"]:
+        elif title["kind"] == "movie" and not title["overview"]:
             try:
-                movie = tvdb.movie(title["tvdb_movie_id"])
-                overview = str(movie.get("overview") or "").strip()
+                movie = None
+                movie_id = title["tvdb_movie_id"]
+                if not movie_id and (title["tmdb_id"] or title["imdb_id"]):
+                    candidates = tvdb.search_movies(
+                        title["metadata_title"] or title["title"],
+                        title["metadata_year"] or title["year"],
+                    )
+                    for candidate in candidates:
+                        confidence = match_confidence(
+                            title["metadata_title"] or title["title"],
+                            title["metadata_year"] or title["year"], candidate,
+                        )
+                        if not (confidence["exact_title"] and confidence["exact_year"]):
+                            continue
+                        candidate_id = candidate.get("tvdb_id") or candidate.get("id")
+                        if not candidate_id:
+                            continue
+                        candidate_movie = tvdb.movie(candidate_id)
+                        tmdb_id, imdb_id = plex_movie_ids(candidate_movie)
+                        same_external_id = (
+                            bool(title["tmdb_id"] and tmdb_id == str(title["tmdb_id"]))
+                            or bool(title["imdb_id"] and imdb_id == title["imdb_id"])
+                        )
+                        if same_external_id:
+                            movie_id = candidate_id
+                            movie = candidate_movie
+                            break
+                if not movie_id:
+                    movie = None
+                elif movie is None:
+                    movie = tvdb.movie(movie_id)
+                overview = str((movie or {}).get("overview") or "").strip()
                 if overview:
                     conn.execute(
-                        "UPDATE titles SET overview=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                        (overview, title_id),
+                        """UPDATE titles SET overview=?,
+                           tvdb_movie_id=COALESCE(tvdb_movie_id, ?),
+                           updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                        (overview, movie_id, title_id),
                     )
                     title = conn.execute(
                         """SELECT t.*, r.label source_label,
