@@ -57,9 +57,7 @@ from .naming import (
     contained_destination, plex_episode_filename, plex_movie_filename, plex_show_folder,
 )
 from .scanner import scan_root, scan_title
-from .source_browser import (
-    SourceBrowserError, list_folders, preview_folder, validate_browse_path,
-)
+from .source_browser import SourceBrowserError, list_folders, preview_folder
 from .tvdb import TVDBClient, TVDBError
 from .provider_secrets import ProviderSecretError, ProviderSecretStore
 from .timezones import timezone_groups
@@ -4473,12 +4471,17 @@ def add_root(
             destination,
             "Choose Movies or TV Shows as the library type, then try again.",
         )
-    try:
-        resolved = validate_browse_path(path, settings.media_browse_roots)
-    except SourceBrowserError:
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute() or "\x00" in path:
         return redirect(
             destination,
-            "InfoMancer cannot add that folder because it is outside the allowed media locations or is not accessible. Check the folder and server permissions, then try again.",
+            "Enter a complete absolute folder path, then try again.",
+        )
+    resolved = candidate.resolve()
+    if not resolved.is_dir():
+        return redirect(
+            destination,
+            f"InfoMancer cannot access {resolved}. Check the folder and server permissions, then try again.",
         )
     try:
         with db.connect() as conn:
