@@ -85,7 +85,7 @@ try:
 except ProviderSecretError as exc:
     stored_provider_secrets = {}
     provider_secret_error = str(exc)
-APP_VERSION = "0.6.0-alpha.2"
+APP_VERSION = "0.7.0-alpha.1"
 app = FastAPI(title="InfoMancer", version=APP_VERSION)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "app" / "static"), name="static")
 COLLECTION_ART_DIR = settings.database.parent / "collection-art"
