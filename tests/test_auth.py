@@ -67,6 +67,55 @@ class AuthServiceTests(unittest.TestCase):
         )
         self.assertEqual(user.username, "sandboxpass")
 
+    def test_initial_librarian_creation_is_atomic_and_single_use(self):
+        user = self.auth.create_initial_librarian(
+            "firstadmin", "first@example.com", "First Admin",
+            "a strong initial password", provider="cloudflare",
+            subject="cf-subject", require_password=True,
+        )
+        self.assertTrue(user.is_librarian)
+        self.assertEqual(
+            self.auth.user_for_identity("cloudflare", "cf-subject").id, user.id
+        )
+        with self.assertRaisesRegex(AuthenticationError, "already been completed"):
+            self.auth.create_initial_librarian(
+                "secondadmin", "second@example.com", "Second Admin",
+                "another strong password",
+            )
+
+    def test_initial_external_identity_failure_does_not_leave_user(self):
+        with self.assertRaisesRegex(AuthenticationError, "identity is incomplete"):
+            self.auth.create_initial_librarian(
+                "firstadmin", "first@example.com", "First Admin", "",
+                require_password=False, provider="cloudflare", subject="",
+            )
+        self.assertEqual(self.auth.user_count(), 0)
+
+    def test_distributed_failures_lock_an_identity_and_old_attempts_are_pruned(self):
+        self.auth.create_user(
+            "ratelimit", "rate@example.com", "Rate Limit",
+            "a long rate limit password",
+        )
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO login_attempts(identity,ip_address,failures,last_attempt_at)
+                   VALUES ('stale','192.0.2.1',1,'2000-01-01 00:00:00')"""
+            )
+        for index in range(15):
+            with self.assertRaises(AuthenticationError):
+                self.auth.authenticate_local(
+                    "ratelimit", "wrong password", f"198.51.100.{index + 1}"
+                )
+        from app.auth import LoginLocked
+        with self.assertRaises(LoginLocked):
+            self.auth.authenticate_local(
+                "ratelimit", "a long rate limit password", "203.0.113.1"
+            )
+        with self.database.connect() as conn:
+            self.assertIsNone(conn.execute(
+                "SELECT 1 FROM login_attempts WHERE identity='stale'"
+            ).fetchone())
+
     def test_sessions_store_only_token_hash_and_can_be_revoked(self):
         user = self.auth.create_user(
             "member", "member@example.com", "Member",

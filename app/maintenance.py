@@ -16,6 +16,7 @@ REQUIRED_TABLES = {"titles", "files", "roots", "users", "app_settings"}
 SAFE_BACKUP_NAME = re.compile(
     r"^infomancer-backup-\d{8}-\d{6}(?:-[a-z-]+)?(?:-\d+)?\.db$"
 )
+SAFE_ARTWORK_NAME = re.compile(r"^[0-9a-f]{40}\.(?:jpg|png|webp)$")
 
 
 def backup_directory(database_path: Path) -> Path:
@@ -67,6 +68,7 @@ def validate_database_backup(path: Path) -> None:
     try:
         connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         integrity = connection.execute("PRAGMA integrity_check").fetchone()
+        foreign_key_error = connection.execute("PRAGMA foreign_key_check").fetchone()
         tables = {
             row[0] for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
@@ -83,12 +85,113 @@ def validate_database_backup(path: Path) -> None:
         raise MaintenanceError(
             "The selected database did not pass SQLite's integrity check."
         )
+    if foreign_key_error:
+        raise MaintenanceError(
+            "The selected database contains broken catalog relationships."
+        )
     missing = REQUIRED_TABLES - tables
     if missing:
         raise MaintenanceError(
             "The selected database is not an InfoMancer backup. "
             f"It is missing required data tables: {', '.join(sorted(missing))}."
         )
+
+
+def _inside(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(parent.resolve(strict=False))
+        return True
+    except ValueError:
+        return False
+
+
+def _database_roots(database_path: Path) -> tuple[Path, ...]:
+    try:
+        with sqlite3.connect(f"file:{database_path}?mode=ro", uri=True) as connection:
+            return tuple(
+                Path(row[0]) for row in connection.execute("SELECT path FROM roots")
+                if row[0]
+            )
+    except sqlite3.Error:
+        return ()
+
+
+def validate_database_paths(
+    path: Path, media_browse_roots: tuple[Path, ...],
+    existing_roots: tuple[Path, ...] = (),
+) -> None:
+    """Reject restored catalog paths that escape already-trusted storage."""
+    allowed_parents = tuple(root.resolve(strict=False) for root in media_browse_roots)
+    grandfathered = {root.resolve(strict=False) for root in existing_roots}
+    connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    try:
+        tables = {
+            row[0] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        roots: dict[int, Path] = {}
+        for row in connection.execute("SELECT id,path FROM roots"):
+            root = Path(row["path"] or "")
+            resolved = root.resolve(strict=False)
+            if not root.is_absolute() or (
+                resolved not in grandfathered
+                and not any(_inside(resolved, parent) for parent in allowed_parents)
+            ):
+                raise MaintenanceError(
+                    "The selected backup contains a media root outside the storage locations this installation trusts."
+                )
+            roots[int(row["id"])] = root
+
+        for row in connection.execute("SELECT root_id,folder_path FROM titles"):
+            root = roots.get(int(row["root_id"]))
+            candidate = Path(row["folder_path"] or "")
+            if root is None or not candidate.is_absolute() or not _inside(candidate, root):
+                raise MaintenanceError(
+                    "The selected backup contains a title path outside its configured media root."
+                )
+
+        for row in connection.execute(
+            """SELECT f.path,t.root_id FROM files f JOIN titles t ON t.id=f.title_id"""
+        ):
+            root = roots.get(int(row["root_id"]))
+            candidate = Path(row["path"] or "")
+            if root is None or not candidate.is_absolute() or not _inside(candidate, root):
+                raise MaintenanceError(
+                    "The selected backup contains a media-file path outside its configured root."
+                )
+
+        if "duplicate_trash" in tables:
+            for row in connection.execute(
+                "SELECT root_id,original_path,trash_path FROM duplicate_trash"
+            ):
+                root = roots.get(int(row["root_id"])) if row["root_id"] is not None else None
+                original = Path(row["original_path"] or "")
+                trash = Path(row["trash_path"] or "")
+                if (
+                    root is None or not original.is_absolute() or not trash.is_absolute()
+                    or not _inside(original, root)
+                    or not _inside(trash, root / ".infomancer-trash")
+                ):
+                    raise MaintenanceError(
+                        "The selected backup contains managed-trash paths outside a configured media root."
+                    )
+
+        if "collections" in tables:
+            for row in connection.execute(
+                "SELECT artwork_filename FROM collections WHERE artwork_filename IS NOT NULL AND artwork_filename<>''"
+            ):
+                if not SAFE_ARTWORK_NAME.fullmatch(str(row["artwork_filename"])):
+                    raise MaintenanceError(
+                        "The selected backup contains an invalid collection artwork filename."
+                    )
+    except sqlite3.Error as exc:
+        raise MaintenanceError(
+            "The selected database could not be checked for safe filesystem paths."
+        ) from exc
+    finally:
+        connection.close()
 
 
 def list_database_backups(database_path: Path) -> list[dict]:
@@ -119,8 +222,14 @@ def resolve_backup(database_path: Path, name: str) -> Path:
     return path
 
 
-def install_database_backup(database_path: Path, candidate: Path) -> Path:
+def install_database_backup(
+    database_path: Path, candidate: Path,
+    media_browse_roots: tuple[Path, ...] | None = None,
+) -> Path:
     validate_database_backup(candidate)
+    existing_roots = _database_roots(database_path)
+    if media_browse_roots is not None:
+        validate_database_paths(candidate, media_browse_roots, existing_roots)
     safety_backup = create_database_backup(database_path, "before-restore")
     staged = database_path.with_suffix(".restore.db")
     source = None
@@ -135,6 +244,8 @@ def install_database_backup(database_path: Path, candidate: Path) -> Path:
         target.close()
         target = None
         validate_database_backup(staged)
+        if media_browse_roots is not None:
+            validate_database_paths(staged, media_browse_roots, existing_roots)
         for suffix in ("-wal", "-shm"):
             Path(f"{database_path}{suffix}").unlink(missing_ok=True)
         os.replace(staged, database_path)

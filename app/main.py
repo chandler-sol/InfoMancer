@@ -63,7 +63,10 @@ from .source_browser import SourceBrowserError, list_folders, preview_folder
 from .smart_collections import decode_filters, encode_filters, matching_titles, normalize_filters
 from .tvdb import TVDBClient, TVDBError
 from .provider_secrets import ProviderSecretError, ProviderSecretStore
-from .request_security import RequestBodyTooLarge, csrf_submission, replay_body
+from .request_security import (
+    LOCAL_CSRF_COOKIE, RequestBodyTooLarge, browser_request_is_same_origin,
+    csrf_submission, host_is_allowed, replay_body,
+)
 from .timezones import timezone_groups
 
 
@@ -126,7 +129,10 @@ def shared_template_context(request: Request) -> dict:
     return {
         "current_user": current_user,
         "current_session": getattr(request.state, "auth_session", None),
-        "csrf_token": getattr(getattr(request.state, "auth_session", None), "csrf_token", ""),
+        "csrf_token": (
+            getattr(getattr(request.state, "auth_session", None), "csrf_token", "")
+            or getattr(request.state, "local_csrf_token", "")
+        ),
         "auth_mode": settings.auth_mode,
         "sandbox_mode": settings.sandbox,
         "minimum_password_length": settings.minimum_password_length,
@@ -449,10 +455,17 @@ async def authentication_middleware(request: Request, call_next):
     request.state.user = None
     request.state.auth_session = None
     new_session_token = ""
+    new_local_csrf_token = ""
 
     async def finish(response):
         if new_session_token:
             set_session_cookie(response, request, new_session_token)
+        if new_local_csrf_token:
+            response.set_cookie(
+                LOCAL_CSRF_COOKIE, new_local_csrf_token, httponly=True,
+                secure=secure_cookie_for(request, settings), samesite="strict",
+                path="/",
+            )
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "same-origin")
@@ -467,6 +480,11 @@ async def authentication_middleware(request: Request, call_next):
         )
         return response
 
+    if not host_is_allowed(request, settings):
+        return await finish(Response(
+            "Invalid Host header", status_code=400, media_type="text/plain"
+        ))
+
     if path.startswith("/static/") or path == "/health":
         return await finish(await call_next(request))
 
@@ -476,77 +494,82 @@ async def authentication_middleware(request: Request, call_next):
             profile_icon="library", role="librarian", active=True,
             force_password_change=False, last_login_at="",
         )
-        return await finish(await call_next(request))
+        local_csrf = request.cookies.get(LOCAL_CSRF_COOKIE, "")
+        if not local_csrf:
+            local_csrf = secrets.token_urlsafe(32)
+            new_local_csrf_token = local_csrf
+        request.state.local_csrf_token = local_csrf
 
-    users_exist = auth_service.user_count() > 0
+    if settings.auth_mode != "disabled":
+        users_exist = auth_service.user_count() > 0
 
-    if settings.auth_mode == "cloudflare":
-        assertion = request.headers.get("cf-access-jwt-assertion", "")
-        try:
-            claims = auth_service.cloudflare_claims(assertion)
-        except AuthenticationError as exc:
-            record_event(
-                "authentication",
-                "Cloudflare Access authentication was rejected.",
-                level="warning", detail=str(exc),
-                context={"operation": "cloudflare-claims"},
-            )
-            return await finish(auth_error_response(
-                request, 401, "Authentication required",
-                "Cloudflare Access could not verify this request. Sign in through Access again, then retry.",
-            ))
-        request.state.external_claims = claims
-        if not users_exist:
-            if path != "/setup":
-                if path.startswith("/api/"):
-                    return await finish(JSONResponse(
-                        {"detail": "Complete first-run setup"}, status_code=401
-                    ))
-                return await finish(RedirectResponse("/setup", status_code=303))
-        else:
-            subject = str(claims.get("sub") or "")
-            email = str(claims.get("email") or "")
-            user = auth_service.user_for_identity("cloudflare", subject)
-            if not user:
-                user = auth_service.claim_preassigned_identity(
-                    "cloudflare", subject, email
+        if settings.auth_mode == "cloudflare":
+            assertion = request.headers.get("cf-access-jwt-assertion", "")
+            try:
+                claims = auth_service.cloudflare_claims(assertion)
+            except AuthenticationError as exc:
+                record_event(
+                    "authentication",
+                    "Cloudflare Access authentication was rejected.",
+                    level="warning", detail=str(exc),
+                    context={"operation": "cloudflare-claims"},
                 )
-            if not user:
                 return await finish(auth_error_response(
-                    request, 403, "Account not assigned",
-                    "Cloudflare verified your identity, but a Librarian has not assigned it an InfoMancer account.",
+                    request, 401, "Authentication required",
+                    "Cloudflare Access could not verify this request. Sign in through Access again, then retry.",
                 ))
-            auth_service.record_identity_login("cloudflare", subject, user.id)
-            existing = auth_service.session_from_token(
-                request.cookies.get(SESSION_COOKIE, "")
-            )
-            if not existing or existing.user.id != user.id:
-                new_session_token, existing = auth_service.create_session(user, request)
-            request.state.user = user
-            request.state.auth_session = existing
-    else:
-        if not users_exist:
-            if path != "/setup":
-                if path.startswith("/api/"):
-                    return await finish(JSONResponse(
-                        {"detail": "Complete first-run setup"}, status_code=401
+            request.state.external_claims = claims
+            if not users_exist:
+                if path != "/setup":
+                    if path.startswith("/api/"):
+                        return await finish(JSONResponse(
+                            {"detail": "Complete first-run setup"}, status_code=401
+                        ))
+                    return await finish(RedirectResponse("/setup", status_code=303))
+            else:
+                subject = str(claims.get("sub") or "")
+                email = str(claims.get("email") or "")
+                user = auth_service.user_for_identity("cloudflare", subject)
+                if not user:
+                    user = auth_service.claim_preassigned_identity(
+                        "cloudflare", subject, email
+                    )
+                if not user:
+                    return await finish(auth_error_response(
+                        request, 403, "Account not assigned",
+                        "Cloudflare verified your identity, but a Librarian has not assigned it an InfoMancer account.",
                     ))
-                return await finish(RedirectResponse("/setup", status_code=303))
-        elif not public_path(path):
-            session = auth_service.session_from_token(
-                request.cookies.get(SESSION_COOKIE, "")
-            )
-            if not session:
-                if path.startswith("/api/"):
-                    return await finish(JSONResponse(
-                        {"detail": "Authentication required"}, status_code=401
+                auth_service.record_identity_login("cloudflare", subject, user.id)
+                existing = auth_service.session_from_token(
+                    request.cookies.get(SESSION_COOKIE, "")
+                )
+                if not existing or existing.user.id != user.id:
+                    new_session_token, existing = auth_service.create_session(user, request)
+                request.state.user = user
+                request.state.auth_session = existing
+        else:
+            if not users_exist:
+                if path != "/setup":
+                    if path.startswith("/api/"):
+                        return await finish(JSONResponse(
+                            {"detail": "Complete first-run setup"}, status_code=401
+                        ))
+                    return await finish(RedirectResponse("/setup", status_code=303))
+            elif not public_path(path):
+                session = auth_service.session_from_token(
+                    request.cookies.get(SESSION_COOKIE, "")
+                )
+                if not session:
+                    if path.startswith("/api/"):
+                        return await finish(JSONResponse(
+                            {"detail": "Authentication required"}, status_code=401
+                        ))
+                    destination = safe_next(path + (f"?{request.url.query}" if request.url.query else ""))
+                    return await finish(RedirectResponse(
+                        f"/login?{urlencode({'next': destination})}", status_code=303
                     ))
-                destination = safe_next(path + (f"?{request.url.query}" if request.url.query else ""))
-                return await finish(RedirectResponse(
-                    f"/login?{urlencode({'next': destination})}", status_code=303
-                ))
-            request.state.user = session.user
-            request.state.auth_session = session
+                request.state.user = session.user
+                request.state.auth_session = session
 
     user = getattr(request.state, "user", None)
     session = getattr(request.state, "auth_session", None)
@@ -577,24 +600,51 @@ async def authentication_middleware(request: Request, call_next):
                     request, 403, "Librarian access required",
                     "Your Member account cannot make administrative or filesystem changes.",
                 ))
-            if not session:
-                return await finish(auth_error_response(
-                    request, 403, "Session required", "Start a fresh session and try again."
-                ))
-            try:
-                submitted, buffered_body = await csrf_submission(request)
-            except RequestBodyTooLarge:
-                return await finish(auth_error_response(
-                    request, 413, "Request too large",
-                    "This form submission is larger than InfoMancer accepts.",
-                ))
-            if not submitted or not hmac.compare_digest(submitted, session.csrf_token):
-                return await finish(auth_error_response(
-                    request, 403, "Request verification failed",
-                    "Refresh the page and try the operation again.",
-                ))
-            if buffered_body is not None:
-                replay_body(request, buffered_body)
+            if settings.auth_mode == "disabled":
+                if not browser_request_is_same_origin(request, settings):
+                    return await finish(auth_error_response(
+                        request, 403, "Cross-site request blocked",
+                        "Open InfoMancer directly and try the operation again.",
+                    ))
+                try:
+                    submitted, buffered_body = await csrf_submission(request)
+                except RequestBodyTooLarge:
+                    return await finish(auth_error_response(
+                        request, 413, "Request too large",
+                        "This form submission is larger than InfoMancer accepts.",
+                    ))
+                local_csrf = getattr(request.state, "local_csrf_token", "")
+                if submitted and (
+                    not local_csrf
+                    or not hmac.compare_digest(submitted, local_csrf)
+                ):
+                    return await finish(auth_error_response(
+                        request, 403, "Request verification failed",
+                        "Refresh the page and try the operation again.",
+                    ))
+                if buffered_body is not None:
+                    replay_body(request, buffered_body)
+            else:
+                if not session:
+                    return await finish(auth_error_response(
+                        request, 403, "Session required", "Start a fresh session and try again."
+                    ))
+                try:
+                    submitted, buffered_body = await csrf_submission(request)
+                except RequestBodyTooLarge:
+                    return await finish(auth_error_response(
+                        request, 413, "Request too large",
+                        "This form submission is larger than InfoMancer accepts.",
+                    ))
+                if not submitted or not hmac.compare_digest(
+                    submitted, session.csrf_token
+                ):
+                    return await finish(auth_error_response(
+                        request, 403, "Request verification failed",
+                        "Refresh the page and try the operation again.",
+                    ))
+                if buffered_body is not None:
+                    replay_body(request, buffered_body)
 
     return await finish(await call_next(request))
 
@@ -1390,6 +1440,13 @@ def activation_context(
     }
 
 
+def public_activation_url(request: Request, token: str) -> str:
+    generated = request.url_for("activate_page", token=token)
+    if settings.public_url:
+        return settings.public_url.rstrip("/") + generated.path
+    return str(generated)
+
+
 def user_admin_context(
     request: Request, error: str = "", invitation_url: str = "",
     invitation_expires: str = "", invitation_user: AuthUser | None = None,
@@ -1447,17 +1504,16 @@ def setup_account(
             "requires_password": True, "error": "Passwords do not match.",
         })
     try:
-        user = auth_service.create_user(
-            username, email, display_name, password, role="librarian",
+        claims = getattr(request.state, "external_claims", {})
+        provider = "cloudflare" if settings.auth_mode == "cloudflare" else ""
+        subject = str(claims.get("sub") or "") if provider else ""
+        user = auth_service.create_initial_librarian(
+            username, email, display_name, password,
             profile_icon=profile_icon,
             require_password=settings.auth_mode == "local",
+            provider=provider, subject=subject,
+            identity_email=str(claims.get("email") or email),
         )
-        if settings.auth_mode == "cloudflare":
-            claims = getattr(request.state, "external_claims", {})
-            subject = str(claims.get("sub") or "")
-            if not subject:
-                raise AuthenticationError("Cloudflare identity is missing a subject.")
-            auth_service.link_identity(user.id, "cloudflare", subject, email)
     except AuthenticationError as exc:
         return preauth_response(request, "setup.html", {
             "username": username, "email": email, "display_name": display_name,
@@ -1999,7 +2055,7 @@ def create_admin_user(
             raw_token, expires = auth_service.create_invitation(
                 user.id, request.state.user.id
             )
-            invitation_url = str(request.url_for("activate_page", token=raw_token))
+            invitation_url = public_activation_url(request, raw_token)
             return templates.TemplateResponse(
                 request, "admin_users.html", user_admin_context(
                     request, invitation_url=invitation_url,
@@ -2024,7 +2080,7 @@ def create_user_invitation(request: Request, user_id: int):
             user_id, request.state.user.id
         )
         user = auth_service.get_user(user_id)
-        invitation_url = str(request.url_for("activate_page", token=raw_token))
+        invitation_url = public_activation_url(request, raw_token)
     except AuthenticationError as exc:
         return templates.TemplateResponse(
             request, "admin_users.html", user_admin_context(request, error=str(exc)),
@@ -4131,6 +4187,15 @@ def render_settings(
     )
 
 
+def csv_safe_row(row) -> dict:
+    safe = {}
+    for key, value in dict(row).items():
+        if isinstance(value, str) and value.lstrip(" \t\r\n")[:1] in {"=", "+", "-", "@"}:
+            value = "'" + value
+        safe[key] = value
+    return safe
+
+
 LIBRARY_EXPORT_FIELDS = [
     "title_id", "kind", "title", "release_year", "end_year", "continuing",
     "tvdb_id", "tvdb_movie_id", "tmdb_id", "imdb_id", "imdb_rating",
@@ -4206,7 +4271,7 @@ def export_library(request: Request, format: str = "csv"):
             output = io.StringIO(newline="")
             writer = csv.DictWriter(output, fieldnames=LIBRARY_EXPORT_FIELDS)
             writer.writeheader()
-            writer.writerows(rows)
+            writer.writerows(csv_safe_row(row) for row in rows)
             body = output.getvalue().encode("utf-8-sig")
             media_type = "text/csv; charset=utf-8"
         elif normalized == "json":
@@ -4440,7 +4505,7 @@ def restore_server_database(
         )
     try:
         candidate = resolve_backup(db.path, backup_name)
-        safety = install_database_backup(db.path, candidate)
+        safety = install_database_backup(db.path, candidate, settings.media_browse_roots)
     except MaintenanceError as exc:
         record_event(
             "restore", "Database restore was rejected.",
@@ -4477,7 +4542,7 @@ async def restore_uploaded_database(
                         "The uploaded database is larger than the 2 GB restore limit."
                     )
                 candidate.write(chunk)
-        safety = install_database_backup(db.path, candidate_path)
+        safety = install_database_backup(db.path, candidate_path, settings.media_browse_roots)
     except (MaintenanceError, OSError) as exc:
         record_event(
             "restore", "Uploaded database restore was rejected.",
@@ -4687,7 +4752,7 @@ def export_logs():
         extrasaction="ignore",
     )
     writer.writeheader()
-    writer.writerows(dict(row) for row in rows)
+    writer.writerows(csv_safe_row(row) for row in rows)
     filename = f"infomancer-logs-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv"
     return Response(
         output.getvalue().encode("utf-8-sig"),

@@ -17,6 +17,43 @@ from app.engagement import EngagementService
 
 
 class AuthenticationFlowTests(unittest.TestCase):
+    def test_disabled_mode_keeps_host_and_csrf_boundaries(self):
+        original_settings = main.settings
+        main.settings = replace(
+            main.settings, auth_mode="disabled", public_url="",
+            trusted_hosts=(), trust_cloudflare_proxy=False,
+        )
+        try:
+            with TestClient(main.app, follow_redirects=False) as client:
+                page = client.get("/")
+                self.assertEqual(page.status_code, 200)
+                token = client.cookies.get("infomancer_local_csrf")
+                self.assertTrue(token)
+                accepted_without_browser_metadata = client.post(
+                    "/account/home-layout", data={}
+                )
+                self.assertEqual(accepted_without_browser_metadata.status_code, 303)
+                rejected = client.post(
+                    "/account/home-layout", data={},
+                    headers={
+                        "origin": "https://attacker.example",
+                        "sec-fetch-site": "cross-site",
+                    },
+                )
+                self.assertEqual(rejected.status_code, 403)
+                accepted = client.post(
+                    "/account/home-layout", data={"csrf_token": token},
+                    headers={
+                        "origin": "http://testserver",
+                        "sec-fetch-site": "same-origin",
+                    },
+                )
+                self.assertEqual(accepted.status_code, 303)
+                bad_host = client.get("/", headers={"host": "attacker.example"})
+                self.assertEqual(bad_host.status_code, 400)
+        finally:
+            main.settings = original_settings
+
     def test_redirect_helper_rejects_external_destination(self):
         response = main.redirect("//example.test/account", "Not allowed")
         self.assertEqual(response.status_code, 303)

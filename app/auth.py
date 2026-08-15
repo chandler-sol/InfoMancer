@@ -8,6 +8,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import urlsplit
 
 import jwt
 from argon2 import PasswordHasher
@@ -58,21 +59,33 @@ def _verified_cloudflare_request(request, settings: Settings) -> bool:
     return settings.auth_mode == "cloudflare" and bool(claims)
 
 
+def _trusted_cloudflare_proxy(request, settings: Settings) -> bool:
+    return settings.trust_cloudflare_proxy or _verified_cloudflare_request(
+        request, settings
+    )
+
+
 def secure_cookie_for(request, settings: Settings) -> bool:
     if settings.cookie_secure == "true":
         return True
     if settings.cookie_secure == "false":
         return False
+    if settings.public_url:
+        try:
+            if urlsplit(settings.public_url).scheme.casefold() == "https":
+                return True
+        except ValueError:
+            pass
     if getattr(getattr(request, "url", None), "scheme", "") == "https":
         return True
-    if _verified_cloudflare_request(request, settings):
+    if _trusted_cloudflare_proxy(request, settings):
         forwarded = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
         return forwarded == "https"
     return False
 
 
 def request_ip(request, settings: Settings | None = None) -> str:
-    if settings is not None and _verified_cloudflare_request(request, settings):
+    if settings is not None and _trusted_cloudflare_proxy(request, settings):
         forwarded = request.headers.get("cf-connecting-ip", "").strip()
         try:
             if forwarded:
@@ -254,6 +267,57 @@ class AuthService:
             ) from exc
         return user_from_row(row)
 
+    def create_initial_librarian(
+        self, username: str, email: str, display_name: str, password: str = "",
+        profile_icon: str = "initials", *, require_password: bool = True,
+        provider: str = "", subject: str = "", identity_email: str = "",
+    ) -> AuthUser:
+        """Create the first Librarian and optional external identity atomically."""
+        username, email, display_name = self.validate_account_fields(
+            username, email, display_name, password,
+            require_password=require_password,
+        )
+        if profile_icon not in PROFILE_ICONS:
+            profile_icon = "initials"
+        provider = provider.strip().casefold()
+        subject = subject.strip()
+        if provider and not subject:
+            raise AuthenticationError("The external sign-in identity is incomplete.")
+        try:
+            with self.database.connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]:
+                    raise AuthenticationError(
+                        "First-run setup has already been completed."
+                    )
+                user_id = conn.execute(
+                    """INSERT INTO users
+                       (username,email,display_name,profile_icon,password_hash,role,
+                        force_password_change,password_changed_at)
+                       VALUES (?,?,?,?,?,'librarian',0,CURRENT_TIMESTAMP)""",
+                    (
+                        username, email or None, display_name, profile_icon,
+                        password_hasher.hash(password) if password else None,
+                    ),
+                ).lastrowid
+                if provider:
+                    conn.execute(
+                        """INSERT INTO auth_identities(user_id,provider,subject,email)
+                           VALUES (?,?,?,?)""",
+                        (
+                            user_id, provider, subject,
+                            normalize_email(identity_email or email) or None,
+                        ),
+                    )
+                row = conn.execute(
+                    "SELECT * FROM users WHERE id=?", (user_id,)
+                ).fetchone()
+        except sqlite3.IntegrityError as exc:
+            raise AuthenticationError(
+                "The first Librarian account could not be created because its identity conflicts with existing setup data."
+            ) from exc
+        return user_from_row(row)
+
     def get_user(self, user_id: int) -> AuthUser | None:
         with self.database.connect() as conn:
             row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
@@ -396,7 +460,19 @@ class AuthService:
         identity = identity.strip().casefold()
         if not identity or not password:
             raise AuthenticationError("Incorrect username, email, or password.")
+
+        failure = False
         with self.database.connect() as conn:
+            conn.execute(
+                "DELETE FROM login_attempts WHERE datetime(last_attempt_at)<datetime('now','-1 day')"
+            )
+            conn.execute(
+                """DELETE FROM login_attempts WHERE rowid IN (
+                     SELECT rowid FROM login_attempts
+                     ORDER BY datetime(last_attempt_at) DESC,rowid DESC
+                     LIMIT -1 OFFSET 5000
+                   )"""
+            )
             attempt = conn.execute(
                 "SELECT * FROM login_attempts WHERE identity=? AND ip_address=?",
                 (identity, ip_address),
@@ -407,6 +483,19 @@ class AuthService:
                         raise LoginLocked("Too many attempts. Try again in a few minutes.")
                 except ValueError:
                     pass
+            identity_failures = int(conn.execute(
+                """SELECT COALESCE(SUM(failures),0) FROM login_attempts
+                   WHERE identity=? AND datetime(last_attempt_at)>=datetime('now','-15 minutes')""",
+                (identity,),
+            ).fetchone()[0])
+            ip_failures = int(conn.execute(
+                """SELECT COALESCE(SUM(failures),0) FROM login_attempts
+                   WHERE ip_address=? AND datetime(last_attempt_at)>=datetime('now','-15 minutes')""",
+                (ip_address,),
+            ).fetchone()[0])
+            if identity_failures >= 15 or ip_failures >= 30:
+                raise LoginLocked("Too many attempts. Try again in a few minutes.")
+
             row = conn.execute(
                 """SELECT * FROM users
                    WHERE LOWER(username)=? OR LOWER(COALESCE(email,''))=?""",
@@ -420,6 +509,7 @@ class AuthService:
                 raise AuthenticationError(
                     "This account is waiting for setup. Ask a Librarian for a fresh one-time setup link."
                 )
+
             verified = False
             if row and row["password_hash"]:
                 try:
@@ -431,6 +521,7 @@ class AuthService:
                         )
                 except (VerifyMismatchError, VerificationError, InvalidHashError):
                     verified = False
+
             if not verified:
                 failures = int(attempt["failures"] if attempt else 0) + 1
                 locked_until = (
@@ -445,15 +536,26 @@ class AuthService:
                          locked_until=excluded.locked_until""",
                     (identity, ip_address, failures, locked_until),
                 )
-                raise AuthenticationError("Incorrect username, email, or password.")
-            conn.execute(
-                "DELETE FROM login_attempts WHERE identity=? AND ip_address=?",
-                (identity, ip_address),
-            )
-            conn.execute(
-                "UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?", (row["id"],)
-            )
-            refreshed = conn.execute("SELECT * FROM users WHERE id=?", (row["id"],)).fetchone()
+                conn.execute(
+                    """DELETE FROM login_attempts WHERE rowid IN (
+                         SELECT rowid FROM login_attempts
+                         ORDER BY datetime(last_attempt_at) DESC,rowid DESC
+                         LIMIT -1 OFFSET 5000
+                       )"""
+                )
+                failure = True
+            else:
+                conn.execute("DELETE FROM login_attempts WHERE identity=?", (identity,))
+                conn.execute(
+                    "UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (row["id"],),
+                )
+                refreshed = conn.execute(
+                    "SELECT * FROM users WHERE id=?", (row["id"],)
+                ).fetchone()
+
+        if failure:
+            raise AuthenticationError("Incorrect username, email, or password.")
         return user_from_row(refreshed)
 
     def create_session(self, user: AuthUser, request) -> tuple[str, AuthSession]:

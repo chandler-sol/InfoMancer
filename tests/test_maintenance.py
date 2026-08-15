@@ -66,6 +66,38 @@ class MaintenanceTests(unittest.TestCase):
         self.assertTrue(safety.is_file())
         validate_database_backup(safety)
 
+    def test_restore_rejects_catalog_paths_outside_trusted_storage(self):
+        media = self.base / "media"
+        root = media / "Movies"
+        title_folder = root / "Example"
+        root.mkdir(parents=True)
+        with self.database.connect() as connection:
+            root_id = connection.execute(
+                "INSERT INTO roots(path,kind,label) VALUES (?,'movie','Movies')",
+                (str(root),),
+            ).lastrowid
+            title_id = connection.execute(
+                """INSERT INTO titles(root_id,kind,title,folder_path)
+                   VALUES (?,'movie','Example',?)""",
+                (root_id, str(title_folder)),
+            ).lastrowid
+            connection.execute(
+                """INSERT INTO files(title_id,path,filename,extension,seen_scan)
+                   VALUES (?,?,?,?,?)""",
+                (title_id, str(title_folder / "movie.mkv"), "movie.mkv", ".mkv", "scan"),
+            )
+        backup = create_database_backup(self.path)
+        connection = sqlite3.connect(backup)
+        try:
+            connection.execute(
+                "UPDATE files SET path='/outside/trusted/storage/movie.mkv'"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        with self.assertRaisesRegex(MaintenanceError, "media-file path"):
+            install_database_backup(self.path, backup, (media,))
+
     def test_non_infomancer_database_is_rejected(self):
         invalid = self.base / "invalid.db"
         connection = sqlite3.connect(invalid)

@@ -23,7 +23,21 @@ Test the policy in a private browser window. Cloudflare's sign-in page must
 appear before InfoMancer.
 
 This outer policy can protect InfoMancer while the application continues using
-local accounts. To make Cloudflare the application sign-in authority too, set:
+local accounts. For that layout, tell InfoMancer its canonical HTTPS address and
+explicitly trust Cloudflare proxy metadata:
+
+```dotenv
+INFOMANCER_PUBLIC_URL=https://infomancer.example.com
+INFOMANCER_TRUSTED_HOSTS=infomancer.example.com
+INFOMANCER_TRUST_CLOUDFLARE_PROXY=true
+```
+
+Only enable `INFOMANCER_TRUST_CLOUDFLARE_PROXY` while the origin remains private
+(loopback-only or otherwise unreachable except through the trusted connector).
+It lets local-account installations use the real Cloudflare client IP and HTTPS
+scheme without trusting arbitrary forwarded headers from direct clients.
+
+To make Cloudflare the application sign-in authority too, set:
 
 ```dotenv
 INFOMANCER_AUTH_MODE=cloudflare
@@ -31,7 +45,7 @@ CF_ACCESS_TEAM_DOMAIN=https://your-team.cloudflareaccess.com
 CF_ACCESS_AUD=the-application-audience-tag-from-cloudflare
 ```
 
-The first verified visitor completes Librarian setup. Afterward, a Librarian
+The first verified visitor must also enter the one-time bootstrap token shown in the InfoMancer server logs to complete Librarian setup. Afterward, a Librarian
 must create each later account with the exact email address Cloudflare asserts.
 Restart InfoMancer after changing authentication environment values.
 

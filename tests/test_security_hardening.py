@@ -10,7 +10,10 @@ from starlette.requests import Request
 from app.auth import request_ip, secure_cookie_for
 from app.bootstrap import BootstrapTokenManager
 from app.config import Settings
-from app.request_security import RequestBodyTooLarge, csrf_submission
+from app.request_security import (
+    RequestBodyTooLarge, browser_request_is_same_origin, csrf_submission,
+    host_is_allowed,
+)
 
 
 def settings_for(path: Path, *, auth_mode: str = "local") -> Settings:
@@ -137,6 +140,53 @@ class ForwardedHeaderTests(unittest.TestCase):
             )
             self.assertEqual(request_ip(request, settings), "203.0.113.50")
             self.assertTrue(secure_cookie_for(request, settings))
+
+    def test_local_auth_can_explicitly_trust_private_cloudflare_proxy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = settings_for(Path(temporary), auth_mode="local")
+            settings = Settings(**{
+                **settings.__dict__,
+                "public_url": "https://media.example.test",
+                "trusted_hosts": ("media.example.test",),
+                "trust_cloudflare_proxy": True,
+            })
+            request = request_with(
+                headers={
+                    "host": "media.example.test",
+                    "cf-connecting-ip": "203.0.113.60",
+                    "x-forwarded-proto": "https",
+                },
+                client="172.20.0.4",
+            )
+            self.assertEqual(request_ip(request, settings), "203.0.113.60")
+            self.assertTrue(secure_cookie_for(request, settings))
+            self.assertTrue(host_is_allowed(request, settings))
+
+    def test_disabled_auth_rejects_untrusted_host(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = settings_for(Path(temporary), auth_mode="disabled")
+            self.assertFalse(host_is_allowed(
+                request_with(headers={"host": "attacker.example"}), settings
+            ))
+            self.assertTrue(host_is_allowed(
+                request_with(headers={"host": "127.0.0.1:8787"}), settings
+            ))
+
+    def test_disabled_mode_rejects_cross_site_browser_origin(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = settings_for(Path(temporary), auth_mode="disabled")
+            cross_site = request_with(headers={
+                "host": "127.0.0.1:8787",
+                "origin": "https://attacker.example",
+                "sec-fetch-site": "cross-site",
+            })
+            same_origin = request_with(headers={
+                "host": "127.0.0.1:8787",
+                "origin": "http://127.0.0.1:8787",
+                "sec-fetch-site": "same-origin",
+            })
+            self.assertFalse(browser_request_is_same_origin(cross_site, settings))
+            self.assertTrue(browser_request_is_same_origin(same_origin, settings))
 
     def test_invalid_cloudflare_ip_falls_back_to_socket_peer(self):
         with tempfile.TemporaryDirectory() as temporary:

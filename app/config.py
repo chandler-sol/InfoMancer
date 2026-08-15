@@ -11,6 +11,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env", override=False)
 
 
+def _enabled(value: str) -> bool:
+    return value.strip().casefold() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class Settings:
     database: Path
@@ -26,6 +30,9 @@ class Settings:
     application_secret: str = ""
     sandbox: bool = False
     bootstrap_token: str = ""
+    public_url: str = ""
+    trusted_hosts: tuple[str, ...] = ()
+    trust_cloudflare_proxy: bool = False
 
     @property
     def minimum_password_length(self) -> int:
@@ -50,6 +57,11 @@ def get_settings() -> Settings:
         session_days = max(1, min(90, int(os.getenv("INFOMANCER_SESSION_DAYS", "14"))))
     except ValueError:
         session_days = 14
+    trusted_hosts = tuple(
+        value.strip().casefold().rstrip(".")
+        for value in os.getenv("INFOMANCER_TRUSTED_HOSTS", "").split(",")
+        if value.strip()
+    )
     return Settings(
         database=db,
         tvdb_api_key=os.getenv("TVDB_API_KEY", "").strip(),
@@ -64,7 +76,11 @@ def get_settings() -> Settings:
         cloudflare_team_domain=os.getenv("CF_ACCESS_TEAM_DOMAIN", "").strip().rstrip("/"),
         cloudflare_audience=os.getenv("CF_ACCESS_AUD", "").strip(),
         application_secret=os.getenv("INFOMANCER_SECRET", "").strip(),
-        sandbox=os.getenv("INFOMANCER_SANDBOX", "").strip().casefold()
-        in {"1", "true", "yes", "on"},
+        sandbox=_enabled(os.getenv("INFOMANCER_SANDBOX", "")),
         bootstrap_token=os.getenv("INFOMANCER_BOOTSTRAP_TOKEN", "").strip(),
+        public_url=os.getenv("INFOMANCER_PUBLIC_URL", "").strip().rstrip("/"),
+        trusted_hosts=trusted_hosts,
+        trust_cloudflare_proxy=_enabled(
+            os.getenv("INFOMANCER_TRUST_CLOUDFLARE_PROXY", "")
+        ),
     )
