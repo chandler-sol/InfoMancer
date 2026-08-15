@@ -10,7 +10,7 @@
       <p class="workspace-inspector-subtitle">{% if display_year %}{{ display_year }} · {% endif %}{{ title.source_label or title.source_path }}</p>
       <div class="workspace-inspector-statuses">
         <span class="workspace-status{% if matched %} good{% else %} warning{% endif %}">{{ 'Matched' if matched else 'Unmatched' }}</span>
-        <span class="workspace-status{% if title.source_health == 'healthy' %} good{% elif title.source_health in ['degraded','offline'] %} warning{% endif %}">Source {{ title.source_health|title }}</span>
+        <span class="workspace-status{% if title.source_health == 'healthy' %} good{% elif title.source_health in ['degraded','offline'] %} warning{% endif %}">Source {{ (title.source_health or 'unknown')|title }}</span>
         {% if title.metadata_status %}<span class="workspace-status">{{ title.metadata_status|replace('_',' ')|title }}</span>{% endif %}
       </div>
     </div>
@@ -39,14 +39,14 @@
       <div><small>Audio</small><strong>{{ primary_file.audio_codec or 'Unknown' }}{% if primary_file.audio_channels %} · {{ primary_file.audio_channels }}ch{% endif %}</strong></div>
       <div><small>Range</small><strong>{{ primary_file.dynamic_range or 'Unknown' }}</strong></div>
       <div><small>Container</small><strong>{{ primary_file.container or primary_file.extension or 'Unknown' }}</strong></div>
-      <div><small>Runtime</small><strong>{{ total_runtime_display or primary_file.runtime_display or 'Unknown' }}</strong></div>
+      <div><small>Runtime</small><strong>{{ runtime_display or primary_file.runtime_display or 'Unknown' }}</strong></div>
     </div>{% else %}<p class="workspace-inspector-empty-state">No indexed files are currently attached to this title.</p>{% endif %}
     {% if files %}<div class="workspace-inspector-files">
       {% for file in files[:5] %}<article>
         <div><strong>{{ file.filename }}</strong><small>{{ file.size_display }}{% if file.resolution_display %} · {{ file.resolution_display }}{% endif %}{% if file.dynamic_range %} · {{ file.dynamic_range }}{% endif %}</small></div>
         {% if file.edition_name or file.version_name or file.version_preferred %}<span class="workspace-file-version">{% if file.version_preferred %}Preferred{% endif %}{% if file.edition_name %} · {{ file.edition_name }}{% endif %}{% if file.version_name %} · {{ file.version_name }}{% endif %}</span>{% endif %}
       </article>{% endfor %}
-      {% if files|length > 5 %}<small class="workspace-inspector-more">+ {{ files|length - 5 }} more indexed files</small>{% endif %}
+      {% if file_count > 5 %}<small class="workspace-inspector-more">+ {{ file_count - 5 }} more indexed files</small>{% endif %}
     </div>{% endif %}
   </section>
 

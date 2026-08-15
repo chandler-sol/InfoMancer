@@ -120,6 +120,23 @@ class WorkspaceInspectorTests(unittest.TestCase):
         self.assertEqual(state["favorite"], 1)
         self.assertIsNotNone(tag)
 
+    def test_inspector_media_totals_are_not_limited_by_preview_rows(self):
+        with self.database.connect() as conn:
+            for index in range(13):
+                conn.execute(
+                    """INSERT INTO files(
+                         title_id,path,filename,extension,size_bytes,runtime_seconds,seen_scan
+                       ) VALUES (?,?,?,?,?,?,?)""",
+                    (self.title_id, f"/movies/inspector-film/extra-{index}.mkv",
+                     f"extra-{index}.mkv", ".mkv", 1024, 60, "test"),
+                )
+        response = self.client.get(f"/library/inspector/{self.title_id}")
+        rendered = unescape(response.text)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("14 files", rendered)
+        self.assertIn("+ 9 more indexed files", rendered)
+        self.assertIn("2h 0m", rendered)
+
     def test_missing_inspector_title_is_404(self):
         self.assertEqual(self.client.get("/library/inspector/999999").status_code, 404)
 

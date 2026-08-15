@@ -214,7 +214,7 @@
       if (titleLink || !interactive(event.target)) {
         event.preventDefault();
         rangeAnchorId = titleId;
-        inspectTitle(titleId, item, "push");
+        inspectTitle(titleId, item, selectedTitleId ? "replace" : "push");
       }
     });
 

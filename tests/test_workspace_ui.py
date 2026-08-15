@@ -68,6 +68,7 @@ class WorkspaceFoundationTests(unittest.TestCase):
         self.assertIn('popstate', script)
         self.assertIn('event.shiftKey', script)
         self.assertIn('event.metaKey || event.ctrlKey', script)
+        self.assertIn('selectedTitleId ? "replace" : "push"', script)
         self.assertIn('infomancer-library-selection:', library)
         self.assertIn('data-workspace-title-id', library)
         self.assertIn('Health &amp; attention', partial)

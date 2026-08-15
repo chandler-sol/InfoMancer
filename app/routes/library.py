@@ -640,6 +640,13 @@ def build_router(ctx: RouteContext):
                    LIMIT 12""",
                 (title_id,),
             ).fetchall()
+            file_totals = conn.execute(
+                """SELECT COUNT(*) file_count,
+                          COALESCE(SUM(size_bytes),0) total_size,
+                          COALESCE(SUM(runtime_seconds),0) total_runtime
+                   FROM files WHERE title_id=?""",
+                (title_id,),
+            ).fetchone()
             tags = conn.execute(
                 """SELECT ut.id,ut.name,ut.color,
                           CASE WHEN tt.title_id IS NULL THEN 0 ELSE 1 END selected
@@ -752,9 +759,12 @@ def build_router(ctx: RouteContext):
             "provider_ids": provider_ids,
             "files": files,
             "primary_file": primary,
-            "file_count": len(files),
-            "total_size_display": size_label(total_size),
-            "total_runtime_display": runtime_label(total_runtime),
+            "file_count": int(file_totals["file_count"] or 0),
+            "total_size_display": size_label(file_totals["total_size"]),
+            "runtime_display": (
+                primary["runtime_display"] if title["kind"] == "movie" and primary
+                else runtime_label(file_totals["total_runtime"])
+            ),
             "tags": tags,
             "collections": collections,
             "libraries": libraries,
