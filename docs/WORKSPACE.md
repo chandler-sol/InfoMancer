@@ -40,4 +40,4 @@ W2 replaces the W1 DOM-scraping Inspector with a dedicated read-only `/library/i
 
 ### W2 validation
 
-The final W2 application tree passes 198 tests plus `python -m compileall app`. Coverage includes server-rendered Inspector data, read-only GET behavior, member-safe CSRF-protected favorite/tag mutations, route authorization, keyboard and range selection contracts, browser-history restoration, aggregate media totals beyond the bounded file preview, and correct runtime handling for alternate movie editions.
+The final W2 application tree passes 198 tests plus `python -m compileall app`. Coverage includes server-rendered Inspector data, read-only GET behavior, member-safe CSRF-protected favorite/tag mutations, route authorization, keyboard and range selection contracts, browser-history restoration, aggregate media totals beyond the bounded file preview, and correct runtime handling for alternate movie editions. The permanent repository matrix also passes dependency audit plus Python 3.13 tests and compilation on Ubuntu, macOS, and Windows.
