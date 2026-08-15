@@ -9,6 +9,7 @@
     if (text) text.textContent = label;
     link.classList.remove("active");
     link.removeAttribute("aria-current");
+    link.title = label;
     return link;
   };
 
@@ -20,6 +21,17 @@
   };
 
   const startsAny = (prefixes) => prefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+
+  const ensureAlphaBadge = () => {
+    const brand = document.querySelector(".brand");
+    if (!brand || brand.querySelector(".workspace-nav-alpha")) return;
+    const alpha = document.createElement("span");
+    alpha.className = "workspace-nav-alpha";
+    alpha.textContent = "0.8 α";
+    alpha.title = "InfoMancer 0.8 Alpha Workspace";
+    alpha.setAttribute("aria-label", "Version 0.8 Alpha Workspace");
+    brand.append(alpha);
+  };
 
   const enhanceNavigation = () => {
     const panel = document.getElementById("site-menu-panel");
@@ -44,31 +56,58 @@
     markActive(activity, startsAny(["/activity", "/announcements"]));
     [dashboard, library, review, sources, activity].filter(Boolean).forEach((link) => primary.append(link));
 
-    const makeSection = (title, hrefs) => {
+    const makeSection = (title, hrefs, openWhen) => {
       const links = hrefs.map((href) => byHref.get(href)).filter(Boolean);
       if (!links.length) return null;
-      const section = document.createElement("section");
+      const section = document.createElement("details");
       section.className = "workspace-nav-section";
-      const heading = document.createElement("strong");
-      heading.textContent = title;
+      section.dataset.workspaceSection = title.toLowerCase();
+      section.open = Boolean(openWhen);
+
+      const summary = document.createElement("summary");
+      summary.textContent = title;
+      summary.setAttribute("aria-label", `${title} shortcuts`);
       const list = document.createElement("div");
       list.className = "workspace-nav-secondary";
-      links.forEach((link) => list.append(link));
-      section.append(heading, list);
+      links.forEach((link) => {
+        link.title = link.querySelector("span")?.textContent?.trim() || link.textContent.trim();
+        list.append(link);
+      });
+      section.append(summary, list);
       return section;
     };
 
-    const librarySection = makeSection("Library", ["/movies", "/shows", "/collections", "/libraries", "/favorites"]);
-    const reviewSection = makeSection("Review", ["/library-health", "/duplicates", "/bulk-match"]);
-    const systemSection = makeSection("System", ["/announcements", "/settings", "/help", "/about"]);
-    const alpha = document.createElement("span");
-    alpha.className = "workspace-nav-alpha";
-    alpha.textContent = "0.8 Alpha Workspace";
+    const librarySection = makeSection(
+      "Library",
+      ["/movies", "/shows", "/collections", "/libraries", "/favorites"],
+      startsAny(["/library", "/movies", "/shows", "/titles", "/files", "/collections", "/libraries", "/favorites"]),
+    );
+    const reviewSection = makeSection(
+      "Review",
+      ["/library-health", "/duplicates", "/bulk-match"],
+      startsAny(["/library-health", "/duplicates", "/bulk-match"]),
+    );
+    const moreSection = makeSection(
+      "More",
+      ["/settings", "/help", "/about"],
+      startsAny(["/settings", "/help", "/about"]),
+    );
 
-    panel.replaceChildren(alpha, primary);
-    [librarySection, reviewSection, systemSection].filter(Boolean).forEach((section) => panel.append(section));
+    panel.replaceChildren(primary);
+    [librarySection, reviewSection, moreSection].filter(Boolean).forEach((section) => panel.append(section));
     panel.classList.add("workspace-nav-ready");
     panel.dataset.workspaceReady = "1";
+
+    panel.querySelectorAll(".workspace-nav-section").forEach((section) => {
+      section.addEventListener("toggle", () => {
+        if (!section.open) return;
+        panel.querySelectorAll(".workspace-nav-section[open]").forEach((other) => {
+          if (other !== section) other.open = false;
+        });
+      });
+    });
+
+    ensureAlphaBadge();
   };
 
   const enhanceLibraryInspector = () => {
@@ -225,8 +264,161 @@
     close.addEventListener("click", closeInspector);
   };
 
-  document.addEventListener("DOMContentLoaded", () => {
+  const enhanceCreditHoverCards = () => {
+    const personLinks = [...document.querySelectorAll('.movie-credits a[href^="/library?q="], .episode-credits a[href^="/library?q="]')];
+    if (!personLinks.length) return;
+
+    const popover = document.createElement("aside");
+    popover.className = "workspace-person-popover";
+    popover.hidden = true;
+    popover.setAttribute("aria-live", "polite");
+    document.body.append(popover);
+
+    const cache = new Map();
+    let openTimer = 0;
+    let closeTimer = 0;
+    let activeLink = null;
+
+    const roleFor = (link) => {
+      const creditRow = link.closest(".movie-credits > div");
+      const label = creditRow?.querySelector("strong")?.textContent?.replace(":", "").trim();
+      if (label) return label;
+      const episodeText = link.closest(".episode-credits span")?.textContent || "";
+      if (episodeText.startsWith("Directed by")) return "Director";
+      if (episodeText.startsWith("Written by")) return "Writer";
+      return "Person";
+    };
+
+    const position = (link) => {
+      const rect = link.getBoundingClientRect();
+      const width = Math.min(330, window.innerWidth - 24);
+      let left = rect.left;
+      if (left + width > window.innerWidth - 12) left = window.innerWidth - width - 12;
+      left = Math.max(12, left);
+      const estimatedHeight = Math.min(300, popover.offsetHeight || 220);
+      let top = rect.bottom + 9;
+      if (top + estimatedHeight > window.innerHeight - 12) top = Math.max(12, rect.top - estimatedHeight - 9);
+      popover.style.left = `${left}px`;
+      popover.style.top = `${top}px`;
+    };
+
+    const render = (link, items = null, failed = false) => {
+      popover.replaceChildren();
+      const head = document.createElement("div");
+      head.className = "workspace-person-popover-head";
+      const copy = document.createElement("span");
+      const role = document.createElement("small");
+      role.textContent = roleFor(link);
+      const name = document.createElement("strong");
+      name.textContent = link.textContent.trim();
+      copy.append(role, name);
+      head.append(copy);
+      popover.append(head);
+
+      if (items === null && !failed) {
+        const loading = document.createElement("p");
+        loading.className = "workspace-person-popover-state";
+        loading.textContent = "Finding titles in your library…";
+        popover.append(loading);
+      } else if (items?.length) {
+        const label = document.createElement("small");
+        label.className = "workspace-person-popover-label";
+        label.textContent = "IN YOUR LIBRARY";
+        const list = document.createElement("div");
+        list.className = "workspace-person-title-list";
+        items.slice(0, 4).forEach((item) => {
+          const title = document.createElement("a");
+          title.href = item.href;
+          title.textContent = item.title;
+          list.append(title);
+        });
+        popover.append(label, list);
+      } else {
+        const empty = document.createElement("p");
+        empty.className = "workspace-person-popover-state";
+        empty.textContent = failed ? "Preview unavailable. The library search still works." : "No additional local titles found in this preview.";
+        popover.append(empty);
+      }
+
+      const search = document.createElement("a");
+      search.className = "workspace-person-search";
+      search.href = link.href;
+      search.textContent = "Search library for this person →";
+      popover.append(search);
+      popover.hidden = false;
+      position(link);
+    };
+
+    const load = async (link) => {
+      const key = link.href;
+      if (cache.has(key)) {
+        if (activeLink === link) render(link, cache.get(key));
+        return;
+      }
+      try {
+        const response = await fetch(key, { credentials: "same-origin", headers: { "X-Workspace-Preview": "person" } });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const html = await response.text();
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        const seen = new Set();
+        const items = [];
+        doc.querySelectorAll(".title-link, .cover-card-link").forEach((candidate) => {
+          const href = candidate.href;
+          const title = candidate.querySelector("strong")?.textContent?.trim() || candidate.textContent?.trim();
+          if (!href || !title || seen.has(href)) return;
+          seen.add(href);
+          items.push({ href, title });
+        });
+        cache.set(key, items);
+        if (activeLink === link) render(link, items);
+      } catch (_error) {
+        if (activeLink === link) render(link, [], true);
+      }
+    };
+
+    const show = (link) => {
+      window.clearTimeout(closeTimer);
+      activeLink = link;
+      render(link, cache.get(link.href) ?? null);
+      if (!cache.has(link.href)) load(link);
+    };
+
+    const scheduleClose = () => {
+      window.clearTimeout(closeTimer);
+      closeTimer = window.setTimeout(() => {
+        popover.hidden = true;
+        activeLink = null;
+      }, 140);
+    };
+
+    personLinks.forEach((link) => {
+      link.classList.add("workspace-person-link");
+      link.title = "Preview this person's titles in your library";
+      link.addEventListener("pointerenter", () => {
+        window.clearTimeout(openTimer);
+        window.clearTimeout(closeTimer);
+        openTimer = window.setTimeout(() => show(link), 180);
+      });
+      link.addEventListener("pointerleave", scheduleClose);
+      link.addEventListener("focus", () => show(link));
+      link.addEventListener("blur", scheduleClose);
+    });
+
+    popover.addEventListener("pointerenter", () => window.clearTimeout(closeTimer));
+    popover.addEventListener("pointerleave", scheduleClose);
+    window.addEventListener("resize", () => activeLink && position(activeLink));
+    window.addEventListener("scroll", () => activeLink && position(activeLink), true);
+  };
+
+  const initialize = () => {
     enhanceNavigation();
     enhanceLibraryInspector();
-  });
+    enhanceCreditHoverCards();
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initialize, { once: true });
+  } else {
+    initialize();
+  }
 })();
