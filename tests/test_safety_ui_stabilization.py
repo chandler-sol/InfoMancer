@@ -22,15 +22,26 @@ class SafetyUiStabilizationContractTests(unittest.TestCase):
         self.assertIn('event.key === "Escape"', template)
         self.assertIn('@librarian_post("/roots/{root_id}/delete")', routes)
         self.assertNotIn('confirm != "REMOVE"', routes)
+        self.assertIn("Media source removed from InfoMancer", routes)
 
     def test_quality_defaults_and_review_alignment_are_wired(self):
         routes = (ROOT / "app" / "routes" / "review.py").read_text(encoding="utf-8")
         template = (ROOT / "app" / "templates" / "library_health.html").read_text(encoding="utf-8")
         styles = (ROOT / "app" / "static" / "workspace.css").read_text(encoding="utf-8")
         self.assertIn('/library-health/quality-defaults', routes)
+        self.assertEqual(routes.count('"quality_defaults": mie.library_quality_defaults()'), 2)
         self.assertIn("LIBRARY DEFAULTS", template)
+        self.assertIn("Remove source override", template)
         self.assertIn("Inheriting library defaults", (ROOT / "app" / "mie.py").read_text(encoding="utf-8"))
         self.assertIn("grid-template-columns: auto minmax(0, 1fr) auto", styles)
+
+    def test_managed_trash_explains_lockdown_pause(self):
+        routes = (ROOT / "app" / "routes" / "review.py").read_text(encoding="utf-8")
+        trash = (ROOT / "app" / "templates" / "duplicate_trash.html").read_text(encoding="utf-8")
+        preview = (ROOT / "app" / "templates" / "duplicate_trash_preview.html").read_text(encoding="utf-8")
+        self.assertIn('"lockdown_mode": app_settings.get("lockdown_mode") == "1"', routes)
+        self.assertIn("Automatic permanent removal is paused", trash)
+        self.assertIn("Paused by Lockdown Mode", preview)
 
     def test_system_settings_expose_standard_and_lockdown_modes(self):
         template = (ROOT / "app" / "templates" / "settings.html").read_text(encoding="utf-8")

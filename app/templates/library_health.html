@@ -123,7 +123,7 @@
           <button class="button primary">Save source override and analyze</button>
         </form>
       </details>
-      {% if profile.configured %}<form class="mie-profile-delete" method="post" action="/library-health/quality-profiles/{{ profile.root_id }}/delete"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button">Use library defaults</button></form>{% endif %}
+      {% if profile.configured %}<form class="mie-profile-delete" method="post" action="/library-health/quality-profiles/{{ profile.root_id }}/delete"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button">{{ 'Use library defaults' if quality_defaults.configured else 'Remove source override' }}</button></form>{% endif %}
     </section>
     {% else %}<p>No enabled media sources are available. Add a source before creating a quality profile.</p>{% endfor %}
   </div>

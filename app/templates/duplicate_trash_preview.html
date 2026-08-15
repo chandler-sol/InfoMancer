@@ -16,10 +16,10 @@
   <dl class="trash-paths">
     <div><dt>Current location</dt><dd class="path">{{ preview.source }}</dd></div>
     <div><dt>Managed trash</dt><dd class="path">{{ preview.destination }}</dd></div>
-    <div><dt>Automatic removal</dt><dd>{% if preview.purge_after %}After {{ preview.retention_days }} days{% else %}Never; restore or remove it manually{% endif %}</dd></div>
+    <div><dt>Automatic removal</dt><dd>{% if lockdown_mode %}Paused by Lockdown Mode{% if preview.purge_after %}; the {{ preview.retention_days }}-day retention date is recorded{% endif %}{% elif preview.purge_after %}After {{ preview.retention_days }} days{% else %}Never; restore or remove it manually{% endif %}</dd></div>
   </dl>
   <div class="notice warning">
-    Confirm playback and edition differences before continuing. Moving this file removes it from the active catalog, but does not permanently delete it now.
+    Confirm playback and edition differences before continuing. Moving this file removes it from the active catalog, but does not permanently delete it now.{% if lockdown_mode %} Lockdown Mode is active, so InfoMancer will not automatically purge it while that mode remains enabled.{% endif %}
   </div>
   <div class="actions">
     <a class="button" href="/duplicates">Cancel</a>

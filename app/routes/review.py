@@ -208,7 +208,6 @@ def build_router(ctx: RouteContext):
                         "categories": sorted(MIE_CATEGORIES),
                         "severities": ["critical", "warning", "information"],
                         "quality_profiles": mie.quality_profiles(),
-            "quality_defaults": mie.library_quality_defaults(),
                         "quality_defaults": mie.library_quality_defaults(),
                         "calibration": mie.calibration(),
                         "category_scores": mie.category_scores(),
@@ -772,6 +771,7 @@ def build_router(ctx: RouteContext):
             return redirect("/duplicates", str(exc))
         return templates.TemplateResponse(request, "duplicate_trash_preview.html", {
             "preview": preview,
+            "lockdown_mode": app_settings.get("lockdown_mode") == "1",
             "message": request.query_params.get("message", ""),
         })
 
@@ -785,9 +785,14 @@ def build_router(ctx: RouteContext):
                 str(exc) if isinstance(exc, DuplicateTrashError) else
                 "InfoMancer could not move the file into managed trash. The original file was left in place. Check that the source is writable, then try again.",
             )
+        lockdown = app_settings.get("lockdown_mode") == "1"
         message = (
             "The selected copy was moved into managed trash and removed from the active catalog. "
-            "You can restore it from Duplicate Review → Trash until its retention date."
+            + (
+                "Lockdown Mode is active, so automatic permanent removal is paused."
+                if lockdown else
+                "You can restore it from Duplicate Review → Trash until its retention date."
+            )
         )
         record_event(
             "duplicates", message, context={"file_id": file_id},
@@ -817,6 +822,7 @@ def build_router(ctx: RouteContext):
         return templates.TemplateResponse(request, "duplicate_trash.html", {
             "items": duplicate_trash.items(),
             "retention": app_settings.get("trash_retention_days"),
+            "lockdown_mode": app_settings.get("lockdown_mode") == "1",
             "message": request.query_params.get("message", ""),
         })
 
@@ -834,9 +840,13 @@ def build_router(ctx: RouteContext):
             {"trash_retention_days": retention}, request.state.user.id,
         )
         label = "Never automatically" if retention == "never" else f"After {retention} days"
+        lockdown_note = (
+            " Lockdown Mode is active, so automatic permanent removal remains paused."
+            if app_settings.get("lockdown_mode") == "1" else ""
+        )
         return redirect(
             "/duplicates/trash",
-            f"Managed-trash retention updated: {label}. This applies to files moved to trash from now on.",
+            f"Managed-trash retention updated: {label}. This applies to files moved to trash from now on.{lockdown_note}",
         )
 
     @librarian_post("/duplicates/trash/{trash_id}/restore")

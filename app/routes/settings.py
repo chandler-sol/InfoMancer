@@ -880,9 +880,20 @@ def build_router(ctx: RouteContext):
         return redirect(f"/titles/{title_id}", "Series rescan started")
 
     @librarian_post("/roots/{root_id}/delete")
-    def delete_root(root_id: int):
+    def delete_root(request: Request, root_id: int):
         with db.connect() as conn:
+            root = conn.execute(
+                "SELECT label,path,kind FROM roots WHERE id=?", (root_id,)
+            ).fetchone()
+            if not root:
+                return redirect("/sources", "That media source no longer exists; nothing changed")
             conn.execute("DELETE FROM roots WHERE id=?", (root_id,))
+        label = root["label"] or root["path"]
+        record_event(
+            "source", f"Media source removed from InfoMancer: {label}",
+            context={"root_id": root_id, "path": root["path"], "kind": root["kind"]},
+            user_id=request.state.user.id,
+        )
         return redirect("/sources", "Catalog root removed; media files were untouched")
 
     return router, {

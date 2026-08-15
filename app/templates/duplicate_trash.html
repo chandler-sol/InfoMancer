@@ -5,7 +5,7 @@
   <div>
     <p class="eyebrow">DUPLICATE REVIEW</p>
     <h1>Managed Trash</h1>
-    <p>Files moved here are outside the active catalog but remain on their original source until restored or their retention date passes.</p>
+    <p>Files moved here are outside the active catalog but remain on their original source until restored or permanently removed.{% if lockdown_mode %} Lockdown Mode currently prevents automatic permanent removal.{% endif %}</p>
   </div>
   <a class="button" href="/duplicates">Back to Duplicate Review</a>
 </section>
@@ -14,7 +14,7 @@
   <div>
     <p class="eyebrow">RETENTION</p>
     <h2>Future trash moves</h2>
-    <p>InfoMancer checks once per day and permanently removes only managed-trash files whose retention date has passed.</p>
+    <p>{% if lockdown_mode %}Lockdown Mode is active. Automatic permanent removal is paused; retention dates stay recorded and will be considered again only after returning to Standard Mode.{% else %}InfoMancer checks once per day and permanently removes only managed-trash files whose retention date has passed.{% endif %}</p>
   </div>
   <form method="post" action="/duplicates/trash/retention" class="actions">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -37,7 +37,7 @@
       <p class="eyebrow">{{ item.root_label or 'SOURCE UNAVAILABLE' }}</p>
       <h2>{{ item.title_name }}</h2>
       <p>{{ item.original_path }}</p>
-      <small>Moved {{ item.moved_at }}{% if item.purge_after %} · scheduled for removal {{ item.purge_after }}{% else %} · kept until you restore or remove it{% endif %}</small>
+      <small>Moved {{ item.moved_at }}{% if item.purge_after and lockdown_mode %} · retention date {{ item.purge_after }} · automatic removal paused{% elif item.purge_after %} · scheduled for removal {{ item.purge_after }}{% else %} · kept until you restore or remove it{% endif %}</small>
     </div>
     <form method="post" action="/duplicates/trash/{{ item.id }}/restore">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
