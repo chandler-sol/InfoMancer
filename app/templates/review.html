@@ -60,7 +60,7 @@
   </div>
 
   <section class="review-queue-list" aria-live="polite" data-review-list>
-    {% for item in queue.items %}
+    {% for item in queue["items"] %}
     <article class="review-queue-item severity-{{ item.severity }}" data-review-item data-review-key="{{ item.key }}" data-review-severity="{{ item.severity }}" data-review-bucket="{{ item.bucket }}">
       <button class="review-item-open" type="button" data-workspace-drawer-url="{{ item.drawer_url }}" data-workspace-drawer-key="{{ item.key }}" data-workspace-drawer-param="review" aria-label="Inspect {{ item.summary }}">
         <span class="review-item-signal" aria-hidden="true"></span>
