@@ -274,12 +274,14 @@ class ReviewQueue:
                 bucket_rank.get(item["bucket"], 99),
                 item["affected"].casefold(), item["summary"].casefold(),
             ))
-        status_counts = {
-            review_status: len(self._all_items(
-                status=review_status, include_librarian=include_librarian,
-            ))
-            for review_status in ("active", "dismissed", "resolved")
-        }
+        status_counts = {}
+        for review_status in ("active", "dismissed", "resolved"):
+            if review_status == status:
+                status_counts[review_status] = len(all_items)
+            else:
+                status_counts[review_status] = len(self._all_items(
+                    status=review_status, include_librarian=include_librarian,
+                ))
         summary = self.mie.summary()
         return {
             "items": items,

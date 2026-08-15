@@ -50,6 +50,7 @@ class ReviewQueueServiceTests(unittest.TestCase):
         self.assertGreaterEqual(view["counts"]["warning"], 2)
         self.assertGreaterEqual(view["bucket_counts"]["duplicates"], 1)
         self.assertEqual(view["status_counts"]["active"], view["counts"]["total"])
+        self.assertEqual(view["status_counts"]["active"], view["total"])
 
     def test_member_queue_excludes_duplicate_cleanup(self):
         view = self.queue.view(include_librarian=False)
