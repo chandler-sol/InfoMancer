@@ -200,6 +200,7 @@
       return;
     }
     const submitters = [...form.querySelectorAll('button[type="submit"], input[type="submit"]')];
+    const csrfToken = form.querySelector('input[name="csrf_token"]')?.value || "";
     submitters.forEach(button => button.disabled = true);
     form.classList.add("workspace-action-busy");
     try {
@@ -207,7 +208,11 @@
         method: (form.method || "POST").toUpperCase(),
         credentials: "same-origin",
         body: new FormData(form),
-        headers: {"Accept": "application/json", "X-Workspace-Action": "1"},
+        headers: {
+          "Accept": "application/json",
+          "X-Workspace-Action": "1",
+          ...(csrfToken ? {"X-CSRF-Token": csrfToken} : {}),
+        },
       });
       let data = null;
       try { data = await response.json(); } catch (_error) {}

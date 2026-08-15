@@ -97,6 +97,8 @@ class ReviewWorkspaceContractTests(unittest.TestCase):
         self.assertIn("workspace-command-palette", ui)
         self.assertIn("candidateIndex === activeIndex", ui)
         self.assertIn("data-workspace-menu-toggle", ui)
+        self.assertIn("X-CSRF-Token", ui)
+        self.assertIn('input[name="csrf_token"]', ui)
         self.assertIn("workspace-drawer", styles)
         self.assertIn("top: 50%", styles)
 
