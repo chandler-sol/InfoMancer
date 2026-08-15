@@ -33,6 +33,8 @@ class SafetyUiStabilizationContractTests(unittest.TestCase):
         self.assertIn("LIBRARY DEFAULTS", template)
         self.assertIn("Remove source override", template)
         self.assertIn("Inheriting library defaults", (ROOT / "app" / "mie.py").read_text(encoding="utf-8"))
+        self.assertIn("grid-template-columns: minmax(0, 1fr) auto", styles)
+        self.assertIn('.mie-finding-head:has(> input[type="checkbox"])', styles)
         self.assertIn("grid-template-columns: auto minmax(0, 1fr) auto", styles)
 
     def test_managed_trash_explains_lockdown_pause(self):
