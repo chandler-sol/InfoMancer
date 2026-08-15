@@ -37,8 +37,7 @@ class BootstrapTokenManager:
                     raise RuntimeError("The first-run bootstrap token file is empty.")
             else:
                 with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                    handle.write(token + "
-")
+                    handle.write(token + "\n")
         try:
             os.chmod(self.path, 0o600)
         except OSError:
