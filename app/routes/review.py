@@ -14,7 +14,6 @@ def build_router(ctx: RouteContext):
     MIE_SEVERITIES = ctx.get("MIE_SEVERITIES")
     Request = ctx.get("Request")
     TVDBError = ctx.get("TVDBError")
-    action = ctx.live("action")
     analyze_library_health_with_activity = ctx.live("analyze_library_health_with_activity")
     app_settings = ctx.live("app_settings")
     check_source_health = ctx.live("check_source_health")
@@ -23,8 +22,6 @@ def build_router(ctx: RouteContext):
     duplicate_verify_job = ctx.live("duplicate_verify_job")
     duplicate_verify_lock = ctx.live("duplicate_verify_lock")
     duplicates = ctx.live("duplicates")
-    file_a_id = ctx.live("file_a_id")
-    file_b_id = ctx.live("file_b_id")
     json = ctx.live("json")
     maybe_start_trash_cleanup = ctx.live("maybe_start_trash_cleanup")
     media_info_job = ctx.live("media_info_job")
@@ -32,7 +29,6 @@ def build_router(ctx: RouteContext):
     mie = ctx.live("mie")
     movie_match_job = ctx.live("movie_match_job")
     movie_match_lock = ctx.live("movie_match_lock")
-    parsed = ctx.live("parsed")
     re = ctx.live("re")
     record_event = ctx.live("record_event")
     redirect = ctx.live("redirect")
@@ -54,7 +50,6 @@ def build_router(ctx: RouteContext):
     trash_retention_days = ctx.live("trash_retention_days")
     tv_match_job = ctx.live("tv_match_job")
     tv_match_lock = ctx.live("tv_match_lock")
-    user_id = ctx.live("user_id")
 
     def librarian_get(path: str, **kwargs):
         dependencies = list(kwargs.pop("dependencies", ()))
