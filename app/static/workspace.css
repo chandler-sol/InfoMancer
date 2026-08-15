@@ -43,6 +43,10 @@ body.has-app-sidebar .site-menu-panel:not(.workspace-nav-ready) {
   box-shadow: inset 3px 0 0 var(--lime);
 }
 
+.workspace-nav-primary > a.domain-current {
+  color: #b8c5d2;
+}
+
 .workspace-nav-section {
   margin: 2px 8px 0;
   border-top: 1px solid var(--line);
@@ -150,6 +154,12 @@ body.has-app-sidebar .brand-lockup {
 @media (min-width: 981px) {
   body.has-app-sidebar.sidebar-collapsed .workspace-nav-primary {
     padding-inline: 0;
+  }
+
+  body.has-app-sidebar.sidebar-collapsed .workspace-nav-primary > a.domain-current {
+    background: rgba(185, 245, 66, .10);
+    color: var(--text);
+    box-shadow: inset 3px 0 0 var(--lime);
   }
 
   body.has-app-sidebar.sidebar-collapsed .workspace-nav-section {
