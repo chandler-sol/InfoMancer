@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import re
 import secrets
 import sqlite3
@@ -52,21 +53,32 @@ def safe_next(value: str, fallback: str = "/") -> str:
     return candidate
 
 
+def _verified_cloudflare_request(request, settings: Settings) -> bool:
+    claims = getattr(getattr(request, "state", None), "external_claims", None)
+    return settings.auth_mode == "cloudflare" and bool(claims)
+
+
 def secure_cookie_for(request, settings: Settings) -> bool:
     if settings.cookie_secure == "true":
         return True
     if settings.cookie_secure == "false":
         return False
-    forwarded = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
-    return forwarded == "https" or request.url.scheme == "https"
+    if getattr(getattr(request, "url", None), "scheme", "") == "https":
+        return True
+    if _verified_cloudflare_request(request, settings):
+        forwarded = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+        return forwarded == "https"
+    return False
 
 
-def request_ip(request) -> str:
-    forwarded = request.headers.get("cf-connecting-ip") or request.headers.get(
-        "x-forwarded-for", ""
-    ).split(",", 1)[0].strip()
-    if forwarded:
-        return forwarded[:64]
+def request_ip(request, settings: Settings | None = None) -> str:
+    if settings is not None and _verified_cloudflare_request(request, settings):
+        forwarded = request.headers.get("cf-connecting-ip", "").strip()
+        try:
+            if forwarded:
+                return str(ipaddress.ip_address(forwarded))
+        except ValueError:
+            pass
     return (request.client.host if request.client else "")[:64]
 
 
@@ -456,7 +468,8 @@ class AuthService:
                    VALUES (?,?,?,?,?,?)""",
                 (
                     user.id, token_hash(raw_token), csrf_token, iso_timestamp(expires),
-                    request.headers.get("user-agent", "")[:500], request_ip(request),
+                    request.headers.get("user-agent", "")[:500],
+                    request_ip(request, self.settings),
                 ),
             ).lastrowid
             row = conn.execute(

@@ -1,0 +1,162 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+from starlette.requests import Request
+
+from app.auth import request_ip, secure_cookie_for
+from app.bootstrap import BootstrapTokenManager
+from app.config import Settings
+from app.request_security import RequestBodyTooLarge, csrf_submission
+
+
+def settings_for(path: Path, *, auth_mode: str = "local") -> Settings:
+    return Settings(
+        database=path / "test.db", tvdb_api_key="", tvdb_pin="",
+        search_url_template="", media_browse_roots=(path,), auth_mode=auth_mode,
+        session_days=14, cookie_secure="auto", cloudflare_team_domain="",
+        cloudflare_audience="",
+    )
+
+
+def request_with(
+    *, headers: dict[str, str] | None = None, client: str = "10.0.0.2",
+    claims: dict | None = None, scheme: str = "http", body: bytes = b"",
+) -> Request:
+    encoded_headers = [
+        (key.lower().encode("latin-1"), value.encode("latin-1"))
+        for key, value in (headers or {}).items()
+    ]
+    sent = False
+
+    async def receive():
+        nonlocal sent
+        if sent:
+            return {"type": "http.request", "body": b"", "more_body": False}
+        sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    scope = {
+        "type": "http", "http_version": "1.1", "method": "POST",
+        "scheme": scheme, "path": "/", "raw_path": b"/", "query_string": b"",
+        "headers": encoded_headers, "client": (client, 12345),
+        "server": ("testserver", 80), "state": {},
+    }
+    request = Request(scope, receive)
+    if claims is not None:
+        request.state.external_claims = claims
+    return request
+
+
+class RequestSecurityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_urlencoded_csrf_body_is_bounded_and_replayable(self):
+        body = b"csrf_token=expected&value=ok"
+        request = request_with(
+            headers={
+                "content-type": "application/x-www-form-urlencoded",
+                "content-length": str(len(body)),
+            },
+            body=body,
+        )
+        token, buffered = await csrf_submission(request)
+        self.assertEqual(token, "expected")
+        self.assertEqual(buffered, body)
+
+    async def test_large_urlencoded_form_is_rejected_before_buffering(self):
+        request = request_with(
+            headers={
+                "content-type": "application/x-www-form-urlencoded",
+                "content-length": str(3 * 1024 * 1024),
+            },
+        )
+        with self.assertRaises(RequestBodyTooLarge):
+            await csrf_submission(request)
+
+    async def test_multipart_with_csrf_header_is_not_consumed(self):
+        request = request_with(
+            headers={
+                "content-type": "multipart/form-data; boundary=example",
+                "x-csrf-token": "header-token",
+            },
+            body=b"this body must stay unread",
+        )
+        token, buffered = await csrf_submission(request)
+        self.assertEqual(token, "header-token")
+        self.assertIsNone(buffered)
+        message = await request.receive()
+        self.assertEqual(message["body"], b"this body must stay unread")
+
+
+class BootstrapTokenTests(unittest.TestCase):
+    def test_generated_token_is_required_and_removed_after_setup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "bootstrap-token"
+            manager = BootstrapTokenManager(path)
+            token = manager.token()
+            self.assertTrue(path.is_file())
+            self.assertTrue(manager.verify(token))
+            self.assertFalse(manager.verify("wrong-token"))
+            manager.clear()
+            self.assertFalse(path.exists())
+
+    def test_configured_token_does_not_create_a_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "bootstrap-token"
+            manager = BootstrapTokenManager(path, "configured-secret")
+            self.assertTrue(manager.verify("configured-secret"))
+            self.assertFalse(path.exists())
+
+
+class ForwardedHeaderTests(unittest.TestCase):
+    def test_local_auth_ignores_forged_forwarded_headers(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = settings_for(Path(temporary), auth_mode="local")
+            request = request_with(
+                headers={
+                    "cf-connecting-ip": "203.0.113.50",
+                    "x-forwarded-for": "203.0.113.51",
+                    "x-forwarded-proto": "https",
+                },
+                client="10.10.10.10",
+            )
+            self.assertEqual(request_ip(request, settings), "10.10.10.10")
+            self.assertFalse(secure_cookie_for(request, settings))
+
+    def test_verified_cloudflare_request_can_use_cloudflare_headers(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = settings_for(Path(temporary), auth_mode="cloudflare")
+            request = request_with(
+                headers={
+                    "cf-connecting-ip": "203.0.113.50",
+                    "x-forwarded-proto": "https",
+                },
+                client="172.20.0.4", claims={"sub": "verified-user"},
+            )
+            self.assertEqual(request_ip(request, settings), "203.0.113.50")
+            self.assertTrue(secure_cookie_for(request, settings))
+
+    def test_invalid_cloudflare_ip_falls_back_to_socket_peer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = settings_for(Path(temporary), auth_mode="cloudflare")
+            request = request_with(
+                headers={"cf-connecting-ip": "not-an-ip"},
+                client="172.20.0.4", claims={"sub": "verified-user"},
+            )
+            self.assertEqual(request_ip(request, settings), "172.20.0.4")
+
+
+class ContainerHardeningTests(unittest.TestCase):
+    def test_docker_process_is_non_root_and_proxy_headers_are_disabled(self):
+        dockerfile = (Path(__file__).resolve().parent.parent / "Dockerfile").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("USER infomancer", dockerfile)
+        self.assertIn('"--no-proxy-headers"', dockerfile)
+        self.assertNotIn('"--forwarded-allow-ips", "*"', dockerfile)
+
+
+if __name__ == "__main__":
+    unittest.main()

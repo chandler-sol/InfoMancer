@@ -25,6 +25,7 @@ class Settings:
     cloudflare_audience: str
     application_secret: str = ""
     sandbox: bool = False
+    bootstrap_token: str = ""
 
     @property
     def minimum_password_length(self) -> int:
@@ -65,4 +66,5 @@ def get_settings() -> Settings:
         application_secret=os.getenv("INFOMANCER_SECRET", "").strip(),
         sandbox=os.getenv("INFOMANCER_SANDBOX", "").strip().casefold()
         in {"1", "true", "yes", "on"},
+        bootstrap_token=os.getenv("INFOMANCER_BOOTSTRAP_TOKEN", "").strip(),
     )

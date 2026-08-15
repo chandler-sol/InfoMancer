@@ -31,6 +31,7 @@ from fastapi.templating import Jinja2Templates
 
 from .config import BASE_DIR, get_settings
 from .app_settings import AppSettingError, AppSettings
+from .bootstrap import BootstrapTokenManager
 from .auth import (
     AuthService, AuthSession, AuthUser, AuthenticationError, LoginLocked,
     PREAUTH_COOKIE, PROFILE_ICONS, SESSION_COOKIE, request_ip, safe_next,
@@ -62,6 +63,7 @@ from .source_browser import SourceBrowserError, list_folders, preview_folder
 from .smart_collections import decode_filters, encode_filters, matching_titles, normalize_filters
 from .tvdb import TVDBClient, TVDBError
 from .provider_secrets import ProviderSecretError, ProviderSecretStore
+from .request_security import RequestBodyTooLarge, csrf_submission, replay_body
 from .timezones import timezone_groups
 
 
@@ -69,6 +71,9 @@ settings = get_settings()
 db = Database(settings.database)
 db.initialize()
 auth_service = AuthService(db, settings)
+bootstrap_tokens = BootstrapTokenManager(
+    settings.database.parent / "bootstrap-token", settings.bootstrap_token
+)
 app_settings = AppSettings(db, settings.search_url_template)
 engagement = EngagementService(db)
 event_log = EventLog(db)
@@ -576,28 +581,20 @@ async def authentication_middleware(request: Request, call_next):
                 return await finish(auth_error_response(
                     request, 403, "Session required", "Start a fresh session and try again."
                 ))
-            body = await request.body()
-            form = await request.form()
-            submitted = request.headers.get("x-csrf-token", "") or str(
-                form.get("csrf_token") or ""
-            )
+            try:
+                submitted, buffered_body = await csrf_submission(request)
+            except RequestBodyTooLarge:
+                return await finish(auth_error_response(
+                    request, 413, "Request too large",
+                    "This form submission is larger than InfoMancer accepts.",
+                ))
             if not submitted or not hmac.compare_digest(submitted, session.csrf_token):
                 return await finish(auth_error_response(
                     request, 403, "Request verification failed",
                     "Refresh the page and try the operation again.",
                 ))
-            # BaseHTTPMiddleware passes the downstream app a new Request. Replay
-            # the verified body so FastAPI can still populate its Form fields.
-            sent = False
-
-            async def replay_body():
-                nonlocal sent
-                if sent:
-                    return {"type": "http.request", "body": b"", "more_body": False}
-                sent = True
-                return {"type": "http.request", "body": body, "more_body": False}
-
-            request._receive = replay_body
+            if buffered_body is not None:
+                replay_body(request, buffered_body)
 
     return await finish(await call_next(request))
 
@@ -1409,7 +1406,10 @@ def user_admin_context(
 @app.get("/setup", response_class=HTMLResponse)
 def setup_page(request: Request):
     if auth_service.user_count():
+        bootstrap_tokens.clear()
         return redirect("/login" if settings.auth_mode == "local" else "/")
+    if not settings.sandbox:
+        bootstrap_tokens.token()
     claims = getattr(request.state, "external_claims", {})
     email = str(claims.get("email") or "")
     suggested = re.sub(r"[^A-Za-z0-9._-]", "", email.split("@", 1)[0])[:50]
@@ -1428,12 +1428,19 @@ def setup_account(
     request: Request, username: str = Form(...), email: str = Form(""),
     display_name: str = Form(...), profile_icon: str = Form("initials"),
     password: str = Form(""), password_confirm: str = Form(""),
-    preauth_token: str = Form(""),
+    preauth_token: str = Form(""), bootstrap_token: str = Form(""),
 ):
     if auth_service.user_count():
+        bootstrap_tokens.clear()
         return redirect("/login")
     if not valid_preauth(request, preauth_token):
         return redirect("/setup", "Setup form expired. Please try again.")
+    if not settings.sandbox and not bootstrap_tokens.verify(bootstrap_token):
+        return preauth_response(request, "setup.html", {
+            "username": username, "email": email, "display_name": display_name,
+            "requires_password": settings.auth_mode == "local",
+            "error": "The first-run bootstrap token is incorrect. Check the server startup logs and try again.",
+        })
     if settings.auth_mode == "local" and password != password_confirm:
         return preauth_response(request, "setup.html", {
             "username": username, "email": email, "display_name": display_name,
@@ -1456,6 +1463,7 @@ def setup_account(
             "username": username, "email": email, "display_name": display_name,
             "requires_password": settings.auth_mode == "local", "error": str(exc),
         })
+    bootstrap_tokens.clear()
     welcome = quote_plus(
         f"Librarian account created successfully. Welcome, {user.display_name}!"
     )
@@ -1486,7 +1494,7 @@ def login(
     if not valid_preauth(request, preauth_token):
         return redirect("/login", "Sign-in form expired. Please try again.")
     try:
-        user = auth_service.authenticate_local(identity, password, request_ip(request))
+        user = auth_service.authenticate_local(identity, password, request_ip(request, settings))
     except AuthenticationError as exc:
         return preauth_response(request, "login.html", {
             "next": safe_next(next), "identity": identity, "error": str(exc),
