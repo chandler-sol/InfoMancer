@@ -32,6 +32,10 @@ class WorkspaceFoundationTests(unittest.TestCase):
         self.assertNotIn("replaceChildren(primary)", script)
         self.assertIn("sidebar-collapsed .workspace-nav-section", styles)
         self.assertIn("0.8 α", base)
+        self.assertIn('<summary aria-label="Browse shortcuts">Browse</summary>', base)
+        self.assertIn("<span>Custom Libraries</span>", base)
+        self.assertIn('content: "‹"', styles)
+        self.assertIn("font-size: 10.5px", styles)
 
     def test_workspace_removes_home_layout_switcher_from_shell(self):
         base = (ROOT / "app" / "templates" / "base.html").read_text(encoding="utf-8")

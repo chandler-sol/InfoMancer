@@ -72,7 +72,7 @@ body.has-app-sidebar .site-menu-panel:not(.workspace-nav-ready) {
 }
 
 .workspace-nav-section > summary::after {
-  content: "›";
+  content: "‹";
   position: absolute;
   right: 9px;
   top: 50%;
@@ -84,7 +84,7 @@ body.has-app-sidebar .site-menu-panel:not(.workspace-nav-ready) {
 }
 
 .workspace-nav-section[open] > summary::after {
-  transform: translateY(-52%) rotate(90deg);
+  transform: translateY(-52%) rotate(-90deg);
 }
 
 .workspace-nav-section > summary:hover,
@@ -131,12 +131,12 @@ body.has-app-sidebar .brand .workspace-nav-alpha {
   display: inline-flex;
   align-items: center;
   width: fit-content;
-  padding: 2px 5px;
+  padding: 3px 7px;
   border: 1px solid rgba(81, 214, 230, .34);
   border-radius: 999px;
   color: var(--cyan);
   background: rgba(9, 20, 26, .92);
-  font-size: 7px;
+  font-size: 10.5px;
   font-weight: 900;
   letter-spacing: .08em;
   line-height: 1.2;
@@ -165,8 +165,8 @@ body.has-app-sidebar .brand-lockup {
   body.has-app-sidebar.sidebar-collapsed .brand .workspace-nav-alpha {
     right: 5px;
     bottom: 7px;
-    padding: 1px 3px;
-    font-size: 6px;
+    padding: 2px 4px;
+    font-size: 8px;
     letter-spacing: 0;
   }
 }
