@@ -56,6 +56,8 @@ class SortTitleTests(unittest.TestCase):
         page = self.client.get("/movies")
         self.assertLess(page.text.index("The Batman"), page.text.index("2 Fast 2 Furious"))
         self.assertLess(page.text.index("Fast &amp; Furious"), page.text.index("2 Fast 2 Furious"))
+        self.assertIn('id="letter-B"', page.text)
+        self.assertNotIn('id="letter-T"', page.text)
         self.assertIn("The Batman", self.client.get("/movies?letter=B").text)
         self.assertNotIn("The Batman", self.client.get("/movies?letter=T").text)
 

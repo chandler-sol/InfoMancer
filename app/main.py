@@ -494,7 +494,16 @@ def lifespan(row) -> str:
 
 
 def title_initial(row) -> str:
-    name = (row["metadata_title"] or row["title"] or "").strip()
+    try:
+        sort_title = str(row["sort_title"] or "").strip()
+    except (KeyError, IndexError, TypeError):
+        sort_title = ""
+    name = sort_title or (row["metadata_title"] or row["title"] or "").strip()
+    lowered = name.casefold()
+    for article in ("the ", "an ", "a "):
+        if lowered.startswith(article):
+            name = name[len(article):].lstrip()
+            break
     return name[0].upper() if name and name[0].isalpha() else "#"
 
 
