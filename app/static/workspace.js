@@ -363,7 +363,8 @@
         const seen = new Set();
         const items = [];
         doc.querySelectorAll(".title-link, .cover-card-link").forEach((candidate) => {
-          const href = candidate.href;
+          const rawHref = candidate.getAttribute("href");
+          const href = rawHref ? new URL(rawHref, window.location.origin).href : "";
           const title = candidate.querySelector("strong")?.textContent?.trim() || candidate.textContent?.trim();
           if (!href || !title || seen.has(href)) return;
           seen.add(href);
