@@ -1,0 +1,43 @@
+name: W2 Workspace once
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  w2:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out workspace branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: workspace/0.8-foundation
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5f2afc3b5d861e6b1b3a5091d3575c4d3f0e4490
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Apply W2 Workspace patch
+        run: python scripts/w2_workspace_once.py
+      - name: Run W2 focused tests
+        run: python -m unittest tests.test_workspace_ui tests.test_workspace_inspector tests.test_route_authorization tests.test_route_decomposition -v
+      - name: Run full test suite
+        run: python -m unittest discover -s tests -v
+      - name: Compile application
+        run: python -m compileall app
+      - name: Commit clean W2 tree
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          rm -f .github/workflows/w2-workspace-once.yml scripts/w2_workspace_once.py
+          git config user.name "arsenik"
+          git config user.email "64607629+chandler-sol@users.noreply.github.com"
+          git add -A
+          git commit -m "Build Workspace W2 server-backed Inspector"
+          BASIC="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $BASIC" push origin HEAD:workspace/0.8-foundation
