@@ -80,6 +80,7 @@ class ReviewWorkspaceContractTests(unittest.TestCase):
         self.assertIn("path='review.css'", base)
         self.assertIn("path='workspace-ui.js'", base)
         self.assertIn('href="/review" title="Review"', base)
+        self.assertIn('href="/review" title="Review"{% if workspace_review_active %} class="domain-current"{% endif %}', base)
         self.assertIn('@router.get("/review"', routes)
         self.assertIn('/review/items/{source}/{item_id}', routes)
         self.assertIn('/api/review/findings/{finding_id}/dismiss', routes)
