@@ -18,10 +18,12 @@
   <link rel="stylesheet" href="{{ url_for('static', path='engagement.css') }}?v={{ static_version }}">
   <link rel="stylesheet" href="{{ url_for('static', path='tour-demo.css') }}?v={{ static_version }}">
   <link rel="stylesheet" href="{{ url_for('static', path='modern.css') }}?v={{ static_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='workspace.css') }}?v={{ static_version }}">
   <script src="{{ url_for('static', path='organize-dialog.js') }}?v={{ static_version }}" defer></script>
   <script src="{{ url_for('static', path='password-visibility.js') }}?v={{ static_version }}" defer></script>
   <script src="{{ url_for('static', path='engagement.js') }}?v={{ static_version }}" defer></script>
   <script src="{{ url_for('static', path='multipart-submit.js') }}?v={{ static_version }}" defer></script>
+  <script src="{{ url_for('static', path='workspace.js') }}?v={{ static_version }}" defer></script>
 </head>
 <body class="{% if current_user %}role-{{ current_user.role }} has-app-sidebar{% if current_user.high_contrast %} high-contrast{% endif %}{% else %}signed-out{% endif %}">
   {% if current_user %}
