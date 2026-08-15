@@ -106,14 +106,18 @@ def _inside(path: Path, parent: Path) -> bool:
 
 
 def _database_roots(database_path: Path) -> tuple[Path, ...]:
+    connection = None
     try:
-        with sqlite3.connect(f"file:{database_path}?mode=ro", uri=True) as connection:
-            return tuple(
-                Path(row[0]) for row in connection.execute("SELECT path FROM roots")
-                if row[0]
-            )
+        connection = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True)
+        return tuple(
+            Path(row[0]) for row in connection.execute("SELECT path FROM roots")
+            if row[0]
+        )
     except sqlite3.Error:
         return ()
+    finally:
+        if connection is not None:
+            connection.close()
 
 
 def validate_database_paths(
@@ -227,8 +231,9 @@ def install_database_backup(
     media_browse_roots: tuple[Path, ...] | None = None,
 ) -> Path:
     validate_database_backup(candidate)
-    existing_roots = _database_roots(database_path)
+    existing_roots: tuple[Path, ...] = ()
     if media_browse_roots is not None:
+        existing_roots = _database_roots(database_path)
         validate_database_paths(candidate, media_browse_roots, existing_roots)
     safety_backup = create_database_backup(database_path, "before-restore")
     staged = database_path.with_suffix(".restore.db")
