@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   apply:
-    if: github.ref_name == 'agent/security-hardening-0-7'
+    if: github.ref_name == 'agent/security-hardening-0-7' && github.event.head_commit.message != 'Resolve CodeRabbit hardening findings'
     runs-on: ubuntu-latest
     steps:
       - name: Check out hardening branch
@@ -36,11 +36,11 @@ jobs:
       - name: Compile application
         run: python -m compileall -q app scripts
 
-      - name: Commit clean follow-up
+      - name: Push tested non-workflow changes
         run: |
+          git checkout origin/${{ github.ref_name }} -- .github/workflows/tests.yml
           rm scripts/_agent_coderabbit_fixes.py
           rm scripts/_agent_patch_coderabbit_runner.py
-          rm .github/workflows/_agent_coderabbit_fixes.yml
           git config user.name "arsenik"
           git config user.email "64607629+chandler-sol@users.noreply.github.com"
           git add -A
