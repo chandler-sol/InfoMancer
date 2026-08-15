@@ -25,3 +25,8 @@ Primary work domains are Dashboard, Library, Review, Sources, and Activity. Exis
 6. **W6 Operations**: generalized operation history and reversible actions where filesystem semantics permit safe undo.
 
 W1 intentionally uses the existing rendered Library DOM as its inspector data source. W2 should replace that prototype with a dedicated read-only inspector endpoint/partial so the panel can expose richer metadata without duplicating page logic in JavaScript.
+
+## W1.5 Application decomposition
+
+W1.5 moves the product/domain HTTP surface out of `app/main.py` into `app/routes/` APIRouter modules. The composition root retains application construction, middleware, lifecycle, bootstrap/authentication, and admin-account wiring. Existing handler names are published as compatibility aliases during the transition. Route-level Librarian dependencies remain attached inside each router module. Runtime service references remain live through `RouteContext`, preserving test isolation and future service replacement without circular imports.
+
