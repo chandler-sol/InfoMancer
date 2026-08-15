@@ -136,8 +136,9 @@ def build_router(ctx: RouteContext):
             context={"finding_id": finding_id, "reason": reason, "scope": scope, "source": "review-workspace"},
             user_id=request.state.user.id,
         )
-        counts = review_queue.view(include_librarian=True)["counts"]
-        counts["buckets"] = review_queue.view(include_librarian=True)["bucket_counts"]
+        active = review_queue.view(include_librarian=True)
+        counts = dict(active["counts"])
+        counts["buckets"] = active["bucket_counts"]
         return {"ok": True, "message": message, "remove_key": f"finding:{finding_id}", "counts": counts}
 
     @librarian_post("/api/review/findings/{finding_id}/restore")

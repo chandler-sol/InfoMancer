@@ -49,6 +49,7 @@ class ReviewQueueServiceTests(unittest.TestCase):
         self.assertIn("duplicate", sources)
         self.assertGreaterEqual(view["counts"]["warning"], 2)
         self.assertGreaterEqual(view["bucket_counts"]["duplicates"], 1)
+        self.assertEqual(view["status_counts"]["active"], view["counts"]["total"])
 
     def test_member_queue_excludes_duplicate_cleanup(self):
         view = self.queue.view(include_librarian=False)
@@ -89,6 +90,7 @@ class ReviewWorkspaceContractTests(unittest.TestCase):
         self.assertIn("Workspace.toast", ui)
         self.assertIn("Workspace.confirm", ui)
         self.assertIn("workspace-command-palette", ui)
+        self.assertIn("candidateIndex === activeIndex", ui)
         self.assertIn("data-workspace-menu-toggle", ui)
         self.assertIn("workspace-drawer", styles)
         self.assertIn("top: 50%", styles)

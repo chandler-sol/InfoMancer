@@ -371,7 +371,12 @@
         const small = document.createElement("small");
         small.textContent = entry.search ? "Library search" : (entry.href || "Current page action");
         button.append(strong, small);
-        button.addEventListener("mouseenter", () => { activeIndex = index; render(); });
+        button.addEventListener("mouseenter", () => {
+          activeIndex = index;
+          results.querySelectorAll('button[role="option"]').forEach((candidate, candidateIndex) => {
+            candidate.classList.toggle("active", candidateIndex === activeIndex);
+          });
+        });
         button.addEventListener("click", () => run(entry));
         results.append(button);
       });

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections import Counter
 from typing import Any
 
@@ -276,17 +275,12 @@ class ReviewQueue:
                 bucket_rank.get(item["bucket"], 99),
                 item["affected"].casefold(), item["summary"].casefold(),
             ))
-        with self.database.connect() as conn:
-            status_rows = conn.execute(
-                "SELECT status,COUNT(*) count FROM mie_findings GROUP BY status"
-            ).fetchall()
-        status_counts = {"active": 0, "dismissed": 0, "resolved": 0}
-        for row in status_rows:
-            status_counts[row["status"]] = int(row["count"] or 0)
-        if include_librarian:
-            status_counts["active"] += len(self._metadata_items()) + len(self.duplicates.candidates(status="active"))
-        else:
-            status_counts["active"] = len(self._all_items(status="active", include_librarian=False))
+        status_counts = {
+            review_status: len(self._all_items(
+                status=review_status, include_librarian=include_librarian,
+            ))
+            for review_status in ("active", "dismissed", "resolved")
+        }
         summary = self.mie.summary()
         return {
             "items": items,
