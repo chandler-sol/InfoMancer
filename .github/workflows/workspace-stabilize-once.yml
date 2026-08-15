@@ -6,6 +6,7 @@ on:
       - workspace/0.8-foundation
     paths:
       - scripts/apply_workspace_stabilization.py
+      - .github/workflows/workspace-stabilize-once.yml
 
 permissions:
   contents: write
@@ -20,6 +21,9 @@ jobs:
           ref: workspace/0.8-foundation
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Install application dependencies
+        run: python3 -m pip install -r requirements.txt
 
       - name: Apply W1 stabilization patch
         run: python3 scripts/apply_workspace_stabilization.py
