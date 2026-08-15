@@ -28,7 +28,8 @@ class MigrationTests(unittest.TestCase):
                 CREATE TABLE titles(id INTEGER PRIMARY KEY,root_id INTEGER,kind TEXT,title TEXT,year INTEGER,folder_path TEXT,metadata_title TEXT,updated_at TEXT);
                 CREATE TABLE files(id INTEGER PRIMARY KEY,title_id INTEGER,path TEXT,filename TEXT,extension TEXT,size_bytes INTEGER,modified_at REAL,season INTEGER,episode_start INTEGER,episode_end INTEGER,parsed_title TEXT,seen_scan TEXT);
             """)
-            conn.commit(); conn.close()
+            conn.commit()
+            conn.close()
             Database(path).initialize()
             with Database(path).connect() as upgraded:
                 columns = {row["name"] for row in upgraded.execute("PRAGMA table_info(files)")}

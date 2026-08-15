@@ -33,7 +33,10 @@ class TitleMetadataService:
     def _enrich_tv(self, title) -> bool:
         if not title["tvdb_id"]:
             return False
-        if all((title["poster_url"], title["imdb_id"], title["metadata_title_language"], title["overview"])):
+        if all((
+            title["poster_url"], title["imdb_id"], title["metadata_title"],
+            title["metadata_title_language"], title["overview"],
+        )):
             return False
         series = self.tvdb.series(title["tvdb_id"])
         poster_url = self.poster_from(series)

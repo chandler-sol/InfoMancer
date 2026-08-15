@@ -22,6 +22,12 @@ class SupplyChainTests(unittest.TestCase):
         )
         self.assertNotIn(":latest", cloudflare)
 
+    def test_checkout_does_not_persist_ci_credentials(self):
+        workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(workflow.count("persist-credentials: false"), 2)
+
     def test_github_actions_use_full_commit_shas(self):
         workflow_dir = ROOT / ".github" / "workflows"
         workflows = list(workflow_dir.glob("*.yml")) + list(workflow_dir.glob("*.yaml"))

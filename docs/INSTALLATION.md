@@ -14,7 +14,7 @@ You need:
 
 1. A computer or server that can remain on while you use InfoMancer.
 2. Read access to the Movie and TV folders you want to catalog.
-3. Write access to a media folder only if you want InfoMancer to rename files.
+3. Write access to a media folder only if you want InfoMancer to rename, organize, or move duplicate files into managed Trash.
 4. [Docker Desktop on Windows](https://docs.docker.com/desktop/setup/install/windows-install/)
    or [macOS](https://docs.docker.com/desktop/setup/install/mac-install/), or
    [Docker Engine](https://docs.docker.com/engine/install/) with the Compose
@@ -112,13 +112,26 @@ Docker does not officially test every derivative distribution.
    ```
 
 4. Replace `/mnt/media/movies` and `/mnt/media/tv` with your mounted storage.
-5. Start InfoMancer:
+5. Match the container's non-root account to your Linux user and create the
+   writable application-data directory before Docker sees the bind mount:
+
+   ```bash
+   sed -i "s/^INFOMANCER_UID=.*/INFOMANCER_UID=$(id -u)/" .env
+   sed -i "s/^INFOMANCER_GID=.*/INFOMANCER_GID=$(id -g)/" .env
+   mkdir -p data
+   ```
+
+   The same UID/GID must be able to read every media mapping. Grant it write
+   permission only on locations where you want InfoMancer to rename, organize,
+   restore, or move files into managed Trash. Group permissions or ACLs are
+   preferable to changing ownership of a shared media library.
+6. Start InfoMancer:
 
    ```bash
    docker compose -f compose.yaml -f compose.media.yaml up -d --build
    ```
 
-6. Open `http://127.0.0.1:8787`. When the Linux host has no desktop, create an
+7. Open `http://127.0.0.1:8787`. When the Linux host has no desktop, create an
    SSH tunnel from your own computer:
 
    ```bash
@@ -127,7 +140,7 @@ Docker does not officially test every derivative distribution.
 
    Then open `http://127.0.0.1:8787` on your own computer.
 
-7. Create the Librarian and finish Guided Setup.
+8. Create the Librarian and finish Guided Setup.
 
 ## Confirm that it is running
 

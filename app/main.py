@@ -68,7 +68,8 @@ from .background import BackgroundCoordinator
 from .title_metadata import TitleMetadataService
 from .request_security import (
     LOCAL_CSRF_COOKIE, RequestBodyTooLarge, browser_request_is_same_origin,
-    csrf_submission, host_is_allowed, replay_body,
+    constant_time_equal, csrf_submission, host_is_allowed, replay_body,
+    should_issue_session_cookie,
 )
 from .timezones import timezone_groups
 
@@ -383,7 +384,10 @@ async def authentication_middleware(request: Request, call_next):
                 existing = auth_service.session_from_token(
                     request.cookies.get(SESSION_COOKIE, "")
                 )
-                if not existing or existing.user.id != user.id:
+                if (
+                    (not existing or existing.user.id != user.id)
+                    and should_issue_session_cookie(path)
+                ):
                     new_session_token, existing = auth_service.create_session(user, request)
                 request.state.user = user
                 request.state.auth_session = existing
@@ -437,7 +441,7 @@ async def authentication_middleware(request: Request, call_next):
                 local_csrf = getattr(request.state, "local_csrf_token", "")
                 if submitted and (
                     not local_csrf
-                    or not hmac.compare_digest(submitted, local_csrf)
+                    or not constant_time_equal(submitted, local_csrf)
                 ):
                     return await finish(auth_error_response(
                         request, 403, "Request verification failed",
@@ -457,7 +461,7 @@ async def authentication_middleware(request: Request, call_next):
                         request, 413, "Request too large",
                         "This form submission is larger than InfoMancer accepts.",
                     ))
-                if not submitted or not hmac.compare_digest(
+                if not submitted or not constant_time_equal(
                     submitted, session.csrf_token
                 ):
                     return await finish(auth_error_response(
@@ -1241,7 +1245,7 @@ def preauth_response(request: Request, template_name: str, context: dict) -> HTM
 
 def valid_preauth(request: Request, submitted: str) -> bool:
     stored = request.cookies.get(PREAUTH_COOKIE, "")
-    return bool(stored and submitted and hmac.compare_digest(stored, submitted))
+    return bool(stored and submitted and constant_time_equal(stored, submitted))
 
 
 def signed_in_response(request: Request, user: AuthUser, destination: str = "/"):
@@ -4076,7 +4080,7 @@ def library_export_rows(user_id: int) -> list[dict]:
     return exported
 
 
-@librarian_get("/exports/library")
+@app.get("/exports/library")
 def export_library(request: Request, format: str = "csv"):
     normalized = format.strip().casefold()
     if normalized not in {"csv", "json", "xml"}:

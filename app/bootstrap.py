@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import hmac
 import os
 import secrets
 from pathlib import Path
+
+from .request_security import constant_time_equal
 
 
 class BootstrapTokenManager:
@@ -56,7 +57,7 @@ class BootstrapTokenManager:
 
     def verify(self, submitted: str) -> bool:
         expected = self.token()
-        return bool(submitted and hmac.compare_digest(submitted, expected))
+        return bool(submitted and constant_time_equal(submitted, expected))
 
     def clear(self) -> None:
         if not self.configured_token:

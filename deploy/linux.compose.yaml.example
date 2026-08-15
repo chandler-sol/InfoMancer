@@ -2,7 +2,8 @@ services:
   infomancer:
     volumes:
       # Change the source paths to mounted folders on this Linux host.
-      # The account running Docker must be able to read them.
+      # They must be readable by INFOMANCER_UID/INFOMANCER_GID. Grant write
+      # access as well for rename, organize, and managed-trash operations.
       - type: bind
         source: /mnt/media/movies
         target: /media/movies

@@ -68,9 +68,24 @@ def verified_signature_fingerprints(status: str) -> set[str]:
     return fingerprints
 
 
+def normalize_trusted_signing_keys(values: set[str] | None) -> set[str]:
+    """Normalize and validate the explicit release-signing trust boundary."""
+    trusted = {
+        value.replace(" ", "").upper()
+        for value in (values or set())
+        if value and FINGERPRINT_PATTERN.fullmatch(value.replace(" ", ""))
+    }
+    if not trusted:
+        raise UpdateError(
+            "At least one trusted InfoMancer release signing-key fingerprint is required."
+        )
+    return trusted
+
+
 def verify_release_tag(
     tag: str, repository: Path, trusted_signing_keys: set[str] | None = None,
 ) -> None:
+    trusted = normalize_trusted_signing_keys(trusted_signing_keys)
     completed = subprocess.run(
         ["git", "verify-tag", "--raw", tag], cwd=repository, text=True,
         capture_output=True, check=False,
@@ -87,14 +102,7 @@ def verify_release_tag(
             "Git accepted the release tag signature, but InfoMancer could not identify "
             "the signing key fingerprint. The update was stopped."
         )
-    trusted = {
-        value.replace(" ", "").upper()
-        for value in (trusted_signing_keys or set())
-        if value and FINGERPRINT_PATTERN.fullmatch(value.replace(" ", ""))
-    }
-    if trusted_signing_keys and not trusted:
-        raise UpdateError("No configured release signing-key fingerprint is valid.")
-    if trusted and fingerprints.isdisjoint(trusted):
+    if fingerprints.isdisjoint(trusted):
         raise UpdateError(
             "The release tag was signed, but not by a configured trusted InfoMancer release key."
         )
@@ -225,7 +233,7 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--health-timeout", type=int, default=120)
     value.add_argument(
         "--trusted-signing-key", action="append", default=[],
-        help="Allowed primary or signing-subkey GPG fingerprint. May be supplied more than once.",
+        help="Required trusted primary or signing-subkey GPG fingerprint. May be supplied more than once.",
     )
     value.add_argument("--watch", action="store_true")
     value.add_argument("--poll-seconds", type=int, default=5)
@@ -239,11 +247,18 @@ def main() -> int:
     if not data_directory.is_absolute():
         data_directory = repository / data_directory
     files = arguments.compose_files or ["compose.yaml"]
+    try:
+        trusted_signing_keys = normalize_trusted_signing_keys(
+            {value for value in arguments.trusted_signing_key if value.strip()}
+        )
+    except UpdateError as exc:
+        print(f"Updater configuration error: {exc}", file=sys.stderr)
+        return 2
     while True:
         handled = process_request(
             repository, data_directory, files,
             arguments.health_url, max(15, arguments.health_timeout),
-            {value for value in arguments.trusted_signing_key if value.strip()},
+            trusted_signing_keys,
         )
         if not arguments.watch:
             return 0

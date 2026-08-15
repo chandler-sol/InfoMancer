@@ -11,16 +11,18 @@ After fetching release tags, it runs `git verify-tag --raw` before resolving or
 checking out the requested commit. The host account therefore needs the public
 GPG key used to sign InfoMancer release tags in its Git/GPG keyring.
 
-For an additional trust boundary, start the helper with the full expected
-signing-key fingerprint:
+The host updater also requires the full expected signing-key fingerprint.
+A valid signature from some other key in the service account's GPG keyring is
+not sufficient:
 
 ```text
 --trusted-signing-key FULL_GPG_FINGERPRINT
 ```
 
-The option may be supplied more than once during a signing-key rotation. When
-one or more fingerprints are configured, a cryptographically valid tag is
-accepted only when its `VALIDSIG` fingerprint matches that allowlist.
+The option may be supplied more than once during a signing-key rotation. The
+helper refuses to start without at least one valid fingerprint, and a
+cryptographically valid tag is accepted only when its `VALIDSIG` fingerprint
+matches that allowlist.
 
 Release maintainers should create annotated signed tags, for example:
 
@@ -51,9 +53,9 @@ use. Create or download a database backup from **Settings > System** first.
 1. Copy `deploy/infomancer-updater.service.example` to
    `/etc/systemd/system/infomancer-updater.service`.
 2. Edit `User`, `WorkingDirectory`, `ExecStart`, and the repeated
-   `--compose-file` values to match the installation. Add
-   `--trusted-signing-key FULL_GPG_FINGERPRINT` when you want to restrict
-   updates to an explicit release key.
+   `--compose-file` values to match the installation. Replace the example
+   `--trusted-signing-key FULL_GPG_FINGERPRINT` value with the verified full
+   fingerprint of the InfoMancer release key.
 3. Import the release-signing public key into the GPG keyring of the service
    account and verify its fingerprint out of band.
 4. The service user must be able to run Docker and read/write the InfoMancer

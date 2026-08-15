@@ -11,8 +11,8 @@ from app.auth import request_ip, secure_cookie_for
 from app.bootstrap import BootstrapTokenManager
 from app.config import Settings
 from app.request_security import (
-    RequestBodyTooLarge, browser_request_is_same_origin, csrf_submission,
-    host_is_allowed,
+    RequestBodyTooLarge, browser_request_is_same_origin, constant_time_equal,
+    csrf_submission, host_is_allowed, should_issue_session_cookie,
 )
 
 
@@ -105,6 +105,14 @@ class BootstrapTokenTests(unittest.TestCase):
             manager.clear()
             self.assertFalse(path.exists())
 
+    def test_non_ascii_token_is_rejected_without_type_error(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            manager = BootstrapTokenManager(
+                Path(temporary) / "bootstrap-token", "configured-secret"
+            )
+            self.assertFalse(manager.verify("é"))
+            self.assertFalse(constant_time_equal("é", "configured-secret"))
+
     def test_configured_token_does_not_create_a_file(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "bootstrap-token"
@@ -127,6 +135,18 @@ class ForwardedHeaderTests(unittest.TestCase):
             )
             self.assertEqual(request_ip(request, settings), "10.10.10.10")
             self.assertFalse(secure_cookie_for(request, settings))
+
+    def test_https_public_url_does_not_break_plain_lan_cookie(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = settings_for(Path(temporary), auth_mode="local")
+            settings = Settings(**{
+                **settings.__dict__,
+                "public_url": "https://media.example.test",
+            })
+            lan = request_with(headers={"host": "127.0.0.1:8787"}, scheme="http")
+            public = request_with(headers={"host": "media.example.test"}, scheme="http")
+            self.assertFalse(secure_cookie_for(lan, settings))
+            self.assertTrue(secure_cookie_for(public, settings))
 
     def test_verified_cloudflare_request_can_use_cloudflare_headers(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -171,6 +191,9 @@ class ForwardedHeaderTests(unittest.TestCase):
             self.assertTrue(host_is_allowed(
                 request_with(headers={"host": "127.0.0.1:8787"}), settings
             ))
+            self.assertFalse(host_is_allowed(
+                request_with(headers={"host": "testserver"}), settings
+            ))
 
     def test_disabled_mode_rejects_cross_site_browser_origin(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -198,6 +221,13 @@ class ForwardedHeaderTests(unittest.TestCase):
             self.assertEqual(request_ip(request, settings), "172.20.0.4")
 
 
+class SessionIssuanceTests(unittest.TestCase):
+    def test_cookie_less_api_requests_do_not_issue_database_sessions(self):
+        self.assertFalse(should_issue_session_cookie("/api/tasks"))
+        self.assertFalse(should_issue_session_cookie("/api/dashboard-metrics"))
+        self.assertTrue(should_issue_session_cookie("/movies"))
+
+
 class ContainerHardeningTests(unittest.TestCase):
     def test_docker_process_is_non_root_and_proxy_headers_are_disabled(self):
         dockerfile = (Path(__file__).resolve().parent.parent / "Dockerfile").read_text(
@@ -206,6 +236,13 @@ class ContainerHardeningTests(unittest.TestCase):
         self.assertIn("USER infomancer", dockerfile)
         self.assertIn('"--no-proxy-headers"', dockerfile)
         self.assertNotIn('"--forwarded-allow-ips", "*"', dockerfile)
+        self.assertIn("ARG INFOMANCER_UID=1000", dockerfile)
+        self.assertIn("ARG INFOMANCER_GID=1000", dockerfile)
+        compose = (Path(__file__).resolve().parent.parent / "compose.yaml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("INFOMANCER_UID: ${INFOMANCER_UID:-1000}", compose)
+        self.assertIn("INFOMANCER_GID: ${INFOMANCER_GID:-1000}", compose)
 
 
 if __name__ == "__main__":

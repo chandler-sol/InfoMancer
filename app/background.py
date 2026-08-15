@@ -73,14 +73,28 @@ class BackgroundCoordinator:
                     "processed": processed, "total": total, "current": current,
                 })
 
-        result = self.media_hashes.hash_many(
-            ids, progress=progress, cancelled=self.media_hash_cancel.is_set,
-            paused=lambda: self.media_hash_pause.is_set() or (
-                self.app_settings.get("hash_pause_for_activity") == "1"
-                and self.other_background_work_running()
-            ),
-            intensity=self.app_settings.get("hash_io_intensity"),
-        )
+        try:
+            result = self.media_hashes.hash_many(
+                ids, progress=progress, cancelled=self.media_hash_cancel.is_set,
+                paused=lambda: self.media_hash_pause.is_set() or (
+                    self.app_settings.get("hash_pause_for_activity") == "1"
+                    and self.other_background_work_running()
+                ),
+                intensity=self.app_settings.get("hash_io_intensity"),
+            )
+        except Exception as exc:
+            error = str(exc)[:1000]
+            with self.media_hash_lock:
+                self.media_hash_job.update({
+                    "status": "error", "current": "", "error": error,
+                })
+            self.record_event(
+                "media",
+                "File fingerprinting stopped because of an unexpected error. "
+                "Open Logs for details.",
+                level="error", context={"reason": reason, "error": error},
+            )
+            return
         status = "cancelled" if self.media_hash_cancel.is_set() else "complete"
         with self.media_hash_lock:
             self.media_hash_job.update({"status": status, **result, "current": ""})

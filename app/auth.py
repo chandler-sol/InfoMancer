@@ -24,6 +24,7 @@ PREAUTH_COOKIE = "infomancer_preauth"
 USERNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,49}$")
 PROFILE_ICONS = {"initials", "film", "television", "star", "library"}
 ROLES = {"member", "librarian"}
+LOGIN_ATTEMPT_ROW_CAP = 5000
 
 password_hasher = PasswordHasher(memory_cost=19_456, time_cost=2, parallelism=1)
 
@@ -42,6 +43,23 @@ def token_hash(token: str) -> str:
 
 def normalize_email(value: str) -> str:
     return value.strip().casefold()
+
+
+def _prune_login_attempts(conn: sqlite3.Connection) -> None:
+    """Bound stale login-attempt storage without deleting active lockouts."""
+    conn.execute(
+        "DELETE FROM login_attempts WHERE datetime(last_attempt_at)<datetime('now','-1 day')"
+    )
+    conn.execute(
+        """DELETE FROM login_attempts WHERE rowid IN (
+             SELECT rowid FROM login_attempts
+             WHERE locked_until IS NULL
+                OR datetime(locked_until)<=CURRENT_TIMESTAMP
+             ORDER BY datetime(last_attempt_at) DESC,rowid DESC
+             LIMIT -1 OFFSET ?
+           )""",
+        (LOGIN_ATTEMPT_ROW_CAP,),
+    )
 
 
 def safe_next(value: str, fallback: str = "/") -> str:
@@ -70,14 +88,24 @@ def secure_cookie_for(request, settings: Settings) -> bool:
         return True
     if settings.cookie_secure == "false":
         return False
+    if getattr(getattr(request, "url", None), "scheme", "") == "https":
+        return True
     if settings.public_url:
         try:
-            if urlsplit(settings.public_url).scheme.casefold() == "https":
+            public = urlsplit(settings.public_url)
+            request_host = urlsplit(
+                f"//{request.headers.get('host', '')}"
+            ).hostname
+            public_host = public.hostname
+            if (
+                public.scheme.casefold() == "https"
+                and request_host and public_host
+                and request_host.casefold().rstrip(".")
+                == public_host.casefold().rstrip(".")
+            ):
                 return True
         except ValueError:
             pass
-    if getattr(getattr(request, "url", None), "scheme", "") == "https":
-        return True
     if _trusted_cloudflare_proxy(request, settings):
         forwarded = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
         return forwarded == "https"
@@ -463,16 +491,7 @@ class AuthService:
 
         failure = False
         with self.database.connect() as conn:
-            conn.execute(
-                "DELETE FROM login_attempts WHERE datetime(last_attempt_at)<datetime('now','-1 day')"
-            )
-            conn.execute(
-                """DELETE FROM login_attempts WHERE rowid IN (
-                     SELECT rowid FROM login_attempts
-                     ORDER BY datetime(last_attempt_at) DESC,rowid DESC
-                     LIMIT -1 OFFSET 5000
-                   )"""
-            )
+            _prune_login_attempts(conn)
             attempt = conn.execute(
                 "SELECT * FROM login_attempts WHERE identity=? AND ip_address=?",
                 (identity, ip_address),
@@ -536,13 +555,7 @@ class AuthService:
                          locked_until=excluded.locked_until""",
                     (identity, ip_address, failures, locked_until),
                 )
-                conn.execute(
-                    """DELETE FROM login_attempts WHERE rowid IN (
-                         SELECT rowid FROM login_attempts
-                         ORDER BY datetime(last_attempt_at) DESC,rowid DESC
-                         LIMIT -1 OFFSET 5000
-                       )"""
-                )
+                _prune_login_attempts(conn)
                 failure = True
             else:
                 conn.execute("DELETE FROM login_attempts WHERE identity=?", (identity,))

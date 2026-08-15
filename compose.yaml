@@ -1,6 +1,10 @@
 services:
   infomancer:
-    build: .
+    build:
+      context: .
+      args:
+        INFOMANCER_UID: ${INFOMANCER_UID:-1000}
+        INFOMANCER_GID: ${INFOMANCER_GID:-1000}
     container_name: infomancer
     restart: unless-stopped
     env_file: .env

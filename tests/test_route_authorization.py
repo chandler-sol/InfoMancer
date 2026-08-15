@@ -41,6 +41,7 @@ class RouteAuthorizationTests(unittest.TestCase):
     def test_member_self_service_routes_do_not_require_librarian(self):
         for path, method in (
             ("/account/profile", "GET"), ("/account/profile", "POST"),
+            ("/exports/library", "GET"),
             ("/titles/{title_id}/favorite", "POST"),
         ):
             with self.subTest(path=path, method=method):

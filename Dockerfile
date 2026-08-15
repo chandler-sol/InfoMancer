@@ -1,11 +1,13 @@
 FROM python:3.13.14-slim-bookworm@sha256:67a1e1f215ccda113cfc024e8639049257e88f273898f595b61476d128d387e8
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ARG INFOMANCER_UID=1000
+ARG INFOMANCER_GID=1000
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
-RUN groupadd --gid 1000 infomancer \
-    && useradd --uid 1000 --gid infomancer --create-home --shell /bin/false infomancer
+RUN groupadd --gid "${INFOMANCER_GID}" infomancer \
+    && useradd --uid "${INFOMANCER_UID}" --gid infomancer --create-home --shell /bin/false infomancer
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY --chown=infomancer:infomancer app app

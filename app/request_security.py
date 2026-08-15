@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 from urllib.parse import parse_qs, urlsplit
 
 from starlette.requests import Request
@@ -7,11 +8,21 @@ from starlette.requests import Request
 
 MAX_URLENCODED_BODY = 2 * 1024 * 1024
 LOCAL_CSRF_COOKIE = "infomancer_local_csrf"
-LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "testserver"}
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 class RequestBodyTooLarge(ValueError):
     pass
+
+
+def constant_time_equal(left: str, right: str) -> bool:
+    """Compare arbitrary text tokens without ASCII-only compare_digest failures."""
+    return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
+
+
+def should_issue_session_cookie(path: str) -> bool:
+    """Avoid durable DB sessions for cookie-less API/service-token traffic."""
+    return not path.startswith("/api/")
 
 
 def _hostname(value: str) -> str:
@@ -47,7 +58,15 @@ def host_is_allowed(request: Request, settings) -> bool:
     )
     if not enforce:
         return True
-    return _hostname(request.headers.get("host", "")) in allowed_hosts(settings)
+    host = _hostname(request.headers.get("host", ""))
+    # Starlette's TestClient uses these two sentinels. Neither value is
+    # accepted from a real network peer solely because Host says testserver.
+    if (
+        host == "testserver" and request.client
+        and request.client.host == "testclient"
+    ):
+        return True
+    return host in allowed_hosts(settings)
 
 
 def _origin(value: str) -> tuple[str, str, int | None] | None:

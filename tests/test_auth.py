@@ -3,6 +3,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from app.auth import AuthService, AuthenticationError, password_hasher, safe_next
 from app.config import Settings
@@ -115,6 +116,31 @@ class AuthServiceTests(unittest.TestCase):
             self.assertIsNone(conn.execute(
                 "SELECT 1 FROM login_attempts WHERE identity='stale'"
             ).fetchone())
+
+    def test_row_cap_never_deletes_active_lockout(self):
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO login_attempts
+                   (identity,ip_address,failures,last_attempt_at,locked_until)
+                   VALUES ('locked','192.0.2.10',5,CURRENT_TIMESTAMP,
+                           datetime('now','+15 minutes'))"""
+            )
+            for index in range(4):
+                conn.execute(
+                    """INSERT INTO login_attempts
+                       (identity,ip_address,failures,last_attempt_at)
+                       VALUES (?,?,1,CURRENT_TIMESTAMP)""",
+                    (f"other-{index}", f"198.51.100.{index + 1}"),
+                )
+        with patch("app.auth.LOGIN_ATTEMPT_ROW_CAP", 2):
+            with self.assertRaises(AuthenticationError):
+                self.auth.authenticate_local("new-user", "wrong", "203.0.113.8")
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT locked_until FROM login_attempts WHERE identity='locked'"
+            ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertTrue(row["locked_until"])
 
     def test_sessions_store_only_token_hash_and_can_be_revoked(self):
         user = self.auth.create_user(
