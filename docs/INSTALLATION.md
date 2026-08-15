@@ -22,6 +22,17 @@ You need:
 5. A TheTVDB project API key for matching and missing-episode information.
    Guided Setup explains where to enter it.
 
+## One application process per catalog
+
+InfoMancer intentionally runs one application process against each SQLite
+catalog. Background scans, scheduled maintenance, task progress, and filesystem
+operations are coordinated inside that process. Do not add Uvicorn workers or
+run multiple InfoMancer replicas against the same `data/infomancer.db` file.
+
+The application maintains a database-backed runtime lease and refuses a second
+live process that attempts to use the same catalog. A stale lease can be
+reclaimed automatically after an unclean process exit.
+
 ## Windows
 
 1. Install and start Docker Desktop.
@@ -158,10 +169,10 @@ Database migrations run automatically when the updated application starts.
 
 Back up all of these together:
 
-- `data/` — catalog, users, settings, encrypted provider credentials, and the
+- `data/` - catalog, users, settings, encrypted provider credentials, and the
   generated encryption key when `INFOMANCER_SECRET` is blank.
-- `.env` — protected deployment configuration.
-- `compose.media.yaml` — host-to-container storage mappings.
+- `.env` - protected deployment configuration.
+- `compose.media.yaml` - host-to-container storage mappings.
 
 The catalog can be recreated by scanning, but accounts, personal organization,
 settings, and original-filename history cannot be reconstructed from media
@@ -195,5 +206,6 @@ python -m pip install -r requirements.txt
 uvicorn app.main:app --env-file .env --host 127.0.0.1 --port 8787
 ```
 
+Do not add `--workers` to that command when using the same InfoMancer catalog.
 For native use, set `MEDIA_BROWSE_ROOTS` to real paths for that operating
 system. Separate multiple paths with commas.
