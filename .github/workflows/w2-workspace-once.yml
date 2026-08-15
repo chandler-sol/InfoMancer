@@ -1,7 +1,11 @@
 name: W2 Workspace once
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - workspace/0.8-foundation
+    paths:
+      - .github/workflows/w2-workspace-once.yml
 
 permissions:
   contents: write
