@@ -2,8 +2,9 @@
 """Restricted host-side release updater for InfoMancer.
 
 The web application can only write a small request file. This separately-run
-helper validates that request, checks out a signed-off release tag, rebuilds
-the configured Compose project, verifies health, and rolls back on failure.
+helper validates that request, verifies a cryptographically signed release tag,
+rebuilds the configured Compose project, verifies health, and rolls back on
+failure.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from pathlib import Path
 
 
 TAG_PATTERN = re.compile(r"v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?")
+FINGERPRINT_PATTERN = re.compile(r"^[0-9A-Fa-f]{40,64}$")
 
 
 class UpdateError(RuntimeError):
@@ -49,6 +51,23 @@ def run(command: list[str], cwd: Path) -> str:
     return completed.stdout.strip()
 
 
+def verified_signature_fingerprints(status: str) -> set[str]:
+    """Return both signing-subkey and primary-key fingerprints from VALIDSIG."""
+    fingerprints: set[str] = set()
+    for line in status.splitlines():
+        marker = "[GNUPG:] VALIDSIG "
+        if marker not in line:
+            continue
+        fields = line.split(marker, 1)[1].split()
+        if fields and FINGERPRINT_PATTERN.fullmatch(fields[0]):
+            fingerprints.add(fields[0].upper())
+        # GnuPG's VALIDSIG status ends with the primary-key fingerprint. This
+        # differs from fields[0] when the tag is signed by a signing subkey.
+        if fields and FINGERPRINT_PATTERN.fullmatch(fields[-1]):
+            fingerprints.add(fields[-1].upper())
+    return fingerprints
+
+
 def verify_release_tag(
     tag: str, repository: Path, trusted_signing_keys: set[str] | None = None,
 ) -> None:
@@ -62,10 +81,19 @@ def verify_release_tag(
             "The release tag does not have a valid cryptographic signature. "
             "The update was stopped before any checkout occurred."
         )
-    fingerprints = {
-        match.upper() for match in re.findall(r"\[GNUPG:\] VALIDSIG ([0-9A-Fa-f]{40,64})", status)
+    fingerprints = verified_signature_fingerprints(status)
+    if not fingerprints:
+        raise UpdateError(
+            "Git accepted the release tag signature, but InfoMancer could not identify "
+            "the signing key fingerprint. The update was stopped."
+        )
+    trusted = {
+        value.replace(" ", "").upper()
+        for value in (trusted_signing_keys or set())
+        if value and FINGERPRINT_PATTERN.fullmatch(value.replace(" ", ""))
     }
-    trusted = {value.replace(" ", "").upper() for value in (trusted_signing_keys or set()) if value}
+    if trusted_signing_keys and not trusted:
+        raise UpdateError("No configured release signing-key fingerprint is valid.")
     if trusted and fingerprints.isdisjoint(trusted):
         raise UpdateError(
             "The release tag was signed, but not by a configured trusted InfoMancer release key."
@@ -197,7 +225,7 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--health-timeout", type=int, default=120)
     value.add_argument(
         "--trusted-signing-key", action="append", default=[],
-        help="Allowed GPG signing-key fingerprint. May be supplied more than once.",
+        help="Allowed primary or signing-subkey GPG fingerprint. May be supplied more than once.",
     )
     value.add_argument("--watch", action="store_true")
     value.add_argument("--poll-seconds", type=int, default=5)
