@@ -193,12 +193,22 @@ class DuplicateTrashService:
     def restore(self, trash_id: int) -> str:
         with self.database.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM duplicate_trash WHERE id=? AND status='trashed'", (trash_id,)
+                """SELECT d.*,r.path root_path FROM duplicate_trash d
+                   LEFT JOIN roots r ON r.id=d.root_id
+                   WHERE d.id=? AND d.status='trashed'""",
+                (trash_id,),
             ).fetchone()
         if not row:
             raise DuplicateTrashError("That trash item is no longer available to restore.")
+        if not row["root_path"]:
+            raise DuplicateTrashError(
+                "Restore stopped because the configured source for this trash item is no longer available. No file was changed."
+            )
         source = Path(row["trash_path"])
         destination = Path(row["original_path"])
+        root = Path(row["root_path"])
+        self._require_inside(source, root / ".infomancer-trash")
+        self._require_inside(destination, root)
         if destination.exists():
             raise DuplicateTrashError(
                 f"Restore stopped because another file already exists at the original path: {destination}. Move that file elsewhere before restoring."

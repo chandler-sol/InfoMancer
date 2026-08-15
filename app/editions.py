@@ -146,4 +146,15 @@ class EditionVersionService:
                    WHERE f.title_id=? AND f.id<>?""",
                 (current["title_id"], file_id),
             )]
-        return [row for row in rows if same_playable_item(current, row)]
+            manual_pairs = {
+                (int(row["file_a_id"]), int(row["file_b_id"]))
+                for row in conn.execute(
+                    """SELECT file_a_id,file_b_id FROM duplicate_reviews
+                       WHERE review_source='manual'"""
+                )
+            }
+        return [
+            row for row in rows
+            if same_playable_item(current, row)
+            and tuple(sorted((file_id, int(row["id"])))) not in manual_pairs
+        ]

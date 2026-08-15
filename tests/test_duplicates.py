@@ -123,6 +123,39 @@ class DuplicateServiceTests(unittest.TestCase):
         self.assertEqual(len(restored_history), 1)
         self.assertEqual(restored_history[0]["status"], "restored")
 
+    def test_restore_rejects_tampered_destination_outside_source(self):
+        original = self.base / "first.mkv"
+        original.write_bytes(b"first")
+        trash_id = self.trash.move(1, 30, None)
+        outside = self.base.parent / f"{self.base.name}-outside-destination.mkv"
+        with self.database.connect() as conn:
+            conn.execute(
+                "UPDATE duplicate_trash SET original_path=? WHERE id=?",
+                (str(outside), trash_id),
+            )
+        with self.assertRaises(DuplicateTrashError):
+            self.trash.restore(trash_id)
+        self.assertFalse(outside.exists())
+        self.assertEqual(len(self.trash.items()), 1)
+
+    def test_restore_rejects_tampered_source_outside_managed_trash(self):
+        original = self.base / "first.mkv"
+        original.write_bytes(b"first")
+        trash_id = self.trash.move(1, 30, None)
+        outside = self.base.parent / f"{self.base.name}-outside-source.mkv"
+        outside.write_bytes(b"outside")
+        try:
+            with self.database.connect() as conn:
+                conn.execute(
+                    "UPDATE duplicate_trash SET trash_path=? WHERE id=?",
+                    (str(outside), trash_id),
+                )
+            with self.assertRaises(DuplicateTrashError):
+                self.trash.restore(trash_id)
+            self.assertEqual(outside.read_bytes(), b"outside")
+        finally:
+            outside.unlink(missing_ok=True)
+
     def test_manual_removal_is_verified_before_catalog_update(self):
         original = self.base / "first.mkv"
         original.write_bytes(b"still here")

@@ -210,6 +210,22 @@ class EditionVersionTests(unittest.TestCase):
         self.assertEqual(review["decision"], "not_duplicate")
         self.assertEqual(review["review_source"], "manual")
 
+    def test_manual_ignored_decision_is_not_overwritten_by_edition_labels(self):
+        first, second = self.file_ids
+        main.duplicates.decide(first, second, "ignored", 0)
+        self.client.post(
+            f"/files/{first}/edition-version",
+            data={"edition_name": "Extended Edition", "version_name": "4K", "confirm": "SAVE"},
+        )
+        self.client.post(
+            f"/files/{second}/edition-version",
+            data={"edition_name": "Theatrical Cut", "version_name": "1080p", "confirm": "SAVE"},
+        )
+        with self.database.connect() as conn:
+            review = conn.execute("SELECT * FROM duplicate_reviews").fetchone()
+        self.assertEqual(review["decision"], "ignored")
+        self.assertEqual(review["review_source"], "manual")
+
     def test_library_health_requests_identity_review_until_alternatives_are_confirmed(self):
         main.mie.analyze()
         self.assertIn(
