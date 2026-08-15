@@ -157,7 +157,6 @@ def build_router(ctx: RouteContext):
     unanalyzed_count = ctx.live("unanalyzed_count")
     user_id = ctx.live("user_id")
     value = ctx.live("value")
-    warning_weight = ctx.live("warning_weight")
 
     def librarian_get(path: str, **kwargs):
         dependencies = list(kwargs.pop("dependencies", ()))

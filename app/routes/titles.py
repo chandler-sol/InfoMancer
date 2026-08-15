@@ -205,7 +205,6 @@ def build_router(ctx: RouteContext):
     value = ctx.live("value")
     version_name = ctx.live("version_name")
     width = ctx.live("width")
-    writers = ctx.live("writers")
 
     def librarian_get(path: str, **kwargs):
         dependencies = list(kwargs.pop("dependencies", ()))

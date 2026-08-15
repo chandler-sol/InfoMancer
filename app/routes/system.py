@@ -30,7 +30,6 @@ def build_router(ctx: RouteContext):
     rows = ctx.live("rows")
     templates = ctx.live("templates")
     unread = ctx.live("unread")
-    user = ctx.live("user")
 
     def librarian_get(path: str, **kwargs):
         dependencies = list(kwargs.pop("dependencies", ()))

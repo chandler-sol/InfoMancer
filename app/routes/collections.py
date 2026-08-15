@@ -104,7 +104,6 @@ def build_router(ctx: RouteContext):
     title_return_path = ctx.live("title_return_path")
     titles = ctx.live("titles")
     valid = ctx.live("valid")
-    value = ctx.live("value")
 
     def librarian_get(path: str, **kwargs):
         dependencies = list(kwargs.pop("dependencies", ()))

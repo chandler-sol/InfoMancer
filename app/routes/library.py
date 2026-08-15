@@ -128,7 +128,6 @@ def build_router(ctx: RouteContext):
     urlencode = ctx.live("urlencode")
     value = ctx.live("value")
     where = ctx.live("where")
-    writer = ctx.live("writer")
 
     def librarian_get(path: str, **kwargs):
         dependencies = list(kwargs.pop("dependencies", ()))
