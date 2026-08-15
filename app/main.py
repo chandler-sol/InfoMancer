@@ -64,7 +64,7 @@ from .source_browser import SourceBrowserError, list_folders, preview_folder
 from .smart_collections import decode_filters, encode_filters, matching_titles, normalize_filters
 from .tvdb import TVDBClient, TVDBError
 from .provider_secrets import ProviderSecretError, ProviderSecretStore
-from .runtime import JobRegistry, RuntimeLease
+from .background import BackgroundCoordinator
 from .title_metadata import TitleMetadataService
 from .request_security import (
     LOCAL_CSRF_COOKIE, RequestBodyTooLarge, browser_request_is_same_origin,
@@ -178,35 +178,6 @@ tvdb = TVDBClient(
     stored_provider_secrets.get("tvdb_api_key", settings.tvdb_api_key),
     stored_provider_secrets.get("tvdb_pin", settings.tvdb_pin),
 )
-job_registry = JobRegistry()
-runtime_lease = RuntimeLease(db)
-scan_jobs: dict[int, dict] = job_registry.mapping("scan")
-scan_lock = job_registry.lock("scan")
-scan_all_job: dict = job_registry.job("scan-all")
-scan_all_lock = job_registry.lock("scan-all")
-title_scan_jobs: dict[int, dict] = job_registry.mapping("title-scan")
-title_scan_lock = job_registry.lock("title-scan")
-imdb_genre_job: dict = job_registry.job("imdb-metadata")
-imdb_genre_lock = job_registry.lock("imdb-metadata")
-movie_match_job: dict = job_registry.job("movie-match")
-movie_match_lock = job_registry.lock("movie-match")
-tv_match_job: dict = job_registry.job("tv-match")
-tv_match_lock = job_registry.lock("tv-match")
-media_info_job: dict = job_registry.job("media-info")
-media_info_lock = job_registry.lock("media-info")
-duplicate_verify_job: dict = job_registry.job("duplicate-verify")
-duplicate_verify_lock = job_registry.lock("duplicate-verify")
-media_hash_job: dict = job_registry.job("media-hash")
-media_hash_lock = job_registry.lock("media-hash")
-media_hash_pause = job_registry.event("media-hash-pause")
-media_hash_cancel = job_registry.event("media-hash-cancel")
-background_scheduler_stop = job_registry.event("scheduler-stop")
-hash_schedule_last_check = 0.0
-trash_cleanup_job: dict = job_registry.job("trash-cleanup")
-trash_cleanup_lock = job_registry.lock("trash-cleanup")
-trash_cleanup_last_check = 0.0
-
-
 def _file_signatures(*, root_id: int | None = None, title_id: int | None = None) -> dict[int, tuple[int, float]]:
     where, value = ("t.root_id", root_id) if root_id is not None else ("f.title_id", title_id)
     with db.connect() as conn:
@@ -222,197 +193,6 @@ def _file_signatures(*, root_id: int | None = None, title_id: int | None = None)
 def _changed_file_ids(before: dict[int, tuple[int, float]], after: dict[int, tuple[int, float]]) -> list[int]:
     return [file_id for file_id, signature in after.items() if before.get(file_id) != signature]
 
-
-def run_media_hashing(file_ids: list[int], reason: str) -> None:
-    ids = list(dict.fromkeys(file_ids))
-    media_hash_cancel.clear()
-    media_hash_pause.clear()
-    with media_hash_lock:
-        media_hash_job.clear()
-        media_hash_job.update({
-            "status": "running", "processed": 0, "total": len(ids),
-            "current": "", "reason": reason, "complete": 0, "failed": 0,
-        })
-
-    def progress(processed: int, total: int, current: str) -> None:
-        with media_hash_lock:
-            media_hash_job.update({"processed": processed, "total": total, "current": current})
-
-    result = media_hashes.hash_many(
-        ids, progress=progress, cancelled=media_hash_cancel.is_set,
-        paused=lambda: media_hash_pause.is_set() or (
-            app_settings.get("hash_pause_for_activity") == "1"
-            and _other_background_work_running()
-        ),
-        intensity=app_settings.get("hash_io_intensity"),
-    )
-    status = "cancelled" if media_hash_cancel.is_set() else "complete"
-    with media_hash_lock:
-        media_hash_job.update({"status": status, **result, "current": ""})
-    record_event(
-        "media", f"File fingerprinting finished: {result['complete']:,} checked and {result['failed']:,} could not be read.",
-        level="warning" if result["failed"] else "info",
-        context={"reason": reason, **result},
-    )
-
-
-def start_media_hashing(file_ids: list[int], reason: str, *, queue_files: bool = True) -> bool:
-    ids = media_hashes.queue(file_ids) if queue_files else list(dict.fromkeys(file_ids))
-    if not ids:
-        return False
-    with media_hash_lock:
-        if media_hash_job.get("status") in {"starting", "running"}:
-            return False
-        media_hash_job.clear()
-        media_hash_job.update({"status": "starting", "processed": 0, "total": len(ids), "reason": reason})
-    threading.Thread(target=run_media_hashing, args=(ids, reason), daemon=True).start()
-    return True
-
-
-def handle_import_hashing(file_ids: list[int], reason: str) -> None:
-    mode = app_settings.get("hash_mode")
-    if mode in {"off", "on_demand"} or not file_ids:
-        return
-    queued = media_hashes.queue(file_ids)
-    if mode == "automatic" and queued:
-        limit = int(app_settings.get("hash_immediate_limit"))
-        immediate = queued[:limit]
-        deferred = queued[limit:]
-        started = start_media_hashing(immediate, reason, queue_files=False)
-        if immediate and not started:
-            record_event(
-                "media",
-                f"{len(queued):,} new or changed files were queued because another "
-                "fingerprinting task is already running.",
-                context={"queued": len(queued), "reason": reason},
-            )
-        if deferred:
-            record_event(
-                "media",
-                f"{len(queued):,} new or changed files need fingerprints. "
-                f"{len(immediate):,} {'are being checked now' if started else 'remain queued'} "
-                f"and {len(deferred):,} were queued for scheduled or manual processing.",
-                context={"queued": len(queued), "immediate": len(immediate), "deferred": len(deferred)},
-            )
-    elif queued:
-        record_event(
-            "media",
-            f"{len(queued):,} new or changed files were queued for scheduled fingerprinting.",
-            context={"queued": len(queued)},
-        )
-
-
-def _other_background_work_running() -> bool:
-    with scan_all_lock, scan_lock, title_scan_lock, movie_match_lock, tv_match_lock, media_info_lock:
-        return any((
-            scan_all_job.get("status") in {"starting", "running"},
-            any(job.get("status") in {"starting", "running"} for job in scan_jobs.values()),
-            any(job.get("status") in {"starting", "running"} for job in title_scan_jobs.values()),
-            movie_match_job.get("status") in {"starting", "running"},
-            tv_match_job.get("status") in {"starting", "running"},
-            media_info_job.get("status") in {"starting", "running"},
-        ))
-
-
-def maybe_start_scheduled_hashing() -> None:
-    global hash_schedule_last_check
-    now_epoch = time.time()
-    if now_epoch - hash_schedule_last_check < 30:
-        return
-    hash_schedule_last_check = now_epoch
-    prefs = app_settings.values()
-    if prefs["hash_mode"] not in {"automatic", "scheduled"}:
-        return
-    if prefs["hash_pause_for_activity"] == "1" and _other_background_work_running():
-        return
-    local_now = datetime.now(ZoneInfo(prefs["timezone"]))
-    hour, minute = (int(part) for part in prefs["hash_schedule_time"].split(":"))
-    if (local_now.hour, local_now.minute) < (hour, minute):
-        return
-    frequency, day = prefs["hash_schedule_frequency"], int(prefs["hash_schedule_day"])
-    if frequency == "weekly" and local_now.weekday() != day:
-        return
-    if frequency == "monthly" and local_now.day != day:
-        return
-    last_text = prefs.get("hash_last_scheduled_at", "")
-    if last_text:
-        last = datetime.fromisoformat(last_text)
-        if (frequency == "daily" and last.date() == local_now.date()
-                or frequency == "weekly" and last.isocalendar()[:2] == local_now.isocalendar()[:2]
-                or frequency == "monthly" and (last.year, last.month) == (local_now.year, local_now.month)):
-            return
-    ids = media_hashes.eligible_ids()
-    if ids and start_media_hashing(ids, "Scheduled file fingerprinting"):
-        app_settings.set_internal("hash_last_scheduled_at", local_now.isoformat())
-
-
-def run_background_scheduler() -> None:
-    """Run installation schedules even when no browser is open."""
-    while not background_scheduler_stop.wait(30):
-        try:
-            maybe_start_scheduled_hashing()
-            maybe_start_trash_cleanup()
-        except Exception as exc:
-            record_event(
-                "system",
-                "A scheduled maintenance check could not be completed. InfoMancer will try again automatically.",
-                level="error", detail=str(exc),
-            )
-
-
-@app.on_event("startup")
-def start_background_scheduler() -> None:
-    runtime_lease.start()
-    background_scheduler_stop.clear()
-    threading.Thread(
-        target=run_background_scheduler, name="infomancer-scheduler", daemon=True,
-    ).start()
-
-
-@app.on_event("shutdown")
-def stop_background_scheduler() -> None:
-    background_scheduler_stop.set()
-    runtime_lease.release()
-
-
-def trash_retention_days() -> int | None:
-    value = app_settings.get("trash_retention_days")
-    return None if value == "never" else int(value)
-
-
-def maybe_start_trash_cleanup() -> None:
-    """Check for expired managed-trash items at most once per day."""
-    global trash_cleanup_last_check
-    now = time.time()
-    with trash_cleanup_lock:
-        if now - trash_cleanup_last_check < 86_400:
-            return
-        trash_cleanup_last_check = now
-        trash_cleanup_job.clear()
-        trash_cleanup_job.update({"status": "starting", "detail": "Checking retention dates"})
-
-    def run() -> None:
-        try:
-            with trash_cleanup_lock:
-                trash_cleanup_job.update({
-                    "status": "running", "detail": "Removing expired managed-trash items",
-                })
-            purged = duplicate_trash.purge_expired()
-            with trash_cleanup_lock:
-                trash_cleanup_job.update({
-                    "status": "complete", "detail": f"{purged:,} expired item(s) removed",
-                })
-        except (OSError, ValueError, sqlite3.Error) as exc:
-            with trash_cleanup_lock:
-                trash_cleanup_job.update({
-                    "status": "error",
-                    "detail": "Trash cleanup could not finish. Open Logs for details.",
-                    "error": str(exc),
-                })
-
-    threading.Thread(target=run, daemon=True).start()
-
-
 def record_event(
     category: str, message: str, *, level: str = "info", detail: str = "",
     context: dict | None = None, user_id: int | None = None,
@@ -427,6 +207,54 @@ def record_event(
         category, message, level=stored_level, detail=detail,
         context=context, user_id=user_id,
     )
+
+
+background = BackgroundCoordinator(
+    db, app_settings, media_hashes, duplicate_trash, record_event,
+)
+job_registry = background.registry
+runtime_lease = background.runtime_lease
+scan_jobs = background.scan_jobs
+scan_lock = background.scan_lock
+scan_all_job = background.scan_all_job
+scan_all_lock = background.scan_all_lock
+title_scan_jobs = background.title_scan_jobs
+title_scan_lock = background.title_scan_lock
+imdb_genre_job = background.imdb_genre_job
+imdb_genre_lock = background.imdb_genre_lock
+movie_match_job = background.movie_match_job
+movie_match_lock = background.movie_match_lock
+tv_match_job = background.tv_match_job
+tv_match_lock = background.tv_match_lock
+media_info_job = background.media_info_job
+media_info_lock = background.media_info_lock
+duplicate_verify_job = background.duplicate_verify_job
+duplicate_verify_lock = background.duplicate_verify_lock
+media_hash_job = background.media_hash_job
+media_hash_lock = background.media_hash_lock
+media_hash_pause = background.media_hash_pause
+media_hash_cancel = background.media_hash_cancel
+background_scheduler_stop = background.scheduler_stop
+trash_cleanup_job = background.trash_cleanup_job
+trash_cleanup_lock = background.trash_cleanup_lock
+run_media_hashing = background.run_media_hashing
+start_media_hashing = background.start_media_hashing
+handle_import_hashing = background.handle_import_hashing
+_other_background_work_running = background.other_background_work_running
+maybe_start_scheduled_hashing = background.maybe_start_scheduled_hashing
+run_background_scheduler = background.run_scheduler
+trash_retention_days = background.trash_retention_days
+maybe_start_trash_cleanup = background.maybe_start_trash_cleanup
+
+
+@app.on_event("startup")
+def start_background_scheduler() -> None:
+    background.start()
+
+
+@app.on_event("shutdown")
+def stop_background_scheduler() -> None:
+    background.stop()
 
 
 PUBLIC_PATHS = {"/health", "/login", "/setup", "/forgot-password"}
