@@ -6,6 +6,7 @@ on:
       - agent/security-hardening-0-7
     paths:
       - scripts/_agent_security_batch2.py
+      - scripts/_agent_security_batch2_fix.py
 
 permissions:
   contents: write
@@ -26,7 +27,9 @@ jobs:
           python-version: "3.13"
 
       - name: Apply security batch
-        run: python scripts/_agent_security_batch2.py
+        run: |
+          python scripts/_agent_security_batch2.py
+          python scripts/_agent_security_batch2_fix.py
 
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
@@ -42,7 +45,7 @@ jobs:
           git config user.name "chandler-sol"
           git config user.email "64607629+chandler-sol@users.noreply.github.com"
           git add -A
-          git reset scripts/_agent_security_batch2.py .github/workflows/_agent_security_batch2.yml
+          git reset scripts/_agent_security_batch2.py scripts/_agent_security_batch2_fix.py .github/workflows/_agent_security_batch2.yml
           git diff --cached --quiet && exit 0
           git commit -m "Apply security hardening batch 2"
           git push origin HEAD:agent/security-hardening-0-7
