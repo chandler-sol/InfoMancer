@@ -23,7 +23,9 @@ class SupplyChainTests(unittest.TestCase):
         self.assertNotIn(":latest", cloudflare)
 
     def test_github_actions_use_full_commit_shas(self):
-        for workflow in (ROOT / ".github" / "workflows").glob("*.yml"):
+        workflow_dir = ROOT / ".github" / "workflows"
+        workflows = list(workflow_dir.glob("*.yml")) + list(workflow_dir.glob("*.yaml"))
+        for workflow in workflows:
             if workflow.name.startswith("_agent_"):
                 continue
             text = workflow.read_text(encoding="utf-8")
