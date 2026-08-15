@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import secrets
 import threading
 from datetime import datetime, timedelta, timezone
+from typing import Callable
 
 from .db import Database
 
@@ -17,13 +19,14 @@ class RuntimeLease:
     def __init__(
         self, database: Database, *, name: str = "web-runtime",
         ttl_seconds: int = 90, heartbeat_seconds: int = 30,
-        owner: str | None = None,
+        owner: str | None = None, on_lost: Callable[[], None] | None = None,
     ):
         self.database = database
         self.name = name
         self.ttl_seconds = max(30, int(ttl_seconds))
         self.heartbeat_seconds = max(10, min(int(heartbeat_seconds), self.ttl_seconds // 2))
         self.owner = owner or secrets.token_urlsafe(24)
+        self.on_lost = on_lost or self._terminate_after_lease_loss
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -35,6 +38,13 @@ class RuntimeLease:
     def _parse(value: str) -> datetime:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+    @staticmethod
+    def _terminate_after_lease_loss() -> None:
+        # Ownership loss means another live process has claimed this catalog.
+        # Immediate termination is safer than allowing two schedulers or
+        # filesystem-mutating workers to continue against the same database.
+        os._exit(70)
 
     def acquire(self) -> None:
         now = self._now()
@@ -79,10 +89,14 @@ class RuntimeLease:
             while not self._stop.wait(self.heartbeat_seconds):
                 try:
                     self.heartbeat()
-                except Exception:
-                    # A lost lease is surfaced on the next startup. Do not let a
-                    # heartbeat exception kill unrelated request handling.
+                except RuntimeLeaseError:
+                    self.on_lost()
                     return
+                except Exception:
+                    # A transient SQLite/storage failure is not proof that
+                    # ownership changed. Retry on the next heartbeat instead of
+                    # killing a healthy single process.
+                    continue
 
         self._thread = threading.Thread(
             target=run, name="infomancer-runtime-lease", daemon=True,
