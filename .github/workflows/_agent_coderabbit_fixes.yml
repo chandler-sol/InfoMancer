@@ -21,6 +21,9 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Correct patch runner
+        run: python scripts/_agent_patch_coderabbit_runner.py
+
       - name: Apply reviewed fixes
         run: python scripts/_agent_coderabbit_fixes.py
 
@@ -36,6 +39,7 @@ jobs:
       - name: Commit clean follow-up
         run: |
           rm scripts/_agent_coderabbit_fixes.py
+          rm scripts/_agent_patch_coderabbit_runner.py
           rm .github/workflows/_agent_coderabbit_fixes.yml
           git config user.name "arsenik"
           git config user.email "64607629+chandler-sol@users.noreply.github.com"
