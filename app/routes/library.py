@@ -618,6 +618,227 @@ def build_router(ctx: RouteContext):
             "message": request.query_params.get("message", ""),
         })
 
+    def workspace_inspector_context(request: Request, title_id: int) -> dict:
+        """Build the read-only Workspace Inspector from catalog state only."""
+        with db.connect() as conn:
+            title_row = conn.execute(
+                """SELECT t.*,r.label source_label,r.path source_path,
+                          r.health_status source_health,r.last_scanned_at source_scanned_at,
+                          COALESCE(uts.favorite,0) favorite,uts.personal_rating,uts.sort_title
+                   FROM titles t JOIN roots r ON r.id=t.root_id
+                   LEFT JOIN user_title_state uts
+                     ON uts.title_id=t.id AND uts.user_id=?
+                   WHERE t.id=?""",
+                (request.state.user.id, title_id),
+            ).fetchone()
+            if not title_row:
+                raise HTTPException(404, "Title not found")
+            title = dict(title_row)
+            file_rows = conn.execute(
+                """SELECT * FROM files WHERE title_id=?
+                   ORDER BY version_preferred DESC,identity_confirmed DESC,id
+                   LIMIT 12""",
+                (title_id,),
+            ).fetchall()
+            tags = conn.execute(
+                """SELECT ut.id,ut.name,ut.color,
+                          CASE WHEN tt.title_id IS NULL THEN 0 ELSE 1 END selected
+                   FROM user_tags ut LEFT JOIN title_tags tt
+                     ON tt.tag_id=ut.id AND tt.title_id=?
+                   WHERE ut.user_id=? ORDER BY ut.name COLLATE NOCASE""",
+                (title_id, request.state.user.id),
+            ).fetchall() if request.state.user.id > 0 else []
+            collections = conn.execute(
+                """SELECT c.id,c.name FROM collections c
+                   JOIN collection_titles ct ON ct.collection_id=c.id
+                   WHERE ct.title_id=? ORDER BY c.name COLLATE NOCASE""",
+                (title_id,),
+            ).fetchall()
+            libraries = conn.execute(
+                """SELECT l.id,l.name FROM custom_libraries l
+                   JOIN custom_library_titles lt ON lt.library_id=l.id
+                   WHERE lt.title_id=? ORDER BY l.name COLLATE NOCASE""",
+                (title_id,),
+            ).fetchall()
+            findings = conn.execute(
+                """SELECT id,severity,category,summary,recommendation,last_seen_at
+                   FROM mie_findings WHERE title_id=? AND status='active'
+                   ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+                            last_seen_at DESC LIMIT 5""",
+                (title_id,),
+            ).fetchall()
+            finding_counts = conn.execute(
+                """SELECT COUNT(*) total,
+                          SUM(CASE WHEN severity='critical' THEN 1 ELSE 0 END) critical,
+                          SUM(CASE WHEN severity='warning' THEN 1 ELSE 0 END) warning
+                   FROM mie_findings WHERE title_id=? AND status='active'""",
+                (title_id,),
+            ).fetchone()
+            missing_count = conn.execute(
+                """SELECT COUNT(*) count FROM expected_episodes e
+                   WHERE e.title_id=? AND e.season>0
+                     AND (e.aired IS NULL OR e.aired<=date('now'))
+                     AND NOT EXISTS (
+                       SELECT 1 FROM files owned WHERE owned.title_id=e.title_id
+                         AND owned.season=e.season
+                         AND e.episode BETWEEN owned.episode_start
+                           AND COALESCE(owned.episode_end,owned.episode_start)
+                     )""",
+                (title_id,),
+            ).fetchone()["count"] if title["kind"] == "tv" else 0
+            duplicate_count = conn.execute(
+                """SELECT COUNT(*) count FROM duplicate_reviews dr
+                   JOIN files a ON a.id=dr.file_a_id
+                   JOIN files b ON b.id=dr.file_b_id
+                   WHERE dr.decision='active' AND (a.title_id=? OR b.title_id=?)""",
+                (title_id, title_id),
+            ).fetchone()["count"]
+            metadata_queue = conn.execute(
+                "SELECT status,provider,error,requested_at,completed_at FROM metadata_refresh_queue WHERE title_id=?",
+                (title_id,),
+            ).fetchone()
+
+        def size_label(value: int | float | None) -> str:
+            amount = float(value or 0)
+            units = ("B", "KB", "MB", "GB", "TB", "PB")
+            unit = units[0]
+            for candidate in units:
+                unit = candidate
+                if amount < 1024 or candidate == units[-1]:
+                    break
+                amount /= 1024
+            if unit == "B":
+                return f"{int(amount)} {unit}"
+            return f"{amount:.1f} {unit}"
+
+        def runtime_label(value: int | float | None) -> str:
+            seconds = int(value or 0)
+            if seconds <= 0:
+                return ""
+            minutes = max(1, round(seconds / 60))
+            hours, minutes = divmod(minutes, 60)
+            return f"{hours}h {minutes}m" if hours else f"{minutes}m"
+
+        files = []
+        total_size = 0
+        total_runtime = 0.0
+        for row in file_rows:
+            item = dict(row)
+            total_size += int(item.get("size_bytes") or 0)
+            total_runtime += float(item.get("runtime_seconds") or 0)
+            item["size_display"] = size_label(item.get("size_bytes"))
+            item["runtime_display"] = runtime_label(item.get("runtime_seconds"))
+            width, height = item.get("width"), item.get("height")
+            item["resolution_display"] = f"{width}×{height}" if width and height else ""
+            files.append(item)
+        primary = files[0] if files else None
+        matched = bool(
+            title.get("tvdb_id") if title["kind"] == "tv"
+            else title.get("tvdb_movie_id") or title.get("tmdb_id") or title.get("imdb_id")
+        )
+        provider_ids = []
+        for label, value in (
+            ("TVDB", title.get("tvdb_id") or title.get("tvdb_movie_id")),
+            ("TMDB", title.get("tmdb_id")),
+            ("IMDb", title.get("imdb_id")),
+        ):
+            if value:
+                provider_ids.append({"label": label, "value": str(value)})
+        return {
+            "title": title,
+            "display_title": title.get("metadata_title") or title.get("title") or "Untitled",
+            "display_year": title.get("metadata_year") or title.get("year"),
+            "matched": matched,
+            "provider_ids": provider_ids,
+            "files": files,
+            "primary_file": primary,
+            "file_count": len(files),
+            "total_size_display": size_label(total_size),
+            "total_runtime_display": runtime_label(total_runtime),
+            "tags": tags,
+            "collections": collections,
+            "libraries": libraries,
+            "findings": findings,
+            "finding_counts": dict(finding_counts) if finding_counts else {"total": 0, "critical": 0, "warning": 0},
+            "missing_count": missing_count,
+            "duplicate_count": duplicate_count,
+            "metadata_queue": dict(metadata_queue) if metadata_queue else None,
+            "message": "",
+        }
+
+    @router.get("/library/inspector/{title_id}", response_class=HTMLResponse)
+    def workspace_inspector(request: Request, title_id: int):
+        response = templates.TemplateResponse(
+            request, "_workspace_inspector.html",
+            workspace_inspector_context(request, title_id),
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @router.post("/api/titles/{title_id}/favorite")
+    def workspace_toggle_favorite(request: Request, title_id: int) -> dict:
+        if request.state.user.id <= 0:
+            raise HTTPException(403, "Favorites require a signed-in account")
+        with db.connect() as conn:
+            title = conn.execute(
+                "SELECT id,COALESCE(NULLIF(metadata_title,''),title) name FROM titles WHERE id=?",
+                (title_id,),
+            ).fetchone()
+            if not title:
+                raise HTTPException(404, "Title not found")
+            current = conn.execute(
+                "SELECT favorite FROM user_title_state WHERE user_id=? AND title_id=?",
+                (request.state.user.id, title_id),
+            ).fetchone()
+            favorite = not bool(current and current["favorite"])
+            conn.execute(
+                """INSERT INTO user_title_state(user_id,title_id,favorite,updated_at)
+                   VALUES (?,?,?,CURRENT_TIMESTAMP)
+                   ON CONFLICT(user_id,title_id) DO UPDATE SET
+                     favorite=excluded.favorite,updated_at=CURRENT_TIMESTAMP""",
+                (request.state.user.id, title_id, int(favorite)),
+            )
+        record_event(
+            "library", "Title added to favorites." if favorite else "Title removed from favorites.",
+            user_id=request.state.user.id, context={"title_id": title_id, "source": "workspace-inspector"},
+        )
+        return {"title_id": title_id, "favorite": favorite}
+
+    @router.post("/api/titles/{title_id}/tags/{tag_id}")
+    def workspace_toggle_tag(request: Request, title_id: int, tag_id: int) -> dict:
+        if request.state.user.id <= 0:
+            raise HTTPException(403, "Tags require a signed-in account")
+        with db.connect() as conn:
+            if not conn.execute("SELECT id FROM titles WHERE id=?", (title_id,)).fetchone():
+                raise HTTPException(404, "Title not found")
+            tag = conn.execute(
+                "SELECT id,name FROM user_tags WHERE id=? AND user_id=?",
+                (tag_id, request.state.user.id),
+            ).fetchone()
+            if not tag:
+                raise HTTPException(404, "Tag not found")
+            existing = conn.execute(
+                "SELECT 1 FROM title_tags WHERE title_id=? AND tag_id=?",
+                (title_id, tag_id),
+            ).fetchone()
+            selected = not bool(existing)
+            if selected:
+                conn.execute(
+                    "INSERT OR IGNORE INTO title_tags(title_id,tag_id) VALUES (?,?)",
+                    (title_id, tag_id),
+                )
+            else:
+                conn.execute(
+                    "DELETE FROM title_tags WHERE title_id=? AND tag_id=?",
+                    (title_id, tag_id),
+                )
+        record_event(
+            "library", f'Tag "{tag["name"]}" {"added to" if selected else "removed from"} title.',
+            user_id=request.state.user.id,
+            context={"title_id": title_id, "tag_id": tag_id, "source": "workspace-inspector"},
+        )
+        return {"title_id": title_id, "tag_id": tag_id, "selected": selected}
+
     @router.get("/movies", response_class=HTMLResponse)
     def movies(
         request: Request, q: str = "", letter: str = "",
@@ -814,6 +1035,9 @@ def build_router(ctx: RouteContext):
         "rename_tag": rename_tag,
         "delete_tag": delete_tag,
         "library": library,
+        "workspace_inspector": workspace_inspector,
+        "workspace_toggle_favorite": workspace_toggle_favorite,
+        "workspace_toggle_tag": workspace_toggle_tag,
         "movies": movies,
         "shows": shows,
         "people_search": people_search,

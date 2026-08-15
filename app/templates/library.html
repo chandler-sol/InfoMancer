@@ -64,7 +64,7 @@
 <div class="review-actions selection-actions library-selection-actions" id="library-selection-actions" hidden><span class="selection-count" id="library-selection-count">0 selected</span><button class="button subtle" type="button" id="deselect-library-titles">Deselect all</button><button class="button" type="button" id="append-sort-titles">Append Sort Titles</button><button class="button" form="library-bulk-form" formaction="/titles/organize-bulk" formmethod="post">Organize &amp; Tags</button><button class="button" form="library-bulk-form" formaction="/metadata/queue" formmethod="post">Refresh metadata</button>{% if kind in ['movie', 'all'] %}<button class="button primary" form="library-bulk-form" id="analyze-library-movies" data-match-kind="movie" formaction="/movies/bulk-match/analyze">Match selected movies</button>{% endif %}{% if kind in ['tv', 'all'] %}<button class="button primary" form="library-bulk-form" id="analyze-library-shows" data-match-kind="tv" formaction="/shows/bulk-match/analyze">Match selected TV shows</button>{% endif %}</div>
 <section class="cover-library" id="cover-library" aria-label="Library covers" hidden>
 {% for row in rows %}
-  <article class="cover-card" id="title-{{ row.id }}">
+  <article class="cover-card" id="title-{{ row.id }}" data-workspace-title-id="{{ row.id }}">
     <a class="cover-card-link" href="/titles/{{ row.id }}?library_return={{ (library_return ~ '#title-' ~ row.id)|urlencode }}">
       <span class="cover-art">{% if row.poster_url %}<img src="{{ row.poster_url }}" alt="" loading="lazy">{% else %}<span class="cover-art-placeholder">{{ title_initial(row) }}</span>{% endif %}</span>
       <strong>{{ row.metadata_title or row.title }}</strong>
@@ -87,7 +87,7 @@
 {% for row in rows %}
   {% set current_initial = title_initial(row) %}
   {% if current_initial != grouping.initial %}{% set group_noun = 'movies' if kind == 'movie' else ('TV series' if kind == 'tv' else 'titles') %}<tr class="letter-heading" id="letter-{{ current_initial }}"><td class="select-cell letter-select-cell"><label class="letter-select" title="Select all {{ current_initial }} {{ group_noun }}" data-tooltip="Select all {{ current_initial }} {{ group_noun }}"><input class="letter-title-choice" type="checkbox" data-letter="{{ current_initial }}" aria-label="Select all {{ current_initial }} {{ group_noun }}"><span class="sr-only">Select all {{ current_initial }} {{ group_noun }}</span></label></td><td class="letter-label-cell" colspan="{{ 4 if kind == 'movie' else 6 }}"><span class="letter-marker">{{ current_initial }}</span></td></tr>{% set grouping.initial = current_initial %}{% endif %}
-  <tr class="library-title-row" id="title-{{ row.id }}">
+  <tr class="library-title-row" id="title-{{ row.id }}" data-workspace-title-id="{{ row.id }}">
     <td class="select-cell"><input class="library-title-choice" type="checkbox" name="selected" value="{{ row.id }}" data-kind="{{ row.kind }}" data-matched="{% if row.kind == 'tv' %}{{ 'true' if row.tvdb_id else 'false' }}{% else %}{{ 'true' if row.tvdb_movie_id or row.tmdb_id or row.imdb_id else 'false' }}{% endif %}" data-initial="{{ current_initial }}" aria-label="Select {{ row.metadata_title or row.title }}"></td>
     <td class="library-title-cell"><div class="title-cell">{% if row.poster_url %}<img class="poster-thumb" src="{{ row.poster_url }}" alt="" loading="lazy">{% else %}<span class="poster-placeholder">{{ current_initial }}</span>{% endif %}<div><a class="title-link" href="/titles/{{ row.id }}?library_return={{ (library_return ~ '#title-' ~ row.id)|urlencode }}">{{ row.metadata_title or row.title }}{% if lifespan(row) %} <span>({{ lifespan(row) }})</span>{% endif %}</a>{% if row.favorite or row.custom_tags %}<div class="title-organization">{% if row.favorite %}<span class="favorite-star active" title="Favorite">★</span>{% endif %}{% if row.custom_tags %}<span>{{ row.custom_tags }}</span>{% endif %}</div>{% endif %}<small class="library-file-path">{{ row.folder_path }}</small><div class="mobile-title-meta"><span class="kind {{ row.kind }}">{{ 'TV' if row.kind == 'tv' else 'Movie' }}</span>{% if row.kind == 'tv' and row.tvdb_id %}<span class="matched">TVDB {{ row.tvdb_id }}</span>{% elif row.kind == 'movie' and row.tmdb_id %}<span class="matched">TMDB {{ row.tmdb_id }}</span>{% elif row.kind == 'movie' and row.imdb_id %}<span class="matched">IMDb {{ row.imdb_id }}</span>{% else %}<span class="muted">Unmatched</span>{% endif %}{% if row.kind == 'tv' %}<span class="mobile-episode-count">{{ row.episode_count }} episodes</span>{% if row.missing_count %}<a class="mobile-missing-link" href="/titles/{{ row.id }}?show_missing=1#missing-panel">{{ row.missing_count }} missing</a>{% endif %}{% endif %}</div></div></div></td>
     <td class="title-type-cell"><span class="kind {{ row.kind }}">{{ row.kind }}</span></td>
@@ -147,7 +147,19 @@
     let suggestionTimer;
     let requestNumber = 0;
     let coverSizeValueTimer;
+    const selectionStorageKey = `infomancer-library-selection:${window.location.pathname}`;
     let selectionOrder = [];
+    try {
+      const storedSelection = JSON.parse(sessionStorage.getItem(selectionStorageKey) || "[]");
+      if (Array.isArray(storedSelection)) selectionOrder = storedSelection.filter(value => /^\d+$/.test(String(value))).map(String).slice(0, 1000);
+    } catch (_error) {}
+    const restoreStoredSelection = () => {
+      const selected = new Set(selectionOrder);
+      document.querySelectorAll(".library-title-choice").forEach(choice => {
+        choice.checked = selected.has(choice.value);
+      });
+    };
+    restoreStoredSelection();
     const savedLibraryView = localStorage.getItem("infomancer-library-view");
     let currentLibraryView = ["list", "covers"].includes(savedLibraryView)
       ? savedLibraryView
@@ -204,6 +216,7 @@
       selected.forEach(choice => {
         if (!selectionOrder.includes(choice.value)) selectionOrder.push(choice.value);
       });
+      try { sessionStorage.setItem(selectionStorageKey, JSON.stringify(selectionOrder)); } catch (_error) {}
       const unmatched = selected.filter(choice => choice.dataset.matched !== "true");
       const selectedMovies = unmatched.filter(choice => choice.dataset.kind === "movie");
       const selectedShows = unmatched.filter(choice => choice.dataset.kind === "tv");
@@ -283,6 +296,7 @@
         if (!replacement || thisRequest !== requestNumber) return;
         tableBody.replaceChildren(...replacement.childNodes);
         if (coverLibrary && replacementCovers) coverLibrary.replaceChildren(...replacementCovers.childNodes);
+        restoreStoredSelection();
         updateTitleSelection();
         document.querySelectorAll(".alphabet a").forEach(link => {
           link.classList.remove("active");
@@ -301,7 +315,9 @@
           });
           link.href = linkUrl.pathname + linkUrl.search;
         });
-        history.replaceState({}, "", url.pathname + url.search);
+        url.searchParams.delete("inspect");
+        history.replaceState({...history.state, workspaceInspectorTitleId: null}, "", url.pathname + url.search);
+        document.dispatchEvent(new CustomEvent("infomancer:library-results-updated"));
         const filters = [query && `“${query}”`, sourceFilter.value && sourceFilter.options[sourceFilter.selectedIndex]?.text, matchFilter.value && matchFilter.options[matchFilter.selectedIndex]?.text, gapFilter?.value && gapFilter.options[gapFilter.selectedIndex]?.text, favoriteFilter.value && favoriteFilter.options[favoriteFilter.selectedIndex]?.text, tagFilter.value && tagFilter.options[tagFilter.selectedIndex]?.text, genreFilter.value, titleTypeFilter.value && titleTypeFilter.options[titleTypeFilter.selectedIndex]?.text].filter(Boolean);
         state.textContent = filters.length ? `Showing ${filters.join(" · ")}` : "";
       } catch (error) {

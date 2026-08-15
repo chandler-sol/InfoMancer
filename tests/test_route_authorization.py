@@ -25,6 +25,7 @@ class RouteAuthorizationTests(unittest.TestCase):
             return True
         return bool(
             re.fullmatch(r"/titles/\{title_id\}/(?:favorite|organize)", path)
+            or re.fullmatch(r"/api/titles/\{title_id\}/(?:favorite|tags/\{tag_id\})", path)
             or re.fullmatch(r"/files/\{file_id\}/favorite", path)
             or re.fullmatch(r"/tags/\{tag_id\}/(?:rename|delete)", path)
         )

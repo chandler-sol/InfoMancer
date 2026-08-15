@@ -1,0 +1,86 @@
+<div class="workspace-inspector-panel" data-workspace-inspector-panel data-title-id="{{ title.id }}" data-detail-href="/titles/{{ title.id }}">
+  <input type="hidden" data-workspace-csrf value="{{ csrf_token }}">
+  <div class="workspace-inspector-summary">
+    <div class="workspace-inspector-art">
+      {% if title.poster_url %}<img src="{{ title.poster_url }}" alt="" loading="lazy">{% else %}<span class="workspace-inspector-art-placeholder">{{ display_title[:1]|upper }}</span>{% endif %}
+    </div>
+    <div class="workspace-inspector-identity">
+      <p class="workspace-inspector-kicker">{{ 'TV SHOW' if title.kind == 'tv' else 'MOVIE' }}</p>
+      <h2 class="workspace-inspector-title">{{ display_title }}</h2>
+      <p class="workspace-inspector-subtitle">{% if display_year %}{{ display_year }} · {% endif %}{{ title.source_label or title.source_path }}</p>
+      <div class="workspace-inspector-statuses">
+        <span class="workspace-status{% if matched %} good{% else %} warning{% endif %}">{{ 'Matched' if matched else 'Unmatched' }}</span>
+        <span class="workspace-status{% if title.source_health == 'healthy' %} good{% elif title.source_health in ['degraded','offline'] %} warning{% endif %}">Source {{ title.source_health|title }}</span>
+        {% if title.metadata_status %}<span class="workspace-status">{{ title.metadata_status|replace('_',' ')|title }}</span>{% endif %}
+      </div>
+    </div>
+    {% if current_user.id > 0 %}<button type="button" class="workspace-inspector-favorite{% if title.favorite %} active{% endif %}" data-workspace-favorite aria-pressed="{{ 'true' if title.favorite else 'false' }}" title="{{ 'Remove from favorites' if title.favorite else 'Add to favorites' }}"><span>★</span><small>{{ 'Favorite' if title.favorite else 'Favorite' }}</small></button>{% endif %}
+  </div>
+
+  {% if title.overview %}<p class="workspace-inspector-overview">{{ title.overview }}</p>{% endif %}
+
+  <section class="workspace-inspector-section" aria-labelledby="inspector-health-title">
+    <div class="workspace-inspector-section-head"><span><small>REVIEW</small><strong id="inspector-health-title">Health &amp; attention</strong></span><a href="/library-health">Open Review →</a></div>
+    <div class="workspace-inspector-stat-grid">
+      <div><strong>{{ finding_counts.total or 0 }}</strong><span>MIE findings</span></div>
+      {% if title.kind == 'tv' %}<div><strong>{{ missing_count }}</strong><span>Missing episodes</span></div>{% endif %}
+      <div><strong>{{ duplicate_count }}</strong><span>Duplicate decisions</span></div>
+    </div>
+    {% if findings %}<div class="workspace-inspector-findings">
+      {% for finding in findings %}<a href="/library-health?category={{ finding.category|urlencode }}" class="workspace-inspector-finding {{ finding.severity }}"><span>{{ finding.severity|upper }}</span><strong>{{ finding.summary }}</strong></a>{% endfor %}
+    </div>{% elif not missing_count and not duplicate_count %}<p class="workspace-inspector-empty-state">No active catalog issues are attached to this title.</p>{% endif %}
+  </section>
+
+  <section class="workspace-inspector-section" aria-labelledby="inspector-media-title">
+    <div class="workspace-inspector-section-head"><span><small>ON DISK</small><strong id="inspector-media-title">Media</strong></span><em>{{ file_count }} file{% if file_count != 1 %}s{% endif %} · {{ total_size_display }}</em></div>
+    {% if primary_file %}<div class="workspace-inspector-media-grid">
+      <div><small>Resolution</small><strong>{{ primary_file.resolution_display or 'Unknown' }}</strong></div>
+      <div><small>Video</small><strong>{{ primary_file.video_codec or 'Unknown' }}</strong></div>
+      <div><small>Audio</small><strong>{{ primary_file.audio_codec or 'Unknown' }}{% if primary_file.audio_channels %} · {{ primary_file.audio_channels }}ch{% endif %}</strong></div>
+      <div><small>Range</small><strong>{{ primary_file.dynamic_range or 'Unknown' }}</strong></div>
+      <div><small>Container</small><strong>{{ primary_file.container or primary_file.extension or 'Unknown' }}</strong></div>
+      <div><small>Runtime</small><strong>{{ total_runtime_display or primary_file.runtime_display or 'Unknown' }}</strong></div>
+    </div>{% else %}<p class="workspace-inspector-empty-state">No indexed files are currently attached to this title.</p>{% endif %}
+    {% if files %}<div class="workspace-inspector-files">
+      {% for file in files[:5] %}<article>
+        <div><strong>{{ file.filename }}</strong><small>{{ file.size_display }}{% if file.resolution_display %} · {{ file.resolution_display }}{% endif %}{% if file.dynamic_range %} · {{ file.dynamic_range }}{% endif %}</small></div>
+        {% if file.edition_name or file.version_name or file.version_preferred %}<span class="workspace-file-version">{% if file.version_preferred %}Preferred{% endif %}{% if file.edition_name %} · {{ file.edition_name }}{% endif %}{% if file.version_name %} · {{ file.version_name }}{% endif %}</span>{% endif %}
+      </article>{% endfor %}
+      {% if files|length > 5 %}<small class="workspace-inspector-more">+ {{ files|length - 5 }} more indexed files</small>{% endif %}
+    </div>{% endif %}
+  </section>
+
+  <section class="workspace-inspector-section" aria-labelledby="inspector-metadata-title">
+    <div class="workspace-inspector-section-head"><span><small>IDENTITY</small><strong id="inspector-metadata-title">Metadata</strong></span>{% if title.metadata_provider %}<em>{{ title.metadata_provider }}</em>{% endif %}</div>
+    <dl class="workspace-inspector-meta compact">
+      {% if provider_ids %}<div><dt>IDs</dt><dd>{% for item in provider_ids %}<span>{{ item.label }} {{ item.value }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</dd></div>{% endif %}
+      <div><dt>Refresh</dt><dd>{% if metadata_queue %}{{ metadata_queue.status|title }}{% elif title.metadata_refreshed_at %}{{ title.metadata_refreshed_at }}{% else %}Not refreshed{% endif %}</dd></div>
+      {% if title.genres %}<div><dt>Genres</dt><dd>{{ title.genres|replace(',', ', ') }}</dd></div>{% endif %}
+      {% if title.imdb_rating %}<div><dt>IMDb</dt><dd>★ {{ '%.1f'|format(title.imdb_rating) }}{% if title.imdb_votes %} · {{ '{:,}'.format(title.imdb_votes) }} votes{% endif %}</dd></div>{% endif %}
+    </dl>
+  </section>
+
+  <section class="workspace-inspector-section" aria-labelledby="inspector-organize-title">
+    <div class="workspace-inspector-section-head"><span><small>PERSONAL</small><strong id="inspector-organize-title">Organization</strong></span><a href="/titles/{{ title.id }}/organize" data-organize-dialog>Manage →</a></div>
+    {% if current_user.id > 0 and tags %}<div class="workspace-inspector-tags" aria-label="Custom tags">
+      {% for tag in tags %}<button type="button" data-workspace-tag="{{ tag.id }}" class="workspace-inspector-tag{% if tag.selected %} active{% endif %}" aria-pressed="{{ 'true' if tag.selected else 'false' }}">{{ tag.name }}</button>{% endfor %}
+    </div>{% elif current_user.id > 0 %}<p class="workspace-inspector-empty-state">No custom tags yet. Manage this title to create one.</p>{% endif %}
+    <dl class="workspace-inspector-meta compact">
+      {% if title.personal_rating is not none %}<div><dt>Your rating</dt><dd>{{ title.personal_rating }}/10</dd></div>{% endif %}
+      {% if collections %}<div><dt>Collections</dt><dd>{{ collections|map(attribute='name')|join(', ') }}</dd></div>{% endif %}
+      {% if libraries %}<div><dt>Libraries</dt><dd>{{ libraries|map(attribute='name')|join(', ') }}</dd></div>{% endif %}
+      {% if title.sort_title %}<div><dt>Sort title</dt><dd>{{ title.sort_title }}</dd></div>{% endif %}
+    </dl>
+  </section>
+
+  <div class="workspace-inspector-actions workspace-inspector-footer-actions">
+    <a class="button primary" href="/titles/{{ title.id }}">Open full details</a>
+    <div class="workspace-inspector-action-list">
+      <a href="/titles/{{ title.id }}/organize" data-organize-dialog>Organize &amp; Tags</a>
+      <a href="/titles/{{ title.id }}/libraries" data-organize-dialog>Custom Libraries</a>
+      {% if current_user.is_librarian %}<a href="/titles/{{ title.id }}/tvdb">{{ 'Fix Match' if matched else 'Match' }}</a>{% endif %}
+      {% if current_user.is_librarian and title.kind == 'movie' and primary_file %}<a href="/files/{{ primary_file.id }}/edition-version" data-organize-dialog>Edition &amp; Version</a>{% endif %}
+    </div>
+  </div>
+  <p class="workspace-inspector-hint">Single-click inspects · Ctrl/Cmd-click selects · Shift-click selects a range · ↑/↓ moves · Enter opens details · Esc closes</p>
+</div>

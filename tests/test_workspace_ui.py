@@ -47,11 +47,33 @@ class WorkspaceFoundationTests(unittest.TestCase):
 
     def test_library_inspector_preserves_full_detail_navigation(self):
         script = (ROOT / "app" / "static" / "workspace.js").read_text(encoding="utf-8")
+        partial = (ROOT / "app" / "templates" / "_workspace_inspector.html").read_text(encoding="utf-8")
         self.assertIn("workspace-inspector", script)
-        self.assertIn("Open full details", script)
+        self.assertIn("Open full details", partial)
         self.assertIn("dblclick", script)
         self.assertIn('event.key === "Escape"', script)
         self.assertIn('event.key === "Enter"', script)
+
+    def test_w2_inspector_is_server_backed_and_history_aware(self):
+        script = (ROOT / "app" / "static" / "workspace.js").read_text(encoding="utf-8")
+        styles = (ROOT / "app" / "static" / "workspace.css").read_text(encoding="utf-8")
+        library = (ROOT / "app" / "templates" / "library.html").read_text(encoding="utf-8")
+        partial = (ROOT / "app" / "templates" / "_workspace_inspector.html").read_text(encoding="utf-8")
+        routes = (ROOT / "app" / "routes" / "library.py").read_text(encoding="utf-8")
+        self.assertIn('/library/inspector/{title_id}', routes)
+        self.assertIn('/api/titles/{title_id}/favorite', routes)
+        self.assertIn('/api/titles/{title_id}/tags/{tag_id}', routes)
+        self.assertIn('fetch(`/library/inspector/', script)
+        self.assertIn('workspaceInspectorTitleId', script)
+        self.assertIn('popstate', script)
+        self.assertIn('event.shiftKey', script)
+        self.assertIn('event.metaKey || event.ctrlKey', script)
+        self.assertIn('infomancer-library-selection:', library)
+        self.assertIn('data-workspace-title-id', library)
+        self.assertIn('Health &amp; attention', partial)
+        self.assertIn('Edition &amp; Version', partial)
+        self.assertIn('data-workspace-tag', partial)
+        self.assertIn('server-backed Inspector', styles)
 
     def test_detail_workspace_adds_local_people_previews(self):
         script = (ROOT / "app" / "static" / "workspace.js").read_text(encoding="utf-8")
