@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
+
+from .migrations import apply_migrations
 
 
 SCHEMA = """
@@ -630,128 +631,7 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
             conn.executescript(SCHEMA)
-            # SQLite's CREATE TABLE IF NOT EXISTS does not add columns to an
-            # existing catalog, so keep these lightweight migrations explicit.
-            columns = {row["name"] for row in conn.execute("PRAGMA table_info(titles)")}
-            additions = {
-                "end_year": "INTEGER",
-                "continuing": "INTEGER",
-                "metadata_end_year": "INTEGER",
-                "metadata_continuing": "INTEGER",
-                "metadata_status": "TEXT",
-                "metadata_refreshed_at": "TEXT",
-                "metadata_refresh_error": "TEXT NOT NULL DEFAULT ''",
-                "metadata_provider": "TEXT NOT NULL DEFAULT ''",
-                "overview": "TEXT",
-                "tvdb_movie_id": "INTEGER",
-                "tmdb_id": "TEXT",
-                "imdb_id": "TEXT",
-                "imdb_checked_at": "TEXT",
-                "genres": "TEXT",
-                "imdb_title_type": "TEXT",
-                "imdb_rating": "REAL",
-                "imdb_votes": "INTEGER",
-                "poster_url": "TEXT",
-                "metadata_title_language": "TEXT",
-                "discovered_at": "TEXT",
-                "last_scanned_at": "TEXT",
-            }
-            for name, column_type in additions.items():
-                if name not in columns:
-                    conn.execute(f"ALTER TABLE titles ADD COLUMN {name} {column_type}")
-            root_columns = {
-                row["name"] for row in conn.execute("PRAGMA table_info(roots)")
-            }
-            root_additions = {
-                "health_status": "TEXT NOT NULL DEFAULT 'unknown'",
-                "last_checked_at": "TEXT",
-                "last_seen_at": "TEXT",
-                "last_error": "TEXT NOT NULL DEFAULT ''",
-                "last_file_count": "INTEGER NOT NULL DEFAULT 0",
-                "last_observed_file_count": "INTEGER NOT NULL DEFAULT 0",
-                "guard_preserved_count": "INTEGER NOT NULL DEFAULT 0",
-            }
-            for name, column_type in root_additions.items():
-                if name not in root_columns:
-                    conn.execute(f"ALTER TABLE roots ADD COLUMN {name} {column_type}")
-            collection_columns = {row["name"] for row in conn.execute("PRAGMA table_info(collections)")}
-            if "collection_type" not in collection_columns:
-                conn.execute("ALTER TABLE collections ADD COLUMN collection_type TEXT NOT NULL DEFAULT 'manual'")
-            if "filter_json" not in collection_columns:
-                conn.execute("ALTER TABLE collections ADD COLUMN filter_json TEXT NOT NULL DEFAULT '{}'")
-            file_columns = {row["name"] for row in conn.execute("PRAGMA table_info(files)")}
-            file_additions = {
-                "original_filename": "TEXT",
-                "runtime_seconds": "REAL",
-                "width": "INTEGER",
-                "height": "INTEGER",
-                "video_codec": "TEXT",
-                "audio_codec": "TEXT",
-                "audio_channels": "INTEGER",
-                "bitrate": "INTEGER",
-                "container": "TEXT",
-                "dynamic_range": "TEXT",
-                "media_info_at": "TEXT",
-                "media_info_error": "TEXT",
-                "edition_name": "TEXT NOT NULL DEFAULT ''",
-                "version_name": "TEXT NOT NULL DEFAULT ''",
-                "identity_confirmed": "INTEGER NOT NULL DEFAULT 0",
-                "version_preferred": "INTEGER NOT NULL DEFAULT 0",
-            }
-            for name, column_type in file_additions.items():
-                if name not in file_columns:
-                    conn.execute(f"ALTER TABLE files ADD COLUMN {name} {column_type}")
-            conn.execute(
-                """UPDATE files SET original_filename=filename
-                   WHERE original_filename IS NULL OR original_filename=''"""
-            )
-            episode_columns = {
-                row["name"] for row in conn.execute("PRAGMA table_info(expected_episodes)")
-            }
-            if "imdb_id" not in episode_columns:
-                conn.execute("ALTER TABLE expected_episodes ADD COLUMN imdb_id TEXT")
-            user_columns = {
-                row["name"] for row in conn.execute("PRAGMA table_info(users)")
-            }
-            user_additions = {
-                "home_layout": "TEXT NOT NULL DEFAULT 'modern'",
-                "show_home_hero": "INTEGER NOT NULL DEFAULT 1",
-                "high_contrast": "INTEGER NOT NULL DEFAULT 0",
-            }
-            for name, column_type in user_additions.items():
-                if name not in user_columns:
-                    conn.execute(f"ALTER TABLE users ADD COLUMN {name} {column_type}")
-            title_state_columns = {
-                row["name"] for row in conn.execute("PRAGMA table_info(user_title_state)")
-            }
-            if "sort_title" not in title_state_columns:
-                conn.execute("ALTER TABLE user_title_state ADD COLUMN sort_title TEXT")
-            review_columns = {
-                row["name"] for row in conn.execute("PRAGMA table_info(duplicate_reviews)")
-            }
-            if "review_source" not in review_columns:
-                conn.execute(
-                    "ALTER TABLE duplicate_reviews ADD COLUMN review_source TEXT NOT NULL DEFAULT 'manual'"
-                )
-            trash_columns = {
-                row["name"] for row in conn.execute("PRAGMA table_info(duplicate_trash)")
-            }
-            if "size_bytes" not in trash_columns:
-                conn.execute(
-                    "ALTER TABLE duplicate_trash ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0"
-                )
-                for row in conn.execute(
-                    "SELECT id,file_snapshot FROM duplicate_trash WHERE size_bytes=0"
-                ).fetchall():
-                    try:
-                        snapshot = json.loads(row["file_snapshot"] or "{}")
-                        size_bytes = max(0, int(snapshot.get("size_bytes") or 0))
-                    except (TypeError, ValueError, json.JSONDecodeError):
-                        size_bytes = 0
-                    conn.execute(
-                        "UPDATE duplicate_trash SET size_bytes=? WHERE id=?",
-                        (size_bytes, row["id"]),
-                    )
+            apply_migrations(conn)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

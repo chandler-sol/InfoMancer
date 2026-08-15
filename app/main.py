@@ -22,7 +22,7 @@ from pathlib import Path
 from urllib.parse import quote_plus, unquote, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import (
     FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response,
 )
@@ -30,6 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .config import BASE_DIR, get_settings
+from .access import LibrarianAccessRequired, require_librarian
 from .app_settings import AppSettingError, AppSettings
 from .bootstrap import BootstrapTokenManager
 from .auth import (
@@ -63,6 +64,8 @@ from .source_browser import SourceBrowserError, list_folders, preview_folder
 from .smart_collections import decode_filters, encode_filters, matching_titles, normalize_filters
 from .tvdb import TVDBClient, TVDBError
 from .provider_secrets import ProviderSecretError, ProviderSecretStore
+from .runtime import JobRegistry, RuntimeLease
+from .title_metadata import TitleMetadataService
 from .request_security import (
     LOCAL_CSRF_COOKIE, RequestBodyTooLarge, browser_request_is_same_origin,
     csrf_submission, host_is_allowed, replay_body,
@@ -97,6 +100,21 @@ except ProviderSecretError as exc:
     provider_secret_error = str(exc)
 APP_VERSION = "0.7.0-alpha.1"
 app = FastAPI(title="InfoMancer", version=APP_VERSION)
+
+
+def _librarian_route(method: str, path: str, **kwargs):
+    dependencies = list(kwargs.pop("dependencies", ()))
+    dependencies.append(Depends(require_librarian))
+    return getattr(app, method)(path, dependencies=dependencies, **kwargs)
+
+
+def librarian_get(path: str, **kwargs):
+    return _librarian_route("get", path, **kwargs)
+
+
+def librarian_post(path: str, **kwargs):
+    return _librarian_route("post", path, **kwargs)
+
 app.mount("/static", StaticFiles(directory=BASE_DIR / "app" / "static"), name="static")
 COLLECTION_ART_DIR = settings.database.parent / "collection-art"
 COLLECTION_ART_DIR.mkdir(parents=True, exist_ok=True)
@@ -160,30 +178,32 @@ tvdb = TVDBClient(
     stored_provider_secrets.get("tvdb_api_key", settings.tvdb_api_key),
     stored_provider_secrets.get("tvdb_pin", settings.tvdb_pin),
 )
-scan_jobs: dict[int, dict] = {}
-scan_lock = threading.Lock()
-scan_all_job: dict = {"status": "idle"}
-scan_all_lock = threading.Lock()
-title_scan_jobs: dict[int, dict] = {}
-title_scan_lock = threading.Lock()
-imdb_genre_job: dict = {"status": "idle"}
-imdb_genre_lock = threading.Lock()
-movie_match_job: dict = {"status": "idle"}
-movie_match_lock = threading.Lock()
-tv_match_job: dict = {"status": "idle"}
-tv_match_lock = threading.Lock()
-media_info_job: dict = {"status": "idle"}
-media_info_lock = threading.Lock()
-duplicate_verify_job: dict = {"status": "idle"}
-duplicate_verify_lock = threading.Lock()
-media_hash_job: dict = {"status": "idle"}
-media_hash_lock = threading.Lock()
-media_hash_pause = threading.Event()
-media_hash_cancel = threading.Event()
-background_scheduler_stop = threading.Event()
+job_registry = JobRegistry()
+runtime_lease = RuntimeLease(db)
+scan_jobs: dict[int, dict] = job_registry.mapping("scan")
+scan_lock = job_registry.lock("scan")
+scan_all_job: dict = job_registry.job("scan-all")
+scan_all_lock = job_registry.lock("scan-all")
+title_scan_jobs: dict[int, dict] = job_registry.mapping("title-scan")
+title_scan_lock = job_registry.lock("title-scan")
+imdb_genre_job: dict = job_registry.job("imdb-metadata")
+imdb_genre_lock = job_registry.lock("imdb-metadata")
+movie_match_job: dict = job_registry.job("movie-match")
+movie_match_lock = job_registry.lock("movie-match")
+tv_match_job: dict = job_registry.job("tv-match")
+tv_match_lock = job_registry.lock("tv-match")
+media_info_job: dict = job_registry.job("media-info")
+media_info_lock = job_registry.lock("media-info")
+duplicate_verify_job: dict = job_registry.job("duplicate-verify")
+duplicate_verify_lock = job_registry.lock("duplicate-verify")
+media_hash_job: dict = job_registry.job("media-hash")
+media_hash_lock = job_registry.lock("media-hash")
+media_hash_pause = job_registry.event("media-hash-pause")
+media_hash_cancel = job_registry.event("media-hash-cancel")
+background_scheduler_stop = job_registry.event("scheduler-stop")
 hash_schedule_last_check = 0.0
-trash_cleanup_job: dict = {"status": "idle"}
-trash_cleanup_lock = threading.Lock()
+trash_cleanup_job: dict = job_registry.job("trash-cleanup")
+trash_cleanup_lock = job_registry.lock("trash-cleanup")
 trash_cleanup_last_check = 0.0
 
 
@@ -342,6 +362,7 @@ def run_background_scheduler() -> None:
 
 @app.on_event("startup")
 def start_background_scheduler() -> None:
+    runtime_lease.start()
     background_scheduler_stop.clear()
     threading.Thread(
         target=run_background_scheduler, name="infomancer-scheduler", daemon=True,
@@ -351,6 +372,7 @@ def start_background_scheduler() -> None:
 @app.on_event("shutdown")
 def stop_background_scheduler() -> None:
     background_scheduler_stop.set()
+    runtime_lease.release()
 
 
 def trash_retention_days() -> int | None:
@@ -408,24 +430,6 @@ def record_event(
 
 
 PUBLIC_PATHS = {"/health", "/login", "/setup", "/forgot-password"}
-LIBRARIAN_GET_PREFIXES = (
-    "/sources", "/intake", "/bulk-match", "/movies/bulk-match",
-    "/shows/bulk-match", "/admin", "/api/source-", "/api/scans",
-    "/api/scan-all", "/api/movie-match-analysis", "/api/tv-match-analysis",
-    "/api/logs",
-    "/settings", "/getting-started",
-    "/logs", "/exports", "/media-info/failures", "/maintenance", "/duplicates",
-)
-
-
-def librarian_only_path(path: str) -> bool:
-    if path.startswith(LIBRARIAN_GET_PREFIXES):
-        return True
-    return bool(re.match(
-        r"^/(?:titles/\d+/(?:tvdb|rename|restore|cover|collections)|"
-        r"files/\d+/(?:rename|collections|edition-version))", path
-    ))
-
 
 def public_path(path: str) -> bool:
     return path in PUBLIC_PATHS or path.startswith("/activate/")
@@ -438,6 +442,14 @@ def auth_error_response(request: Request, status: int, title: str, detail: str):
         request, "auth_error.html",
         {"status": status, "heading": title, "detail": detail, "message": ""},
         status_code=status,
+    )
+
+
+@app.exception_handler(LibrarianAccessRequired)
+async def librarian_access_required(request: Request, _exc: LibrarianAccessRequired):
+    return auth_error_response(
+        request, 403, "Librarian access required",
+        "Your Member account can browse the library, but this operation requires a Librarian.",
     )
 
 
@@ -579,27 +591,8 @@ async def authentication_middleware(request: Request, call_next):
         return await finish(RedirectResponse(
             "/account/security?message=Choose+a+new+password+to+continue", status_code=303
         ))
-    if user and request.method == "GET" and librarian_only_path(path) and not user.is_librarian:
-        return await finish(auth_error_response(
-            request, 403, "Librarian access required",
-            "Your Member account can browse the library, but this operation requires a Librarian.",
-        ))
     if user and request.method not in {"GET", "HEAD", "OPTIONS"}:
         if path not in {"/login", "/setup"}:
-            if path not in {
-                "/logout", "/account/profile", "/account/security",
-                "/account/sessions/revoke-others",
-            } and not re.match(r"^/titles/\d+/(?:favorite|organize)$", path) \
-              and not re.match(r"^/files/\d+/favorite$", path) \
-              and path not in {
-                  "/titles/organize-bulk", "/tags/create",
-              } and not re.match(r"^/tags/\d+/(?:rename|delete)$", path) \
-              and not path.startswith("/account/sessions/") \
-              and not path.startswith("/engagement/") and not user.is_librarian:
-                return await finish(auth_error_response(
-                    request, 403, "Librarian access required",
-                    "Your Member account cannot make administrative or filesystem changes.",
-                ))
             if settings.auth_mode == "disabled":
                 if not browser_request_is_same_origin(request, settings):
                     return await finish(auth_error_response(
@@ -1773,7 +1766,7 @@ def setup_assistant_context(request: Request, step: str, error: str = "") -> dic
     }
 
 
-@app.get("/getting-started", response_class=HTMLResponse)
+@librarian_get("/getting-started", response_class=HTMLResponse)
 def getting_started(request: Request):
     if request.state.user.id <= 0:
         return redirect("/sources", "Setup Assistant requires local or external user accounts.")
@@ -1782,7 +1775,7 @@ def getting_started(request: Request):
     return redirect(f"/getting-started/{step}")
 
 
-@app.post("/getting-started/choice")
+@librarian_post("/getting-started/choice")
 def choose_getting_started(request: Request, mode: str = Form(...)):
     if request.state.user.id <= 0:
         return redirect("/sources", "Setup Assistant requires local or external user accounts.")
@@ -1794,7 +1787,7 @@ def choose_getting_started(request: Request, mode: str = Form(...)):
     return redirect("/getting-started/general")
 
 
-@app.post("/getting-started/restart")
+@librarian_post("/getting-started/restart")
 def restart_getting_started(request: Request):
     if request.state.user.id <= 0:
         return redirect("/sources", "Setup Assistant requires local or external user accounts.")
@@ -1802,7 +1795,7 @@ def restart_getting_started(request: Request):
     return redirect("/getting-started/general")
 
 
-@app.get("/getting-started/{step}", response_class=HTMLResponse)
+@librarian_get("/getting-started/{step}", response_class=HTMLResponse)
 def getting_started_step(request: Request, step: str):
     if request.state.user.id <= 0:
         return redirect("/sources", "Setup Assistant requires local or external user accounts.")
@@ -1816,7 +1809,7 @@ def getting_started_step(request: Request, step: str):
     )
 
 
-@app.post("/getting-started/general")
+@librarian_post("/getting-started/general")
 def save_getting_started_general(
     request: Request, timezone_name: str = Form(...),
 ):
@@ -1838,7 +1831,7 @@ def save_getting_started_general(
     return redirect("/getting-started/metadata", "Installation preferences saved.")
 
 
-@app.post("/getting-started/metadata")
+@librarian_post("/getting-started/metadata")
 def continue_getting_started_metadata(
     request: Request, api_key: str = Form(""), subscriber_pin: str = Form(""),
     testing_skip: str = Form(""),
@@ -1905,7 +1898,7 @@ def continue_getting_started_metadata(
     )
 
 
-@app.post("/getting-started/sources")
+@librarian_post("/getting-started/sources")
 def continue_getting_started_sources(request: Request):
     if request.state.user.id <= 0:
         return redirect("/sources", "Setup Assistant requires local or external user accounts.")
@@ -1923,7 +1916,7 @@ def continue_getting_started_sources(request: Request):
     return redirect("/getting-started/finish")
 
 
-@app.post("/getting-started/complete")
+@librarian_post("/getting-started/complete")
 def complete_getting_started(request: Request):
     if request.state.user.id <= 0:
         return redirect("/sources", "Setup Assistant requires local or external user accounts.")
@@ -1987,7 +1980,7 @@ def about_page(request: Request):
     })
 
 
-@app.post("/admin/announcements")
+@librarian_post("/admin/announcements")
 def create_announcement(
     request: Request, title: str = Form(...), body: str = Form(...),
     category: str = Form("information"), audience: str = Form("members"),
@@ -2022,7 +2015,7 @@ def create_announcement(
     )
 
 
-@app.post("/admin/announcements/{announcement_id}/deactivate")
+@librarian_post("/admin/announcements/{announcement_id}/deactivate")
 def deactivate_announcement(announcement_id: int):
     try:
         engagement.deactivate(announcement_id)
@@ -2034,14 +2027,14 @@ def deactivate_announcement(announcement_id: int):
     )
 
 
-@app.get("/admin/users", response_class=HTMLResponse)
+@librarian_get("/admin/users", response_class=HTMLResponse)
 def admin_users(request: Request):
     return templates.TemplateResponse(
         request, "admin_users.html", user_admin_context(request)
     )
 
 
-@app.post("/admin/users")
+@librarian_post("/admin/users")
 def create_admin_user(
     request: Request, username: str = Form(...), email: str = Form(""),
     display_name: str = Form(...), role: str = Form("member"),
@@ -2073,7 +2066,7 @@ def create_admin_user(
     )
 
 
-@app.post("/admin/users/{user_id}/invitation")
+@librarian_post("/admin/users/{user_id}/invitation")
 def create_user_invitation(request: Request, user_id: int):
     try:
         raw_token, expires = auth_service.create_invitation(
@@ -2094,7 +2087,7 @@ def create_user_invitation(request: Request, user_id: int):
     )
 
 
-@app.post("/admin/users/{user_id}/invitation/revoke")
+@librarian_post("/admin/users/{user_id}/invitation/revoke")
 def revoke_user_invitation(request: Request, user_id: int):
     revoked = auth_service.revoke_invitations(user_id)
     if revoked:
@@ -2107,7 +2100,7 @@ def revoke_user_invitation(request: Request, user_id: int):
     )
 
 
-@app.post("/admin/users/{user_id}")
+@librarian_post("/admin/users/{user_id}")
 def update_admin_user(
     request: Request, user_id: int, display_name: str = Form(...),
     email: str = Form(""), role: str = Form("member"), active: str = Form("0"),
@@ -2121,7 +2114,7 @@ def update_admin_user(
     return redirect("/admin/users", "User updated")
 
 
-@app.post("/admin/users/{user_id}/sessions/revoke")
+@librarian_post("/admin/users/{user_id}/sessions/revoke")
 def revoke_admin_sessions(request: Request, user_id: int):
     auth_service.revoke_user_sessions(user_id)
     return redirect("/admin/users", "User sessions signed out")
@@ -2439,7 +2432,7 @@ def activity_page(request: Request, unread: str = ""):
     })
 
 
-@app.post("/activity/read")
+@librarian_post("/activity/read")
 def mark_activity_read(
     request: Request, event_ids: list[int] = Form(default=[]), all_events: str = Form(""),
 ):
@@ -2674,19 +2667,19 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.get("/api/scans/{root_id}")
+@librarian_get("/api/scans/{root_id}")
 def scan_status(root_id: int) -> dict:
     with scan_lock:
         return dict(scan_jobs.get(root_id, {"status": "idle"}))
 
 
-@app.get("/api/scan-all")
+@librarian_get("/api/scan-all")
 def scan_all_status() -> dict:
     with scan_all_lock:
         return dict(scan_all_job)
 
 
-@app.post("/scan-all")
+@librarian_post("/scan-all")
 def start_scan_all():
     with scan_all_lock:
         if scan_all_job.get("status") in {"starting", "running"}:
@@ -2911,7 +2904,7 @@ def active_tasks() -> dict:
     return {"tasks": tasks, "scheduled": []}
 
 
-@app.get("/api/movie-match-analysis")
+@librarian_get("/api/movie-match-analysis")
 def movie_match_analysis_status() -> dict:
     with movie_match_lock:
         return dict(movie_match_job)
@@ -2924,7 +2917,7 @@ def duplicate_verification_status() -> dict:
         return dict(duplicate_verify_job)
 
 
-@app.get("/api/tv-match-analysis")
+@librarian_get("/api/tv-match-analysis")
 def tv_match_analysis_status() -> dict:
     with tv_match_lock:
         return dict(tv_match_job)
@@ -2936,7 +2929,7 @@ def media_info_status() -> dict:
         return dict(media_info_job)
 
 
-@app.get("/media-info/failures", response_class=HTMLResponse)
+@librarian_get("/media-info/failures", response_class=HTMLResponse)
 def media_info_failures(request: Request):
     with db.connect() as conn:
         rows = conn.execute(
@@ -2969,7 +2962,7 @@ def media_info_failures(request: Request):
     })
 
 
-@app.post("/media-info/scan")
+@librarian_post("/media-info/scan")
 def start_media_info_scan(request: Request, scope: str = Form("missing")):
     with media_info_lock:
         if media_info_job.get("status") in {"starting", "running"}:
@@ -2996,7 +2989,7 @@ def start_media_info_scan(request: Request, scope: str = Form("missing")):
     )
 
 
-@app.post("/imdb-genres/sync")
+@librarian_post("/imdb-genres/sync")
 def start_imdb_genre_sync(return_to: str = Form("")):
     destination = "/settings/metadata" if return_to == "/settings/metadata" else "/sources"
     with imdb_genre_lock:
@@ -3050,7 +3043,7 @@ def queue_metadata_refresh(title_ids: list[int], user_id: int, label: str) -> st
     return error or f"Metadata refresh queued for {len(valid):,} title(s)."
 
 
-@app.post("/metadata/queue")
+@librarian_post("/metadata/queue")
 def enqueue_metadata_refresh(
     request: Request, selected: list[int] = Form(default=[]), scope: str = Form("selected"),
     return_to: str = Form("/settings/metadata"),
@@ -3066,7 +3059,7 @@ def enqueue_metadata_refresh(
     return redirect(destination, message)
 
 
-@app.post("/metadata/retry-failed")
+@librarian_post("/metadata/retry-failed")
 def retry_failed_metadata(request: Request):
     with db.connect() as conn:
         ids = [row["title_id"] for row in conn.execute(
@@ -3076,7 +3069,7 @@ def retry_failed_metadata(request: Request):
     return redirect("/settings/metadata", message)
 
 
-@app.post("/titles/{title_id}/imdb-refresh")
+@librarian_post("/titles/{title_id}/imdb-refresh")
 def refresh_title_imdb_metadata(title_id: int):
     with db.connect() as conn:
         title = conn.execute("SELECT * FROM titles WHERE id=?", (title_id,)).fetchone()
@@ -3092,7 +3085,7 @@ def refresh_title_imdb_metadata(title_id: int):
     )
 
 
-@app.post("/files/{file_id}/imdb-refresh")
+@librarian_post("/files/{file_id}/imdb-refresh")
 def refresh_episode_imdb_metadata(file_id: int):
     with db.connect() as conn:
         file_row = conn.execute(
@@ -3302,7 +3295,7 @@ def title_identity(request: Request, title_id: int):
     return templates.TemplateResponse(request, "identity_report.html", {"report": report})
 
 
-@app.post("/library-health/analyze")
+@librarian_post("/library-health/analyze")
 def analyze_library_health(request: Request):
     try:
         finding_count = analyze_library_health_with_activity()
@@ -3421,7 +3414,7 @@ def preview_library_health_remediation(request: Request, finding_id: int):
     })
 
 
-@app.post("/library-health/findings/{finding_id}/remediate")
+@librarian_post("/library-health/findings/{finding_id}/remediate")
 def apply_library_health_remediation(
     request: Request, finding_id: int, action: str = Form(...),
     confirm: str = Form(""),
@@ -3515,7 +3508,7 @@ def apply_library_health_remediation(
     )
 
 
-@app.post("/library-health/remediate-batch")
+@librarian_post("/library-health/remediate-batch")
 def batch_library_health_remediation(
     request: Request, findings: list[str] = Form(default=[]),
     action: str = Form("check_sources"), confirm: str = Form(""),
@@ -3546,7 +3539,7 @@ def batch_library_health_remediation(
     )
 
 
-@app.post("/library-health/quality-profiles/{root_id}")
+@librarian_post("/library-health/quality-profiles/{root_id}")
 def save_library_quality_profile(
     request: Request, root_id: int,
     minimum_width: str = Form(""), minimum_height: str = Form(""),
@@ -3591,7 +3584,7 @@ def save_library_quality_profile(
     )
 
 
-@app.post("/library-health/calibration")
+@librarian_post("/library-health/calibration")
 def save_library_health_calibration(
     request: Request,
     identity_warning_threshold: str = Form("70"),
@@ -3629,7 +3622,7 @@ def save_library_health_calibration(
     )
 
 
-@app.post("/library-health/quality-profiles/{root_id}/delete")
+@librarian_post("/library-health/quality-profiles/{root_id}/delete")
 def delete_library_quality_profile(request: Request, root_id: int):
     if not mie.delete_quality_profile(root_id):
         return redirect(
@@ -3648,7 +3641,7 @@ def delete_library_quality_profile(request: Request, root_id: int):
     )
 
 
-@app.post("/library-health/findings/{finding_id}/dismiss")
+@librarian_post("/library-health/findings/{finding_id}/dismiss")
 def dismiss_library_health_finding(
     request: Request, finding_id: int, reason: str = Form("other"),
     scope: str = Form("finding"), note: str = Form(""),
@@ -3678,7 +3671,7 @@ def dismiss_library_health_finding(
     )
 
 
-@app.post("/library-health/findings/{finding_id}/restore")
+@librarian_post("/library-health/findings/{finding_id}/restore")
 def restore_library_health_finding(request: Request, finding_id: int):
     if not mie.restore(finding_id):
         return redirect(
@@ -3696,7 +3689,7 @@ def restore_library_health_finding(request: Request, finding_id: int):
     )
 
 
-@app.post("/library-health/feedback/{feedback_id}/delete")
+@librarian_post("/library-health/feedback/{feedback_id}/delete")
 def delete_library_health_feedback(request: Request, feedback_id: int):
     if not mie.delete_feedback(feedback_id):
         return redirect(
@@ -3715,7 +3708,7 @@ def delete_library_health_feedback(request: Request, feedback_id: int):
     )
 
 
-@app.get("/duplicates", response_class=HTMLResponse)
+@librarian_get("/duplicates", response_class=HTMLResponse)
 def duplicate_review(
     request: Request, status: str = "active", evidence: str | None = None,
     refresh: bool = False, cleanup_status: str = "all", q: str = "",
@@ -3805,7 +3798,7 @@ def duplicate_review(
     })
 
 
-@app.post("/duplicates/bulk-action")
+@librarian_post("/duplicates/bulk-action")
 def bulk_duplicate_action(
     request: Request, pairs: list[str] = Form(default=[]), action: str = Form(...),
 ):
@@ -3856,7 +3849,7 @@ def bulk_duplicate_action(
     return redirect("/duplicates", f"Verification started for {len(parsed):,} selected pairs. Progress is shown in the task panel.")
 
 
-@app.get("/duplicates/{file_id}/trash-preview")
+@librarian_get("/duplicates/{file_id}/trash-preview")
 def preview_duplicate_trash(request: Request, file_id: int):
     try:
         preview = duplicate_trash.preview(file_id, trash_retention_days())
@@ -3868,7 +3861,7 @@ def preview_duplicate_trash(request: Request, file_id: int):
     })
 
 
-@app.post("/duplicates/{file_id}/trash")
+@librarian_post("/duplicates/{file_id}/trash")
 def move_duplicate_to_trash(request: Request, file_id: int):
     try:
         duplicate_trash.move(file_id, trash_retention_days(), request.state.user.id)
@@ -3889,7 +3882,7 @@ def move_duplicate_to_trash(request: Request, file_id: int):
     return redirect("/duplicates/trash", message)
 
 
-@app.post("/duplicates/{file_id}/verify-removed")
+@librarian_post("/duplicates/{file_id}/verify-removed")
 def verify_duplicate_removed(request: Request, file_id: int):
     try:
         path = duplicate_trash.verify_manually_removed(file_id, request.state.user.id)
@@ -3906,7 +3899,7 @@ def verify_duplicate_removed(request: Request, file_id: int):
     return redirect("/duplicates", message)
 
 
-@app.get("/duplicates/trash")
+@librarian_get("/duplicates/trash")
 def duplicate_trash_page(request: Request):
     maybe_start_trash_cleanup()
     return templates.TemplateResponse(request, "duplicate_trash.html", {
@@ -3916,7 +3909,7 @@ def duplicate_trash_page(request: Request):
     })
 
 
-@app.post("/duplicates/trash/retention")
+@librarian_post("/duplicates/trash/retention")
 def update_duplicate_trash_retention(
     request: Request, retention: str = Form(...),
 ):
@@ -3936,7 +3929,7 @@ def update_duplicate_trash_retention(
     )
 
 
-@app.post("/duplicates/trash/{trash_id}/restore")
+@librarian_post("/duplicates/trash/{trash_id}/restore")
 def restore_duplicate_trash(request: Request, trash_id: int):
     try:
         path = duplicate_trash.restore(trash_id)
@@ -3954,7 +3947,7 @@ def restore_duplicate_trash(request: Request, trash_id: int):
     return redirect("/duplicates/trash", message)
 
 
-@app.post("/duplicates/{file_a_id}/{file_b_id}/decision")
+@librarian_post("/duplicates/{file_a_id}/{file_b_id}/decision")
 def decide_duplicate(
     request: Request, file_a_id: int, file_b_id: int,
     decision: str = Form(...),
@@ -3989,7 +3982,7 @@ def decide_duplicate(
     return redirect(destination, labels[decision])
 
 
-@app.post("/duplicates/{file_a_id}/{file_b_id}/verify")
+@librarian_post("/duplicates/{file_a_id}/{file_b_id}/verify")
 def verify_duplicate(request: Request, file_a_id: int, file_b_id: int):
     with duplicate_verify_lock:
         if duplicate_verify_job.get("status") in {"starting", "running"}:
@@ -4049,7 +4042,7 @@ def verify_duplicate(request: Request, file_a_id: int, file_b_id: int):
     )
 
 
-@app.get("/intake", response_class=HTMLResponse)
+@librarian_get("/intake", response_class=HTMLResponse)
 def intake(request: Request):
     with db.connect() as conn:
         rows = conn.execute(
@@ -4255,7 +4248,7 @@ def library_export_rows(user_id: int) -> list[dict]:
     return exported
 
 
-@app.get("/exports/library")
+@librarian_get("/exports/library")
 def export_library(request: Request, format: str = "csv"):
     normalized = format.strip().casefold()
     if normalized not in {"csv", "json", "xml"}:
@@ -4311,7 +4304,7 @@ def export_library(request: Request, format: str = "csv"):
     )
 
 
-@app.get("/settings/export")
+@librarian_get("/settings/export")
 def export_application_settings(request: Request):
     payload = {
         "format": "infomancer-settings",
@@ -4340,7 +4333,7 @@ def export_application_settings(request: Request):
     )
 
 
-@app.post("/settings/import/preview", response_class=HTMLResponse)
+@librarian_post("/settings/import/preview", response_class=HTMLResponse)
 async def preview_application_settings(request: Request, settings_file: UploadFile = File(...)):
     try:
         content = await settings_file.read(262145)
@@ -4376,7 +4369,7 @@ async def preview_application_settings(request: Request, settings_file: UploadFi
     })
 
 
-@app.post("/settings/import")
+@librarian_post("/settings/import")
 def apply_application_settings(
     request: Request, encoded_settings: str = Form(...), confirm: str = Form(""),
 ):
@@ -4410,7 +4403,7 @@ def apply_application_settings(
     )
 
 
-@app.post("/maintenance/backups")
+@librarian_post("/maintenance/backups")
 def create_backup_from_ui(request: Request):
     try:
         path = create_database_backup(db.path)
@@ -4430,7 +4423,7 @@ def create_backup_from_ui(request: Request):
     )
 
 
-@app.post("/maintenance/backups/verify")
+@librarian_post("/maintenance/backups/verify")
 def verify_all_backups(request: Request):
     backups = list_database_backups(db.path)
     failures: list[str] = []
@@ -4451,7 +4444,7 @@ def verify_all_backups(request: Request):
     return redirect("/settings/system", message)
 
 
-@app.get("/maintenance/diagnostics")
+@librarian_get("/maintenance/diagnostics")
 def download_diagnostics(request: Request):
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -4478,7 +4471,7 @@ def download_diagnostics(request: Request):
     })
 
 
-@app.get("/maintenance/backups/{name}")
+@librarian_get("/maintenance/backups/{name}")
 def download_database_backup(name: str):
     try:
         path = resolve_backup(db.path, name)
@@ -4494,7 +4487,7 @@ def restart_after_restore() -> None:
     os._exit(0)
 
 
-@app.post("/maintenance/restore/server", response_class=HTMLResponse)
+@librarian_post("/maintenance/restore/server", response_class=HTMLResponse)
 def restore_server_database(
     request: Request, backup_name: str = Form(...), confirm: str = Form(""),
 ):
@@ -4518,7 +4511,7 @@ def restore_server_database(
     })
 
 
-@app.post("/maintenance/restore/upload", response_class=HTMLResponse)
+@librarian_post("/maintenance/restore/upload", response_class=HTMLResponse)
 async def restore_uploaded_database(
     request: Request, database_file: UploadFile = File(...),
     confirm: str = Form(""),
@@ -4570,7 +4563,7 @@ def release_version_key(value: str) -> tuple:
     return numbers + (0 if "-" in value else 1,)
 
 
-@app.post("/maintenance/updates/check")
+@librarian_post("/maintenance/updates/check")
 def check_for_updates(request: Request):
     repository = os.getenv(
         "INFOMANCER_UPDATE_REPOSITORY", "chandler-sol/InfoMancer"
@@ -4674,7 +4667,7 @@ def check_for_updates(request: Request):
     )
 
 
-@app.post("/maintenance/updates/apply")
+@librarian_post("/maintenance/updates/apply")
 def request_application_update(
     request: Request, tag: str = Form(...), confirm: str = Form(""),
 ):
@@ -4716,7 +4709,7 @@ def request_application_update(
     )
 
 
-@app.get("/logs", response_class=HTMLResponse)
+@librarian_get("/logs", response_class=HTMLResponse)
 def logs_page(
     request: Request, level: str = "", category: str = "", search: str = "",
 ):
@@ -4728,7 +4721,7 @@ def logs_page(
     })
 
 
-@app.get("/api/logs")
+@librarian_get("/api/logs")
 def logs_api(level: str = "", category: str = "", search: str = "", limit: int = 250):
     return {
         "events": [
@@ -4739,7 +4732,7 @@ def logs_api(level: str = "", category: str = "", search: str = "", limit: int =
     }
 
 
-@app.get("/logs/export")
+@librarian_get("/logs/export")
 def export_logs():
     rows = event_log.query(limit=50000)
     output = io.StringIO(newline="")
@@ -4761,12 +4754,12 @@ def export_logs():
     )
 
 
-@app.get("/settings")
+@librarian_get("/settings")
 def settings_index():
     return RedirectResponse("/settings/general", status_code=303)
 
 
-@app.get("/settings/{section}", response_class=HTMLResponse)
+@librarian_get("/settings/{section}", response_class=HTMLResponse)
 def settings_section(request: Request, section: str):
     if section not in SETTINGS_SECTIONS:
         return auth_error_response(
@@ -4776,7 +4769,7 @@ def settings_section(request: Request, section: str):
     return render_settings(request, section)
 
 
-@app.post("/settings/general")
+@librarian_post("/settings/general")
 def save_general_settings(
     request: Request, timezone_name: str = Form(...),
     default_library_view: str = Form(...), default_cover_size: str = Form(...),
@@ -4801,7 +4794,7 @@ def save_general_settings(
     return redirect("/settings/general", message)
 
 
-@app.post("/settings/external-search")
+@librarian_post("/settings/external-search")
 def save_external_search_settings(
     request: Request, search_provider_name: str = Form(...),
     search_url_template: str = Form(...),
@@ -4824,7 +4817,7 @@ def save_external_search_settings(
     return redirect("/settings/external-search", message)
 
 
-@app.post("/settings/logging")
+@librarian_post("/settings/logging")
 def save_logging_settings(request: Request, log_level: str = Form(...)):
     try:
         validated = app_settings.validate_logging(log_level)
@@ -4847,7 +4840,7 @@ def save_logging_settings(request: Request, log_level: str = Form(...)):
     return redirect("/settings/system", message)
 
 
-@app.post("/settings/hashing")
+@librarian_post("/settings/hashing")
 def save_hashing_settings(
     request: Request,
     hash_mode: str = Form(...),
@@ -4882,7 +4875,7 @@ def save_hashing_settings(
     )
 
 
-@app.post("/hashes/run")
+@librarian_post("/hashes/run")
 def run_hashes_now():
     ids = media_hashes.eligible_ids()
     if not ids:
@@ -4892,7 +4885,7 @@ def run_hashes_now():
     return redirect("/settings/system", f"Fingerprinting started for {len(ids):,} files. You can continue using InfoMancer while it runs.")
 
 
-@app.post("/hashes/pause")
+@librarian_post("/hashes/pause")
 def pause_hashes():
     with media_hash_lock:
         running = media_hash_job.get("status") in {"starting", "running"}
@@ -4902,7 +4895,7 @@ def pause_hashes():
     return redirect("/settings/system", "Fingerprinting paused after the current file. Select Resume when you are ready.")
 
 
-@app.post("/hashes/resume")
+@librarian_post("/hashes/resume")
 def resume_hashes():
     with media_hash_lock:
         running = media_hash_job.get("status") in {"starting", "running"}
@@ -4912,7 +4905,7 @@ def resume_hashes():
     return redirect("/settings/system", "Fingerprinting resumed.")
 
 
-@app.post("/hashes/cancel")
+@librarian_post("/hashes/cancel")
 def cancel_hashes():
     with media_hash_lock:
         running = media_hash_job.get("status") in {"starting", "running"}
@@ -4923,7 +4916,7 @@ def cancel_hashes():
     return redirect("/settings/system", "Fingerprinting is stopping after the current file. Unfinished files remain available for the next run.")
 
 
-@app.post("/settings/metadata/tvdb-test")
+@librarian_post("/settings/metadata/tvdb-test")
 def test_tvdb_settings_connection():
     if not tvdb.api_key:
         return redirect(
@@ -4945,7 +4938,7 @@ def test_tvdb_settings_connection():
     return redirect("/settings/metadata", "TVDB connection verified successfully.")
 
 
-@app.get("/sources", response_class=HTMLResponse)
+@librarian_get("/sources", response_class=HTMLResponse)
 def sources(request: Request):
     with db.connect() as conn:
         roots = conn.execute(
@@ -4966,7 +4959,7 @@ def sources(request: Request):
     })
 
 
-@app.get("/api/source-browser")
+@librarian_get("/api/source-browser")
 def source_browser(path: str = ""):
     try:
         return list_folders(path, settings.media_browse_roots)
@@ -4974,7 +4967,7 @@ def source_browser(path: str = ""):
         raise HTTPException(400, str(exc)) from exc
 
 
-@app.get("/api/source-preview")
+@librarian_get("/api/source-preview")
 def source_preview(path: str):
     try:
         return preview_folder(path, settings.media_browse_roots)
@@ -4982,7 +4975,7 @@ def source_preview(path: str):
         raise HTTPException(400, str(exc)) from exc
 
 
-@app.post("/maintenance/optimize-database")
+@librarian_post("/maintenance/optimize-database")
 def optimize_database(return_to: str = Form("")):
     destination = "/settings/system" if return_to == "/settings/system" else "/sources"
     try:
@@ -5004,7 +4997,7 @@ def optimize_database(return_to: str = Form("")):
     return redirect(destination, "Database indexes and query statistics optimized successfully.")
 
 
-@app.post("/maintenance/restart")
+@librarian_post("/maintenance/restart")
 def restart_application(confirm: str = Form(""), return_to: str = Form("")):
     destination = "/settings/system" if return_to == "/settings/system" else "/sources"
     if confirm != "RESTART":
@@ -5018,7 +5011,7 @@ def restart_application(confirm: str = Form(""), return_to: str = Form("")):
     return redirect(destination, "Restart requested; InfoMancer will be available again shortly.")
 
 
-@app.post("/roots")
+@librarian_post("/roots")
 def add_root(
     path: str = Form(...), kind: str = Form(...), label: str = Form(""),
     scan_after: str = Form(""), return_to: str = Form(""),
@@ -5068,7 +5061,7 @@ def add_root(
     return redirect(destination, "Media source added successfully.")
 
 
-@app.post("/roots/{root_id}/scan")
+@librarian_post("/roots/{root_id}/scan")
 def start_scan(root_id: int):
     with scan_all_lock:
         if scan_all_job.get("status") in {"starting", "running"}:
@@ -5082,7 +5075,7 @@ def start_scan(root_id: int):
     return redirect("/sources", "Scan started")
 
 
-@app.post("/roots/{root_id}/check")
+@librarian_post("/roots/{root_id}/check")
 def check_root_connection(request: Request, root_id: int):
     try:
         result = check_source_health(root_id)
@@ -5102,7 +5095,7 @@ def check_root_connection(request: Request, root_id: int):
     )
 
 
-@app.post("/roots/{root_id}/label")
+@librarian_post("/roots/{root_id}/label")
 def update_root_label(root_id: int, label: str = Form("")):
     cleaned = " ".join(label.split())[:120]
     with db.connect() as conn:
@@ -5116,7 +5109,7 @@ def update_root_label(root_id: int, label: str = Form("")):
     )
 
 
-@app.post("/titles/{title_id}/scan")
+@librarian_post("/titles/{title_id}/scan")
 def start_title_scan(title_id: int):
     with scan_all_lock:
         if scan_all_job.get("status") in {"starting", "running"}:
@@ -5132,7 +5125,7 @@ def start_title_scan(title_id: int):
     return redirect(f"/titles/{title_id}", "Series rescan started")
 
 
-@app.post("/roots/{root_id}/delete")
+@librarian_post("/roots/{root_id}/delete")
 def delete_root(root_id: int, confirm: str = Form("")):
     if confirm != "REMOVE":
         return redirect("/sources", "Type REMOVE to remove a catalog root")
@@ -5442,7 +5435,7 @@ async def save_collection_artwork(upload: UploadFile | None) -> str:
     return filename
 
 
-@app.get("/titles/{title_id}/collections", response_class=HTMLResponse)
+@librarian_get("/titles/{title_id}/collections", response_class=HTMLResponse)
 def title_collections_page(request: Request, title_id: int):
     with db.connect() as conn:
         title = conn.execute(
@@ -5466,7 +5459,7 @@ def title_collections_page(request: Request, title_id: int):
     })
 
 
-@app.post("/titles/{title_id}/collections")
+@librarian_post("/titles/{title_id}/collections")
 def save_title_collections(
     request: Request, title_id: int,
     selected_collections: list[int] = Form([]), return_to: str = Form(""),
@@ -5508,7 +5501,7 @@ def save_title_collections(
     )
 
 
-@app.get("/files/{file_id}/collections", response_class=HTMLResponse)
+@librarian_get("/files/{file_id}/collections", response_class=HTMLResponse)
 def episode_collections_page(request: Request, file_id: int):
     with db.connect() as conn:
         file_row = conn.execute(
@@ -5555,7 +5548,7 @@ def episode_collections_page(request: Request, file_id: int):
     })
 
 
-@app.post("/files/{file_id}/collections")
+@librarian_post("/files/{file_id}/collections")
 def save_episode_collections(
     request: Request, file_id: int, assignments: list[str] = Form([]),
 ):
@@ -5669,7 +5662,7 @@ def smart_filter_form(form) -> dict[str, str]:
     )})
 
 
-@app.post("/collections/smart/preview", response_class=HTMLResponse)
+@librarian_post("/collections/smart/preview", response_class=HTMLResponse)
 async def preview_smart_collection(request: Request):
     form = await request.form()
     try:
@@ -5685,7 +5678,7 @@ async def preview_smart_collection(request: Request):
     })
 
 
-@app.post("/collections/smart")
+@librarian_post("/collections/smart")
 async def create_smart_collection(request: Request):
     form = await request.form()
     name = str(form.get("name") or "")
@@ -5724,7 +5717,7 @@ def custom_libraries_page(request: Request):
     })
 
 
-@app.post("/libraries")
+@librarian_post("/libraries")
 def create_custom_library(
     request: Request, name: str = Form(...), library_kind: str = Form("mixed"),
     description: str = Form(""), return_to: str = Form("/libraries"),
@@ -5784,7 +5777,7 @@ def title_libraries_page(request: Request, title_id: int):
     })
 
 
-@app.post("/titles/{title_id}/libraries")
+@librarian_post("/titles/{title_id}/libraries")
 def save_title_libraries(
     request: Request, title_id: int, selected: list[int] = Form(default=[]),
     new_library_name: str = Form(""), return_to: str = Form(""),
@@ -5808,7 +5801,7 @@ def save_title_libraries(
     return redirect(safe_next(return_to or f"/titles/{title_id}"), message)
 
 
-@app.post("/collections")
+@librarian_post("/collections")
 def create_collection(
     request: Request, name: str = Form(...), description: str = Form(""),
 ):
@@ -5905,7 +5898,7 @@ def collection_detail(request: Request, collection_id: int, q: str = ""):
     })
 
 
-@app.post("/collections/{collection_id}/edit")
+@librarian_post("/collections/{collection_id}/edit")
 async def edit_collection(
     request: Request, collection_id: int, name: str = Form(...),
     description: str = Form(""), artwork: UploadFile | None = File(None),
@@ -5955,7 +5948,7 @@ async def edit_collection(
     )
 
 
-@app.post("/collections/{collection_id}/titles")
+@librarian_post("/collections/{collection_id}/titles")
 def add_collection_title(
     request: Request, collection_id: int, title_id: int = Form(...),
 ):
@@ -5986,7 +5979,7 @@ def add_collection_title(
     return redirect(f"/collections/{collection_id}", message)
 
 
-@app.post("/collections/{collection_id}/titles/{title_id}/remove")
+@librarian_post("/collections/{collection_id}/titles/{title_id}/remove")
 def remove_collection_title(request: Request, collection_id: int, title_id: int):
     with db.connect() as conn:
         title = conn.execute(
@@ -6009,7 +6002,7 @@ def remove_collection_title(request: Request, collection_id: int, title_id: int)
     )
 
 
-@app.post("/collections/{collection_id}/titles/{title_id}/move")
+@librarian_post("/collections/{collection_id}/titles/{title_id}/move")
 def move_collection_title(
     request: Request, collection_id: int, title_id: int,
     direction: str = Form(...),
@@ -6063,7 +6056,7 @@ def move_collection_item(
     return redirect(f"/collections/{collection_id}#{item_type}-{item_id}")
 
 
-@app.post("/collections/{collection_id}/episodes/{episode_id}/move")
+@librarian_post("/collections/{collection_id}/episodes/{episode_id}/move")
 def move_collection_episode(
     request: Request, collection_id: int, episode_id: int,
     direction: str = Form(...),
@@ -6071,7 +6064,7 @@ def move_collection_episode(
     return move_collection_item(collection_id, "episode", episode_id, direction)
 
 
-@app.post("/collections/{collection_id}/episodes/{episode_id}/remove")
+@librarian_post("/collections/{collection_id}/episodes/{episode_id}/remove")
 def remove_collection_episode(request: Request, collection_id: int, episode_id: int):
     with db.connect() as conn:
         episode = conn.execute(
@@ -6102,7 +6095,7 @@ def remove_collection_episode(request: Request, collection_id: int, episode_id: 
     )
 
 
-@app.post("/collections/{collection_id}/delete")
+@librarian_post("/collections/{collection_id}/delete")
 def delete_collection(request: Request, collection_id: int):
     artwork = ""
     with db.connect() as conn:
@@ -6385,7 +6378,7 @@ def sort_titles_dialog(request: Request):
     })
 
 
-@app.post("/titles/sort-titles")
+@librarian_post("/titles/sort-titles")
 def apply_sort_titles(
     request: Request, selected: list[int] = Form(default=[]),
     sequence_number: list[int] = Form(default=[]),
@@ -6959,7 +6952,7 @@ def search_history(request: Request) -> dict:
     return {"history": [dict(row) for row in rows]}
 
 
-@app.post("/api/search-history/clear")
+@librarian_post("/api/search-history/clear")
 def clear_search_history(request: Request) -> dict:
     if request.state.user.id > 0:
         with db.connect() as conn:
@@ -6986,7 +6979,7 @@ def edition_version_context(file_id: int) -> dict:
     }
 
 
-@app.get("/files/{file_id}/edition-version", response_class=HTMLResponse)
+@librarian_get("/files/{file_id}/edition-version", response_class=HTMLResponse)
 def edition_version_page(request: Request, file_id: int):
     context = edition_version_context(file_id)
     file = context["file"]
@@ -7001,7 +6994,7 @@ def edition_version_page(request: Request, file_id: int):
     })
 
 
-@app.post("/files/{file_id}/edition-version/preview", response_class=HTMLResponse)
+@librarian_post("/files/{file_id}/edition-version/preview", response_class=HTMLResponse)
 def preview_edition_version(
     request: Request, file_id: int, edition_name: str = Form(""),
     version_name: str = Form(""), preferred: str = Form(""),
@@ -7018,7 +7011,7 @@ def preview_edition_version(
     })
 
 
-@app.post("/files/{file_id}/edition-version")
+@librarian_post("/files/{file_id}/edition-version")
 def save_edition_version(
     request: Request, file_id: int, edition_name: str = Form(""),
     version_name: str = Form(""), preferred: str = Form(""),
@@ -7070,6 +7063,30 @@ def save_edition_version(
     )
 
 
+@librarian_post("/titles/{title_id}/metadata/enrich")
+def enrich_title_metadata(title_id: int):
+    service = TitleMetadataService(
+        db, tvdb, poster_from=poster_from, plex_movie_ids=plex_movie_ids,
+        localized_title=localized_tvdb_title, match_confidence=match_confidence,
+    )
+    try:
+        changed = service.enrich(title_id)
+    except TVDBError as exc:
+        record_event(
+            "metadata", "Title metadata enrichment could not reach TVDB.",
+            level="warning", detail=str(exc), context={"title_id": title_id},
+        )
+        return redirect(f"/titles/{title_id}", "TVDB metadata refresh could not finish. Try again later.")
+    except ValueError:
+        raise HTTPException(404, "Title not found")
+    if changed:
+        record_event("metadata", "Title metadata was refreshed from TVDB.", context={"title_id": title_id})
+    return redirect(
+        f"/titles/{title_id}",
+        "Metadata refreshed." if changed else "No missing TVDB metadata needed to be refreshed.",
+    )
+
+
 @app.get("/titles/{title_id}", response_class=HTMLResponse)
 def title_detail(request: Request, title_id: int):
     with db.connect() as conn:
@@ -7081,92 +7098,6 @@ def title_detail(request: Request, title_id: int):
         ).fetchone()
         if not title:
             raise HTTPException(404, "Title not found")
-        if (title["kind"] == "tv" and title["tvdb_id"]
-                and (not title["poster_url"] or not title["imdb_id"]
-                     or not title["metadata_title_language"] or not title["overview"])):
-            try:
-                series = tvdb.series(title["tvdb_id"])
-                poster_url = poster_from(series)
-                _tmdb_id, imdb_id = plex_movie_ids(series)
-                metadata_title, title_language = localized_tvdb_title(
-                    series, title["metadata_title"]
-                )
-                if poster_url or imdb_id or metadata_title:
-                    conn.execute(
-                        """UPDATE titles SET
-                           poster_url=COALESCE(NULLIF(?, ''), poster_url),
-                           imdb_id=COALESCE(NULLIF(?, ''), imdb_id),
-                           metadata_title=COALESCE(NULLIF(?, ''), metadata_title),
-                           metadata_title_language=?,
-                           overview=COALESCE(NULLIF(?, ''), overview),
-                           imdb_checked_at=CURRENT_TIMESTAMP
-                           WHERE id=?""",
-                        (
-                            poster_url, imdb_id, metadata_title,
-                            title_language or "preserved",
-                            str(series.get("overview") or "").strip(), title_id,
-                        ),
-                    )
-                    title = conn.execute(
-                        """SELECT t.*, r.label source_label,
-                                  r.last_scanned_at root_last_scanned_at
-                           FROM titles t JOIN roots r ON r.id=t.root_id WHERE t.id=?""",
-                        (title_id,),
-                    ).fetchone()
-            except TVDBError:
-                # Poster enrichment is optional and should never block the
-                # locally cataloged show detail page.
-                pass
-        elif title["kind"] == "movie" and not title["overview"]:
-            try:
-                movie = None
-                movie_id = title["tvdb_movie_id"]
-                if not movie_id and (title["tmdb_id"] or title["imdb_id"]):
-                    candidates = tvdb.search_movies(
-                        title["metadata_title"] or title["title"],
-                        title["metadata_year"] or title["year"],
-                    )
-                    for candidate in candidates:
-                        confidence = match_confidence(
-                            title["metadata_title"] or title["title"],
-                            title["metadata_year"] or title["year"], candidate,
-                        )
-                        if not (confidence["exact_title"] and confidence["exact_year"]):
-                            continue
-                        candidate_id = candidate.get("tvdb_id") or candidate.get("id")
-                        if not candidate_id:
-                            continue
-                        candidate_movie = tvdb.movie(candidate_id)
-                        tmdb_id, imdb_id = plex_movie_ids(candidate_movie)
-                        same_external_id = (
-                            bool(title["tmdb_id"] and tmdb_id == str(title["tmdb_id"]))
-                            or bool(title["imdb_id"] and imdb_id == title["imdb_id"])
-                        )
-                        if same_external_id:
-                            movie_id = candidate_id
-                            movie = candidate_movie
-                            break
-                if not movie_id:
-                    movie = None
-                elif movie is None:
-                    movie = tvdb.movie(movie_id)
-                overview = str((movie or {}).get("overview") or "").strip()
-                if overview:
-                    conn.execute(
-                        """UPDATE titles SET overview=?,
-                           tvdb_movie_id=COALESCE(tvdb_movie_id, ?),
-                           updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-                        (overview, movie_id, title_id),
-                    )
-                    title = conn.execute(
-                        """SELECT t.*, r.label source_label,
-                                  r.last_scanned_at root_last_scanned_at
-                           FROM titles t JOIN roots r ON r.id=t.root_id WHERE t.id=?""",
-                        (title_id,),
-                    ).fetchone()
-            except TVDBError:
-                # Synopsis enrichment is optional and must not block local details.
-                pass
         file_rows = conn.execute(
             """SELECT f.* FROM files f
                WHERE f.title_id=? ORDER BY f.season, f.episode_start, f.filename""",
@@ -7325,7 +7256,7 @@ def title_detail(request: Request, title_id: int):
     })
 
 
-@app.get("/titles/{title_id}/cover", response_class=HTMLResponse)
+@librarian_get("/titles/{title_id}/cover", response_class=HTMLResponse)
 def title_cover(request: Request, title_id: int):
     with db.connect() as conn:
         title = conn.execute("SELECT * FROM titles WHERE id=?", (title_id,)).fetchone()
@@ -7358,7 +7289,7 @@ def title_cover(request: Request, title_id: int):
     })
 
 
-@app.post("/titles/{title_id}/cover")
+@librarian_post("/titles/{title_id}/cover")
 def update_title_cover(
     title_id: int, poster_url: str = Form(...), return_to: str = Form(""),
 ):
@@ -7403,7 +7334,7 @@ def update_title_cover(
     return match_success_redirect(title_id, "Cover updated", return_to)
 
 
-@app.post("/titles/{title_id}/media-info")
+@librarian_post("/titles/{title_id}/media-info")
 def inspect_title_media(title_id: int):
     global media_info_job
     with db.connect() as conn:
@@ -7447,7 +7378,7 @@ def inspect_title_media(title_id: int):
     )
 
 
-@app.get("/titles/{title_id}/tvdb", response_class=HTMLResponse)
+@librarian_get("/titles/{title_id}/tvdb", response_class=HTMLResponse)
 def tvdb_search(request: Request, title_id: int, q: str = ""):
     with db.connect() as conn:
         title = conn.execute("SELECT * FROM titles WHERE id=?", (title_id,)).fetchone()
@@ -7545,7 +7476,7 @@ def tvdb_series_id_from_reference(reference: str) -> int:
     return int(id_match.group(1))
 
 
-@app.post("/titles/{title_id}/movie/{movie_id}")
+@librarian_post("/titles/{title_id}/movie/{movie_id}")
 def match_movie(
     title_id: int, movie_id: int, return_to: str = Form(""),
     match_origin: str = Form(""),
@@ -7559,7 +7490,7 @@ def match_movie(
     )
 
 
-@app.get("/bulk-match", response_class=HTMLResponse)
+@librarian_get("/bulk-match", response_class=HTMLResponse)
 def bulk_match_home(request: Request):
     with db.connect() as conn:
         counts = conn.execute(
@@ -7572,7 +7503,7 @@ def bulk_match_home(request: Request):
     })
 
 
-@app.get("/shows/bulk-match", response_class=HTMLResponse)
+@librarian_get("/shows/bulk-match", response_class=HTMLResponse)
 def bulk_tv_match_review(
     request: Request, review: bool = False, offset: int = 0, selected: bool = False,
 ):
@@ -7636,7 +7567,7 @@ def bulk_tv_match_review(
     })
 
 
-@app.post("/shows/bulk-match/analyze")
+@librarian_post("/shows/bulk-match/analyze")
 def start_bulk_tv_analysis(mode: str = Form("selected"), selected: list[int] = Form(default=[])):
     with tv_match_lock:
         if tv_match_job.get("status") in {"starting", "running"}:
@@ -7674,7 +7605,7 @@ def start_bulk_tv_analysis(mode: str = Form("selected"), selected: list[int] = F
     return redirect(destination, f"Finding matches for {len(title_ids):,} selected TV series" if mode == "selected" else f"Background analysis started for {len(title_ids):,} TV series")
 
 
-@app.post("/shows/bulk-match")
+@librarian_post("/shows/bulk-match")
 def bulk_tv_match_apply(
     matches: list[str] = Form(default=[]), selected_scope: str = Form(""),
 ):
@@ -7695,7 +7626,7 @@ def bulk_tv_match_apply(
     return redirect(destination, message)
 
 
-@app.get("/movies/bulk-match", response_class=HTMLResponse)
+@librarian_get("/movies/bulk-match", response_class=HTMLResponse)
 def bulk_movie_match_review(
     request: Request, review: bool = False, offset: int = 0, selected: bool = False,
 ):
@@ -7781,7 +7712,7 @@ def bulk_movie_match_review(
     })
 
 
-@app.post("/movies/bulk-match/analyze")
+@librarian_post("/movies/bulk-match/analyze")
 def start_bulk_movie_analysis(
     mode: str = Form("selected"), selected: list[int] = Form(default=[]),
 ):
@@ -7837,7 +7768,7 @@ def start_bulk_movie_analysis(
     return redirect(destination, f"Finding matches for {len(title_ids):,} selected movies" if mode == "selected" else f"Background analysis started for {len(title_ids):,} movies")
 
 
-@app.post("/movies/bulk-match")
+@librarian_post("/movies/bulk-match")
 def bulk_movie_match_apply(
     matches: list[str] = Form(default=[]), selected_scope: str = Form(""),
 ):
@@ -7924,7 +7855,7 @@ def store_tv_match(title_id: int, series_id: int) -> int:
     return len(episodes)
 
 
-@app.post("/titles/{title_id}/tvdb/{series_id}")
+@librarian_post("/titles/{title_id}/tvdb/{series_id}")
 def match_tvdb(
     title_id: int, series_id: int, return_to: str = Form(""),
     match_origin: str = Form(""),
@@ -7939,7 +7870,7 @@ def match_tvdb(
     )
 
 
-@app.post("/titles/{title_id}/tvdb-manual")
+@librarian_post("/titles/{title_id}/tvdb-manual")
 def match_tvdb_manual(
     title_id: int, tvdb_reference: str = Form(""), return_to: str = Form(""),
     match_origin: str = Form(""),
@@ -7964,7 +7895,7 @@ def match_tvdb_manual(
     )
 
 
-@app.post("/titles/{title_id}/unmatch")
+@librarian_post("/titles/{title_id}/unmatch")
 def unmatch_title(title_id: int):
     with db.connect() as conn:
         title = conn.execute("SELECT id FROM titles WHERE id=?", (title_id,)).fetchone()
@@ -7985,7 +7916,7 @@ def unmatch_title(title_id: int):
     return redirect(f"/titles/{title_id}", "Match metadata removed; media files were unchanged")
 
 
-@app.get("/titles/{title_id}/rename-folder", response_class=HTMLResponse)
+@librarian_get("/titles/{title_id}/rename-folder", response_class=HTMLResponse)
 def rename_folder_preview(request: Request, title_id: int):
     with db.connect() as conn:
         title = conn.execute("SELECT * FROM titles WHERE id=?", (title_id,)).fetchone()
@@ -8004,7 +7935,7 @@ def rename_folder_preview(request: Request, title_id: int):
     })
 
 
-@app.post("/titles/{title_id}/rename-folder")
+@librarian_post("/titles/{title_id}/rename-folder")
 def rename_folder(title_id: int, confirm: str = Form("")):
     if confirm != "RENAME":
         return redirect(f"/titles/{title_id}", "Rename cancelled: confirmation did not match")
@@ -8090,7 +8021,7 @@ def episode_rename_proposals(conn: sqlite3.Connection, title_id: int):
     return title, proposals
 
 
-@app.get("/titles/{title_id}/rename-episodes", response_class=HTMLResponse)
+@librarian_get("/titles/{title_id}/rename-episodes", response_class=HTMLResponse)
 def bulk_rename_preview(request: Request, title_id: int):
     with db.connect() as conn:
         title, proposals = episode_rename_proposals(conn, title_id)
@@ -8105,7 +8036,7 @@ def bulk_rename_preview(request: Request, title_id: int):
     })
 
 
-@app.post("/titles/{title_id}/rename-episodes")
+@librarian_post("/titles/{title_id}/rename-episodes")
 def bulk_rename_apply(
     title_id: int, selected_file_ids: list[int] = Form(default=[]),
 ):
@@ -8189,7 +8120,7 @@ def restore_filename_proposals(conn: sqlite3.Connection, title_id: int):
     return title, proposals
 
 
-@app.get("/titles/{title_id}/restore-filenames", response_class=HTMLResponse)
+@librarian_get("/titles/{title_id}/restore-filenames", response_class=HTMLResponse)
 def restore_filenames_preview(request: Request, title_id: int):
     with db.connect() as conn:
         title, proposals = restore_filename_proposals(conn, title_id)
@@ -8202,7 +8133,7 @@ def restore_filenames_preview(request: Request, title_id: int):
     })
 
 
-@app.post("/titles/{title_id}/restore-filenames")
+@librarian_post("/titles/{title_id}/restore-filenames")
 def restore_filenames_apply(title_id: int):
     restored = 0
     skipped = 0
@@ -8241,7 +8172,7 @@ def restore_filenames_apply(title_id: int):
     return redirect(f"/titles/{title_id}", message)
 
 
-@app.get("/files/{file_id}/rename", response_class=HTMLResponse)
+@librarian_get("/files/{file_id}/rename", response_class=HTMLResponse)
 def rename_file_preview(request: Request, file_id: int):
     with db.connect() as conn:
         row = conn.execute(
@@ -8267,7 +8198,7 @@ def rename_file_preview(request: Request, file_id: int):
     })
 
 
-@app.post("/files/{file_id}/rename")
+@librarian_post("/files/{file_id}/rename")
 def rename_file(file_id: int):
     with db.connect() as conn:
         row = conn.execute(
@@ -8311,7 +8242,7 @@ def rename_file(file_id: int):
     return redirect(f"/titles/{row['title_id']}", "Episode renamed")
 
 
-@app.get("/files/{file_id}/rename-movie", response_class=HTMLResponse)
+@librarian_get("/files/{file_id}/rename-movie", response_class=HTMLResponse)
 def rename_movie_preview(request: Request, file_id: int):
     with db.connect() as conn:
         row = conn.execute(
@@ -8333,7 +8264,7 @@ def rename_movie_preview(request: Request, file_id: int):
     })
 
 
-@app.post("/files/{file_id}/rename-movie")
+@librarian_post("/files/{file_id}/rename-movie")
 def rename_movie(file_id: int):
     with db.connect() as conn:
         row = conn.execute(

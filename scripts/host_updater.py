@@ -49,6 +49,29 @@ def run(command: list[str], cwd: Path) -> str:
     return completed.stdout.strip()
 
 
+def verify_release_tag(
+    tag: str, repository: Path, trusted_signing_keys: set[str] | None = None,
+) -> None:
+    completed = subprocess.run(
+        ["git", "verify-tag", "--raw", tag], cwd=repository, text=True,
+        capture_output=True, check=False,
+    )
+    status = "\n".join(part for part in (completed.stdout, completed.stderr) if part)
+    if completed.returncode:
+        raise UpdateError(
+            "The release tag does not have a valid cryptographic signature. "
+            "The update was stopped before any checkout occurred."
+        )
+    fingerprints = {
+        match.upper() for match in re.findall(r"\[GNUPG:\] VALIDSIG ([0-9A-Fa-f]{40,64})", status)
+    }
+    trusted = {value.replace(" ", "").upper() for value in (trusted_signing_keys or set()) if value}
+    if trusted and fingerprints.isdisjoint(trusted):
+        raise UpdateError(
+            "The release tag was signed, but not by a configured trusted InfoMancer release key."
+        )
+
+
 def compose_command(files: list[str]) -> list[str]:
     command = ["docker", "compose", "-p", "infomancer"]
     for value in files:
@@ -76,7 +99,7 @@ def wait_for_health(url: str, seconds: int) -> None:
 
 def process_request(
     repository: Path, data_directory: Path, files: list[str],
-    health_url: str, health_timeout: int,
+    health_url: str, health_timeout: int, trusted_signing_keys: set[str] | None = None,
 ) -> bool:
     request_path = data_directory / "update-request.json"
     status_path = data_directory / "update-status.json"
@@ -109,6 +132,7 @@ def process_request(
             )
         previous_commit = run(["git", "rev-parse", "HEAD"], repository)
         run(["git", "fetch", "--tags", "origin"], repository)
+        verify_release_tag(tag, repository, trusted_signing_keys)
         target_commit = run(
             ["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"],
             repository,
@@ -171,6 +195,10 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--compose-file", action="append", dest="compose_files")
     value.add_argument("--health-url", default="http://127.0.0.1:8787/health")
     value.add_argument("--health-timeout", type=int, default=120)
+    value.add_argument(
+        "--trusted-signing-key", action="append", default=[],
+        help="Allowed GPG signing-key fingerprint. May be supplied more than once.",
+    )
     value.add_argument("--watch", action="store_true")
     value.add_argument("--poll-seconds", type=int, default=5)
     return value
@@ -187,6 +215,7 @@ def main() -> int:
         handled = process_request(
             repository, data_directory, files,
             arguments.health_url, max(15, arguments.health_timeout),
+            {value for value in arguments.trusted_signing_key if value.strip()},
         )
         if not arguments.watch:
             return 0
