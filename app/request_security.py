@@ -53,6 +53,10 @@ async def csrf_submission(
 
 def replay_body(request: Request, body: bytes) -> None:
     """Replay a small verified form body for FastAPI's downstream parser."""
+    # BaseHTTPMiddleware's wrapped receive path checks the Request body cache.
+    # Populate it after our bounded stream read so call_next can construct a
+    # fresh downstream Request without losing the verified form fields.
+    request._body = body
     sent = False
 
     async def receive():
