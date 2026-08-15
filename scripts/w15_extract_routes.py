@@ -125,12 +125,74 @@ from collections.abc import MutableMapping
 from typing import Any
 
 
+class LiveRef:
+    """Proxy a name in main.py so test/runtime replacements stay visible to routes."""
+
+    def __init__(self, namespace: MutableMapping[str, Any], name: str) -> None:
+        object.__setattr__(self, "_namespace", namespace)
+        object.__setattr__(self, "_name", name)
+
+    def _value(self) -> Any:
+        return self._namespace[self._name]
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._value(), name)
+
+    def __call__(self, *args, **kwargs):
+        return self._value()(*args, **kwargs)
+
+    def __getitem__(self, key):
+        return self._value()[key]
+
+    def __setitem__(self, key, value) -> None:
+        self._value()[key] = value
+
+    def __delitem__(self, key) -> None:
+        del self._value()[key]
+
+    def __iter__(self):
+        return iter(self._value())
+
+    def __len__(self) -> int:
+        return len(self._value())
+
+    def __bool__(self) -> bool:
+        return bool(self._value())
+
+    def __contains__(self, item) -> bool:
+        return item in self._value()
+
+    def __enter__(self):
+        return self._value().__enter__()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return self._value().__exit__(exc_type, exc_value, traceback)
+
+    def __str__(self) -> str:
+        return str(self._value())
+
+    def __repr__(self) -> str:
+        return repr(self._value())
+
+    def __eq__(self, other) -> bool:
+        if isinstance(other, LiveRef):
+            other = other._value()
+        return self._value() == other
+
+    def __ne__(self, other) -> bool:
+        return not self == other
+
+    def __fspath__(self) -> str:
+        return self._value().__fspath__()
+
+
 class RouteContext:
     """Live view of application services/helpers used while routers are assembled.
 
     W1.5 keeps construction in main.py while route behavior moves into domain modules.
-    Each module binds only the names its handlers need. The mapping stays live so
-    compatibility handler aliases can be published as routers are registered.
+    Framework/type symbols are bound directly for FastAPI signature evaluation, while
+    runtime services/helpers use LiveRef so tests and runtime swaps made on main stay
+    visible after router registration.
     """
 
     def __init__(self, namespace: MutableMapping[str, Any]) -> None:
@@ -138,6 +200,9 @@ class RouteContext:
 
     def get(self, name: str) -> Any:
         return self._namespace.get(name)
+
+    def live(self, name: str) -> LiveRef:
+        return LiveRef(self._namespace, name)
 '''
 (ROUTES_DIR / "context.py").write_text(context_source, encoding="utf-8")
 
@@ -169,7 +234,7 @@ for module in MODULE_ORDER:
     globals_needed -= {"router", "librarian_get", "librarian_post"}
 
     aliases = "\n".join(
-        f'    {name} = ctx.get("{name}")'
+        f'    {name} = ctx.{"get" if name[:1].isupper() else "live"}("{name}")'
         for name in sorted(globals_needed)
     )
     handlers = "\n".join(
@@ -177,9 +242,9 @@ for module in MODULE_ORDER:
         for node in nodes
     )
     body = "\n\n".join(chunks)
-    module_source = f'''from __future__ import annotations
-
-from fastapi import APIRouter, Depends
+    # Do not enable postponed annotations in generated route modules. FastAPI must
+    # see the real Request/UploadFile/etc. classes while it inspects each signature.
+    module_source = f'''from fastapi import APIRouter, Depends
 
 from ..access import require_librarian
 from .context import RouteContext
@@ -272,7 +337,9 @@ class RouteDecompositionTests(unittest.TestCase):
         for name in ("system", "operations", "dashboard", "review", "library", "settings", "collections", "titles"):
             path = ROOT / "app" / "routes" / f"{name}.py"
             self.assertTrue(path.exists(), name)
-            self.assertIn("APIRouter", path.read_text(encoding="utf-8"))
+            source = path.read_text(encoding="utf-8")
+            self.assertIn("APIRouter", source)
+            self.assertNotIn("from __future__ import annotations", source)
 
     def test_compatibility_handler_aliases_remain_available(self):
         for name in ("library", "title_detail", "duplicate_review", "collections_page", "sources"):
@@ -293,6 +360,15 @@ class RouteDecompositionTests(unittest.TestCase):
                 found.add(key)
         self.assertEqual(found, targets)
 
+    def test_live_route_context_tracks_main_service_replacement(self):
+        original = main.db
+        sentinel = object()
+        try:
+            main.db = sentinel
+            self.assertIs(main._route_context.live("db")._value(), sentinel)
+        finally:
+            main.db = original
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -303,7 +379,7 @@ if DOC.exists():
     doc = DOC.read_text(encoding="utf-8")
     marker = "## W1.5 Application decomposition"
     if marker not in doc:
-        doc = doc.rstrip() + f'''\n\n{marker}\n\nW1.5 moves the product/domain HTTP surface out of `app/main.py` into `app/routes/` APIRouter modules. The composition root retains application construction, middleware, lifecycle, bootstrap/authentication, and admin-account wiring. Existing handler names are published as compatibility aliases during the transition. Route-level Librarian dependencies remain attached inside each router module.\n'''
+        doc = doc.rstrip() + f'''\n\n{marker}\n\nW1.5 moves the product/domain HTTP surface out of `app/main.py` into `app/routes/` APIRouter modules. The composition root retains application construction, middleware, lifecycle, bootstrap/authentication, and admin-account wiring. Existing handler names are published as compatibility aliases during the transition. Route-level Librarian dependencies remain attached inside each router module. Runtime service references remain live through `RouteContext`, preserving test isolation and future service replacement without circular imports.\n'''
         DOC.write_text(doc + "\n", encoding="utf-8")
 
 print(f"Extracted {len(selected_names)} route functions into {len(MODULE_ORDER)} routers")
