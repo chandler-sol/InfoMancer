@@ -35,7 +35,14 @@ class MigrationTests(unittest.TestCase):
                 columns = {row["name"] for row in upgraded.execute("PRAGMA table_info(files)")}
                 self.assertIn("edition_name", columns)
                 self.assertIn("version_preferred", columns)
-                self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=10").fetchone())
+                self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=11").fetchone())
+                lockout_columns = {
+                    row["name"] for row in upgraded.execute("PRAGMA table_info(login_lockouts)")
+                }
+                self.assertEqual(
+                    {"scope", "lock_key", "locked_until", "created_at"},
+                    lockout_columns,
+                )
 
 
 if __name__ == "__main__":

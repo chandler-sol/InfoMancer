@@ -3,6 +3,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 ARG INFOMANCER_UID=1000
 ARG INFOMANCER_GID=1000
+RUN test "${INFOMANCER_UID}" != "0" && test "${INFOMANCER_GID}" != "0" \
+    || (echo "INFOMANCER_UID and INFOMANCER_GID must be non-root values" >&2; exit 1)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*

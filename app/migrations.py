@@ -115,6 +115,21 @@ def _runtime_lease(conn: sqlite3.Connection) -> None:
     )
 
 
+def _login_lockouts(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS login_lockouts (
+             scope TEXT NOT NULL CHECK(scope IN ('identity','ip')),
+             lock_key TEXT NOT NULL,
+             locked_until TEXT NOT NULL,
+             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+             PRIMARY KEY(scope,lock_key)
+           )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_login_lockouts_until ON login_lockouts(locked_until)"
+    )
+
+
 MIGRATIONS = (
     Migration(1, "title metadata columns", _titles),
     Migration(2, "source health columns", _roots),
@@ -126,6 +141,7 @@ MIGRATIONS = (
     Migration(8, "duplicate review ownership", _duplicate_reviews),
     Migration(9, "duplicate trash size accounting", _duplicate_trash),
     Migration(10, "single-runtime lease", _runtime_lease),
+    Migration(11, "persistent aggregate login lockouts", _login_lockouts),
 )
 
 

@@ -117,6 +117,39 @@ class AuthServiceTests(unittest.TestCase):
                 "SELECT 1 FROM login_attempts WHERE identity='stale'"
             ).fetchone())
 
+    def test_distributed_identity_lock_survives_attempt_row_cap(self):
+        self.auth.create_user(
+            "durablelock", "durable@example.com", "Durable Lock",
+            "a long durable lock password",
+        )
+        for index in range(15):
+            with self.assertRaises(AuthenticationError):
+                self.auth.authenticate_local(
+                    "durablelock", "wrong password", f"198.18.0.{index + 1}"
+                )
+        with self.database.connect() as conn:
+            self.assertIsNotNone(conn.execute(
+                """SELECT 1 FROM login_lockouts
+                   WHERE scope='identity' AND lock_key='durablelock'
+                     AND datetime(locked_until)>CURRENT_TIMESTAMP"""
+            ).fetchone())
+        with patch("app.auth.LOGIN_ATTEMPT_ROW_CAP", 2):
+            for index in range(6):
+                with self.assertRaises(AuthenticationError):
+                    self.auth.authenticate_local(
+                        f"noise-{index}", "wrong", f"203.0.113.{index + 1}"
+                    )
+        with self.database.connect() as conn:
+            source_rows = conn.execute(
+                "SELECT COUNT(*) FROM login_attempts WHERE identity='durablelock'"
+            ).fetchone()[0]
+            self.assertLessEqual(source_rows, 2)
+        from app.auth import LoginLocked
+        with self.assertRaises(LoginLocked):
+            self.auth.authenticate_local(
+                "durablelock", "a long durable lock password", "192.0.2.200"
+            )
+
     def test_row_cap_never_deletes_active_lockout(self):
         with self.database.connect() as conn:
             conn.execute(

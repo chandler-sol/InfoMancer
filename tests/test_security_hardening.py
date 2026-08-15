@@ -238,6 +238,8 @@ class ContainerHardeningTests(unittest.TestCase):
         self.assertNotIn('"--forwarded-allow-ips", "*"', dockerfile)
         self.assertIn("ARG INFOMANCER_UID=1000", dockerfile)
         self.assertIn("ARG INFOMANCER_GID=1000", dockerfile)
+        self.assertIn('test "${INFOMANCER_UID}" != "0"', dockerfile)
+        self.assertIn('test "${INFOMANCER_GID}" != "0"', dockerfile)
         compose = (Path(__file__).resolve().parent.parent / "compose.yaml").read_text(
             encoding="utf-8"
         )

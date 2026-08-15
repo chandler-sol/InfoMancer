@@ -116,15 +116,21 @@ Docker does not officially test every derivative distribution.
    writable application-data directory before Docker sees the bind mount:
 
    ```bash
+   if [ "$(id -u)" -eq 0 ]; then
+     echo "Run this step as the non-root account that will own InfoMancer data." >&2
+     exit 1
+   fi
    sed -i "s/^INFOMANCER_UID=.*/INFOMANCER_UID=$(id -u)/" .env
    sed -i "s/^INFOMANCER_GID=.*/INFOMANCER_GID=$(id -g)/" .env
    mkdir -p data
    ```
 
-   The same UID/GID must be able to read every media mapping. Grant it write
-   permission only on locations where you want InfoMancer to rename, organize,
-   restore, or move files into managed Trash. Group permissions or ACLs are
-   preferable to changing ownership of a shared media library.
+   Do not use UID or GID `0`. The same non-root UID/GID needs directory
+   search/execute permission on every parent of each media mapping and read
+   permission on the media itself. Grant directory write permission only where
+   you want InfoMancer to rename, organize, restore, or move files into managed
+   Trash. Ownership, group permissions, or ACLs can provide this access; ACLs or
+   group permissions are preferable to changing ownership of a shared library.
 6. Start InfoMancer:
 
    ```bash

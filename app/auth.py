@@ -46,7 +46,7 @@ def normalize_email(value: str) -> str:
 
 
 def _prune_login_attempts(conn: sqlite3.Connection) -> None:
-    """Bound stale login-attempt storage without deleting active lockouts."""
+    """Bound stale login-attempt storage without deleting active pair locks."""
     conn.execute(
         "DELETE FROM login_attempts WHERE datetime(last_attempt_at)<datetime('now','-1 day')"
     )
@@ -59,6 +59,30 @@ def _prune_login_attempts(conn: sqlite3.Connection) -> None:
              LIMIT -1 OFFSET ?
            )""",
         (LOGIN_ATTEMPT_ROW_CAP,),
+    )
+
+
+def _prune_login_lockouts(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "DELETE FROM login_lockouts WHERE datetime(locked_until)<=CURRENT_TIMESTAMP"
+    )
+
+
+def _has_login_lock(conn: sqlite3.Connection, scope: str, lock_key: str) -> bool:
+    return conn.execute(
+        """SELECT 1 FROM login_lockouts
+           WHERE scope=? AND lock_key=? AND datetime(locked_until)>CURRENT_TIMESTAMP""",
+        (scope, lock_key),
+    ).fetchone() is not None
+
+
+def _set_login_lock(conn: sqlite3.Connection, scope: str, lock_key: str) -> None:
+    conn.execute(
+        """INSERT INTO login_lockouts(scope,lock_key,locked_until,created_at)
+           VALUES (?,?,datetime('now','+15 minutes'),CURRENT_TIMESTAMP)
+           ON CONFLICT(scope,lock_key) DO UPDATE SET
+             locked_until=excluded.locked_until,created_at=CURRENT_TIMESTAMP""",
+        (scope, lock_key),
     )
 
 
@@ -489,84 +513,137 @@ class AuthService:
         if not identity or not password:
             raise AuthenticationError("Incorrect username, email, or password.")
 
-        failure = False
+        # Aggregate account/IP locks live outside login_attempts so retention
+        # pruning cannot erase a live lockout created by distributed failures.
+        precheck_locked = False
         with self.database.connect() as conn:
             _prune_login_attempts(conn)
+            _prune_login_lockouts(conn)
             attempt = conn.execute(
                 "SELECT * FROM login_attempts WHERE identity=? AND ip_address=?",
                 (identity, ip_address),
             ).fetchone()
+            pair_locked = False
             if attempt and attempt["locked_until"]:
                 try:
-                    if datetime.fromisoformat(attempt["locked_until"]) > utcnow():
-                        raise LoginLocked("Too many attempts. Try again in a few minutes.")
+                    pair_locked = datetime.fromisoformat(attempt["locked_until"]) > utcnow()
                 except ValueError:
-                    pass
-            identity_failures = int(conn.execute(
-                """SELECT COALESCE(SUM(failures),0) FROM login_attempts
-                   WHERE identity=? AND datetime(last_attempt_at)>=datetime('now','-15 minutes')""",
-                (identity,),
-            ).fetchone()[0])
-            ip_failures = int(conn.execute(
-                """SELECT COALESCE(SUM(failures),0) FROM login_attempts
-                   WHERE ip_address=? AND datetime(last_attempt_at)>=datetime('now','-15 minutes')""",
-                (ip_address,),
-            ).fetchone()[0])
-            if identity_failures >= 15 or ip_failures >= 30:
-                raise LoginLocked("Too many attempts. Try again in a few minutes.")
-
-            row = conn.execute(
-                """SELECT * FROM users
-                   WHERE LOWER(username)=? OR LOWER(COALESCE(email,''))=?""",
-                (identity, identity),
-            ).fetchone()
-            if row and not row["active"]:
-                raise AuthenticationError(
-                    "This account is disabled. Ask a Librarian to enable it before signing in."
-                )
-            if row and not row["password_hash"]:
-                raise AuthenticationError(
-                    "This account is waiting for setup. Ask a Librarian for a fresh one-time setup link."
-                )
-
-            verified = False
-            if row and row["password_hash"]:
-                try:
-                    verified = password_hasher.verify(row["password_hash"], password)
-                    if verified and password_hasher.check_needs_rehash(row["password_hash"]):
-                        conn.execute(
-                            "UPDATE users SET password_hash=? WHERE id=?",
-                            (password_hasher.hash(password), row["id"]),
-                        )
-                except (VerifyMismatchError, VerificationError, InvalidHashError):
-                    verified = False
-
-            if not verified:
-                failures = int(attempt["failures"] if attempt else 0) + 1
-                locked_until = (
-                    iso_timestamp(utcnow() + timedelta(minutes=15)) if failures >= 5 else None
-                )
-                conn.execute(
-                    """INSERT INTO login_attempts
-                       (identity,ip_address,failures,last_attempt_at,locked_until)
-                       VALUES (?,?,?,CURRENT_TIMESTAMP,?)
-                       ON CONFLICT(identity,ip_address) DO UPDATE SET
-                         failures=excluded.failures,last_attempt_at=CURRENT_TIMESTAMP,
-                         locked_until=excluded.locked_until""",
-                    (identity, ip_address, failures, locked_until),
-                )
-                _prune_login_attempts(conn)
-                failure = True
+                    pair_locked = False
+            identity_locked = _has_login_lock(conn, "identity", identity)
+            ip_locked = _has_login_lock(conn, "ip", ip_address)
+            if pair_locked or identity_locked or ip_locked:
+                precheck_locked = True
             else:
-                conn.execute("DELETE FROM login_attempts WHERE identity=?", (identity,))
-                conn.execute(
-                    "UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (row["id"],),
-                )
-                refreshed = conn.execute(
-                    "SELECT * FROM users WHERE id=?", (row["id"],)
-                ).fetchone()
+                identity_failures = int(conn.execute(
+                    """SELECT COALESCE(SUM(failures),0) FROM login_attempts
+                       WHERE identity=? AND datetime(last_attempt_at)>=datetime('now','-15 minutes')""",
+                    (identity,),
+                ).fetchone()[0])
+                ip_failures = int(conn.execute(
+                    """SELECT COALESCE(SUM(failures),0) FROM login_attempts
+                       WHERE ip_address=? AND datetime(last_attempt_at)>=datetime('now','-15 minutes')""",
+                    (ip_address,),
+                ).fetchone()[0])
+                if identity_failures >= 15:
+                    _set_login_lock(conn, "identity", identity)
+                    precheck_locked = True
+                if ip_failures >= 30:
+                    _set_login_lock(conn, "ip", ip_address)
+                    precheck_locked = True
 
+        if precheck_locked:
+            raise LoginLocked("Too many attempts. Try again in a few minutes.")
+
+        failure = False
+        with self.database.connect() as conn:
+            # Recheck durable aggregate locks after the preflight transaction in
+            # case another request crossed a threshold in the meantime.
+            _prune_login_lockouts(conn)
+            if (
+                _has_login_lock(conn, "identity", identity)
+                or _has_login_lock(conn, "ip", ip_address)
+            ):
+                locked_during_auth = True
+            else:
+                locked_during_auth = False
+
+            if not locked_during_auth:
+                attempt = conn.execute(
+                    "SELECT * FROM login_attempts WHERE identity=? AND ip_address=?",
+                    (identity, ip_address),
+                ).fetchone()
+                row = conn.execute(
+                    """SELECT * FROM users
+                       WHERE LOWER(username)=? OR LOWER(COALESCE(email,''))=?""",
+                    (identity, identity),
+                ).fetchone()
+                if row and not row["active"]:
+                    raise AuthenticationError(
+                        "This account is disabled. Ask a Librarian to enable it before signing in."
+                    )
+                if row and not row["password_hash"]:
+                    raise AuthenticationError(
+                        "This account is waiting for setup. Ask a Librarian for a fresh one-time setup link."
+                    )
+
+                verified = False
+                if row and row["password_hash"]:
+                    try:
+                        verified = password_hasher.verify(row["password_hash"], password)
+                        if verified and password_hasher.check_needs_rehash(row["password_hash"]):
+                            conn.execute(
+                                "UPDATE users SET password_hash=? WHERE id=?",
+                                (password_hasher.hash(password), row["id"]),
+                            )
+                    except (VerifyMismatchError, VerificationError, InvalidHashError):
+                        verified = False
+
+                if not verified:
+                    failures = int(attempt["failures"] if attempt else 0) + 1
+                    locked_until = (
+                        iso_timestamp(utcnow() + timedelta(minutes=15)) if failures >= 5 else None
+                    )
+                    conn.execute(
+                        """INSERT INTO login_attempts
+                           (identity,ip_address,failures,last_attempt_at,locked_until)
+                           VALUES (?,?,?,CURRENT_TIMESTAMP,?)
+                           ON CONFLICT(identity,ip_address) DO UPDATE SET
+                             failures=excluded.failures,last_attempt_at=CURRENT_TIMESTAMP,
+                             locked_until=excluded.locked_until""",
+                        (identity, ip_address, failures, locked_until),
+                    )
+                    identity_failures = int(conn.execute(
+                        """SELECT COALESCE(SUM(failures),0) FROM login_attempts
+                           WHERE identity=? AND datetime(last_attempt_at)>=datetime('now','-15 minutes')""",
+                        (identity,),
+                    ).fetchone()[0])
+                    ip_failures = int(conn.execute(
+                        """SELECT COALESCE(SUM(failures),0) FROM login_attempts
+                           WHERE ip_address=? AND datetime(last_attempt_at)>=datetime('now','-15 minutes')""",
+                        (ip_address,),
+                    ).fetchone()[0])
+                    if identity_failures >= 15:
+                        _set_login_lock(conn, "identity", identity)
+                    if ip_failures >= 30:
+                        _set_login_lock(conn, "ip", ip_address)
+                    _prune_login_attempts(conn)
+                    failure = True
+                else:
+                    conn.execute("DELETE FROM login_attempts WHERE identity=?", (identity,))
+                    conn.execute(
+                        "DELETE FROM login_lockouts WHERE scope='identity' AND lock_key=?",
+                        (identity,),
+                    )
+                    conn.execute(
+                        "UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (row["id"],),
+                    )
+                    refreshed = conn.execute(
+                        "SELECT * FROM users WHERE id=?", (row["id"],)
+                    ).fetchone()
+
+        if locked_during_auth:
+            raise LoginLocked("Too many attempts. Try again in a few minutes.")
         if failure:
             raise AuthenticationError("Incorrect username, email, or password.")
         return user_from_row(refreshed)

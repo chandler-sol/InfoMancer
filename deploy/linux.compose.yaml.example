@@ -2,8 +2,10 @@ services:
   infomancer:
     volumes:
       # Change the source paths to mounted folders on this Linux host.
-      # They must be readable by INFOMANCER_UID/INFOMANCER_GID. Grant write
-      # access as well for rename, organize, and managed-trash operations.
+      # They and every parent directory must be searchable (execute permission)
+      # by INFOMANCER_UID/INFOMANCER_GID; media files must also be readable.
+      # Grant directory write access for rename, organize, and managed-trash
+      # operations. Ownership, group permissions, or ACLs can provide this access.
       - type: bind
         source: /mnt/media/movies
         target: /media/movies
