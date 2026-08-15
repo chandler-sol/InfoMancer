@@ -91,6 +91,8 @@ class ReviewWorkspaceContractTests(unittest.TestCase):
         self.assertIn('/api/review/findings/{finding_id}/dismiss', routes)
         self.assertIn('/api/review/duplicates/{file_a_id}/{file_b_id}/decision', routes)
         self.assertIn("data-review-queue", template)
+        self.assertIn('{% for item in queue["items"] %}', template)
+        self.assertNotIn("{% for item in queue.items %}", template)
         self.assertIn("data-workspace-drawer-url", template)
         self.assertIn("data-workspace-ajax", drawer)
         self.assertIn("Workspace.toast", ui)
