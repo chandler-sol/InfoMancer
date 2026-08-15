@@ -28,6 +28,18 @@ jobs:
       - name: Apply W1 stabilization patch
         run: python3 scripts/apply_workspace_stabilization.py
 
+      - name: Repair nested home-switcher removal
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("app/templates/base.html")
+          text = path.read_text(encoding="utf-8")
+          residue = "          </svg>\n        </button>\n      </form>\n      {% endif %}\n"
+          if residue not in text:
+              raise SystemExit("Expected home-switcher residue was not found")
+          path.write_text(text.replace(residue, "", 1), encoding="utf-8")
+          PY
+
       - name: Run test suite
         run: python3 -m unittest discover -s tests -v
 
