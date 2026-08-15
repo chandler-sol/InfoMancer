@@ -8,6 +8,16 @@
   --im-motion: 180ms cubic-bezier(.2, .8, .2, 1);
 }
 
+/* Keep the legacy navigation from flashing before Workspace enhancement runs. */
+body.has-app-sidebar .site-menu-panel:not(.workspace-nav-ready) {
+  opacity: 0;
+}
+
+/* The old home-layout switcher is superseded by the Workspace shell. */
+.home-layout-toggle {
+  display: none !important;
+}
+
 /* Workspace navigation hierarchy */
 .site-menu-panel.workspace-nav-ready {
   display: flex;
@@ -39,19 +49,65 @@
 }
 
 .workspace-nav-section {
-  margin: 4px 8px 0;
+  margin: 2px 8px 0;
   border-top: 1px solid var(--line);
-  padding-top: 10px;
+  padding-top: 7px;
 }
 
-.workspace-nav-section > strong {
-  display: block;
-  margin: 0 10px 6px;
+.workspace-nav-section > summary {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  margin: 0 3px 2px;
+  padding: 5px 28px 5px 9px;
+  border-radius: var(--im-radius-xs);
   color: var(--muted);
+  cursor: pointer;
   font-size: 10px;
   font-weight: 800;
   letter-spacing: .15em;
+  list-style: none;
   text-transform: uppercase;
+  transition: color .16s ease, background .16s ease;
+}
+
+.workspace-nav-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.workspace-nav-section > summary::after {
+  content: "›";
+  position: absolute;
+  right: 9px;
+  top: 50%;
+  color: #6f7f90;
+  font-size: 17px;
+  line-height: 1;
+  transform: translateY(-52%) rotate(0deg);
+  transition: transform var(--im-motion), color .16s ease;
+}
+
+.workspace-nav-section[open] > summary::after {
+  transform: translateY(-52%) rotate(90deg);
+}
+
+.workspace-nav-section > summary:hover,
+.workspace-nav-section > summary:focus-visible {
+  color: var(--text);
+  background: rgba(255, 255, 255, .035);
+}
+
+.workspace-nav-section[open] > summary {
+  color: #9caaba;
+}
+
+.workspace-nav-secondary {
+  padding-bottom: 3px;
+}
+
+.workspace-nav-section:not([open]) > .workspace-nav-secondary {
+  display: none;
 }
 
 .workspace-nav-secondary a {
@@ -72,19 +128,49 @@
   background: rgba(255, 255, 255, .055);
 }
 
-.workspace-nav-alpha {
+/* Version belongs with the product mark, not in the navigation list. */
+body.has-app-sidebar .brand .workspace-nav-alpha {
+  position: absolute;
+  right: 9px;
+  bottom: 9px;
   display: inline-flex;
+  align-items: center;
   width: fit-content;
-  margin: 10px 18px 2px;
-  padding: 3px 7px;
-  border: 1px solid rgba(81, 214, 230, .28);
+  padding: 2px 5px;
+  border: 1px solid rgba(81, 214, 230, .34);
   border-radius: 999px;
   color: var(--cyan);
-  background: rgba(81, 214, 230, .06);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: .12em;
+  background: rgba(9, 20, 26, .92);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  line-height: 1.2;
   text-transform: uppercase;
+  pointer-events: none;
+}
+
+body.has-app-sidebar .brand-lockup {
+  max-width: calc(100% - 35px);
+}
+
+@media (min-width: 981px) {
+  body.has-app-sidebar.sidebar-collapsed .workspace-nav-section {
+    display: none;
+  }
+
+  body.has-app-sidebar.sidebar-collapsed .site-menu:hover .workspace-nav-section,
+  body.has-app-sidebar.sidebar-collapsed .site-menu:focus-within .workspace-nav-section,
+  body.has-app-sidebar.sidebar-collapsed .site-menu.tour-menu-open .workspace-nav-section {
+    display: block;
+  }
+
+  body.has-app-sidebar.sidebar-collapsed .brand .workspace-nav-alpha {
+    right: 5px;
+    bottom: 7px;
+    padding: 1px 3px;
+    font-size: 6px;
+    letter-spacing: 0;
+  }
 }
 
 /* Library selection now behaves like a contextual app toolbar. */
@@ -117,6 +203,255 @@
 .cover-card.workspace-selected {
   outline: 2px solid rgba(81, 214, 230, .65);
   outline-offset: 2px;
+}
+
+/* Detail pages should read as one dossier rather than unrelated islands. */
+body.has-app-sidebar .media-dossier {
+  width: min(100%, 1380px);
+  margin-inline: auto;
+}
+
+body.has-app-sidebar .media-dossier .detail-page-head {
+  display: grid;
+  grid-template-columns: clamp(190px, 16vw, 240px) minmax(280px, 1fr) minmax(310px, 380px);
+  align-items: start;
+  gap: clamp(24px, 3vw, 46px);
+  margin: 4px 0 16px;
+  padding: clamp(22px, 2.3vw, 34px);
+  border: 1px solid #273542;
+  border-radius: var(--im-radius-lg);
+  background:
+    radial-gradient(circle at 10% 8%, rgba(81, 214, 230, .045), transparent 30%),
+    linear-gradient(145deg, rgba(18, 25, 33, .94), rgba(10, 15, 21, .96));
+  box-shadow: 0 18px 46px rgba(0, 0, 0, .14);
+}
+
+body.has-app-sidebar .media-dossier .detail-poster-column {
+  width: 100%;
+}
+
+body.has-app-sidebar .media-dossier .detail-poster,
+body.has-app-sidebar .media-dossier .detail-poster-placeholder {
+  width: 100%;
+  max-width: 240px;
+  margin: 0;
+  border-radius: var(--im-radius-md);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .28);
+}
+
+body.has-app-sidebar .media-dossier .detail-copy {
+  min-width: 0;
+  padding-top: 6px;
+}
+
+body.has-app-sidebar .media-dossier .detail-copy h1 {
+  max-width: 760px;
+  margin-bottom: 8px;
+  font-size: clamp(34px, 3.2vw, 58px);
+  line-height: .98;
+  letter-spacing: -.045em;
+}
+
+body.has-app-sidebar .media-dossier .detail-date {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+body.has-app-sidebar .media-dossier .imdb-facts,
+body.has-app-sidebar .media-dossier .genre-list {
+  margin-top: 10px;
+}
+
+body.has-app-sidebar .media-dossier .detail-match-badge {
+  margin-top: 18px;
+}
+
+body.has-app-sidebar .media-dossier .title-hero-aside {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  gap: 12px;
+}
+
+body.has-app-sidebar .media-dossier .title-synopsis,
+body.has-app-sidebar .media-dossier .movie-credits {
+  margin: 0;
+  padding: 16px 17px;
+  border: 1px solid #293744;
+  border-radius: var(--im-radius-md);
+  background: rgba(8, 13, 18, .58);
+}
+
+body.has-app-sidebar .media-dossier .title-synopsis h2 {
+  margin-top: 0;
+}
+
+body.has-app-sidebar .media-dossier .movie-credits {
+  display: grid;
+  gap: 10px;
+}
+
+body.has-app-sidebar .media-dossier .movie-credits > div {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+}
+
+body.has-app-sidebar .media-dossier .movie-credits > div > strong {
+  color: #dfe7ef;
+  font-size: 12px;
+}
+
+body.has-app-sidebar .media-dossier .movie-credits a {
+  text-underline-offset: 3px;
+  text-decoration-color: transparent;
+  transition: color .14s ease, text-decoration-color .14s ease;
+}
+
+body.has-app-sidebar .media-dossier .movie-credits a:hover,
+body.has-app-sidebar .media-dossier .movie-credits a:focus-visible {
+  color: var(--lime);
+  text-decoration-color: rgba(185, 245, 66, .45);
+}
+
+body.has-app-sidebar .media-dossier .detail-technical-rail {
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+}
+
+body.has-app-sidebar .media-dossier .detail-technical-rail dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+body.has-app-sidebar .media-dossier .detail-technical-rail dl > div {
+  min-width: 0;
+  padding: 13px 15px;
+  border: 1px solid #273542;
+  border-radius: var(--im-radius-sm);
+  background: rgba(16, 22, 29, .72);
+}
+
+body.has-app-sidebar .media-dossier .detail-technical-rail dt {
+  margin-bottom: 4px;
+}
+
+body.has-app-sidebar .media-dossier .detail-technical-rail dd {
+  margin: 0;
+}
+
+body.has-app-sidebar .media-dossier .dossier-on-disk {
+  margin-top: 0;
+  padding: 20px;
+  border: 1px solid #273542;
+  border-radius: var(--im-radius-lg);
+  background: rgba(11, 17, 23, .72);
+}
+
+body.has-app-sidebar .media-dossier .dossier-on-disk .panel-head {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+body.has-app-sidebar .media-dossier .file-list > article {
+  margin-top: 10px;
+  border-radius: var(--im-radius-sm);
+}
+
+/* People previews turn passive credit links into useful local-library context. */
+.workspace-person-link {
+  cursor: pointer;
+}
+
+.workspace-person-popover {
+  position: fixed;
+  z-index: 120;
+  width: min(330px, calc(100vw - 24px));
+  padding: 14px;
+  border: 1px solid #3a4b5a;
+  border-radius: var(--im-radius-md);
+  background: rgba(15, 21, 28, .985);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, .48);
+  backdrop-filter: blur(18px);
+}
+
+.workspace-person-popover[hidden] {
+  display: none;
+}
+
+.workspace-person-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.workspace-person-popover-head > span {
+  display: grid;
+  gap: 2px;
+}
+
+.workspace-person-popover-head small,
+.workspace-person-popover-label {
+  color: var(--cyan);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+}
+
+.workspace-person-popover-head strong {
+  color: var(--text);
+  font-size: 17px;
+}
+
+.workspace-person-popover-label {
+  display: block;
+  margin: 12px 0 6px;
+  color: var(--muted);
+}
+
+.workspace-person-popover-state {
+  margin: 12px 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workspace-person-title-list {
+  display: grid;
+  gap: 3px;
+}
+
+.workspace-person-title-list a {
+  display: block;
+  padding: 7px 8px;
+  overflow: hidden;
+  border-radius: var(--im-radius-xs);
+  color: var(--text);
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-person-title-list a:hover,
+.workspace-person-title-list a:focus-visible {
+  background: rgba(185, 245, 66, .07);
+  color: var(--lime);
+}
+
+.workspace-person-search {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--cyan);
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
 }
 
 /* Persistent inspector drawer */
@@ -290,6 +625,16 @@ body.workspace-inspector-open .workspace-inspector {
   }
 }
 
+@media (max-width: 1180px) {
+  body.has-app-sidebar .media-dossier .detail-page-head {
+    grid-template-columns: 210px minmax(0, 1fr);
+  }
+
+  body.has-app-sidebar .media-dossier .title-hero-aside {
+    grid-column: 2;
+  }
+}
+
 @media (max-width: 900px) {
   :root { --im-inspector-width: 100vw; }
   .workspace-inspector {
@@ -310,5 +655,33 @@ body.workspace-inspector-open .workspace-inspector {
     overflow-x: auto;
     justify-content: flex-start;
     margin-inline: 8px;
+  }
+
+  body.has-app-sidebar .media-dossier .detail-page-head {
+    grid-template-columns: 170px minmax(0, 1fr);
+    gap: 20px;
+    padding: 20px;
+  }
+
+  body.has-app-sidebar .media-dossier .title-hero-aside {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 620px) {
+  body.has-app-sidebar .media-dossier .detail-page-head {
+    grid-template-columns: 1fr;
+  }
+
+  body.has-app-sidebar .media-dossier .detail-poster-column {
+    width: 150px;
+  }
+
+  body.has-app-sidebar .media-dossier .title-hero-aside {
+    grid-column: auto;
+  }
+
+  body.has-app-sidebar .media-dossier .detail-technical-rail dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
