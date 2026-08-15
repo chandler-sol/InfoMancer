@@ -183,6 +183,23 @@ def build_router(ctx: RouteContext):
             f"{'s' if changed != 1 else ''} changed.",
         )
 
+    @librarian_post("/settings/safety")
+    def update_safety_mode(request: Request, lockdown_mode: str = Form("0")):
+        try:
+            values = app_settings.validate_safety(lockdown_mode)
+            changed = app_settings.update(values, request.state.user.id)
+        except AppSettingError as exc:
+            return render_settings(request, "system", str(exc), status_code=400)
+        mode = "Lockdown Mode" if values["lockdown_mode"] == "1" else "Standard Mode"
+        message = (
+            f"Safety mode changed to {mode}." if changed else f"{mode} is already active."
+        )
+        record_event(
+            "settings", message, context={"lockdown_mode": values["lockdown_mode"]},
+            user_id=request.state.user.id,
+        )
+        return redirect("/settings/system", message)
+
     @librarian_post("/maintenance/backups")
     def create_backup_from_ui(request: Request):
         try:
@@ -863,9 +880,7 @@ def build_router(ctx: RouteContext):
         return redirect(f"/titles/{title_id}", "Series rescan started")
 
     @librarian_post("/roots/{root_id}/delete")
-    def delete_root(root_id: int, confirm: str = Form("")):
-        if confirm != "REMOVE":
-            return redirect("/sources", "Type REMOVE to remove a catalog root")
+    def delete_root(root_id: int):
         with db.connect() as conn:
             conn.execute("DELETE FROM roots WHERE id=?", (root_id,))
         return redirect("/sources", "Catalog root removed; media files were untouched")

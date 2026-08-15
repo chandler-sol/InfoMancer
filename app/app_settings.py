@@ -21,6 +21,7 @@ class AppSettings:
         "search_url_template",
         "log_level",
         "trash_retention_days",
+        "lockdown_mode",
         "hash_mode",
         "hash_immediate_limit",
         "hash_schedule_frequency",
@@ -43,6 +44,7 @@ class AppSettings:
             "search_url_template": environment_search_url,
             "log_level": "info",
             "trash_retention_days": "30",
+            "lockdown_mode": "0",
             "hash_mode": "automatic",
             "hash_immediate_limit": "200",
             "hash_schedule_frequency": "weekly",
@@ -126,6 +128,12 @@ class AppSettings:
         if level not in {"info", "verbose", "debug"}:
             raise AppSettingError("Choose Standard, Verbose, or Debug logging.")
         return {"log_level": level}
+
+    def validate_safety(self, lockdown_mode: str) -> dict[str, str]:
+        mode = lockdown_mode.strip().casefold()
+        if mode not in {"0", "1", "standard", "lockdown"}:
+            raise AppSettingError("Choose Standard Mode or Lockdown Mode.")
+        return {"lockdown_mode": "1" if mode in {"1", "lockdown"} else "0"}
 
     def validate_hashing(
         self, mode: str, immediate_limit: str, frequency: str,
@@ -220,6 +228,8 @@ class AppSettings:
             validated["trash_retention_days"] = retention
         if "log_level" in text_values:
             validated.update(self.validate_logging(text_values["log_level"]))
+        if "lockdown_mode" in text_values:
+            validated.update(self.validate_safety(text_values["lockdown_mode"]))
         hashing_keys = {
             "hash_mode", "hash_immediate_limit", "hash_schedule_frequency",
             "hash_schedule_day", "hash_schedule_time", "hash_io_intensity",

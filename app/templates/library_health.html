@@ -78,44 +78,54 @@
 
 <details class="panel mie-quality-profiles">
   <summary>
-    <span><strong>Quality and consistency profiles</strong><small>Set expectations independently for each media source.</small></span>
+    <span><strong>Quality and consistency profiles</strong><small>Set a library-wide baseline, then customize only the sources that need an exception.</small></span>
   </summary>
   <p class="mie-profile-intro">Blank preferences are ignored. MIE only reports differences and never replaces, moves, or deletes a media file.</p>
-  <div class="mie-profile-list">
+  <section class="mie-profile-card mie-library-default-card">
+    <header>
+      <div><p class="eyebrow">LIBRARY DEFAULTS</p><h2>Default quality profile</h2><p>{% if quality_defaults.configured %}Applies to {{ quality_defaults.inherited_count }} of {{ quality_defaults.source_count }} enabled sources. {{ quality_defaults.override_count }} source{{ '' if quality_defaults.override_count == 1 else 's' }} use custom overrides.{% else %}No library-wide baseline is configured yet. Existing source overrides continue to work independently.{% endif %}</p></div>
+      <span class="mie-profile-state">{{ 'Configured' if quality_defaults.configured else 'Not configured' }}</span>
+    </header>
+    <form class="mie-profile-form" method="post" action="/library-health/quality-defaults">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Minimum width (pixels)<input name="minimum_width" inputmode="numeric" value="{{ quality_defaults.minimum_width or '' }}" placeholder="1920"></label>
+      <label>Minimum height (pixels)<input name="minimum_height" inputmode="numeric" value="{{ quality_defaults.minimum_height or '' }}" placeholder="1080"></label>
+      <label>Minimum bitrate (Mbps)<input name="minimum_bitrate_mbps" inputmode="decimal" value="{{ quality_defaults.minimum_bitrate_mbps }}" placeholder="8"></label>
+      <label>Preferred video codecs<input name="preferred_video_codecs" value="{{ quality_defaults.preferred_video_codecs }}" placeholder="HEVC, AV1"></label>
+      <label>Preferred containers<input name="preferred_containers" value="{{ quality_defaults.preferred_containers }}" placeholder="MATROSKA, MP4"></label>
+      <label>Minimum audio channels<input name="minimum_audio_channels" inputmode="numeric" value="{{ quality_defaults.minimum_audio_channels or '' }}" placeholder="6"></label>
+      <label>Dynamic range<select name="dynamic_range"><option value="any" {% if quality_defaults.dynamic_range == 'any' %}selected{% endif %}>Any</option><option value="sdr" {% if quality_defaults.dynamic_range == 'sdr' %}selected{% endif %}>Prefer SDR</option><option value="hdr" {% if quality_defaults.dynamic_range == 'hdr' %}selected{% endif %}>Prefer HDR</option></select></label>
+      <label class="mie-profile-checkbox"><input type="checkbox" name="detect_outliers" {% if quality_defaults.detect_outliers %}checked{% endif %}> Detect files that differ from a title's dominant technical profile</label>
+      <button class="button primary">Save library defaults and analyze</button>
+    </form>
+    {% if quality_defaults.configured %}<form method="post" action="/library-health/quality-defaults/delete" data-workspace-confirm="Clear the library-wide quality defaults? Source overrides will be preserved."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button">Clear library defaults</button></form>{% endif %}
+  </section>
+  <div class="mie-profile-list mie-source-overrides">
     {% for profile in quality_profiles %}
     <section class="mie-profile-card">
       <header>
-        <div><h2>{{ profile.label or profile.path }}</h2><p>{{ profile.kind|title }} source{% if profile.configured %} · Last updated {{ local_time(profile.updated_at) }}{% endif %}</p></div>
-        <span class="mie-profile-state">{{ 'Configured' if profile.configured else 'Not configured' }}</span>
+        <div><h2>{{ profile.label or profile.path }}</h2><p>{{ profile.kind|title }} source{% if profile.configured %} · Override updated {{ local_time(profile.updated_at) }}{% endif %}</p></div>
+        <span class="mie-profile-state {{ 'inherited' if profile.inheriting else '' }}">{{ profile.state_label }}</span>
       </header>
-      <form class="mie-profile-form" method="post" action="/library-health/quality-profiles/{{ profile.root_id }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label>Minimum width (pixels)<input name="minimum_width" inputmode="numeric" value="{{ profile.minimum_width or '' }}" placeholder="1920"></label>
-        <label>Minimum height (pixels)<input name="minimum_height" inputmode="numeric" value="{{ profile.minimum_height or '' }}" placeholder="1080"></label>
-        <label>Minimum bitrate (Mbps)<input name="minimum_bitrate_mbps" inputmode="decimal" value="{{ profile.minimum_bitrate_mbps }}" placeholder="8"></label>
-        <label>Preferred video codecs<input name="preferred_video_codecs" value="{{ profile.preferred_video_codecs }}" placeholder="HEVC, AV1"></label>
-        <label>Preferred containers<input name="preferred_containers" value="{{ profile.preferred_containers }}" placeholder="MATROSKA, MP4"></label>
-        <label>Minimum audio channels<input name="minimum_audio_channels" inputmode="numeric" value="{{ profile.minimum_audio_channels or '' }}" placeholder="6"></label>
-        <label>Dynamic range
-          <select name="dynamic_range">
-            <option value="any" {% if profile.dynamic_range == 'any' %}selected{% endif %}>Any</option>
-            <option value="sdr" {% if profile.dynamic_range == 'sdr' %}selected{% endif %}>Prefer SDR</option>
-            <option value="hdr" {% if profile.dynamic_range == 'hdr' %}selected{% endif %}>Prefer HDR</option>
-          </select>
-        </label>
-        <label class="mie-profile-checkbox"><input type="checkbox" name="detect_outliers" {% if profile.detect_outliers %}checked{% endif %}> Detect files that differ from a title's dominant technical profile</label>
-        <button class="button primary">Save and analyze</button>
-      </form>
-      {% if profile.configured %}
-      <form class="mie-profile-delete" method="post" action="/library-health/quality-profiles/{{ profile.root_id }}/delete">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button class="button">Remove profile</button>
-      </form>
-      {% endif %}
+      {% if profile.inheriting %}<p class="mie-effective-profile">Effective profile: inherited from the library defaults. Customize only when this source needs different expectations.</p>{% elif not profile.configured %}<p class="mie-effective-profile">No quality expectations apply to this source yet.</p>{% endif %}
+      <details class="mie-source-profile-editor" {% if profile.configured %}open{% endif %}>
+        <summary class="button">{{ 'Edit source override' if profile.configured else 'Customize this source' }}</summary>
+        <form class="mie-profile-form" method="post" action="/library-health/quality-profiles/{{ profile.root_id }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>Minimum width (pixels)<input name="minimum_width" inputmode="numeric" value="{{ profile.minimum_width or '' }}" placeholder="1920"></label>
+          <label>Minimum height (pixels)<input name="minimum_height" inputmode="numeric" value="{{ profile.minimum_height or '' }}" placeholder="1080"></label>
+          <label>Minimum bitrate (Mbps)<input name="minimum_bitrate_mbps" inputmode="decimal" value="{{ profile.minimum_bitrate_mbps }}" placeholder="8"></label>
+          <label>Preferred video codecs<input name="preferred_video_codecs" value="{{ profile.preferred_video_codecs }}" placeholder="HEVC, AV1"></label>
+          <label>Preferred containers<input name="preferred_containers" value="{{ profile.preferred_containers }}" placeholder="MATROSKA, MP4"></label>
+          <label>Minimum audio channels<input name="minimum_audio_channels" inputmode="numeric" value="{{ profile.minimum_audio_channels or '' }}" placeholder="6"></label>
+          <label>Dynamic range<select name="dynamic_range"><option value="any" {% if profile.dynamic_range == 'any' %}selected{% endif %}>Any</option><option value="sdr" {% if profile.dynamic_range == 'sdr' %}selected{% endif %}>Prefer SDR</option><option value="hdr" {% if profile.dynamic_range == 'hdr' %}selected{% endif %}>Prefer HDR</option></select></label>
+          <label class="mie-profile-checkbox"><input type="checkbox" name="detect_outliers" {% if profile.detect_outliers %}checked{% endif %}> Detect files that differ from a title's dominant technical profile</label>
+          <button class="button primary">Save source override and analyze</button>
+        </form>
+      </details>
+      {% if profile.configured %}<form class="mie-profile-delete" method="post" action="/library-health/quality-profiles/{{ profile.root_id }}/delete"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button">Use library defaults</button></form>{% endif %}
     </section>
-    {% else %}
-    <p>No enabled media sources are available. Add a source before creating a quality profile.</p>
-    {% endfor %}
+    {% else %}<p>No enabled media sources are available. Add a source before creating a quality profile.</p>{% endfor %}
   </div>
 </details>
 

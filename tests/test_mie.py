@@ -51,6 +51,31 @@ class MediaIntelligenceEngineTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
+    def test_library_quality_defaults_are_inherited_and_source_overrides_win(self):
+        initial = self.engine.library_quality_defaults()
+        self.assertFalse(initial["configured"])
+        self.engine.save_library_quality_defaults(
+            minimum_width="1920", minimum_height="1080", minimum_bitrate_mbps="8",
+            preferred_video_codecs="HEVC, AV1", preferred_containers="MATROSKA, MP4",
+            minimum_audio_channels="6", dynamic_range="any", detect_outliers=True,
+        )
+        defaults = self.engine.library_quality_defaults()
+        self.assertTrue(defaults["configured"])
+        self.assertEqual(defaults["minimum_width"], 1920)
+        inherited = self.engine.quality_profiles()[0]
+        self.assertTrue(inherited["inheriting"])
+        self.assertFalse(inherited["configured"])
+        self.assertEqual(inherited["minimum_width"], 1920)
+        self.engine.save_quality_profile(1, minimum_width="1280", detect_outliers=False)
+        override = self.engine.quality_profiles()[0]
+        self.assertTrue(override["configured"])
+        self.assertFalse(override["inheriting"])
+        self.assertEqual(override["minimum_width"], 1280)
+        self.engine.delete_quality_profile(1)
+        inherited_again = self.engine.quality_profiles()[0]
+        self.assertTrue(inherited_again["inheriting"])
+        self.assertEqual(inherited_again["minimum_width"], 1920)
+
     def test_analysis_explains_existing_catalog_facts_without_changing_media(self):
         with self.database.connect() as conn:
             file_before = dict(conn.execute(

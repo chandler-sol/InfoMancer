@@ -470,9 +470,18 @@ class MediaIntelligenceEngine:
                         },
                     })
 
-            profiles = {
+            source_profiles = {
                 int(row["root_id"]): dict(row)
                 for row in conn.execute("SELECT * FROM mie_quality_profiles")
+            }
+            library_profile = self._library_quality_defaults_raw(conn)
+            enabled_root_ids = {
+                int(row["id"]) for row in conn.execute("SELECT id FROM roots WHERE enabled=1")
+            }
+            profiles = {
+                root_id: source_profiles.get(root_id) or library_profile
+                for root_id in enabled_root_ids
+                if source_profiles.get(root_id) is not None or library_profile is not None
             }
             title_quality_rows: dict[int, list[dict[str, Any]]] = defaultdict(list)
             for title_id, title_files in files_by_title.items():
@@ -537,10 +546,10 @@ class MediaIntelligenceEngine:
                             "root_id": title["root_id"],
                             "title_id": title_id,
                             "file_id": file["id"],
-                            "summary": f"{file['filename']} is outside this source's quality profile",
+                            "summary": f"{file['filename']} is outside its effective quality profile",
                             "explanation": (
                                 f"{title_name} was compared with the preferences a Librarian "
-                                "set for this source. " + "; ".join(violations) + "."
+                                "set for this source or inherited from the library defaults. " + "; ".join(violations) + "."
                             ),
                             "recommendation": (
                                 "Review whether this is an intentional edition or an older copy. "
@@ -926,41 +935,13 @@ class MediaIntelligenceEngine:
             )
         return bool(cursor.rowcount)
 
-    def quality_profiles(self) -> list[dict[str, Any]]:
-        with self.database.connect() as conn:
-            rows = conn.execute(
-                """SELECT r.id root_id,r.label,r.path,r.kind,
-                          p.minimum_width,p.minimum_height,p.minimum_bitrate,
-                          p.preferred_video_codecs,p.preferred_containers,
-                          p.minimum_audio_channels,p.dynamic_range,p.detect_outliers,
-                          p.updated_at
-                   FROM roots r LEFT JOIN mie_quality_profiles p ON p.root_id=r.id
-                   WHERE r.enabled=1 ORDER BY r.kind,r.label COLLATE NOCASE,r.path"""
-            ).fetchall()
-        profiles = []
-        for row in rows:
-            profile = dict(row)
-            profile["configured"] = row["updated_at"] is not None
-            profile["preferred_video_codecs"] = row["preferred_video_codecs"] or ""
-            profile["preferred_containers"] = row["preferred_containers"] or ""
-            profile["dynamic_range"] = row["dynamic_range"] or "any"
-            profile["detect_outliers"] = (
-                True if row["detect_outliers"] is None else bool(row["detect_outliers"])
-            )
-            profile["minimum_bitrate_mbps"] = (
-                round(int(row["minimum_bitrate"]) / 1_000_000, 2)
-                if row["minimum_bitrate"] else ""
-            )
-            profiles.append(profile)
-        return profiles
-
-    def save_quality_profile(
-        self, root_id: int, *, minimum_width: str = "", minimum_height: str = "",
+    @staticmethod
+    def _normalize_quality_profile(
+        *, minimum_width: str = "", minimum_height: str = "",
         minimum_bitrate_mbps: str = "", preferred_video_codecs: str = "",
         preferred_containers: str = "", minimum_audio_channels: str = "",
         dynamic_range: str = "any", detect_outliers: bool = True,
-        user_id: int | None = None,
-    ) -> None:
+    ) -> dict[str, Any]:
         def optional_integer(value: str, label: str, maximum: int) -> int | None:
             value = value.strip()
             if not value:
@@ -982,9 +963,7 @@ class MediaIntelligenceEngine:
             try:
                 bitrate_mbps = float(bitrate_text)
             except ValueError as exc:
-                raise ValueError(
-                    "Minimum bitrate must be a number in Mbps or left blank."
-                ) from exc
+                raise ValueError("Minimum bitrate must be a number in Mbps or left blank.") from exc
             if bitrate_mbps <= 0 or bitrate_mbps > 1_000:
                 raise ValueError("Minimum bitrate must be greater than 0 and at most 1,000 Mbps.")
             bitrate = round(bitrate_mbps * 1_000_000)
@@ -1006,9 +985,139 @@ class MediaIntelligenceEngine:
 
         codecs = normalized_list(preferred_video_codecs, "Preferred video codec")
         containers = normalized_list(preferred_containers, "Preferred container")
-        dynamic_range = dynamic_range.strip().casefold()
-        if dynamic_range not in {"any", "sdr", "hdr"}:
+        range_value = dynamic_range.strip().casefold()
+        if range_value not in {"any", "sdr", "hdr"}:
             raise ValueError("Dynamic range preference must be Any, SDR, or HDR.")
+        return {
+            "minimum_width": width, "minimum_height": height,
+            "minimum_bitrate": bitrate,
+            "preferred_video_codecs": codecs, "preferred_containers": containers,
+            "minimum_audio_channels": channels, "dynamic_range": range_value,
+            "detect_outliers": int(bool(detect_outliers)),
+        }
+
+    @staticmethod
+    def _quality_profile_display(profile: dict[str, Any] | None) -> dict[str, Any]:
+        profile = dict(profile or {})
+        return {
+            "minimum_width": profile.get("minimum_width"),
+            "minimum_height": profile.get("minimum_height"),
+            "minimum_bitrate": profile.get("minimum_bitrate"),
+            "minimum_bitrate_mbps": (
+                round(int(profile["minimum_bitrate"]) / 1_000_000, 2)
+                if profile.get("minimum_bitrate") else ""
+            ),
+            "preferred_video_codecs": profile.get("preferred_video_codecs") or "",
+            "preferred_containers": profile.get("preferred_containers") or "",
+            "minimum_audio_channels": profile.get("minimum_audio_channels"),
+            "dynamic_range": profile.get("dynamic_range") or "any",
+            "detect_outliers": True if profile.get("detect_outliers") is None else bool(profile.get("detect_outliers")),
+        }
+
+    def _library_quality_defaults_raw(self, conn=None) -> dict[str, Any] | None:
+        if conn is None:
+            with self.database.connect() as connection:
+                return self._library_quality_defaults_raw(connection)
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key='mie_quality_defaults'"
+        ).fetchone()
+        if not row or not row["value"]:
+            return None
+        try:
+            value = json.loads(row["value"])
+        except (json.JSONDecodeError, TypeError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    def library_quality_defaults(self) -> dict[str, Any]:
+        raw = self._library_quality_defaults_raw()
+        result = self._quality_profile_display(raw)
+        result["configured"] = raw is not None
+        with self.database.connect() as conn:
+            total = int(conn.execute("SELECT COUNT(*) FROM roots WHERE enabled=1").fetchone()[0])
+            overrides = int(conn.execute(
+                """SELECT COUNT(*) FROM mie_quality_profiles p
+                   JOIN roots r ON r.id=p.root_id WHERE r.enabled=1"""
+            ).fetchone()[0])
+        result["source_count"] = total
+        result["override_count"] = overrides
+        result["inherited_count"] = max(0, total - overrides) if raw is not None else 0
+        return result
+
+    def save_library_quality_defaults(
+        self, *, minimum_width: str = "", minimum_height: str = "",
+        minimum_bitrate_mbps: str = "", preferred_video_codecs: str = "",
+        preferred_containers: str = "", minimum_audio_channels: str = "",
+        dynamic_range: str = "any", detect_outliers: bool = True,
+        user_id: int | None = None,
+    ) -> None:
+        profile = self._normalize_quality_profile(
+            minimum_width=minimum_width, minimum_height=minimum_height,
+            minimum_bitrate_mbps=minimum_bitrate_mbps,
+            preferred_video_codecs=preferred_video_codecs,
+            preferred_containers=preferred_containers,
+            minimum_audio_channels=minimum_audio_channels, dynamic_range=dynamic_range,
+            detect_outliers=detect_outliers,
+        )
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO app_settings(key,value,updated_by,updated_at)
+                   VALUES ('mie_quality_defaults',?,?,CURRENT_TIMESTAMP)
+                   ON CONFLICT(key) DO UPDATE SET value=excluded.value,
+                     updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP""",
+                (json.dumps(profile, ensure_ascii=False), user_id if user_id and user_id > 0 else None),
+            )
+
+    def delete_library_quality_defaults(self) -> bool:
+        with self.database.connect() as conn:
+            result = conn.execute("DELETE FROM app_settings WHERE key='mie_quality_defaults'")
+        return bool(result.rowcount)
+
+    def quality_profiles(self) -> list[dict[str, Any]]:
+        library_defaults = self._library_quality_defaults_raw()
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """SELECT r.id root_id,r.label,r.path,r.kind,
+                          p.minimum_width,p.minimum_height,p.minimum_bitrate,
+                          p.preferred_video_codecs,p.preferred_containers,
+                          p.minimum_audio_channels,p.dynamic_range,p.detect_outliers,
+                          p.updated_at
+                   FROM roots r LEFT JOIN mie_quality_profiles p ON p.root_id=r.id
+                   WHERE r.enabled=1 ORDER BY r.kind,r.label COLLATE NOCASE,r.path"""
+            ).fetchall()
+        profiles = []
+        for row in rows:
+            override = row["updated_at"] is not None
+            raw = dict(row) if override else library_defaults
+            profile = {"root_id": row["root_id"], "label": row["label"],
+                       "path": row["path"], "kind": row["kind"],
+                       "updated_at": row["updated_at"]}
+            profile.update(self._quality_profile_display(raw))
+            profile["configured"] = override
+            profile["inheriting"] = bool(not override and library_defaults is not None)
+            profile["state_label"] = (
+                "Source override" if override else
+                "Inheriting library defaults" if library_defaults is not None else
+                "Not configured"
+            )
+            profiles.append(profile)
+        return profiles
+
+    def save_quality_profile(
+        self, root_id: int, *, minimum_width: str = "", minimum_height: str = "",
+        minimum_bitrate_mbps: str = "", preferred_video_codecs: str = "",
+        preferred_containers: str = "", minimum_audio_channels: str = "",
+        dynamic_range: str = "any", detect_outliers: bool = True,
+        user_id: int | None = None,
+    ) -> None:
+        profile = self._normalize_quality_profile(
+            minimum_width=minimum_width, minimum_height=minimum_height,
+            minimum_bitrate_mbps=minimum_bitrate_mbps,
+            preferred_video_codecs=preferred_video_codecs,
+            preferred_containers=preferred_containers,
+            minimum_audio_channels=minimum_audio_channels, dynamic_range=dynamic_range,
+            detect_outliers=detect_outliers,
+        )
         with self.database.connect() as conn:
             if not conn.execute(
                 "SELECT 1 FROM roots WHERE id=? AND enabled=1", (root_id,)
@@ -1033,10 +1142,11 @@ class MediaIntelligenceEngine:
                      dynamic_range=excluded.dynamic_range,
                      detect_outliers=excluded.detect_outliers,
                      updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP""",
-                (
-                    root_id, width, height, bitrate, codecs, containers, channels,
-                    dynamic_range, int(detect_outliers), user_id,
-                ),
+                (root_id, profile["minimum_width"], profile["minimum_height"],
+                 profile["minimum_bitrate"], profile["preferred_video_codecs"],
+                 profile["preferred_containers"], profile["minimum_audio_channels"],
+                 profile["dynamic_range"], profile["detect_outliers"],
+                 user_id if user_id and user_id > 0 else None),
             )
 
     def delete_quality_profile(self, root_id: int) -> bool:

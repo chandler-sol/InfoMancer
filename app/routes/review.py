@@ -208,6 +208,8 @@ def build_router(ctx: RouteContext):
                         "categories": sorted(MIE_CATEGORIES),
                         "severities": ["critical", "warning", "information"],
                         "quality_profiles": mie.quality_profiles(),
+            "quality_defaults": mie.library_quality_defaults(),
+                        "quality_defaults": mie.library_quality_defaults(),
                         "calibration": mie.calibration(),
                         "category_scores": mie.category_scores(),
                         "analysis_history": mie.analysis_history(),
@@ -230,6 +232,7 @@ def build_router(ctx: RouteContext):
             "categories": sorted(MIE_CATEGORIES),
             "severities": ["critical", "warning", "information"],
             "quality_profiles": mie.quality_profiles(),
+            "quality_defaults": mie.library_quality_defaults(),
             "calibration": mie.calibration(),
             "category_scores": mie.category_scores(),
             "analysis_history": mie.analysis_history(),
@@ -415,6 +418,48 @@ def build_router(ctx: RouteContext):
         return redirect(
             "/library-health",
             f"Checked {len(results):,} sources: {healthy:,} available and {len(results)-healthy:,} still protected. No catalog or media files were changed.",
+        )
+
+    @librarian_post("/library-health/quality-defaults")
+    def save_library_quality_defaults(
+        request: Request, minimum_width: str = Form(""), minimum_height: str = Form(""),
+        minimum_bitrate_mbps: str = Form(""), preferred_video_codecs: str = Form(""),
+        preferred_containers: str = Form(""), minimum_audio_channels: str = Form(""),
+        dynamic_range: str = Form("any"), detect_outliers: str = Form(""),
+    ):
+        try:
+            mie.save_library_quality_defaults(
+                minimum_width=minimum_width, minimum_height=minimum_height,
+                minimum_bitrate_mbps=minimum_bitrate_mbps,
+                preferred_video_codecs=preferred_video_codecs,
+                preferred_containers=preferred_containers,
+                minimum_audio_channels=minimum_audio_channels,
+                dynamic_range=dynamic_range, detect_outliers=detect_outliers == "on",
+                user_id=request.state.user.id,
+            )
+            finding_count = mie.analyze()
+        except (ValueError, sqlite3.Error) as exc:
+            return redirect("/library-health", f"Library quality defaults were not saved. {exc}")
+        record_event(
+            "mie", "Library-wide quality defaults were saved.",
+            context={"finding_count": finding_count}, user_id=request.state.user.id,
+        )
+        return redirect(
+            "/library-health",
+            "Library quality defaults saved and analysis refreshed. Source overrides were preserved.",
+        )
+
+    @librarian_post("/library-health/quality-defaults/delete")
+    def delete_library_quality_defaults(request: Request):
+        mie.delete_library_quality_defaults()
+        finding_count = mie.analyze()
+        record_event(
+            "mie", "Library-wide quality defaults were cleared.",
+            context={"finding_count": finding_count}, user_id=request.state.user.id,
+        )
+        return redirect(
+            "/library-health",
+            "Library quality defaults cleared. Existing source overrides remain configured.",
         )
 
     @librarian_post("/library-health/quality-profiles/{root_id}")

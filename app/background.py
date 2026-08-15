@@ -233,6 +233,14 @@ class BackgroundCoordinator:
 
     def maybe_start_trash_cleanup(self) -> None:
         """Check for expired managed-trash items at most once per day."""
+        if self.app_settings.get("lockdown_mode") == "1":
+            with self.trash_cleanup_lock:
+                self.trash_cleanup_job.clear()
+                self.trash_cleanup_job.update({
+                    "status": "paused",
+                    "detail": "Lockdown Mode is preventing permanent managed-trash deletion",
+                })
+            return
         now = time.time()
         with self.trash_cleanup_lock:
             if now - self.trash_cleanup_last_check < 86_400:

@@ -21,6 +21,7 @@ class AppSettingsTests(unittest.TestCase):
     def test_defaults_validation_update_and_history(self):
         self.assertEqual(self.settings.get("installation_name"), "InfoMancer")
         self.assertEqual(self.settings.get("search_provider_name"), "example.test")
+        self.assertEqual(self.settings.get("lockdown_mode"), "0")
 
         values = self.settings.validate_general(
             "  Family   Archive  ", "America/New_York", "covers", "220"
@@ -45,6 +46,15 @@ class AppSettingsTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(AppSettingError, "complete HTTP or HTTPS"):
             self.settings.validate_external_search("Example", "ftp://example.test/{query}")
+
+    def test_safety_mode_is_explicit_and_portable(self):
+        self.assertEqual(self.settings.validate_safety("standard"), {"lockdown_mode": "0"})
+        self.assertEqual(self.settings.validate_safety("lockdown"), {"lockdown_mode": "1"})
+        self.settings.update({"lockdown_mode": "1"}, None)
+        self.assertEqual(self.settings.get("lockdown_mode"), "1")
+        self.assertEqual(self.settings.validate_import({"lockdown_mode": "0"}), {"lockdown_mode": "0"})
+        with self.assertRaisesRegex(AppSettingError, "Standard Mode or Lockdown Mode"):
+            self.settings.validate_safety("reckless")
 
     def test_external_search_update(self):
         values = self.settings.validate_external_search(

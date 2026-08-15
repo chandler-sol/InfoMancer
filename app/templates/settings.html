@@ -63,7 +63,7 @@
     <div class="settings-metrics system-metrics"><div><strong>{{ '{:,}'.format(system_counts.titles) }}</strong><span>Titles</span></div><div><strong>{{ '{:,}'.format(system_counts.files) }}</strong><span>Media files</span></div><div><strong>{{ '{:,}'.format(system_counts.roots) }}</strong><span>Sources</span></div><div><strong>{{ '{:,}'.format(system_counts.active_users) }}</strong><span>Active users</span></div></div>
   </section>
   <nav class="settings-jump-nav full-width" aria-label="System settings sections">
-    <a href="#storage">Storage</a><a href="#fingerprints">Fingerprints</a><a href="#backups">Backups</a><a href="#updates">Updates</a><a href="#media-information">Media inspection</a><a href="#logging">Logs</a><a href="#service">Service</a>
+    <a href="#storage">Storage</a><a href="#safety">Safety</a><a href="#fingerprints">Fingerprints</a><a href="#backups">Backups</a><a href="#updates">Updates</a><a href="#media-information">Media inspection</a><a href="#logging">Logs</a><a href="#service">Service</a>
   </nav>
   <div class="system-overview-grid full-width">
   <section class="panel settings-card system-storage-card" id="storage">
@@ -75,6 +75,15 @@
     <p class="eyebrow">DEPLOYMENT</p><h2>Protected configuration</h2>
     <dl class="settings-facts"><div><dt>Authentication</dt><dd>{{ auth_mode|title }}</dd></div><div><dt>Session lifetime</dt><dd>{{ settings_session_days }} day{% if settings_session_days != 1 %}s{% endif %}</dd></div><div><dt>Secure cookie</dt><dd>{{ cookie_secure_setting|title }}</dd></div><div><dt>Cloudflare identity</dt><dd>{{ 'Configured' if cloudflare_configured else 'Not configured in InfoMancer' }}</dd></div><div><dt>Accessible storage locations</dt><dd>{% for root in browse_roots %}<code>{{ root }}</code>{% if not loop.last %}<br>{% endif %}{% endfor %}<small>Paths visible inside InfoMancer. Docker maps your Windows, macOS, or Linux folders into these locations.</small></dd></div></dl>
     <p class="muted">Authentication, secrets, trusted filesystem paths, and Cloudflare identity validation require server configuration and an application restart.</p>
+  </section>
+  <section class="panel settings-card system-safety-card" id="safety">
+    <div class="settings-card-head"><div><p class="eyebrow">SAFETY</p><h2>File protection mode</h2></div><span class="settings-state {{ 'warn' if preferences.lockdown_mode == '1' else 'good' }}">{{ 'Lockdown' if preferences.lockdown_mode == '1' else 'Standard' }}</span></div>
+    <p class="muted">Standard Mode uses clear confirmation dialogs for destructive actions. Lockdown Mode adds typed confirmation to irreversible file decisions and pauses automatic managed-trash deletion.</p>
+    <form class="settings-form safety-mode-form" method="post" action="/settings/safety">
+      <label class="safety-mode-choice"><input type="radio" name="lockdown_mode" value="0" {% if preferences.lockdown_mode != '1' %}checked{% endif %}><span><strong>Standard Mode</strong><small>Confirm destructive actions with a normal warning dialog.</small></span></label>
+      <label class="safety-mode-choice"><input type="radio" name="lockdown_mode" value="1" {% if preferences.lockdown_mode == '1' %}checked{% endif %}><span><strong>Lockdown Mode</strong><small>Require additional typed confirmation for irreversible file deletion. Automatic managed-trash purging is paused.</small></span></label>
+      <button class="button primary">Save safety mode</button>
+    </form>
   </section>
   <section class="panel settings-card system-portable-card">
     <p class="eyebrow">PORTABLE CONFIGURATION</p><h2>Export or import settings</h2>

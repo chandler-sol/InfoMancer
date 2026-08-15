@@ -7,7 +7,7 @@
 <div class="page-head sources-page-head"><div><p class="eyebrow">CONFIGURATION</p><h1>Sources</h1><p class="muted">Manage the folders InfoMancer is allowed to catalog.</p></div></div>
 {% if setup_assistant_active %}<section class="setup-handoff-banner"><div><p class="eyebrow">GUIDED SETUP · SOURCE STEP</p><strong>Add every Movie and TV Shows folder you want InfoMancer to catalog.</strong><span>You can return to the assistant after adding one or several sources.</span></div><a class="button primary" href="/getting-started/sources">Continue guided setup</a></section>{% endif %}
 <div class="split">
-  <section class="panel grow"><div class="panel-head"><div><p class="eyebrow">CONFIGURED</p><h2>Library roots</h2></div><div class="actions"><a class="button intake-button" href="/intake">Ready to match</a><form method="post" action="/scan-all"><button class="button primary">Scan all sources</button></form></div></div>
+  <section class="panel grow"><div class="panel-head"><div><p class="eyebrow">CONFIGURED</p><h2>Library roots</h2></div><div class="actions sources-global-actions"><a class="button intake-button" href="/intake">Ready to match</a><form method="post" action="/scan-all"><button class="button primary">Scan all sources</button></form></div></div>
     {% if roots %}<div class="root-list">{% for root in roots %}
       <article class="root-row">
         <span class="kind {{ root.kind }}">{{ root.kind }}</span>
@@ -15,16 +15,18 @@
           <small>{{ root.title_count }} titles · {{ root.file_count }} video files{% if root.last_scanned_at %} · scanned {{ local_time(root.last_scanned_at) }}{% endif %}</small>
           <span class="source-health source-health-{{ root.health_status or 'unknown' }}">{{ (root.health_status or 'unknown')|title }}{% if root.last_seen_at %} · last seen {{ local_time(root.last_seen_at) }}{% endif %}</span>
           {% if root.health_status in ('offline','degraded') %}<small class="source-health-guidance">{{ root.last_error or 'Check the storage connection before scanning.' }} Source Guard is protecting {{ root.guard_preserved_count or root.file_count }} catalog files.</small>{% endif %}</a>
-        <div class="actions">
+        <div class="actions source-action-rail">
           <form method="post" action="/roots/{{ root.id }}/check"><button class="button">Check connection</button></form>
           <form method="post" action="/roots/{{ root.id }}/scan"><button class="button">Scan</button></form>
-          <details class="root-name-editor"><summary>Edit name</summary>
+          <details class="root-name-editor source-action-popover"><summary class="button">Edit name</summary>
             <form method="post" action="/roots/{{ root.id }}/label" class="root-name-form">
               <label>Display name <span class="muted">optional</span><input name="label" value="{{ root.label or '' }}" placeholder="For example, Family Movies" autocomplete="off" maxlength="120"></label>
               <div class="actions"><button type="button" class="button small" data-cancel-root-name>Cancel</button><button class="button primary small">Save name</button></div>
             </form>
           </details>
-          <details><summary>Remove</summary><form class="confirm-inline" method="post" action="/roots/{{ root.id }}/delete"><input name="confirm" placeholder="Type REMOVE"><button class="danger">Remove catalog</button></form></details>
+          <form class="source-remove-form" method="post" action="/roots/{{ root.id }}/delete" data-workspace-confirm="Remove {{ root.label or root.path }} from InfoMancer? Its catalog records will be removed, but your media files will not be deleted.">
+            <button class="source-trash-button" type="submit" title="Remove source" aria-label="Remove {{ root.label or root.path }} source"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-1 11H8L7 9Zm3 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg></button>
+          </form>
         </div>
       </article>
     {% endfor %}</div>{% else %}<div class="empty">No library roots configured.</div>{% endif %}
@@ -222,13 +224,17 @@
 </script>
 <script>
 (() => {
+  const editors = [...document.querySelectorAll(".root-name-editor")];
+  const closeEditors = except => editors.forEach(editor => { if (editor !== except) editor.removeAttribute("open"); });
+  editors.forEach(editor => editor.addEventListener("toggle", () => { if (editor.open) closeEditors(editor); }));
   document.querySelectorAll("[data-cancel-root-name]").forEach(button => {
     button.addEventListener("click", () => button.closest("details")?.removeAttribute("open"));
   });
   document.addEventListener("click", event => {
-    document.querySelectorAll(".root-name-editor[open]").forEach(editor => {
-      if (!editor.contains(event.target)) editor.removeAttribute("open");
-    });
+    editors.forEach(editor => { if (editor.open && !editor.contains(event.target)) editor.removeAttribute("open"); });
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") closeEditors(null);
   });
 })();
 </script>
