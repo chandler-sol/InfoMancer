@@ -13,11 +13,11 @@ InfoMancer 0.8 starts the transition from a page-oriented management website to 
 
 ## Navigation model
 
-Primary work domains are Dashboard, Library, Review, Sources, and Activity. Existing capabilities remain available as secondary destinations beneath Library, Review, and System groupings.
+Primary work domains are Dashboard, Library, Review, Sources, and Activity. Existing capabilities remain available as collapsible secondary destinations beneath Library, Review, and More. The final navigation hierarchy is rendered by Jinja on the first response; JavaScript only coordinates interaction, so the shell does not repaint from a legacy menu after load.
 
 ## Workspace phases
 
-1. **W1 Foundation**: shared workspace styles, navigation hierarchy, contextual bulk-action toolbar, first persistent Library inspector.
+1. **W1 Foundation + stabilization**: server-rendered workspace shell, collapsible navigation hierarchy, intentional compact rail, contextual bulk-action toolbar, cohesive title dossier, local-library people previews, and the first persistent Library inspector.
 2. **W2 Library**: server-backed inspector partials, richer file/edition/quality information, history-aware selection state, instantaneous favorite/tag actions.
 3. **W3 Review**: unified queue for MIE findings, duplicates, unmatched media, missing episodes, metadata issues, and quality decisions.
 4. **W4 Interaction**: reusable drawers, dialogs, toasts, partial navigation, keyboard shortcuts, and command palette.

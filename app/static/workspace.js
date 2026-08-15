@@ -1,113 +1,16 @@
 (() => {
-  const path = window.location.pathname;
-
-  const cloneLink = (source, href, label) => {
-    if (!source) return null;
-    const link = source.cloneNode(true);
-    link.href = href;
-    const text = link.querySelector("span");
-    if (text) text.textContent = label;
-    link.classList.remove("active");
-    link.removeAttribute("aria-current");
-    link.title = label;
-    return link;
-  };
-
-  const markActive = (link, active) => {
-    if (!link) return;
-    link.classList.toggle("active", active);
-    if (active) link.setAttribute("aria-current", "page");
-    else link.removeAttribute("aria-current");
-  };
-
-  const startsAny = (prefixes) => prefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
-
-  const ensureAlphaBadge = () => {
-    const brand = document.querySelector(".brand");
-    if (!brand || brand.querySelector(".workspace-nav-alpha")) return;
-    const alpha = document.createElement("span");
-    alpha.className = "workspace-nav-alpha";
-    alpha.textContent = "0.8 α";
-    alpha.title = "InfoMancer 0.8 Alpha Workspace";
-    alpha.setAttribute("aria-label", "Version 0.8 Alpha Workspace");
-    brand.append(alpha);
-  };
-
-  const enhanceNavigation = () => {
+  const enhanceWorkspaceNavigation = () => {
     const panel = document.getElementById("site-menu-panel");
-    if (!panel || panel.dataset.workspaceReady === "1") return;
-
-    const originals = [...panel.querySelectorAll(":scope > a")];
-    if (!originals.length) return;
-    const byHref = new Map(originals.map((link) => [new URL(link.href, window.location.origin).pathname, link]));
-    const source = (...hrefs) => hrefs.map((href) => byHref.get(href)).find(Boolean) || originals[0];
-
-    const primary = document.createElement("div");
-    primary.className = "workspace-nav-primary";
-    const dashboard = cloneLink(source("/"), "/", "Dashboard");
-    const library = cloneLink(source("/movies", "/shows"), "/library", "Library");
-    const review = cloneLink(source("/library-health", "/duplicates"), "/library-health", "Review");
-    const sources = cloneLink(source("/settings"), "/sources", "Sources");
-    const activity = cloneLink(source("/activity"), "/activity", "Activity");
-    markActive(dashboard, path === "/");
-    markActive(library, startsAny(["/library", "/movies", "/shows", "/titles", "/files", "/collections", "/libraries", "/favorites"]));
-    markActive(review, startsAny(["/library-health", "/duplicates", "/bulk-match"]));
-    markActive(sources, startsAny(["/sources"]));
-    markActive(activity, startsAny(["/activity", "/announcements"]));
-    [dashboard, library, review, sources, activity].filter(Boolean).forEach((link) => primary.append(link));
-
-    const makeSection = (title, hrefs, openWhen) => {
-      const links = hrefs.map((href) => byHref.get(href)).filter(Boolean);
-      if (!links.length) return null;
-      const section = document.createElement("details");
-      section.className = "workspace-nav-section";
-      section.dataset.workspaceSection = title.toLowerCase();
-      section.open = Boolean(openWhen);
-
-      const summary = document.createElement("summary");
-      summary.textContent = title;
-      summary.setAttribute("aria-label", `${title} shortcuts`);
-      const list = document.createElement("div");
-      list.className = "workspace-nav-secondary";
-      links.forEach((link) => {
-        link.title = link.querySelector("span")?.textContent?.trim() || link.textContent.trim();
-        list.append(link);
-      });
-      section.append(summary, list);
-      return section;
-    };
-
-    const librarySection = makeSection(
-      "Library",
-      ["/movies", "/shows", "/collections", "/libraries", "/favorites"],
-      startsAny(["/library", "/movies", "/shows", "/titles", "/files", "/collections", "/libraries", "/favorites"]),
-    );
-    const reviewSection = makeSection(
-      "Review",
-      ["/library-health", "/duplicates", "/bulk-match"],
-      startsAny(["/library-health", "/duplicates", "/bulk-match"]),
-    );
-    const moreSection = makeSection(
-      "More",
-      ["/settings", "/help", "/about"],
-      startsAny(["/settings", "/help", "/about"]),
-    );
-
-    panel.replaceChildren(primary);
-    [librarySection, reviewSection, moreSection].filter(Boolean).forEach((section) => panel.append(section));
-    panel.classList.add("workspace-nav-ready");
-    panel.dataset.workspaceReady = "1";
-
-    panel.querySelectorAll(".workspace-nav-section").forEach((section) => {
+    if (!panel) return;
+    const sections = [...panel.querySelectorAll(".workspace-nav-section")];
+    sections.forEach((section) => {
       section.addEventListener("toggle", () => {
         if (!section.open) return;
-        panel.querySelectorAll(".workspace-nav-section[open]").forEach((other) => {
+        sections.forEach((other) => {
           if (other !== section) other.open = false;
         });
       });
     });
-
-    ensureAlphaBadge();
   };
 
   const enhanceLibraryInspector = () => {
@@ -412,7 +315,7 @@
   };
 
   const initialize = () => {
-    enhanceNavigation();
+    enhanceWorkspaceNavigation();
     enhanceLibraryInspector();
     enhanceCreditHoverCards();
   };

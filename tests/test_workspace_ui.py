@@ -15,22 +15,28 @@ class WorkspaceFoundationTests(unittest.TestCase):
         self.assertIn("path='workspace.css'", base)
         self.assertIn("path='workspace.js'", base)
 
-    def test_workspace_navigation_keeps_core_domains_and_collapsible_destinations(self):
+    def test_workspace_navigation_is_server_rendered_and_collapsible(self):
+        base = (ROOT / "app" / "templates" / "base.html").read_text(encoding="utf-8")
         script = (ROOT / "app" / "static" / "workspace.js").read_text(encoding="utf-8")
         styles = (ROOT / "app" / "static" / "workspace.css").read_text(encoding="utf-8")
+        self.assertIn('site-menu-panel workspace-nav-ready', base)
+        self.assertIn('data-workspace-nav', base)
         for label in ("Dashboard", "Library", "Review", "Sources", "Activity"):
-            self.assertIn(f'"{label}"', script)
+            self.assertIn(f"<span>{label}</span>", base)
         for href in ("/movies", "/shows", "/collections", "/favorites", "/duplicates", "/bulk-match"):
-            self.assertIn(f'"{href}"', script)
-        self.assertIn('document.createElement("details")', script)
-        self.assertIn("workspace-nav-section", styles)
-        self.assertIn("site-menu-panel:not(.workspace-nav-ready)", styles)
-        self.assertIn("0.8 α", script)
+            self.assertIn(f'href="{href}"', base)
+        for section in ("library", "review", "more"):
+            self.assertIn(f'data-workspace-section="{section}"', base)
+        self.assertIn("enhanceWorkspaceNavigation", script)
+        self.assertNotIn("cloneLink", script)
+        self.assertNotIn("replaceChildren(primary)", script)
+        self.assertIn("sidebar-collapsed .workspace-nav-section", styles)
+        self.assertIn("0.8 α", base)
 
-    def test_workspace_deprecates_home_layout_switcher(self):
-        styles = (ROOT / "app" / "static" / "workspace.css").read_text(encoding="utf-8")
-        self.assertIn(".home-layout-toggle", styles)
-        self.assertIn("display: none !important", styles)
+    def test_workspace_removes_home_layout_switcher_from_shell(self):
+        base = (ROOT / "app" / "templates" / "base.html").read_text(encoding="utf-8")
+        self.assertNotIn('class="home-layout-toggle"', base)
+        self.assertNotIn('action="/account/home-layout"', base)
 
     def test_library_inspector_preserves_full_detail_navigation(self):
         script = (ROOT / "app" / "static" / "workspace.js").read_text(encoding="utf-8")

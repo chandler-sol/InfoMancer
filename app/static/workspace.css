@@ -8,14 +8,9 @@
   --im-motion: 180ms cubic-bezier(.2, .8, .2, 1);
 }
 
-/* Keep the legacy navigation from flashing before Workspace enhancement runs. */
+/* The final Workspace navigation is server-rendered. Keep any accidental legacy panel hidden. */
 body.has-app-sidebar .site-menu-panel:not(.workspace-nav-ready) {
   opacity: 0;
-}
-
-/* The old home-layout switcher is superseded by the Workspace shell. */
-.home-layout-toggle {
-  display: none !important;
 }
 
 /* Workspace navigation hierarchy */
@@ -146,7 +141,6 @@ body.has-app-sidebar .brand .workspace-nav-alpha {
   letter-spacing: .08em;
   line-height: 1.2;
   text-transform: uppercase;
-  pointer-events: none;
 }
 
 body.has-app-sidebar .brand-lockup {
@@ -154,6 +148,10 @@ body.has-app-sidebar .brand-lockup {
 }
 
 @media (min-width: 981px) {
+  body.has-app-sidebar.sidebar-collapsed .workspace-nav-primary {
+    padding-inline: 0;
+  }
+
   body.has-app-sidebar.sidebar-collapsed .workspace-nav-section {
     display: none;
   }
