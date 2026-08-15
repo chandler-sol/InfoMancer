@@ -14,6 +14,7 @@ class WorkspaceFoundationTests(unittest.TestCase):
         self.assertIn('APP_VERSION = "0.8.0-alpha.1"', main)
         self.assertIn("path='workspace.css'", base)
         self.assertIn("path='workspace.js'", base)
+        self.assertIn("path='workspace-ui.js'", base)
 
     def test_workspace_navigation_is_server_rendered_and_collapsible(self):
         base = (ROOT / "app" / "templates" / "base.html").read_text(encoding="utf-8")
@@ -23,7 +24,7 @@ class WorkspaceFoundationTests(unittest.TestCase):
         self.assertIn('data-workspace-nav', base)
         for label in ("Dashboard", "Library", "Review", "Sources", "Activity"):
             self.assertIn(f"<span>{label}</span>", base)
-        for href in ("/movies", "/shows", "/collections", "/favorites", "/duplicates", "/bulk-match"):
+        for href in ("/movies", "/shows", "/collections", "/favorites", "/review", "/duplicates", "/bulk-match"):
             self.assertIn(f'href="{href}"', base)
         for section in ("library", "review", "more"):
             self.assertIn(f'data-workspace-section="{section}"', base)

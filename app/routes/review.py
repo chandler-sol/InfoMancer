@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from ..access import require_librarian
+from ..review_queue import ReviewQueue
 from .context import RouteContext
 
 
@@ -50,6 +51,7 @@ def build_router(ctx: RouteContext):
     trash_retention_days = ctx.live("trash_retention_days")
     tv_match_job = ctx.live("tv_match_job")
     tv_match_lock = ctx.live("tv_match_lock")
+    review_queue = ReviewQueue(db, mie, duplicates)
 
     def librarian_get(path: str, **kwargs):
         dependencies = list(kwargs.pop("dependencies", ()))
@@ -60,6 +62,123 @@ def build_router(ctx: RouteContext):
         dependencies = list(kwargs.pop("dependencies", ()))
         dependencies.append(Depends(require_librarian))
         return router.post(path, dependencies=dependencies, **kwargs)
+
+    @router.get("/review", response_class=HTMLResponse)
+    def review_workspace(
+        request: Request, status: str = "active", severity: str = "",
+        bucket: str = "", q: str = "", sort: str = "priority",
+    ):
+        queue = review_queue.view(
+            status=status, severity=severity, bucket=bucket, q=q, sort=sort,
+            include_librarian=request.state.user.is_librarian,
+        )
+        response = templates.TemplateResponse(request, "review.html", {
+            "queue": queue,
+            "filters": queue["filters"],
+            "message": request.query_params.get("message", ""),
+        })
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @router.get("/review/items/{source}/{item_id}", response_class=HTMLResponse)
+    def review_workspace_item(request: Request, source: str, item_id: str):
+        item = review_queue.get_item(
+            source, item_id, include_librarian=request.state.user.is_librarian,
+        )
+        if item is None:
+            raise HTTPException(404, "That review item is no longer available.")
+        response = templates.TemplateResponse(
+            request, "_review_drawer.html", {"item": item},
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @librarian_post("/review/analyze")
+    def analyze_review_workspace(request: Request):
+        try:
+            finding_count = analyze_library_health_with_activity()
+        except sqlite3.Error as exc:
+            record_event(
+                "mie", "Review analysis could not be completed.", level="error",
+                detail=str(exc), context={"operation": "review-analysis"},
+                user_id=request.state.user.id,
+            )
+            return redirect(
+                "/review",
+                "Review could not refresh because the findings could not be saved. No media files were changed.",
+            )
+        message = (
+            f"Review refreshed with {finding_count} current finding"
+            f"{'s' if finding_count != 1 else ''}. No media files were changed."
+        )
+        record_event(
+            "mie", message, context={"finding_count": finding_count, "source": "review-workspace"},
+            user_id=request.state.user.id,
+        )
+        return redirect("/review", message)
+
+    @librarian_post("/api/review/findings/{finding_id}/dismiss")
+    def workspace_dismiss_review_finding(
+        request: Request, finding_id: int, reason: str = Form("other"),
+        scope: str = Form("finding"), note: str = Form(""),
+    ) -> dict:
+        try:
+            dismissed = mie.dismiss(
+                finding_id, request.state.user.id, reason=reason, scope=scope, note=note,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if not dismissed:
+            raise HTTPException(409, "That finding is no longer active.")
+        message = "Feedback saved and the finding was removed from active Review."
+        record_event(
+            "mie", f"Review finding {finding_id} was dismissed.",
+            context={"finding_id": finding_id, "reason": reason, "scope": scope, "source": "review-workspace"},
+            user_id=request.state.user.id,
+        )
+        counts = review_queue.view(include_librarian=True)["counts"]
+        counts["buckets"] = review_queue.view(include_librarian=True)["bucket_counts"]
+        return {"ok": True, "message": message, "remove_key": f"finding:{finding_id}", "counts": counts}
+
+    @librarian_post("/api/review/findings/{finding_id}/restore")
+    def workspace_restore_review_finding(request: Request, finding_id: int) -> dict:
+        if not mie.restore(finding_id):
+            raise HTTPException(409, "That finding is no longer dismissed.")
+        message = "Finding restored to active Review."
+        record_event(
+            "mie", f"Review finding {finding_id} was restored.",
+            context={"finding_id": finding_id, "source": "review-workspace"},
+            user_id=request.state.user.id,
+        )
+        dismissed = review_queue.view(status="dismissed", include_librarian=True)
+        counts = dict(dismissed["counts"])
+        counts["buckets"] = dismissed["bucket_counts"]
+        return {"ok": True, "message": message, "remove_key": f"finding:{finding_id}", "counts": counts}
+
+    @librarian_post("/api/review/duplicates/{file_a_id}/{file_b_id}/decision")
+    def workspace_duplicate_decision(
+        request: Request, file_a_id: int, file_b_id: int,
+        decision: str = Form(...),
+    ) -> dict:
+        if decision not in {"ignored", "not_duplicate"}:
+            raise HTTPException(400, "Choose Ignore for now or Intentional alternative.")
+        if not duplicates.decide(file_a_id, file_b_id, decision, request.state.user.id):
+            raise HTTPException(409, "That duplicate pair is no longer available.")
+        message = (
+            "Duplicate pair ignored for now. It can return if either file changes."
+            if decision == "ignored" else
+            "Files marked as intentional alternatives. Neither file was changed."
+        )
+        record_event(
+            "duplicates", message,
+            context={"file_a_id": file_a_id, "file_b_id": file_b_id, "decision": decision, "source": "review-workspace"},
+            user_id=request.state.user.id,
+        )
+        active = review_queue.view(include_librarian=True)
+        counts = dict(active["counts"])
+        counts["buckets"] = active["bucket_counts"]
+        left, right = sorted((file_a_id, file_b_id))
+        return {"ok": True, "message": message, "remove_key": f"duplicate:{left}:{right}", "counts": counts}
 
     @router.get("/library-health", response_class=HTMLResponse)
     def library_health(

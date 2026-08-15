@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Review · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="review-workspace" data-review-queue data-review-status="{{ filters.status }}">
+  <header class="review-page-head">
+    <div>
+      <p class="eyebrow">REVIEW WORKSPACE</p>
+      <h1>Review</h1>
+      <p>One queue for the things InfoMancer thinks deserve a decision. Open an item to see the evidence, then act without losing your place.</p>
+    </div>
+    <div class="review-page-actions">
+      {% if current_user.is_librarian %}
+      <form method="post" action="/review/analyze" data-workspace-confirm="Refresh Media Intelligence now? This updates review findings but does not change media files.">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button primary" data-workspace-command="Refresh review analysis">Refresh analysis</button>
+      </form>
+      {% endif %}
+      <a class="button" href="/library-health">Health details</a>
+    </div>
+  </header>
+
+  {% if message %}<div class="notice review-inline-notice">{{ message }}</div>{% endif %}
+
+  <section class="review-summary-strip" aria-label="Review summary">
+    <div><strong data-review-count="total">{{ queue.counts.total }}</strong><span>Needs attention</span></div>
+    <div class="critical"><strong data-review-count="critical">{{ queue.counts.critical }}</strong><span>Critical</span></div>
+    <div class="warning"><strong data-review-count="warning">{{ queue.counts.warning }}</strong><span>Warnings</span></div>
+    <div><strong data-review-count="information">{{ queue.counts.information }}</strong><span>Information</span></div>
+    <div class="review-health-score"><strong>{{ queue.overall_score if queue.overall_score is not none else '—' }}</strong><span>Health score</span></div>
+  </section>
+
+  <div class="review-meta-line">
+    {% if queue.last_analyzed_at %}Media Intelligence last analyzed {{ local_time(queue.last_analyzed_at) }}.{% else %}Media Intelligence has not been analyzed yet.{% endif %}
+    <span>{{ queue.status_counts.active }} active · {{ queue.status_counts.dismissed }} dismissed · {{ queue.status_counts.resolved }} resolved</span>
+  </div>
+
+  <form class="review-bucket-tabs" method="get" action="/review" aria-label="Review category filters">
+    <input type="hidden" name="status" value="{{ filters.status }}">
+    <input type="hidden" name="severity" value="{{ filters.severity }}">
+    <input type="hidden" name="sort" value="{{ filters.sort }}">
+    <button name="bucket" value="" class="{% if not filters.bucket %}active{% endif %}" data-workspace-command="Review all items">All <b>{{ queue.counts.total }}</b></button>
+    {% for item in queue.buckets %}
+    <button name="bucket" value="{{ item.key }}" class="{% if filters.bucket == item.key %}active{% endif %}" data-workspace-command="Review {{ item.label }}">{{ item.label }} <b data-review-bucket-count="{{ item.key }}">{{ item.count }}</b></button>
+    {% endfor %}
+  </form>
+
+  <form class="review-filterbar" method="get" action="/review">
+    <input type="hidden" name="bucket" value="{{ filters.bucket }}">
+    <label class="review-search"><span class="sr-only">Search review queue</span><input type="search" name="q" value="{{ filters.q }}" placeholder="Search this queue"></label>
+    <label>Status<select name="status"><option value="active" {% if filters.status == 'active' %}selected{% endif %}>Active</option><option value="dismissed" {% if filters.status == 'dismissed' %}selected{% endif %}>Dismissed</option><option value="resolved" {% if filters.status == 'resolved' %}selected{% endif %}>Resolved</option></select></label>
+    <label>Severity<select name="severity"><option value="">All severities</option><option value="critical" {% if filters.severity == 'critical' %}selected{% endif %}>Critical</option><option value="warning" {% if filters.severity == 'warning' %}selected{% endif %}>Warning</option><option value="information" {% if filters.severity == 'information' %}selected{% endif %}>Information</option></select></label>
+    <label>Sort<select name="sort"><option value="priority" {% if filters.sort == 'priority' %}selected{% endif %}>Priority</option><option value="newest" {% if filters.sort == 'newest' %}selected{% endif %}>Newest signal</option><option value="title" {% if filters.sort == 'title' %}selected{% endif %}>Title</option></select></label>
+    <button class="button">Apply</button>
+    {% if filters.q or filters.severity or filters.bucket or filters.status != 'active' or filters.sort != 'priority' %}<a class="button ghost" href="/review">Clear</a>{% endif %}
+  </form>
+
+  <div class="review-results-head">
+    <strong>{{ queue.visible_count }} item{{ '' if queue.visible_count == 1 else 's' }}</strong>
+    <span>Click an item to inspect it. Direct URLs still open the full specialist view.</span>
+  </div>
+
+  <section class="review-queue-list" aria-live="polite" data-review-list>
+    {% for item in queue.items %}
+    <article class="review-queue-item severity-{{ item.severity }}" data-review-item data-review-key="{{ item.key }}" data-review-severity="{{ item.severity }}" data-review-bucket="{{ item.bucket }}">
+      <button class="review-item-open" type="button" data-workspace-drawer-url="{{ item.drawer_url }}" data-workspace-drawer-key="{{ item.key }}" data-workspace-drawer-param="review" aria-label="Inspect {{ item.summary }}">
+        <span class="review-item-signal" aria-hidden="true"></span>
+        <span class="review-item-copy">
+          <span class="review-item-labels"><b>{{ item.severity|title }}</b><i>{{ item.bucket_label }}</i><i>{{ item.source_label }}</i></span>
+          <strong>{{ item.summary }}</strong>
+          <span>{{ item.affected }}{% if item.root_label and item.root_label != item.affected %} · {{ item.root_label }}{% endif %}</span>
+        </span>
+        <span class="review-item-recommendation">{{ item.recommendation }}</span>
+      </button>
+      <div class="workspace-context-menu" data-workspace-menu-root>
+        <button class="workspace-context-toggle" type="button" data-workspace-menu-toggle aria-label="More actions for {{ item.summary }}" aria-expanded="false">•••</button>
+        <div class="workspace-context-popover" data-workspace-menu hidden>
+          <button type="button" data-workspace-drawer-url="{{ item.drawer_url }}" data-workspace-drawer-key="{{ item.key }}" data-workspace-drawer-param="review">Inspect evidence</button>
+          <a href="{{ item.href }}">{{ item.review_label }}</a>
+        </div>
+      </div>
+    </article>
+    {% else %}
+    <div class="review-empty-state">
+      <strong>No review items match these filters.</strong>
+      <p>{% if filters.status == 'active' %}That is a good sign. Clear filters or refresh analysis if you expected something here.{% else %}Try another review status or clear the current filters.{% endif %}</p>
+    </div>
+    {% endfor %}
+    <div class="review-empty-state" data-review-empty hidden><strong>This queue is clear.</strong><p>The remaining visible items were handled without leaving the Review workspace.</p></div>
+  </section>
+</section>
+{% endblock %}

@@ -1,0 +1,74 @@
+<section class="review-drawer-content" data-review-drawer-panel data-review-key="{{ item.key }}">
+  <header class="review-drawer-heading">
+    <div class="review-item-labels"><b class="severity-{{ item.severity }}">{{ item.severity|title }}</b><i>{{ item.bucket_label }}</i><i>{{ item.source_label }}</i></div>
+    <h2>{{ item.summary }}</h2>
+    {% if item.affected %}<p>{{ item.affected }}{% if item.root_label and item.root_label != item.affected %} · {{ item.root_label }}{% endif %}</p>{% endif %}
+  </header>
+
+  <section class="review-drawer-section">
+    <h3>Why it is here</h3>
+    <p>{{ item.explanation }}</p>
+  </section>
+
+  <section class="review-drawer-section review-next-step">
+    <h3>Recommended next step</h3>
+    <p>{{ item.recommendation }}</p>
+  </section>
+
+  {% if item.files %}
+  <section class="review-drawer-section">
+    <h3>Compared files</h3>
+    <div class="review-file-compare">
+      {% for file in item.files %}
+      <article>
+        <strong>{{ file.filename }}</strong>
+        <span>{{ file.root_label }}</span>
+        <dl><div><dt>Resolution</dt><dd>{{ file.resolution }}</dd></div><div><dt>Video</dt><dd>{{ file.video_codec }}</dd></div><div><dt>Dynamic range</dt><dd>{{ file.dynamic_range }}</dd></div><div><dt>Container</dt><dd>{{ file.container }}</dd></div></dl>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if item.evidence_rows %}
+  <details class="review-drawer-section review-evidence" open>
+    <summary>Evidence</summary>
+    <dl>{% for evidence in item.evidence_rows %}<div><dt>{{ evidence.label }}</dt><dd>{{ evidence.value }}</dd></div>{% endfor %}</dl>
+  </details>
+  {% endif %}
+
+  <div class="review-drawer-actions">
+    <a class="button primary" href="{{ item.href }}">{{ item.review_label }}</a>
+    {% if item.title_id %}<a class="button" href="/titles/{{ item.title_id }}">Open title</a>{% endif %}
+  </div>
+
+  {% if current_user.is_librarian and item.source == 'finding' and item.status == 'active' %}
+  <details class="review-feedback-panel">
+    <summary>Correct or dismiss</summary>
+    <form method="post" action="/api/review/findings/{{ item.item_id }}/dismiss" data-workspace-ajax data-workspace-remove-key="{{ item.key }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Reason<select name="reason"><option value="expected">Expected for this media</option><option value="incorrect">Analysis is incorrect</option><option value="resolved_elsewhere">Already handled elsewhere</option><option value="other">Other</option></select></label>
+      <label>Apply to<select name="scope"><option value="finding">This finding only</option>{% if item.title_id %}<option value="title">This rule for this title</option>{% endif %}{% if item.root_id %}<option value="source">This rule for this source</option>{% endif %}</select></label>
+      <label>Optional note<textarea name="note" maxlength="500" rows="3" placeholder="What should MIE understand?"></textarea></label>
+      <button class="button">Save feedback and dismiss</button>
+    </form>
+  </details>
+  {% elif current_user.is_librarian and item.source == 'finding' and item.status == 'dismissed' %}
+  <form class="review-restore-form" method="post" action="/api/review/findings/{{ item.item_id }}/restore" data-workspace-ajax data-workspace-remove-key="{{ item.key }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="button">Restore to active review</button>
+  </form>
+  {% endif %}
+
+  {% if current_user.is_librarian and item.source == 'duplicate' %}
+  <section class="review-drawer-section review-duplicate-decisions">
+    <h3>Review decision</h3>
+    <p>These choices only change InfoMancer's review state. They do not move or delete either file.</p>
+    <div class="button-row">
+      <form method="post" action="/api/review/duplicates/{{ item.file_a_id }}/{{ item.file_b_id }}/decision" data-workspace-ajax data-workspace-remove-key="{{ item.key }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="ignored"><button class="button">Ignore for now</button></form>
+      <form method="post" action="/api/review/duplicates/{{ item.file_a_id }}/{{ item.file_b_id }}/decision" data-workspace-ajax data-workspace-remove-key="{{ item.key }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="decision" value="not_duplicate"><button class="button">Intentional alternative</button></form>
+    </div>
+    <a class="review-secondary-link" href="/duplicates">Verify contents or manage Trash in Duplicate Review →</a>
+  </section>
+  {% endif %}
+</section>

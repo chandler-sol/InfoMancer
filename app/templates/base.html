@@ -19,11 +19,14 @@
   <link rel="stylesheet" href="{{ url_for('static', path='tour-demo.css') }}?v={{ static_version }}">
   <link rel="stylesheet" href="{{ url_for('static', path='modern.css') }}?v={{ static_version }}">
   <link rel="stylesheet" href="{{ url_for('static', path='workspace.css') }}?v={{ static_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='workspace-ui.css') }}?v={{ static_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='review.css') }}?v={{ static_version }}">
   <script src="{{ url_for('static', path='organize-dialog.js') }}?v={{ static_version }}" defer></script>
   <script src="{{ url_for('static', path='password-visibility.js') }}?v={{ static_version }}" defer></script>
   <script src="{{ url_for('static', path='engagement.js') }}?v={{ static_version }}" defer></script>
   <script src="{{ url_for('static', path='multipart-submit.js') }}?v={{ static_version }}" defer></script>
   <script src="{{ url_for('static', path='workspace.js') }}?v={{ static_version }}" defer></script>
+  <script src="{{ url_for('static', path='workspace-ui.js') }}?v={{ static_version }}" defer></script>
 </head>
 <body class="{% if current_user %}role-{{ current_user.role }} has-app-sidebar{% if current_user.high_contrast %} high-contrast{% endif %}{% else %}signed-out{% endif %}">
   {% if current_user %}
@@ -69,7 +72,7 @@
       </a>
       <div class="site-menu" id="site-menu">
         <button type="button" class="site-menu-toggle" id="site-menu-toggle" aria-label="Open navigation menu" aria-expanded="false" aria-controls="site-menu-panel"><span></span><span></span><span></span></button>
-        {% set workspace_review_active = request.url.path.startswith('/library-health') or request.url.path.startswith('/duplicates') or request.url.path.startswith('/bulk-match') or request.url.path.startswith('/movies/bulk-match') or request.url.path.startswith('/shows/bulk-match') %}
+        {% set workspace_review_active = request.url.path.startswith('/review') or request.url.path.startswith('/library-health') or request.url.path.startswith('/duplicates') or request.url.path.startswith('/bulk-match') or request.url.path.startswith('/movies/bulk-match') or request.url.path.startswith('/shows/bulk-match') %}
         {% set workspace_library_active = not workspace_review_active and (request.url.path.startswith('/library') or request.url.path.startswith('/movies') or request.url.path.startswith('/shows') or request.url.path.startswith('/titles') or request.url.path.startswith('/files') or request.url.path.startswith('/collections') or request.url.path.startswith('/libraries') or request.url.path.startswith('/favorites')) %}
         {% set workspace_sources_active = request.url.path.startswith('/sources') %}
         {% set workspace_activity_active = request.url.path.startswith('/activity') or request.url.path.startswith('/announcements') %}
@@ -78,7 +81,7 @@
           <div class="workspace-nav-primary">
             <a href="/" title="Dashboard"{% if request.url.path == '/' %} class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8"></path><path d="M5.5 9.5V21h13V9.5M9 21v-7h6v7"></path></svg><span>Dashboard</span></a>
             <a href="/library" title="Library"{% if request.url.path == '/library' %} class="active" aria-current="page"{% elif workspace_library_active %} class="domain-current"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M7 5 9 9m4-4 2 4m4-4 2 4M3 10h18"></path></svg><span>Library</span></a>
-            <a href="/library-health" title="Review"{% if workspace_review_active %} class="domain-current"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-6 4 12 2-6h6"></path><path d="M20 5.8A8.5 8.5 0 0 0 12 3a8.5 8.5 0 0 0-8 2.8"></path><path d="M4.5 17.5A18 18 0 0 0 12 22a18 18 0 0 0 7.5-4.5"></path></svg><span>Review</span></a>
+            <a href="/review" title="Review"{% if request.url.path == '/review' %} class="active" aria-current="page"{% elif workspace_review_active %} class="domain-current"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-6 4 12 2-6h6"></path><path d="M20 5.8A8.5 8.5 0 0 0 12 3a8.5 8.5 0 0 0-8 2.8"></path><path d="M4.5 17.5A18 18 0 0 0 12 22a18 18 0 0 0 7.5-4.5"></path></svg><span>Review</span></a>
             {% if current_user.is_librarian %}<a href="/sources" title="Sources"{% if workspace_sources_active %} class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"></path></svg><span>Sources</span></a>{% endif %}
             <a href="/activity" title="Activity"{% if workspace_activity_active %} class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M8 9h8M8 13h5"></path></svg><span>Activity</span>{% if activity_unread_count %}<b class="menu-count">{{ activity_unread_count }}</b>{% endif %}</a>
           </div>
@@ -97,6 +100,7 @@
           <details class="workspace-nav-section" data-workspace-section="review"{% if workspace_review_active %} open{% endif %}>
             <summary aria-label="Review shortcuts">Review</summary>
             <div class="workspace-nav-secondary">
+              <a href="/review" title="Review Queue"{% if request.url.path == '/review' %} class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h9"></path><path d="m17 16 2 2 3-4"></path></svg><span>Review Queue</span></a>
               <a href="/library-health" title="Library Health"{% if request.url.path.startswith('/library-health') %} class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-6 4 12 2-6h6"></path><path d="M20 5.8A8.5 8.5 0 0 0 12 3a8.5 8.5 0 0 0-8 2.8"></path><path d="M4.5 17.5A18 18 0 0 0 12 22a18 18 0 0 0 7.5-4.5"></path></svg><span>Library Health</span></a>
               {% if current_user.is_librarian %}<a href="/duplicates" title="Duplicate Review"{% if request.url.path.startswith('/duplicates') %} class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="13" rx="2"></rect><rect x="8" y="8" width="13" height="13" rx="2"></rect></svg><span>Duplicate Review</span></a>
               <a href="/bulk-match" title="Bulk Match"{% if request.url.path.startswith('/bulk-match') or request.url.path.startswith('/movies/bulk-match') or request.url.path.startswith('/shows/bulk-match') %} class="active" aria-current="page"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M4 12h10M4 18h7"></path><path d="m16 15 2 2 4-5"></path></svg><span>Bulk Match</span></a>{% endif %}

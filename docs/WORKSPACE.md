@@ -41,3 +41,12 @@ W2 replaces the W1 DOM-scraping Inspector with a dedicated read-only `/library/i
 ### W2 validation
 
 The final W2 application tree passes 198 tests plus `python -m compileall app`. Coverage includes server-rendered Inspector data, read-only GET behavior, member-safe CSRF-protected favorite/tag mutations, route authorization, keyboard and range selection contracts, browser-history restoration, aggregate media totals beyond the bounded file preview, and correct runtime handling for alternate movie editions. The permanent repository matrix also passes dependency audit plus Python 3.13 tests and compilation on Ubuntu, macOS, and Windows.
+
+
+## W3 + W4: Unified Review and application interactions
+
+W3 makes `/review` the primary decision surface. It adapts existing MIE findings, live duplicate candidates, and failed metadata work into one filtered queue without introducing a second source of truth. Specialist pages remain available for deep workflows.
+
+W4 adds reusable Workspace primitives: a server-backed right drawer, same-origin AJAX forms, confirmation dialogs, contextual menus, toasts, and a Ctrl/Cmd+K command palette. Review uses these primitives first, but they are intentionally generic so Library, Sources, and later Operation History can reuse them.
+
+Review GETs remain read-only. Librarian-only state changes use dedicated CSRF-protected POST routes and preserve the route-level authorization boundary established during 0.7 hardening.
