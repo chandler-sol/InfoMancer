@@ -236,10 +236,9 @@ class ReviewQueue:
                 # Members cannot open Duplicate Review, so omit duplicate cleanup work.
                 continue
             items.append(self._finding_item(finding))
-        if status == "active":
+        if status == "active" and include_librarian:
             items.extend(self._metadata_items())
-            if include_librarian:
-                items.extend(self._duplicate_item(item) for item in self.duplicates.candidates(status="active"))
+            items.extend(self._duplicate_item(item) for item in self.duplicates.candidates(status="active"))
         return items
 
     def view(
@@ -323,7 +322,7 @@ class ReviewQueue:
                 if ids == pair:
                     return self._duplicate_item(candidate)
             return None
-        if source == "metadata" and item_id.isdigit():
+        if source == "metadata" and include_librarian and item_id.isdigit():
             target = f"metadata:{int(item_id)}"
             return next((item for item in self._metadata_items() if item["key"] == target), None)
         return None

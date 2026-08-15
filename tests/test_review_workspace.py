@@ -53,8 +53,12 @@ class ReviewQueueServiceTests(unittest.TestCase):
 
     def test_member_queue_excludes_duplicate_cleanup(self):
         view = self.queue.view(include_librarian=False)
-        self.assertNotIn("duplicate", {item["source"] for item in view["items"]})
+        sources = {item["source"] for item in view["items"]}
+        self.assertNotIn("duplicate", sources)
+        self.assertNotIn("metadata", sources)
         self.assertTrue(any(item["bucket"] == "matching" for item in view["items"]))
+        self.assertIsNone(self.queue.get_item("metadata", "1", include_librarian=False))
+        self.assertIsNotNone(self.queue.get_item("metadata", "1", include_librarian=True))
 
     def test_queue_filters_and_drawer_lookup(self):
         view = self.queue.view(bucket="matching", severity="warning", q="example", include_librarian=True)
