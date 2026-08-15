@@ -29,6 +29,7 @@ functional_path = ROOT / "tests/test_workspace_inspector.py"
 functional = functional_path.read_text(encoding="utf-8")
 if "from html import unescape\n" not in functional:
     functional = functional.replace("from dataclasses import replace\n", "from dataclasses import replace\nfrom html import unescape\n", 1)
+functional = functional.replace('            "Inspector Film", "Health &amp; attention", "Quality deserves review",\n', '            "Inspector Film", "Health & attention", "Quality deserves review",\n', 1)
 old_assert = "            self.assertIn(expected, response.text)\n"
 new_assert = "            self.assertIn(expected, unescape(response.text))\n"
 if old_assert not in functional:
