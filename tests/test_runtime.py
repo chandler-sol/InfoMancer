@@ -38,6 +38,18 @@ class RuntimeLeaseTests(unittest.TestCase):
         second.acquire()
         second.release()
 
+    def test_old_process_detects_ownership_loss_after_stale_reclaim(self):
+        first = RuntimeLease(self.database, owner="first", ttl_seconds=30)
+        second = RuntimeLease(self.database, owner="second", ttl_seconds=30)
+        first.acquire()
+        expired = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        with self.database.connect() as conn:
+            conn.execute("UPDATE runtime_leases SET heartbeat_at=?", (expired,))
+        second.acquire()
+        with self.assertRaises(RuntimeLeaseError):
+            first.heartbeat()
+        second.release()
+
 
 if __name__ == "__main__":
     unittest.main()
