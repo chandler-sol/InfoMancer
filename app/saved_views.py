@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 from urllib.parse import parse_qsl, urlencode
 
 from .db import Database
@@ -158,10 +159,8 @@ class SavedViewService:
                     "SELECT * FROM user_saved_views WHERE id=? AND user_id=?",
                     (view_id, user_id),
                 ).fetchone()
-        except Exception as exc:
-            if exc.__class__.__name__ == "IntegrityError":
-                raise SavedViewError(f'A saved view named "{cleaned}" already exists.') from exc
-            raise
+        except sqlite3.IntegrityError as exc:
+            raise SavedViewError(f'A saved view named "{cleaned}" already exists.') from exc
         return self._view(row)
 
     def toggle_pin(self, user_id: int, view_id: int) -> dict:
