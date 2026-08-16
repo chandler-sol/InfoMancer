@@ -276,8 +276,8 @@ tv_match_job = background.tv_match_job
 tv_match_lock = background.tv_match_lock
 media_info_job = background.media_info_job
 media_info_lock = background.media_info_lock
-media_integrity_job = {"status": "idle", "processed": 0, "total": 0, "passed": 0, "issues": 0, "current": ""}
-media_integrity_lock = threading.Lock()
+media_integrity_job = background.media_integrity_job
+media_integrity_lock = background.media_integrity_lock
 duplicate_verify_job = background.duplicate_verify_job
 duplicate_verify_lock = background.duplicate_verify_lock
 media_hash_job = background.media_hash_job
@@ -290,13 +290,7 @@ trash_cleanup_lock = background.trash_cleanup_lock
 run_media_hashing = background.run_media_hashing
 start_media_hashing = background.start_media_hashing
 handle_import_hashing = background.handle_import_hashing
-_background_other_work_running = background.other_background_work_running
-
-def _other_background_work_running() -> bool:
-    with media_integrity_lock:
-        if media_integrity_job.get("status") in {"starting", "running"}:
-            return True
-    return _background_other_work_running()
+_other_background_work_running = background.other_background_work_running
 maybe_start_scheduled_hashing = background.maybe_start_scheduled_hashing
 run_background_scheduler = background.run_scheduler
 trash_retention_days = background.trash_retention_days
@@ -2127,6 +2121,19 @@ def run_media_inspection(file_ids: list[int] | None = None) -> None:
 
 
 def run_media_integrity(file_ids: list[int] | None = None, mode: str = "sample") -> None:
+    if not media_integrity.available():
+        with media_integrity_lock:
+            media_integrity_job.clear()
+            media_integrity_job.update({
+                "status": "error", "processed": 0, "total": 0, "passed": 0,
+                "issues": 0, "current": "",
+                "detail": "FFmpeg is unavailable. Install or bundle FFmpeg before running deep media integrity checks.",
+            })
+        record_event(
+            "media-integrity", "Media integrity sampling could not start because FFmpeg is unavailable.",
+            level="warning", context={"mode": mode},
+        )
+        return
     rows = media_integrity.pending_files(file_ids)
     with media_integrity_lock:
         media_integrity_job.clear()

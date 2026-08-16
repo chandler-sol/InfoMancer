@@ -301,14 +301,11 @@ def build_router(ctx: RouteContext):
                         "analysis_history": mie.analysis_history(),
                         "feedback_rules": mie.feedback(),
                         "duplicate_impact": duplicate_trash.impact(),
-            "stream_expectations": mie.stream_expectations(),
-            "title_health": mie.title_health_overview(),
-            "integrity_summary": media_integrity.summary(),
-            "integrity_job": dict(media_integrity_job),
                         "stream_expectations": mie.stream_expectations(),
                         "title_health": mie.title_health_overview(),
                         "integrity_summary": media_integrity.summary(),
                         "integrity_job": dict(media_integrity_job),
+                        "integrity_available": media_integrity.available(),
                         "message": "",
                         "error": (
                             "InfoMancer could not analyze the catalog because its "
@@ -336,6 +333,7 @@ def build_router(ctx: RouteContext):
             "title_health": mie.title_health_overview(),
             "integrity_summary": media_integrity.summary(),
             "integrity_job": dict(media_integrity_job),
+            "integrity_available": media_integrity.available(),
             "message": request.query_params.get("message", ""),
             "error": "",
         })
@@ -345,10 +343,6 @@ def build_router(ctx: RouteContext):
         return templates.TemplateResponse(request, "storage_intelligence.html", {
             "report": mie.storage_report(),
             "duplicate_impact": duplicate_trash.impact(),
-            "stream_expectations": mie.stream_expectations(),
-            "title_health": mie.title_health_overview(),
-            "integrity_summary": media_integrity.summary(),
-            "integrity_job": dict(media_integrity_job),
         })
 
     @router.get("/titles/{title_id}/identity", response_class=HTMLResponse)
@@ -360,6 +354,11 @@ def build_router(ctx: RouteContext):
 
     @librarian_post("/library-health/integrity/sample")
     def start_integrity_sampling(request: Request):
+        if not media_integrity.available():
+            return redirect(
+                "/library-health",
+                "Deep media integrity needs FFmpeg. InfoMancer did not start a scan because FFmpeg is unavailable to this installation.",
+            )
         if other_background_work_running():
             return redirect(
                 "/library-health",

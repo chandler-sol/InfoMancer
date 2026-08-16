@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,11 @@ class MediaIntegrityService:
 
     def __init__(self, database: Database) -> None:
         self.database = database
+
+    @staticmethod
+    def available() -> bool:
+        """Return whether the read-only FFmpeg decoder is available to this process."""
+        return shutil.which("ffmpeg") is not None
 
     @staticmethod
     def _sample_offsets(runtime_seconds: float | None) -> list[float]:

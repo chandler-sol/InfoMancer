@@ -3,7 +3,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from app.app_settings import AppSettings
+from app.background import BackgroundCoordinator
 from app.db import Database
+from app.duplicate_trash import DuplicateTrashService
+from app.file_hashes import MediaHashService
 from app.media_info import inspect_media
 from app.media_integrity import MediaIntegrityService
 from app.mie import MediaIntelligenceEngine
@@ -66,6 +70,24 @@ class Intelligence09Tests(unittest.TestCase):
         self.assertIn("stream-subtitle-language-missing", rules)
         self.assertIn("stream-subtitles-missing", rules)
         self.assertIn("stream-audio-channels-low", rules)
+
+    @patch("app.media_integrity.shutil.which", return_value=None)
+    def test_integrity_preflight_detects_missing_ffmpeg(self, _which):
+        self.assertFalse(self.integrity.available())
+
+    def test_integrity_job_participates_in_central_background_guard(self):
+        settings = AppSettings(self.database, "https://example.invalid/search?q={query}")
+        coordinator = BackgroundCoordinator(
+            self.database, settings, MediaHashService(self.database),
+            DuplicateTrashService(self.database), lambda *args, **kwargs: None,
+        )
+        self.assertFalse(coordinator.other_background_work_running())
+        with coordinator.media_integrity_lock:
+            coordinator.media_integrity_job["status"] = "running"
+        self.assertTrue(coordinator.other_background_work_running())
+        with coordinator.media_integrity_lock:
+            coordinator.media_integrity_job["status"] = "complete"
+        self.assertFalse(coordinator.other_background_work_running())
 
     @patch("app.media_integrity.subprocess.run")
     def test_integrity_sampling_is_read_only_and_surfaces_decode_failure(self, run):

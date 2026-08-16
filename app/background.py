@@ -44,6 +44,8 @@ class BackgroundCoordinator:
         self.tv_match_lock = self.registry.lock("tv-match")
         self.media_info_job = self.registry.job("media-info")
         self.media_info_lock = self.registry.lock("media-info")
+        self.media_integrity_job = self.registry.job("media-integrity")
+        self.media_integrity_lock = self.registry.lock("media-integrity")
         self.duplicate_verify_job = self.registry.job("duplicate-verify")
         self.duplicate_verify_lock = self.registry.lock("duplicate-verify")
         self.media_hash_job = self.registry.job("media-hash")
@@ -168,6 +170,7 @@ class BackgroundCoordinator:
         with (
             self.scan_all_lock, self.scan_lock, self.title_scan_lock,
             self.movie_match_lock, self.tv_match_lock, self.media_info_lock,
+            self.media_integrity_lock,
         ):
             return any((
                 self.scan_all_job.get("status") in {"starting", "running"},
@@ -182,6 +185,7 @@ class BackgroundCoordinator:
                 self.movie_match_job.get("status") in {"starting", "running"},
                 self.tv_match_job.get("status") in {"starting", "running"},
                 self.media_info_job.get("status") in {"starting", "running"},
+                self.media_integrity_job.get("status") in {"starting", "running"},
             ))
 
     def maybe_start_scheduled_hashing(self) -> None:

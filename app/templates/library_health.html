@@ -53,11 +53,14 @@
       <div><strong>{{ integrity_summary.failed + integrity_summary.warning + integrity_summary.error }}</strong><span>Needs review</span></div>
       <div><strong>{{ integrity_summary.unchecked_or_stale }}</strong><span>Unchecked / changed</span></div>
     </div>
+    {% if not integrity_available %}
+    <p class="muted">FFmpeg is not available to this InfoMancer process, so deep integrity sampling is disabled. Ordinary catalog and metadata analysis still works.</p>
+    {% endif %}
     {% if current_user.is_librarian %}
     <form method="post" action="/library-health/integrity/sample">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button class="button primary" {% if integrity_job.status in ['starting','running'] %}disabled{% endif %}>
-        {{ 'Sampling media…' if integrity_job.status in ['starting','running'] else 'Sample unchecked / changed media' }}
+      <button class="button primary" {% if not integrity_available or integrity_job.status in ['starting','running'] %}disabled{% endif %}>
+        {% if integrity_job.status in ['starting','running'] %}Sampling media…{% elif not integrity_available %}FFmpeg unavailable{% else %}Sample unchecked / changed media{% endif %}
       </button>
     </form>
     {% endif %}
