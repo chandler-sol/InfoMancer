@@ -51,12 +51,23 @@ class AppSettingsTests(unittest.TestCase):
             self.settings.validate_external_search("Example", "ftp://example.test/{query}")
 
     def test_safety_mode_is_explicit_and_portable(self):
-        self.assertEqual(self.settings.validate_safety("standard"), {"read_only_mode": "0", "lockdown_mode": "0"})
-        self.assertEqual(self.settings.validate_safety("lockdown"), {"read_only_mode": "0", "lockdown_mode": "1"})
+        self.assertEqual(
+            self.settings.validate_safety("standard"),
+            {"read_only_mode": "0", "lockdown_mode": "0"},
+        )
+        self.assertEqual(
+            self.settings.validate_safety("lockdown"),
+            {"read_only_mode": "0", "lockdown_mode": "1"},
+        )
         self.settings.update({"lockdown_mode": "1"}, None)
         self.assertEqual(self.settings.get("lockdown_mode"), "1")
-        self.assertEqual(self.settings.validate_import({"lockdown_mode": "0"}), {"lockdown_mode": "0"})
-        with self.assertRaisesRegex(AppSettingError, "Read-Only Mode, Standard Mode, or Lockdown Mode"):
+        self.assertEqual(
+            self.settings.validate_import({"lockdown_mode": "0"}),
+            {"lockdown_mode": "0", "read_only_mode": "0"},
+        )
+        with self.assertRaisesRegex(
+            AppSettingError, "Read-Only Mode, Standard Mode, or Lockdown Mode"
+        ):
             self.settings.validate_safety("reckless")
 
     def test_file_protection_modes_are_mutually_exclusive_and_portable(self):
@@ -77,6 +88,10 @@ class AppSettingsTests(unittest.TestCase):
         })
         self.assertEqual(imported["read_only_mode"], "1")
         self.assertEqual(imported["lockdown_mode"], "0")
+        with self.assertRaisesRegex(AppSettingError, "cannot both be enabled"):
+            self.settings.validate_import({
+                "read_only_mode": "1", "lockdown_mode": "1",
+            })
         with self.assertRaisesRegex(AppSettingError, "Read-Only Mode"):
             self.settings.validate_safety("unsafe")
 
