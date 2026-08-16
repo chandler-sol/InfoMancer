@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Preview Recovery · InfoMancer{% endblock %}
+{% block content %}
+{% set section = 'recovery' %}
+<section class="settings-shell">
+  <header class="page-head compact-page-head">
+    <div><p class="eyebrow">PORTABLE RECOVERY</p><h1>Verified restore preview</h1><p>The selected package passed archive, checksum, and database validation.</p></div>
+  </header>
+  {% include "_settings_nav.html" %}
+
+  <section class="panel settings-card">
+    <div class="success-banner"><strong>Package verified. Nothing in the live installation has been changed.</strong></div>
+    <dl class="settings-summary-grid">
+      <div><dt>Selected file</dt><dd>{{ source_name }}</dd></div>
+      <div><dt>Created by</dt><dd>InfoMancer {{ summary.app_version }}</dd></div>
+      <div><dt>Created at</dt><dd>{{ summary.created_at or 'Unknown' }}</dd></div>
+      <div><dt>Database</dt><dd>{{ '%.1f'|format(summary.database_size / (1024 * 1024)) }} MB</dd></div>
+      <div><dt>Collection artwork</dt><dd>{{ summary.artwork_files }} file{% if summary.artwork_files != 1 %}s{% endif %}</dd></div>
+      <div><dt>Media files</dt><dd>Not included</dd></div>
+    </dl>
+  </section>
+
+  <section class="panel settings-card">
+    <p class="eyebrow">EXCLUDED BY DESIGN</p>
+    <h2>Secrets stay local to this installation</h2>
+    <p>The recovery package cannot overwrite the provider-secret store. TVDB and any future provider credentials must be entered again after a clean reinstall.</p>
+    {% if summary.excluded %}<ul>{% for item in summary.excluded %}<li>{{ item }}</li>{% endfor %}</ul>{% endif %}
+  </section>
+
+  <section class="panel settings-card danger-zone">
+    <p class="eyebrow">FINAL CONFIRMATION</p>
+    <h2>Restore this package</h2>
+    <p>InfoMancer will first create and verify a new portable safety backup of the current installation. It will then stage and replace the database plus collection artwork. If commit fails, InfoMancer will roll both back before returning an error.</p>
+    <form method="post" action="/settings/recovery/apply" class="stacked-form">
+      <input type="hidden" name="staged_token" value="{{ staged_token }}">
+      <label>Type <strong>RESTORE</strong> to continue
+        <input type="text" name="confirm" autocomplete="off" required>
+      </label>
+      <div class="button-row">
+        <button type="submit" class="button danger">Restore verified package</button>
+        <a class="button" href="/settings/recovery">Cancel</a>
+      </div>
+    </form>
+  </section>
+</section>
+{% endblock %}
