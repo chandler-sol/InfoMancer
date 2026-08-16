@@ -1252,3 +1252,15 @@ body.workspace-inspector-open .workspace-inspector {
 .season-folder-copy p {color:#ff9a9a;font-size:11px;margin:3px 0 0}
 .season-folder-apply {margin-top:12px}
 @media (max-width:720px) {.season-folder-summary {grid-template-columns:repeat(2,minmax(0,1fr))}.season-folder-copy > div {align-items:flex-start;flex-direction:column}}
+
+
+/* Portable recovery package */
+.recovery-package-block {align-items:start;border-top:1px solid var(--line);display:grid;gap:20px;grid-template-columns:minmax(0,1fr) minmax(330px,.72fr);margin-top:18px;padding-top:18px}
+.recovery-package-copy h3 {font-size:16px;margin:3px 0 7px}
+.recovery-package-copy p:last-child {line-height:1.5;margin-bottom:0}
+.recovery-package-actions {display:grid;gap:10px}
+.recovery-package-actions form {margin:0}
+.recovery-verify-form {align-items:end;display:grid;gap:8px;grid-template-columns:minmax(0,1fr) auto}
+.recovery-verify-form label {color:var(--muted);display:grid;font-size:11px;gap:5px}
+.recovery-verify-form input[type=file] {background:var(--bg);border:1px solid var(--line);border-radius:5px;color:var(--text);font:inherit;padding:7px}
+@media (max-width:900px) {.recovery-package-block {grid-template-columns:1fr}.recovery-verify-form {grid-template-columns:1fr}}

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from ..access import require_librarian
+from ..recovery_package import RecoveryPackageError, RecoveryPackageService
 from .context import RouteContext
 
 
@@ -31,6 +32,7 @@ def build_router(ctx: RouteContext):
     csv_safe_row = ctx.live("csv_safe_row")
     datetime = ctx.live("datetime")
     db = ctx.live("db")
+    recovery_packages = RecoveryPackageService(db.path, APP_VERSION)
     engagement = ctx.live("engagement")
     event_log = ctx.live("event_log")
     install_database_backup = ctx.live("install_database_backup")
@@ -203,6 +205,70 @@ def build_router(ctx: RouteContext):
         )
         record_event(
             "settings", message, context={"file_protection_mode": mode},
+            user_id=request.state.user.id,
+        )
+        return redirect("/settings/system", message)
+
+    @librarian_post("/maintenance/recovery-package")
+    def create_recovery_package(request: Request):
+        try:
+            package = recovery_packages.create()
+        except RecoveryPackageError as exc:
+            record_event(
+                "backup", "Portable recovery package could not be created.",
+                level="error", detail=str(exc), user_id=request.state.user.id,
+            )
+            return redirect("/settings/system", str(exc))
+        record_event(
+            "backup", "Portable recovery package created and verified.",
+            context={"name": package.name}, user_id=request.state.user.id,
+        )
+        return FileResponse(
+            package,
+            media_type="application/octet-stream",
+            filename=package.name,
+        )
+
+    @librarian_post("/maintenance/recovery-package/verify")
+    async def verify_recovery_package(
+        request: Request, recovery_file: UploadFile = File(...),
+    ):
+        candidate_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=db.path.parent, prefix="verify-recovery-upload-",
+                suffix=".infomancer-backup", delete=False,
+            ) as candidate:
+                candidate_path = Path(candidate.name)
+                total = 0
+                while chunk := await recovery_file.read(1024 * 1024):
+                    total += len(chunk)
+                    if total > recovery_packages.MAX_PACKAGE_BYTES:
+                        raise RecoveryPackageError(
+                            "The uploaded recovery package is larger than the 4 GB verification limit."
+                        )
+                    candidate.write(chunk)
+            result = recovery_packages.verify(candidate_path)
+        except (RecoveryPackageError, OSError) as exc:
+            record_event(
+                "backup", "Uploaded recovery package verification failed.",
+                level="error", detail=str(exc), user_id=request.state.user.id,
+            )
+            return redirect(
+                "/settings/system",
+                str(exc) if isinstance(exc, RecoveryPackageError)
+                else "InfoMancer could not save that package for verification. Check free disk space and permissions.",
+            )
+        finally:
+            if candidate_path:
+                candidate_path.unlink(missing_ok=True)
+        message = (
+            f"Recovery package verified successfully. Database: {result['database_size'] / (1024 * 1024):.1f} MB; "
+            f"collection artwork files: {result['artwork_files']}; created by InfoMancer {result['app_version']}."
+        )
+        record_event(
+            "backup", "Uploaded recovery package verified successfully.",
+            context={key: value for key, value in result.items() if key != "created_at"},
             user_id=request.state.user.id,
         )
         return redirect("/settings/system", message)
@@ -910,6 +976,8 @@ def build_router(ctx: RouteContext):
         "export_application_settings": export_application_settings,
         "preview_application_settings": preview_application_settings,
         "apply_application_settings": apply_application_settings,
+        "create_recovery_package": create_recovery_package,
+        "verify_recovery_package": verify_recovery_package,
         "create_backup_from_ui": create_backup_from_ui,
         "verify_all_backups": verify_all_backups,
         "download_diagnostics": download_diagnostics,

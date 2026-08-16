@@ -57,6 +57,20 @@ season groups. Collapsed remains the default, while Librarians can switch the st
 state under General Settings; per-page Expand all and Collapse all controls remain
 available.
 
+## Portable Recovery Package
+
+System Settings can create a single `.infomancer-backup` file for disaster recovery
+and future native-uninstall handoff. The package contains a consistent SQLite backup,
+collection artwork, a versioned manifest, file sizes, and SHA-256 checksums. Creation
+verifies the package before download, and an existing package can be uploaded for
+verification without changing the live installation. Archive traversal, undeclared
+entries, duplicate paths, checksum mismatches, oversized packages, invalid databases,
+and unsupported format versions are rejected.
+
+The recovery format never contains movie or TV media, provider credentials or their
+local encryption keys, deployment environment files, application binaries, or caches.
+This keeps the package portable without weakening provider-secret encryption.
+
 ## Persisted Global Rename Review
 
 Rename suggestions are now stored as background-generated filesystem snapshots instead

@@ -54,6 +54,15 @@ location outside InfoMancer-managed directories and verified before uninstall
 continues; if creation or verification fails, keep InfoMancer installed unless
 the user explicitly chooses to proceed without the backup.
 
+The recovery choice uses InfoMancer's portable `.infomancer-backup` format. The
+package contains a verified SQLite snapshot plus collection artwork and a signed-by-
+content manifest of SHA-256 checksums. The database carries accounts, catalog data,
+source definitions, settings, collections, favorites, tags, and operation history.
+Media files, provider credentials, local encryption keys, deployment environment
+files, binaries, and caches are intentionally excluded. Provider credentials must be
+entered again after recovery. The same package creator/verifier is exposed in App
+Settings so users can test the format before a native installer exists.
+
 A complete uninstall removes application binaries, databases, configuration,
 provider-secret/encryption-key files, artwork, caches, logs, updater data,
 crash data created by InfoMancer, shortcuts, services, scheduled tasks, file or
