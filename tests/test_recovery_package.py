@@ -169,7 +169,7 @@ class RecoveryPackageUiContractTests(unittest.TestCase):
         self.assertIn('/settings/recovery/preview', page)
         self.assertIn('/settings/recovery/apply', preview)
         self.assertIn('name="confirm"', preview)
-        self.assertIn('service.restore(candidate, settings.media_browse_roots)', recovery_routes)
+        self.assertIn('recovery_service().restore(candidate, settings.media_browse_roots)', recovery_routes)
         self.assertIn("Provider credentials were not restored", (root / "app/templates/recovery_restore_pending.html").read_text(encoding="utf-8"))
 
 
