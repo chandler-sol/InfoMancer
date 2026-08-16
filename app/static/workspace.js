@@ -195,6 +195,13 @@
       rangeAnchorId = targetId;
     };
 
+    // Prevent the browser's native Shift+mousedown text-range selection from
+    // painting over cover titles before the click handler selects media cards.
+    document.addEventListener("mousedown", (event) => {
+      const item = event.target.closest(".library-title-row, .cover-card");
+      if (item && event.shiftKey && !interactive(event.target)) event.preventDefault();
+    });
+
     document.addEventListener("click", (event) => {
       const item = event.target.closest(".library-title-row, .cover-card");
       if (!item || interactive(event.target)) return;

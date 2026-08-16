@@ -27,6 +27,9 @@ ROLES = {"member", "librarian"}
 LOGIN_ATTEMPT_ROW_CAP = 5000
 
 password_hasher = PasswordHasher(memory_cost=19_456, time_cost=2, parallelism=1)
+# Keep nonexistent and not-yet-configured accounts on the same Argon2 path as
+# real accounts so the public login response does not become a timing oracle.
+DUMMY_PASSWORD_HASH = password_hasher.hash(secrets.token_urlsafe(32))
 
 
 def utcnow() -> datetime:
@@ -200,7 +203,14 @@ class AuthenticationError(ValueError):
 
 
 class LoginLocked(AuthenticationError):
-    pass
+    def __init__(
+        self, message: str, *, new_lockout: bool = False,
+        scope: str = "", user_id: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.new_lockout = new_lockout
+        self.scope = scope
+        self.user_id = user_id
 
 
 def user_from_row(row: sqlite3.Row) -> AuthUser:
@@ -515,7 +525,9 @@ class AuthService:
 
         # Aggregate account/IP locks live outside login_attempts so retention
         # pruning cannot erase a live lockout created by distributed failures.
-        precheck_locked = False
+        precheck_existing_lock = False
+        precheck_new_scopes: list[str] = []
+        precheck_user_id: int | None = None
         with self.database.connect() as conn:
             _prune_login_attempts(conn)
             _prune_login_lockouts(conn)
@@ -523,6 +535,12 @@ class AuthService:
                 "SELECT * FROM login_attempts WHERE identity=? AND ip_address=?",
                 (identity, ip_address),
             ).fetchone()
+            account = conn.execute(
+                """SELECT id FROM users
+                   WHERE LOWER(username)=? OR LOWER(COALESCE(email,''))=?""",
+                (identity, identity),
+            ).fetchone()
+            precheck_user_id = int(account["id"]) if account else None
             pair_locked = False
             if attempt and attempt["locked_until"]:
                 try:
@@ -532,7 +550,7 @@ class AuthService:
             identity_locked = _has_login_lock(conn, "identity", identity)
             ip_locked = _has_login_lock(conn, "ip", ip_address)
             if pair_locked or identity_locked or ip_locked:
-                precheck_locked = True
+                precheck_existing_lock = True
             else:
                 identity_failures = int(conn.execute(
                     """SELECT COALESCE(SUM(failures),0) FROM login_attempts
@@ -546,26 +564,34 @@ class AuthService:
                 ).fetchone()[0])
                 if identity_failures >= 15:
                     _set_login_lock(conn, "identity", identity)
-                    precheck_locked = True
+                    precheck_new_scopes.append("account")
                 if ip_failures >= 30:
                     _set_login_lock(conn, "ip", ip_address)
-                    precheck_locked = True
+                    precheck_new_scopes.append("ip")
 
-        if precheck_locked:
-            raise LoginLocked("Too many attempts. Try again in a few minutes.")
+        if precheck_existing_lock:
+            raise LoginLocked(
+                "Too many attempts. Try again in a few minutes.",
+                user_id=precheck_user_id,
+            )
+        if precheck_new_scopes:
+            raise LoginLocked(
+                "Too many attempts. Try again in a few minutes.",
+                new_lockout=True, scope="+".join(precheck_new_scopes),
+                user_id=precheck_user_id,
+            )
 
         failure = False
+        new_lock_scopes: list[str] = []
+        failure_user_id: int | None = None
         with self.database.connect() as conn:
             # Recheck durable aggregate locks after the preflight transaction in
             # case another request crossed a threshold in the meantime.
             _prune_login_lockouts(conn)
-            if (
+            locked_during_auth = (
                 _has_login_lock(conn, "identity", identity)
                 or _has_login_lock(conn, "ip", ip_address)
-            ):
-                locked_during_auth = True
-            else:
-                locked_during_auth = False
+            )
 
             if not locked_during_auth:
                 attempt = conn.execute(
@@ -577,29 +603,35 @@ class AuthService:
                        WHERE LOWER(username)=? OR LOWER(COALESCE(email,''))=?""",
                     (identity, identity),
                 ).fetchone()
-                if row and not row["active"]:
-                    raise AuthenticationError(
-                        "This account is disabled. Ask a Librarian to enable it before signing in."
-                    )
-                if row and not row["password_hash"]:
-                    raise AuthenticationError(
-                        "This account is waiting for setup. Ask a Librarian for a fresh one-time setup link."
-                    )
+                failure_user_id = int(row["id"]) if row else None
+                account_usable = bool(
+                    row and row["active"] and row["password_hash"]
+                )
+                candidate_hash = (
+                    row["password_hash"] if row and row["password_hash"]
+                    else DUMMY_PASSWORD_HASH
+                )
 
                 verified = False
-                if row and row["password_hash"]:
-                    try:
-                        verified = password_hasher.verify(row["password_hash"], password)
-                        if verified and password_hasher.check_needs_rehash(row["password_hash"]):
-                            conn.execute(
-                                "UPDATE users SET password_hash=? WHERE id=?",
-                                (password_hasher.hash(password), row["id"]),
-                            )
-                    except (VerifyMismatchError, VerificationError, InvalidHashError):
-                        verified = False
+                try:
+                    verified = password_hasher.verify(candidate_hash, password)
+                    if (
+                        verified and account_usable
+                        and password_hasher.check_needs_rehash(candidate_hash)
+                    ):
+                        conn.execute(
+                            "UPDATE users SET password_hash=? WHERE id=?",
+                            (password_hasher.hash(password), row["id"]),
+                        )
+                except (VerifyMismatchError, VerificationError, InvalidHashError):
+                    verified = False
+                # Disabled, pending, and nonexistent accounts intentionally take
+                # the same public path as an ordinary bad password.
+                verified = bool(verified and account_usable)
 
                 if not verified:
-                    failures = int(attempt["failures"] if attempt else 0) + 1
+                    previous_failures = int(attempt["failures"] if attempt else 0)
+                    failures = previous_failures + 1
                     locked_until = (
                         iso_timestamp(utcnow() + timedelta(minutes=15)) if failures >= 5 else None
                     )
@@ -612,6 +644,9 @@ class AuthService:
                              locked_until=excluded.locked_until""",
                         (identity, ip_address, failures, locked_until),
                     )
+                    if previous_failures < 5 <= failures:
+                        new_lock_scopes.append("account_ip")
+
                     identity_failures = int(conn.execute(
                         """SELECT COALESCE(SUM(failures),0) FROM login_attempts
                            WHERE identity=? AND datetime(last_attempt_at)>=datetime('now','-15 minutes')""",
@@ -622,10 +657,14 @@ class AuthService:
                            WHERE ip_address=? AND datetime(last_attempt_at)>=datetime('now','-15 minutes')""",
                         (ip_address,),
                     ).fetchone()[0])
-                    if identity_failures >= 15:
+                    if identity_failures >= 15 and not _has_login_lock(
+                        conn, "identity", identity
+                    ):
                         _set_login_lock(conn, "identity", identity)
-                    if ip_failures >= 30:
+                        new_lock_scopes.append("account")
+                    if ip_failures >= 30 and not _has_login_lock(conn, "ip", ip_address):
                         _set_login_lock(conn, "ip", ip_address)
+                        new_lock_scopes.append("ip")
                     _prune_login_attempts(conn)
                     failure = True
                 else:
@@ -643,7 +682,16 @@ class AuthService:
                     ).fetchone()
 
         if locked_during_auth:
-            raise LoginLocked("Too many attempts. Try again in a few minutes.")
+            raise LoginLocked(
+                "Too many attempts. Try again in a few minutes.",
+                user_id=failure_user_id,
+            )
+        if new_lock_scopes:
+            raise LoginLocked(
+                "Too many attempts. Try again in a few minutes.",
+                new_lockout=True, scope="+".join(dict.fromkeys(new_lock_scopes)),
+                user_id=failure_user_id,
+            )
         if failure:
             raise AuthenticationError("Incorrect username, email, or password.")
         return user_from_row(refreshed)

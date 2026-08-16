@@ -5,7 +5,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.auth import AuthService, AuthenticationError, password_hasher, safe_next
+from app.auth import (
+    AuthService, AuthenticationError, LoginLocked, password_hasher, safe_next,
+)
 from app.config import Settings
 from app.db import Database
 
@@ -267,18 +269,46 @@ class AuthServiceTests(unittest.TestCase):
             self.auth.invitation_for_token(first)
         self.assertEqual(self.auth.invitation_for_token(second)["user_id"], member.id)
 
-    def test_pending_and_disabled_accounts_get_actionable_login_messages(self):
+    def test_pending_disabled_and_unknown_accounts_share_public_login_error(self):
         pending = self.auth.create_user(
             "waiting", "waiting@example.com", "Waiting", "",
             require_password=False,
         )
-        with self.assertRaisesRegex(AuthenticationError, "waiting for setup"):
-            self.auth.authenticate_local("waiting", "not relevant", "127.0.0.1")
+        for identity in ("waiting", "missing-user"):
+            with self.subTest(identity=identity):
+                with self.assertRaisesRegex(
+                    AuthenticationError, "Incorrect username, email, or password"
+                ):
+                    self.auth.authenticate_local(
+                        identity, "not relevant", f"127.0.0.{1 if identity == 'waiting' else 2}"
+                    )
         self.auth.update_user_admin(
             pending.id, pending.display_name, pending.email, "member", False, 999,
         )
-        with self.assertRaisesRegex(AuthenticationError, "account is disabled"):
-            self.auth.authenticate_local("waiting", "not relevant", "127.0.0.1")
+        with self.assertRaisesRegex(
+            AuthenticationError, "Incorrect username, email, or password"
+        ):
+            self.auth.authenticate_local("waiting", "not relevant", "127.0.0.3")
+
+    def test_new_pair_lockout_is_reported_once_with_account_metadata(self):
+        user = self.auth.create_user(
+            "lockme", "lock@example.com", "Lock Me",
+            "a sufficiently long password",
+        )
+        for _ in range(4):
+            with self.assertRaises(AuthenticationError):
+                self.auth.authenticate_local("lockme", "wrong password", "192.0.2.55")
+        with self.assertRaises(LoginLocked) as created:
+            self.auth.authenticate_local("lockme", "wrong password", "192.0.2.55")
+        self.assertTrue(created.exception.new_lockout)
+        self.assertIn("account_ip", created.exception.scope)
+        self.assertEqual(created.exception.user_id, user.id)
+        with self.assertRaises(LoginLocked) as repeated:
+            self.auth.authenticate_local(
+                "lockme", "a sufficiently long password", "192.0.2.55"
+            )
+        self.assertFalse(repeated.exception.new_lockout)
+        self.assertEqual(repeated.exception.user_id, user.id)
 
     def test_duplicate_username_error_names_the_conflicting_username(self):
         self.auth.create_user(

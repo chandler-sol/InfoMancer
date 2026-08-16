@@ -102,7 +102,10 @@ except ProviderSecretError as exc:
     stored_provider_secrets = {}
     provider_secret_error = str(exc)
 APP_VERSION = "0.8.0-alpha.1"
-app = FastAPI(title="InfoMancer", version=APP_VERSION)
+app = FastAPI(
+    title="InfoMancer", version=APP_VERSION,
+    docs_url=None, redoc_url=None, openapi_url=None,
+)
 
 
 def _librarian_route(method: str, path: str, **kwargs):
@@ -209,6 +212,43 @@ def record_event(
     event_log.write(
         category, message, level=stored_level, detail=detail,
         context=context, user_id=user_id,
+    )
+
+
+def _primary_librarian_id() -> int | None:
+    """Return the first active Librarian for targeted security notifications."""
+    try:
+        with db.connect() as conn:
+            row = conn.execute(
+                """SELECT id FROM users
+                   WHERE role='librarian' AND active=1
+                   ORDER BY id LIMIT 1"""
+            ).fetchone()
+        return int(row["id"]) if row else None
+    except sqlite3.Error:
+        return None
+
+
+def record_security_event(
+    message: str, *, level: str = "info", detail: str = "",
+    context: dict | None = None, user_id: int | None = None,
+    notify_librarian: bool = False,
+) -> None:
+    """Audit a security event and optionally surface it to the primary Librarian."""
+    security_context = dict(context or {})
+    security_context.setdefault("category", "authentication")
+    record_event(
+        "authentication", message, level=level, detail=detail,
+        context=security_context, user_id=user_id,
+    )
+    if not notify_librarian:
+        return
+    librarian_id = _primary_librarian_id()
+    if librarian_id is None:
+        return
+    record_event(
+        "library", message, level=level, detail=detail,
+        context=security_context, user_id=librarian_id,
     )
 
 
@@ -1385,12 +1425,38 @@ def login(
         return redirect("/")
     if not valid_preauth(request, preauth_token):
         return redirect("/login", "Sign-in form expired. Please try again.")
+    client_ip = request_ip(request, settings)
     try:
-        user = auth_service.authenticate_local(identity, password, request_ip(request, settings))
+        user = auth_service.authenticate_local(identity, password, client_ip)
+    except LoginLocked as exc:
+        if exc.new_lockout:
+            locked_user = auth_service.get_user(exc.user_id) if exc.user_id else None
+            subject = locked_user.display_name if locked_user else "an account"
+            record_security_event(
+                f"Repeated sign-in attempts were blocked for {subject}.",
+                level="warning",
+                detail=(
+                    f"Temporary lock scope: {exc.scope or 'existing'}. "
+                    f"Source IP: {client_ip or 'unknown'}."
+                ),
+                context={
+                    "operation": "login_lockout", "scope": exc.scope,
+                    "ip_address": client_ip,
+                },
+                user_id=exc.user_id, notify_librarian=True,
+            )
+        return preauth_response(request, "login.html", {
+            "next": safe_next(next), "identity": identity, "error": str(exc),
+        })
     except AuthenticationError as exc:
         return preauth_response(request, "login.html", {
             "next": safe_next(next), "identity": identity, "error": str(exc),
         })
+    record_security_event(
+        "Local account signed in.",
+        context={"operation": "login_success", "ip_address": client_ip},
+        user_id=user.id,
+    )
     return signed_in_response(request, user, next)
 
 
@@ -1525,6 +1591,11 @@ def change_account_password(
         auth_service.change_password(request.state.user.id, current_password, new_password)
         auth_service.revoke_user_sessions(
             request.state.user.id, except_session=request.state.auth_session.id
+        )
+        record_security_event(
+            "Account password was changed and other sessions were revoked.",
+            context={"operation": "password_changed"},
+            user_id=request.state.user.id,
         )
     except AuthenticationError as exc:
         return templates.TemplateResponse(request, "account_security.html", {

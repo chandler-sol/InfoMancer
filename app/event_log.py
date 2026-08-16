@@ -116,6 +116,7 @@ class EventLog:
             "duplicates": "/duplicates", "metadata": "/settings/metadata",
             "media": "/settings/system", "hashing": "/settings/system",
             "scan": "/sources", "source-guard": "/sources",
+            "authentication": "/logs?category=authentication",
         }.get(category, "/library-health")
 
     def activity(self, user_id: int, *, unread_only: bool = False, limit: int = 100) -> list[dict]:
