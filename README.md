@@ -1,51 +1,96 @@
 # InfoMancer
+
 ![InfoMancer library intelligence dashboard](docs/Infomancer1.png)
-A local-first, lightweight movie and TV inventory for multiple disks. InfoMancer scans media into SQLite, helps match titles through TVDB and IMDb metadata, reports missing episodes, and previews Plex-compatible filesystem changes before applying them.
 
-## What works
+InfoMancer is a local-first media catalog, intelligence, review, and safe filesystem-management application for movie and TV libraries spread across multiple disks, NAS shares, and hosts. It scans media into SQLite, enriches titles with provider metadata, inspects technical media characteristics, explains library problems, and lets a Librarian review changes before InfoMancer touches a file.
 
-- Multiple movie and TV roots, including Windows drive paths and UNC shares when run natively
+The current development line is **0.8 alpha**.
+
+## What makes InfoMancer different
+
+InfoMancer is deliberately broader than a file renamer and deliberately safer than an automatic cleanup script.
+
+- **Media Intelligence Engine (MIE):** explainable health, identity, completeness, quality, freshness, and storage findings. MIE records evidence and recommendations instead of hiding decisions behind a single opaque score.
+- **Unified Review Workspace:** MIE findings, duplicate decisions, unmatched media, missing episodes, metadata problems, quality decisions, and persisted rename proposals converge into one review domain while specialist workflows remain available when more detail is needed.
+- **Safe filesystem automation:** episode/movie/show-folder renames and season-folder organization are preview-first, collision-aware, source-boundary checked, and revalidated immediately before apply.
+- **Operation History + guarded Undo:** supported filesystem operations keep a durable before/after record. Undo refuses to run when catalog or filesystem state has drifted rather than guessing.
+- **Three file-protection modes:** Read-Only, Standard, and Lockdown let an installation decide how much authority InfoMancer has over media. Read-Only still permits scanning, matching, inspection, MIE, and organization metadata without permitting media-file changes.
+- **Duplicate intelligence with managed Trash:** InfoMancer can verify duplicate copies, compare useful quality/storage evidence, recommend which copy deserves attention, move supported duplicates into managed Trash, and restore them through guarded workflows.
+- **TV-library depth:** expected-episode data, missing aired episodes, multi-episode awareness, collapsible seasons, and preview-first organization into `Season 01` / `Specials` folders are built into the title workflow.
+- **Personal library organization:** Saved Views, pinned views, Favorites, ratings, tags, Collections, Custom Libraries, Smart Collections, custom ordering, and Sort Titles sit alongside the shared physical catalog.
+- **Technical media intelligence:** FFprobe-backed runtime, resolution, codec, channel, bitrate, container, and HDR/dynamic-range inspection feeds both title details and MIE quality analysis.
+- **Local-first recovery and ownership:** SQLite backups, exports, settings portability, and verified `.infomancer-backup` packages are designed around self-hosted data ownership. Media files are never copied into InfoMancer backups.
+- **Native Windows direction without a separate update server:** the 0.8 alpha includes a Tauri Windows application, installer/uninstaller testing, a zero-residue uninstall policy, optional final recovery backup, and a GitHub Releases-based signed updater architecture.
+
+For the long-form inventory, see **[the complete feature catalog](docs/reference/FEATURE_CATALOG.md)**. The 0.8 Workspace architecture and completed W1-W6 phases are documented in **[docs/WORKSPACE.md](docs/WORKSPACE.md)**.
+
+## Current capability highlights
+
+### Catalog and Workspace
+
+- Multiple Movie and TV roots, including native Windows drive paths and UNC shares when accessible to the process
 - Recursive, non-destructive scans of common video formats
-- Fast SQLite-backed title and filename search
-- `SxxExx` and multi-episode `SxxExx-Eyy` parsing
-- TVDB v4 series and movie matching with expected-episode import
-- IMDb genres, title type, ratings, vote counts, posters, and metadata filters
-- Missing aired regular-episode reports with configurable external search links
-- Reviewable bulk matching and rename workflows
-- Show-folder renames to `Show (Start - End) {tvdb-12345}`
-- Episode renames to `Show - S01E01 - Episode Name.ext`
-- Targeted series rescans, original-filename restoration, and match removal
-- Persistent background-task status and a new-media intake queue
-- Explainable Library Health findings with identity confidence and multi-episode evidence
-- Duplicate-copy review with hash verification and storage-recovery recommendations
-- Per-source quality profiles and title-level technical consistency checks
-- Local user accounts with Argon2id passwords, revocable sessions, and CSRF protection
-- Fixed Librarian and Member roles with Librarian-managed user access
-- Optional Cloudflare Access identity validation and account linking
-- Librarian-only application settings with validation and change history
-- Replayable new-user walkthroughs and per-user tour completion
-- Official release announcements plus scheduled Librarian messages for Members
-- Loopback-only Docker deployment suitable for an existing Cloudflare Tunnel
+- SQLite-backed title and filename search
+- Dedicated Library, Movies, TV Shows, Review, Sources, Activity, and Dashboard work domains
+- Persistent Library Inspector, contextual selection toolbar, drawers, dialogs, toasts, contextual menus, keyboard shortcuts, and command palette
+- Named Saved Views that can be pinned to Library and Dashboard
+- Collections, Smart Collections, Custom Libraries, Favorites, personal ratings, tags, custom order, and Sort Titles
 
-Plex recommends a year in TV show names, `Season XX` folders, and provider IDs in the exact curly-brace form `{tvdb-123456}`. InfoMancer follows that provider-ID format. It does not yet reorganize files into season folders.
+### Matching and metadata
+
+- TVDB v4 series and movie matching
+- Stored TVDB, TMDB, and IMDb identifiers where available
+- IMDb title type, genres, rating, votes, cast, director, and writer data
+- Posters/covers and title overviews
+- Explicit metadata refresh and Fix Match/Change Match/Unmatch workflows
+- Expected-episode import and missing aired regular-episode reporting
+- Configurable external search links
+
+### Filesystem and media management
+
+- `SxxExx` and multi-episode `SxxExx-Eyy` parsing
+- Episode renames to `Show - S01E01 - Episode Name.ext`
+- Show-folder renames using Plex-compatible provider IDs
+- Preview-first movie renames
+- Preview-first organization into season folders, with season zero mapped to `Specials`
+- Persisted global rename proposals in Review
+- Original-filename restoration
+- Editions, versions, and preferred-version labeling
+- Operation History and guarded Undo for supported changes
+- Read-Only, Standard, and Lockdown file-protection modes
+
+### Intelligence, health, and duplicates
+
+- Explainable MIE findings across health, identity, completeness, quality, freshness, and storage
+- Identity-confidence evidence and conflict explanations
+- Library Health remediation guidance
+- FFprobe-backed runtime, resolution, video/audio codec, channel, bitrate, container, and HDR inspection
+- Source-level quality profiles and title-level technical consistency checks
+- Duplicate candidate review and hash verification
+- Managed Trash, guarded restore, and storage-recovery recommendations
+
+### Recovery, security, and operations
+
+- Consistent SQLite backups and validated database restore
+- Verified portable `.infomancer-backup` creation and verification
+- CSV, JSON, and XML library exports
+- Structured event/activity logging and security events
+- Local Argon2id authentication, revocable sessions, CSRF protection, invitation/recovery links, throttling/lockouts, and Librarian/Member authorization
+- Optional Cloudflare Access JWT validation and account linking
+- Non-root Docker runtime, restrictive origin/host/request handling, and security response headers
+- Cross-platform test matrix plus dependency and supply-chain checks
 
 ## Install
 
-Docker is the recommended installation on Windows, macOS, and Linux. It keeps
-InfoMancer and FFprobe consistent while allowing each operating system to map
-its own disks, mounted volumes, and network shares beneath `/media` inside the
-container.
+Docker remains the recommended self-hosted installation on Windows, macOS, and Linux. It keeps InfoMancer and FFprobe consistent while allowing each operating system to map its own disks, mounted volumes, and network shares beneath `/media` inside the container.
 
-See **[Install InfoMancer](docs/INSTALLATION.md)** for the complete
-platform-specific walkthrough, storage examples, updates, backups, and
-troubleshooting.
+See **[Install InfoMancer](docs/INSTALLATION.md)** for the complete platform-specific walkthrough, storage examples, updates, backups, and troubleshooting.
 
 The short version is:
 
 1. Install Docker Desktop, or Docker Engine with Compose on Linux.
 2. Copy `.env.example` to `.env`.
-3. Copy the matching example from `deploy/` to `compose.media.yaml` and replace
-   its example media paths.
+3. Copy the matching example from `deploy/` to `compose.media.yaml` and replace its example media paths.
 4. Run:
 
    ```bash
@@ -54,133 +99,105 @@ The short version is:
 
 5. Open `http://127.0.0.1:8787` and follow Guided Setup.
 
-On the first visit, InfoMancer asks you to create the initial **Librarian** account. Librarians can scan, match, change metadata, rename files, and administer users. **Members** can browse and search without filesystem or administrative access.
+On the first visit, InfoMancer asks you to create the initial **Librarian** account. Librarians can scan, match, change metadata, review filesystem proposals, perform permitted media operations, and administer users. **Members** can browse and organize permitted personal state without receiving Librarian filesystem or administrative authority.
 
 ## Authentication
 
-`INFOMANCER_AUTH_MODE` controls how the app verifies people:
+`INFOMANCER_AUTH_MODE` controls how the application verifies people:
 
 - `local` (default): username or email plus an Argon2id-hashed password.
-- `cloudflare`: validates the signed Cloudflare Access JWT on every request, then maps that identity to an InfoMancer account. A Librarian must pre-create later users with the exact verified email address.
-- `disabled`: intended only for an explicitly trusted loopback/private installation. It grants the browser Librarian privileges without a login.
+- `cloudflare`: validates the signed Cloudflare Access JWT on every request, then maps that identity to an InfoMancer account.
+- `disabled`: intended only for an explicitly trusted loopback/private installation. It grants the local browser Librarian privileges without a login.
 
-Local sessions use an opaque, `HttpOnly`, same-site cookie; only a SHA-256 hash of the session token is stored in SQLite. State-changing requests require a per-session CSRF token. Account settings provide Profile, Password, and Sessions pages, while Librarians also receive a Users page.
+Local sessions use an opaque, `HttpOnly`, same-site cookie; only a SHA-256 hash of the session token is stored in SQLite. State-changing requests require CSRF protection. Public login failures are deliberately generic, and repeated failures are throttled with pair, identity-wide, and IP-wide lockout controls.
 
-In local mode, a Librarian creates a Member or Librarian account and gives that person a one-time setup link. The full link is shown only once, expires after 24 hours, and is replaced whenever a new link is generated. Only a SHA-256 hash of its secret is stored in SQLite. The invited person chooses their own password; using the link immediately invalidates it. Share these links privately because possession of an unused link grants access to that account.
+In local mode, a Librarian can create a Member or Librarian account and issue a one-time setup link. Setup links expire, are replaced when regenerated, and are stored only as hashes. Password changes and recovery actions revoke affected sessions where appropriate.
 
-If the last Librarian cannot sign in, reset that account from a terminal. The command asks for the new temporary password interactively, signs out its existing sessions, and requires another password change after sign-in:
+If the last Librarian cannot sign in, reset that account from a terminal:
 
 ```bash
 # Docker Compose
 docker compose exec infomancer python -m app.cli reset-librarian USERNAME
-
 ```
 
-Alternatively, generate a one-hour, single-use recovery link. This lets the
-account owner choose the new password in their browser without placing any
-password in terminal history:
+Or create a one-hour, single-use recovery link:
 
 ```bash
 docker compose exec infomancer python -m app.cli recovery-link USERNAME \
   --base-url https://your-infomancer-address
 ```
 
-Treat the printed link like a password. It expires automatically, becomes
-invalid immediately after use, and revokes the account’s existing sessions.
+Treat the printed link like a password. It expires automatically and becomes invalid after use.
 
-For a native installation, run `.venv\Scripts\python.exe -m app.cli reset-librarian USERNAME` on Windows or `.venv/bin/python -m app.cli reset-librarian USERNAME` on macOS/Linux. The recovery command accepts Librarian usernames only and never places the new password in shell history.
+Passkeys, application-native MFA, and direct Google/Microsoft/Apple/GitHub adapters are reserved for a later authentication phase. Cloudflare Access can provide external SSO today.
 
-Members can browse and search titles, metadata, missing episodes, and permitted external provider links. Only Librarians can manage sources and users, scan or match media, refresh metadata, or perform filesystem changes. These permissions are enforced by the server; the Member interface also omits controls they cannot use.
+## Safe operating model
 
-Passkeys, MFA, and direct Google, Microsoft, Apple, and GitHub adapters are reserved for a later authentication phase; the provider-neutral identity table is already in place.
+InfoMancer treats the filesystem as something to protect, not merely manipulate.
 
-The service account running InfoMancer needs read permission to catalog files and write permission only for roots where renaming is desired.
+- Scanning never renames, moves, or deletes media.
+- Removing a source deletes catalog rows, not media files.
+- Rename and season-organization workflows preview destination paths first.
+- Existing destinations block the operation rather than being overwritten.
+- Persisted rename proposals are revalidated before apply.
+- Read-Only Mode blocks media mutation while preserving analysis and catalog workflows.
+- Lockdown Mode pauses automatic permanent managed-trash deletion and strengthens irreversible-action protection.
+- Operation History records supported filesystem changes and only offers Undo when the current state can be verified safely.
+- Search-provider links never start a download.
 
-## App Settings
+The service account running InfoMancer needs read permission to catalog files and write permission only for roots where filesystem changes are desired.
 
-Librarians can open **Settings** from the main menu or their account menu. Settings are split into four sections:
+## Settings and recovery
 
-- **General** changes the installation name, display time zone, default library view, and default cover size.
-- **Metadata & Matching** shows TVDB credential status, tests the TVDB connection, reports locally stored IMDb coverage, and starts an IMDb metadata update.
-- **External Search** changes the provider label and URL template used by series, episode, and missing-episode search actions.
-- **System** reports application and database health, inspects technical media
-  information, exports the catalog and logs, controls logging detail, exports
-  and imports portable preferences, creates and restores validated database
-  backups, checks releases, provides database optimization and restart
-  controls, and lists recent settings changes with the Librarian who made each
-  change.
+Librarian Settings cover installation preferences, metadata/provider status, external search, file-protection mode, fingerprint scheduling, logs, database maintenance, backups, and recovery tooling.
 
-Settings exports intentionally omit passwords, accounts, sessions, provider
-credentials, encryption keys, sources, and media. Complete database backups
-include catalog and account data but never copy the media files themselves.
-Installing a checked release from the interface requires the optional,
-restricted host updater; see **[Updating InfoMancer](docs/UPDATES.md)**.
+Portable settings exports deliberately omit accounts, passwords, sessions, provider credentials, encryption keys, sources, and media. Database backups contain the SQLite catalog/account state but never media files.
 
-Safe presentation and provider preferences are stored in SQLite and take effect on subsequent page loads. TVDB credentials entered through InfoMancer are stored in a separate encrypted application-data file; `INFOMANCER_SECRET` protects that file when configured, otherwise InfoMancer creates a restricted local encryption key in its data folder. Other trust-boundary settings—including authentication mode, secure-cookie policy, Cloudflare validation, database location, and allowed browse roots—remain protected environment or Compose configuration.
+The newer `.infomancer-backup` recovery package adds a versioned manifest, a consistent SQLite snapshot, collection artwork where present, and SHA-256 verification. It deliberately excludes movie/TV files, provider credentials, encryption keys, deployment environment files, application binaries, and caches. Package creation and upload verification are implemented; full in-app restore from that portable package remains release work.
 
-## Tours and announcements
+## Native Windows alpha
 
-New local-account users receive a short guided tour after their first sign-in. The tour introduces global search, navigation, background tasks, announcements, and account controls. A user can skip it without losing access to it: **Profile → Take the tour again** replays the walkthrough at any time.
+The repository now contains an alpha Tauri-based Windows application and CI that builds the InfoMancer core, builds the installer, performs an actual install/uninstall smoke test, and checks known InfoMancer-owned locations for residue.
 
-The **Announcements** page is available to every signed-in user from the main menu. Official release notes are bundled with InfoMancer versions and appear once for each user. Librarians can also publish plain-text installation messages for Members, Librarians, or everyone. A message may appear once or repeat daily or weekly through a required end date. Delivery receipts are stored per user, so reading a notice does not mark it as read for anyone else.
+The Windows uninstall policy is intentionally strict: uninstall should remove InfoMancer-owned local state rather than leaving caches/configuration behind. Before destructive local-data cleanup, the uninstaller can offer to create and verify a recovery package at a user-selected location. User media is never part of uninstall cleanup.
 
-Librarian announcements are intentionally local to that InfoMancer installation. Official notices are delivered through application updates rather than a remotely writable announcement service; this keeps self-hosted installations independent and avoids adding another external trust dependency.
+The Windows updater architecture uses **GitHub Releases** as the distribution host, so InfoMancer does not require a separately hosted update server. Tauri updater signatures are used to verify update artifacts. Production updater signing keys and Windows publisher/AuthentiCode signing are release gates rather than secrets stored in the repository.
 
-## Guided setup
+See **[Packaging](docs/PACKAGING.md)** and **[Updating InfoMancer](docs/UPDATES.md)** for the current architecture.
 
-After the first Librarian finishes or skips the welcome tour on an empty installation,
-InfoMancer offers Guided setup or Manual setup. Guided setup saves progress across
-installation preferences, metadata status, Movie and TV source selection, and the
-first scan handoff. Manual setup opens Home, where an empty-library card keeps Add
-first source and Setup Assistant actions available. Librarians can reopen Setup
-Assistant later from Help, App Settings, or the Profile menu.
+## Guided setup and onboarding
 
-Guided Setup explains how to obtain TVDB credentials, verifies them before moving
-forward, and saves them encrypted without leaving the wizard. The source step embeds
-the same folder browser and media preview used by Source Management, and requires at
-least one Movie or TV Shows folder before setup can finish. The isolated sandbox has
-a clearly labeled testing-only bypass for metadata-provider setup.
+After the initial Librarian account is created, InfoMancer can walk through installation preferences, metadata-provider setup, Movie/TV source selection, and the first scan handoff. TVDB credentials can be verified inside Guided Setup and are stored outside the SQLite database in protected provider-secret storage.
+
+New users can receive a replayable guided tour of search, navigation, background tasks, announcements, and account controls.
+
+## Announcements
+
+InfoMancer supports bundled official release notices plus local Librarian announcements. Local messages can target Members, Librarians, or everyone and can be one-time, daily, or weekly within their configured schedule. Delivery/read state is tracked per user.
 
 ## Isolated sandbox
 
-The sandbox uses a separate database, generated dummy media, container name,
-Compose project, and loopback port. It never mounts configured production
-media or production data.
+The sandbox uses a separate database, generated dummy media, container name, Compose project, and loopback port. It does not mount configured production media or production data.
 
-On Windows with Docker available:
+Windows:
 
 ```powershell
 .\scripts\reset-sandbox.ps1 -Mode Blank
 .\scripts\reset-sandbox.ps1 -Mode Sample
 ```
 
-On Linux:
+Linux:
 
 ```bash
 ./scripts/reset-sandbox.sh blank
 ./scripts/reset-sandbox.sh sample
 ```
 
-Open `http://127.0.0.1:8788`. Blank presents the complete first-run experience.
-Sample creates and scans disposable fixtures; sign in with username `sandbox` and
-password `sandbox librarian password`. Both reset modes delete only
-`data-sandbox/` and `sandbox-media/` inside the repository.
-
-## Packaging and release readiness
-
-Docker Compose is the first public-beta delivery target. Signed Windows MSI,
-macOS DMG, and native Linux packages are feasible, but require an application
-launcher, platform data locations, service/update behavior, FFprobe packaging,
-code signing, and clean-machine installer testing.
-
-See the **[cross-platform packaging plan](docs/PACKAGING.md)** and
-**[release review checklist](docs/RELEASE_REVIEW.md)**.
+Open `http://127.0.0.1:8788`.
 
 ## Command line
 
-InfoMancer includes a cross-platform CLI for headless status checks,
-diagnostics, source scans, FFprobe media inspection, CSV/JSON/XML exports,
-live log viewing, database backups, optimization, and Librarian recovery.
+InfoMancer includes a cross-platform CLI for status, diagnostics, scans, FFprobe inspection, exports, logs, backups, database optimization, and Librarian recovery.
 
 ```bash
 python -m app.cli --help
@@ -189,29 +206,21 @@ python -m app.cli doctor
 ```
 
 With Docker, run the same module through `docker compose exec infomancer`.
-See the **[command-line guide](docs/CLI.md)** for commands, safe automation,
-and examples.
+See **[the command-line guide](docs/CLI.md)** for details.
 
 ## Remote access
 
-InfoMancer binds to loopback by default. For access away from home, use an
-authenticated reverse proxy or VPN without exposing port 8787 directly. The
-included Cloudflare overlay can run an outbound-only tunnel beside InfoMancer.
+InfoMancer binds to loopback by default in the recommended deployment. For access away from home, use an authenticated reverse proxy or VPN instead of exposing port 8787 directly. The included Cloudflare overlay can run an outbound-only tunnel beside InfoMancer.
 
-See [Remote access with Cloudflare](docs/REMOTE_ACCESS.md) for setup, verification, and rollback. Do not activate the public hostname without the Access policy: the application deliberately relies on that authenticated proxy as its security boundary.
+See **[Remote access with Cloudflare](docs/REMOTE_ACCESS.md)** for setup and verification.
 
-## GitHub
+## Development and release status
 
-The repository excludes local secrets and databases and includes a secret-free GitHub Actions test workflow. A private repository is recommended first; no license has been selected yet. See [Moving InfoMancer to GitHub](docs/GITHUB.md) for private, public, and future deployment options.
+The repository is public, but InfoMancer is still an alpha project and no final open-source license has been selected yet. Do not treat an alpha build as a guarantee that database migrations, packaging, or interfaces have reached long-term compatibility.
 
-## Safe operating model
+Current release work includes portable recovery-package restore, production updater/code signing, large-library performance qualification, filesystem/data-durability torture testing, accessibility/responsive QA, and final licensing/privacy/provider review.
 
-- Scanning never renames, moves, or deletes media.
-- Removing a root deletes catalog rows only.
-- Every filesystem rename has a review step showing old and new paths.
-- A rename refuses to overwrite an existing destination.
-- Search-provider links do not initiate downloads. Use them only for media you are legally allowed to obtain.
-- Back up the SQLite file and test renames on a small sample library first.
+See **[the release review checklist](docs/RELEASE_REVIEW.md)**.
 
 ## Tests
 
@@ -219,8 +228,8 @@ The repository excludes local secrets and databases and includes a secret-free G
 python -m unittest discover -s tests -v
 ```
 
-## Current boundaries
+The permanent CI matrix also runs Python validation on Ubuntu, macOS, and Windows plus dependency/supply-chain checks.
 
-InfoMancer does not scrape torrent result pages, submit downloads to a client, or reorganize season directories. Direct social sign-in, passkeys, and MFA are not yet enabled; Cloudflare Access can currently provide external SSO.
+## Intentional boundaries
 
-Season-zero specials and episodes with future air dates are excluded from the default gap report. TVDB items without an air date are included.
+InfoMancer does not scrape torrent-result pages, automatically acquire copyrighted media, or submit downloads to a client. External search links are convenience links only. Use InfoMancer only with media and metadata sources you are legally entitled to access.
