@@ -16,6 +16,7 @@
     <div><p class="eyebrow">LIBRARY</p><h2>Default presentation</h2><p class="muted">These defaults apply when a browser has not already saved its own view choice.</p></div>
     <label>Default library view<select name="default_library_view"><option value="list" {% if preferences.default_library_view == 'list' %}selected{% endif %}>List</option><option value="covers" {% if preferences.default_library_view == 'covers' %}selected{% endif %}>Covers</option></select></label>
     <label>Default cover size <output id="settings-cover-size-output">{{ preferences.default_cover_size }}px</output><input id="settings-cover-size" name="default_cover_size" type="range" min="120" max="300" step="10" value="{{ preferences.default_cover_size }}"></label>
+    <label>TV season groups<select name="default_season_display"><option value="collapsed" {% if preferences.default_season_display != 'expanded' %}selected{% endif %}>Collapsed by default</option><option value="expanded" {% if preferences.default_season_display == 'expanded' %}selected{% endif %}>Expanded by default</option></select><small>This controls the starting state on the full TV title page. Expand all and Collapse all remain available there.</small></label>
   </section>
   <div class="settings-save-bar"><span>Changes apply to new page loads.</span><button class="button primary">Save general settings</button></div>
 </form>

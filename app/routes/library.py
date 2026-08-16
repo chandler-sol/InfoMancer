@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from ..access import require_librarian
+from ..saved_views import SavedViewError, SavedViewService
 from .context import RouteContext
 
 
@@ -18,6 +19,7 @@ def build_router(ctx: RouteContext):
     csv_safe_row = ctx.live("csv_safe_row")
     datetime = ctx.live("datetime")
     db = ctx.live("db")
+    saved_views = SavedViewService(db)
     display_title_type = ctx.live("display_title_type")
     favorite_return_path = ctx.live("favorite_return_path")
     fuzzy_people = ctx.live("fuzzy_people")
@@ -344,6 +346,66 @@ def build_router(ctx: RouteContext):
             f'Tag "{tag["name"]}" deleted. Movies and TV series were not removed.',
         )
 
+    @router.post("/library/views")
+    def save_library_view(
+        request: Request, name: str = Form(...), view_path: str = Form("/library"),
+        view_query: str = Form(""), pinned: str = Form("0"),
+    ):
+        try:
+            view, created = saved_views.save(
+                request.state.user.id, name, view_path, view_query, pinned=pinned == "1",
+            )
+        except SavedViewError as exc:
+            return redirect(view_path if view_path in SavedViewService.ALLOWED_PATHS else "/library", str(exc))
+        message = (
+            f'Saved view "{view["name"]}" created.'
+            if created else f'Saved view "{view["name"]}" updated.'
+        )
+        record_event(
+            "library", message, user_id=request.state.user.id,
+            context={"saved_view_id": view["id"], "pinned": view["pinned"]},
+        )
+        return redirect(view["href"], message)
+
+    @router.post("/library/views/{view_id}/pin")
+    def toggle_saved_view_pin(request: Request, view_id: int):
+        try:
+            view = saved_views.toggle_pin(request.state.user.id, view_id)
+        except SavedViewError as exc:
+            return redirect("/library", str(exc))
+        message = f'{"Pinned" if view["pinned"] else "Unpinned"} saved view "{view["name"]}".'
+        record_event(
+            "library", message, user_id=request.state.user.id,
+            context={"saved_view_id": view_id, "pinned": view["pinned"]},
+        )
+        return redirect("/library", message)
+
+    @router.post("/library/views/{view_id}/rename")
+    def rename_saved_view(request: Request, view_id: int, name: str = Form(...)):
+        try:
+            view = saved_views.rename(request.state.user.id, view_id, name)
+        except SavedViewError as exc:
+            return redirect("/library", str(exc))
+        message = f'Saved view renamed to "{view["name"]}".'
+        record_event(
+            "library", message, user_id=request.state.user.id,
+            context={"saved_view_id": view_id},
+        )
+        return redirect("/library", message)
+
+    @router.post("/library/views/{view_id}/delete")
+    def delete_saved_view(request: Request, view_id: int):
+        try:
+            name = saved_views.delete(request.state.user.id, view_id)
+        except SavedViewError as exc:
+            return redirect("/library", str(exc))
+        message = f'Saved view "{name}" deleted.'
+        record_event(
+            "library", message, user_id=request.state.user.id,
+            context={"saved_view_id": view_id},
+        )
+        return redirect("/library", message)
+
     @router.get("/library", response_class=HTMLResponse)
     def library(
         request: Request, q: str = "", kind: str = "all", letter: str = "",
@@ -580,12 +642,27 @@ def build_router(ctx: RouteContext):
                     ORDER BY {sort_sql} LIMIT 1000""",
                 [request.state.user.id, request.state.user.id, *params],
             ).fetchall()
+        current_view_path = {"movie": "/movies", "tv": "/shows"}.get(kind, "/library")
+        current_view_query = urlencode({
+            key: value for key, value in {
+                "q": q, "letter": normalized_letter, "genre": genre,
+                "title_type": title_type, "root": root_id, "person": person_id,
+                "person_name": (selected_person["person_name"] if selected_person else person_name),
+                "credit_role": credit_role, "match": match_status, "gaps": gap_status,
+                "favorite": favorite_status, "tag": tag_id, "sort": sort_key,
+            }.items() if value and not (key == "sort" and value == "title")
+        })
+        user_saved_views = saved_views.list_for_user(request.state.user.id)
         return templates.TemplateResponse(request, "library.html", {
             "rows": rows, "q": q, "kind": kind, "letter": normalized_letter,
             "genre": genre, "title_type": title_type, "root_id": root_id,
             "match_status": match_status, "gap_status": gap_status,
             "favorite_status": favorite_status, "tag_id": tag_id, "sort_key": sort_key,
             "tag_options": tag_options,
+            "saved_views": user_saved_views,
+            "pinned_saved_views": [view for view in user_saved_views if view["pinned"]],
+            "current_view_path": current_view_path,
+            "current_view_query": current_view_query,
             "root_options": root_options,
             "selected_root": next((item for item in root_options if item["id"] == root_id), None),
             "person_id": person_id, "person_name": (
@@ -1044,6 +1121,10 @@ def build_router(ctx: RouteContext):
         "create_tag": create_tag,
         "rename_tag": rename_tag,
         "delete_tag": delete_tag,
+        "save_library_view": save_library_view,
+        "toggle_saved_view_pin": toggle_saved_view_pin,
+        "rename_saved_view": rename_saved_view,
+        "delete_saved_view": delete_saved_view,
         "library": library,
         "workspace_inspector": workspace_inspector,
         "workspace_toggle_favorite": workspace_toggle_favorite,

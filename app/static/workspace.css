@@ -1127,3 +1127,60 @@ body.workspace-inspector-open .workspace-inspector {
   .backup-upload-row { grid-template-columns: 1fr; align-items: stretch; }
   .backup-upload-row > .button { width: 100%; }
 }
+
+
+/* W5 saved Library views */
+.saved-view-bar {
+  align-items: center;
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin: 10px 0 14px;
+  padding: 8px 10px;
+  position: relative;
+}
+.saved-view-pins {align-items:center;display:flex;gap:7px;min-width:0;overflow:auto;scrollbar-width:thin}
+.saved-view-label {color:var(--lime);font-size:10px;font-weight:800;letter-spacing:.12em;white-space:nowrap}
+.saved-view-empty {color:var(--muted);font-size:11px;white-space:nowrap}
+.saved-view-chip {background:#101820;border:1px solid var(--line);border-radius:999px;color:var(--text);font-size:12px;padding:6px 10px;text-decoration:none;white-space:nowrap}
+.saved-view-chip:hover,.saved-view-chip:focus-visible {border-color:var(--lime);color:var(--lime);outline:none}
+.saved-view-manager {position:relative;flex:0 0 auto}
+.saved-view-manager > summary {cursor:pointer;list-style:none}
+.saved-view-manager > summary::-webkit-details-marker {display:none}
+.saved-view-manager > summary span {color:var(--muted);font-size:10px;margin-left:4px}
+.saved-view-panel {background:#0c131a;border:1px solid var(--line);border-radius:10px;box-shadow:0 18px 48px rgba(0,0,0,.35);display:grid;gap:10px;padding:12px;position:absolute;right:0;top:calc(100% + 7px);width:min(430px,calc(100vw - 40px));z-index:45}
+.saved-view-create {display:grid;gap:8px}
+.saved-view-create > input,.saved-view-rename input {background:var(--bg);border:1px solid var(--line);border-radius:5px;color:var(--text);font:inherit;padding:8px 9px}
+.saved-view-pin-choice {align-items:center;color:var(--muted);display:flex;font-size:12px;gap:7px}
+.saved-view-list {border-top:1px solid var(--line);display:grid;padding-top:6px}
+.saved-view-list article {align-items:center;border-bottom:1px solid color-mix(in srgb,var(--line) 65%,transparent);display:flex;gap:8px;padding:7px 2px}
+.saved-view-list article:last-child {border-bottom:0}
+.saved-view-open {display:grid;flex:1;min-width:0;text-decoration:none}
+.saved-view-open strong {color:var(--text);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.saved-view-open small {color:var(--muted);font-size:10px}
+.saved-view-open:hover strong {color:var(--lime)}
+.saved-view-actions {align-items:center;display:flex;gap:3px}
+.saved-view-actions form {margin:0}
+.saved-view-actions button,.saved-view-rename > summary {background:transparent;border:0;border-radius:4px;color:var(--muted);cursor:pointer;font:inherit;font-size:11px;padding:6px}
+.saved-view-actions button:hover,.saved-view-rename > summary:hover {background:#141e27;color:var(--lime)}
+.saved-view-delete:hover {color:#ff6b6b!important}
+.saved-view-rename {position:relative}
+.saved-view-rename > summary {list-style:none}
+.saved-view-rename > summary::-webkit-details-marker {display:none}
+.saved-view-rename form {align-items:center;background:#0c131a;border:1px solid var(--line);border-radius:7px;display:flex;gap:6px;padding:7px;position:absolute;right:0;top:calc(100% + 4px);width:260px;z-index:48}
+.saved-view-rename input {min-width:0;width:100%}
+.home-saved-views {margin-top:26px}
+.home-saved-view-grid {display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));margin-top:12px}
+.home-saved-view-grid > a {background:var(--panel);border:1px solid var(--line);border-radius:10px;display:grid;gap:4px;padding:14px;text-decoration:none}
+.home-saved-view-grid > a span {color:var(--lime);font-size:9px;font-weight:800;letter-spacing:.12em}
+.home-saved-view-grid > a strong {color:var(--text);font-size:15px}
+.home-saved-view-grid > a small {color:var(--muted);font-size:11px}
+.home-saved-view-grid > a:hover,.home-saved-view-grid > a:focus-visible {border-color:var(--lime);outline:none;transform:translateY(-1px)}
+@media (max-width:760px) {
+  .saved-view-bar {align-items:stretch;flex-direction:column}
+  .saved-view-manager > summary {width:100%}
+  .saved-view-panel {left:0;right:auto;width:min(430px,calc(100vw - 48px))}
+}

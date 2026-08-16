@@ -130,6 +130,26 @@ def _login_lockouts(conn: sqlite3.Connection) -> None:
     )
 
 
+def _user_saved_views(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS user_saved_views (
+             id INTEGER PRIMARY KEY,
+             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+             name TEXT NOT NULL COLLATE NOCASE,
+             path TEXT NOT NULL CHECK(path IN ('/library','/movies','/shows')),
+             query_string TEXT NOT NULL DEFAULT '',
+             pinned INTEGER NOT NULL DEFAULT 0,
+             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+             UNIQUE(user_id,name)
+           )"""
+    )
+    conn.execute(
+        """CREATE INDEX IF NOT EXISTS idx_user_saved_views_user
+           ON user_saved_views(user_id,pinned DESC,name COLLATE NOCASE)"""
+    )
+
+
 MIGRATIONS = (
     Migration(1, "title metadata columns", _titles),
     Migration(2, "source health columns", _roots),
@@ -142,6 +162,7 @@ MIGRATIONS = (
     Migration(9, "duplicate trash size accounting", _duplicate_trash),
     Migration(10, "single-runtime lease", _runtime_lease),
     Migration(11, "persistent aggregate login lockouts", _login_lockouts),
+    Migration(12, "user saved library views", _user_saved_views),
 )
 
 

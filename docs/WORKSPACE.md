@@ -21,7 +21,7 @@ Primary work domains are Dashboard, Library, Review, Sources, and Activity. Exis
 2. **W2 Library (complete)**: server-backed inspector partials, richer file/edition/quality information, history-aware selection state, instantaneous favorite/tag actions.
 3. **W3 Review**: unified queue for MIE findings, duplicates, unmatched media, missing episodes, metadata issues, and quality decisions.
 4. **W4 Interaction**: reusable drawers, dialogs, toasts, partial navigation, keyboard shortcuts, and command palette.
-5. **W5 Saved Views**: named filter/sort workspaces that can be pinned to Library and Dashboard.
+5. **W5 Saved Views (complete)**: named filter/sort workspaces that can be pinned to Library and Dashboard.
 6. **W6 Operations**: generalized operation history and reversible actions where filesystem semantics permit safe undo.
 
 W1 intentionally uses the existing rendered Library DOM as its inspector data source. W2 replaces that prototype with a dedicated read-only inspector endpoint/partial so the panel can expose richer metadata without duplicating page logic in JavaScript.
@@ -42,6 +42,21 @@ W2 replaces the W1 DOM-scraping Inspector with a dedicated read-only `/library/i
 
 The final W2 application tree passes 198 tests plus `python -m compileall app`. Coverage includes server-rendered Inspector data, read-only GET behavior, member-safe CSRF-protected favorite/tag mutations, route authorization, keyboard and range selection contracts, browser-history restoration, aggregate media totals beyond the bounded file preview, and correct runtime handling for alternate movie editions. The permanent repository matrix also passes dependency audit plus Python 3.13 tests and compilation on Ubuntu, macOS, and Windows.
 
+
+## W5 Saved Views
+
+W5 turns the current Library filter/sort state into a personal reusable workspace.
+Signed-in users can save the normalized current Library, Movies, or TV Shows view,
+rename it, pin or unpin it, and delete it without affecting media or global settings.
+Only the known Library filter keys are stored; arbitrary query parameters and external
+paths are discarded before persistence. Pinned views appear both above the Library
+filters and on Dashboard. Saved views are private to each account and capped to keep
+the navigation surfaces manageable.
+
+The full TV title view also gains an installation-wide collapsed/expanded default for
+season groups. Collapsed remains the default, while Librarians can switch the starting
+state under General Settings; per-page Expand all and Collapse all controls remain
+available.
 
 ## W3 + W4: Unified Review and application interactions
 

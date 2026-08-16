@@ -13,6 +13,7 @@ def build_router(ctx: RouteContext):
     Request = ctx.get("Request")
     TVDBError = ctx.get("TVDBError")
     TitleMetadataService = ctx.get("TitleMetadataService")
+    app_settings = ctx.live("app_settings")
     clean_label = ctx.live("clean_label")
     contained_destination = ctx.live("contained_destination")
     db = ctx.live("db")
@@ -638,6 +639,7 @@ def build_router(ctx: RouteContext):
             "scan_at": scan_at, "scan_stale": scan_is_stale(scan_at),
             "series_search_url": series_provider_search_url(title),
             "title_state": title_state, "title_tags": title_tags,
+            "default_season_display": app_settings.get("default_season_display"),
             "tvdb_enabled": bool(getattr(tvdb, "api_key", settings.tvdb_api_key)),
             "message": request.query_params.get("message", ""),
         })

@@ -73,6 +73,13 @@
     </a>
   </section>
 
+  {% if saved_views %}
+  <section class="home-saved-views" aria-label="Pinned saved library views">
+    <div class="home-section-head"><div><p class="eyebrow">SAVED VIEWS</p><h2>Your Library shortcuts</h2></div><a href="/library">Manage in Library &rarr;</a></div>
+    <div class="home-saved-view-grid">{% for view in saved_views %}<a href="{{ view.href }}"><span>{{ 'MOVIES' if view.path == '/movies' else 'TV SHOWS' if view.path == '/shows' else 'ALL MEDIA' }}</span><strong>{{ view.name }}</strong><small>Open saved filters and sort &rarr;</small></a>{% endfor %}</div>
+  </section>
+  {% endif %}
+
   <section class="home-organize">
     <a href="/collections"><span class="home-organize-icon"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="13" height="15" rx="1"></rect><path d="M8 2h12v15M7 9h7M7 13h7"></path></svg></span><span><small>Curated by You</small><strong>Collections</strong><em>{{ counts.collections }} collection{% if counts.collections != 1 %}s{% endif %}</em></span><b>&rarr;</b></a>
     <a href="/favorites"><span class="home-organize-icon"><svg viewBox="0 0 24 24"><path d="m12 2.5 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3.1-5.8 3.1 1.1-6.5-4.7-4.6 6.5-.9z"></path></svg></span><span><small>Your personal shelf</small><strong>Favorites</strong><em>{{ counts.favorites }} saved item{% if counts.favorites != 1 %}s{% endif %}</em></span><b>&rarr;</b></a>

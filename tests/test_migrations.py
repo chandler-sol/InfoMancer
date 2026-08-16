@@ -36,6 +36,11 @@ class MigrationTests(unittest.TestCase):
                 self.assertIn("edition_name", columns)
                 self.assertIn("version_preferred", columns)
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=11").fetchone())
+                self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=12").fetchone())
+                saved_view_columns = {
+                    row["name"] for row in upgraded.execute("PRAGMA table_info(user_saved_views)")
+                }
+                self.assertTrue({"user_id", "name", "path", "query_string", "pinned"}.issubset(saved_view_columns))
                 lockout_columns = {
                     row["name"] for row in upgraded.execute("PRAGMA table_info(login_lockouts)")
                 }

@@ -12,7 +12,8 @@ class CollapsibleSeasonContractTests(unittest.TestCase):
         self.assertIn('aria-expanded="false"', template)
         self.assertIn('id="expand-all-seasons"', template)
         self.assertIn('id="collapse-all-seasons"', template)
-        self.assertIn('const expandedSeasons = new Set();', template)
+        self.assertIn('const defaultSeasonDisplay = {{ default_season_display|tojson }};', template)
+        self.assertIn('defaultSeasonDisplay === "expanded"', template)
         self.assertIn('expandedSeasons.clear();', template)
         self.assertIn('heading.setAttribute("aria-expanded", String(expanded));', template)
 

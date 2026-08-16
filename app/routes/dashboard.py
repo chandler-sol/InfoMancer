@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from ..access import require_librarian
+from ..saved_views import SavedViewService
 from .context import RouteContext
 
 
@@ -10,6 +11,7 @@ def build_router(ctx: RouteContext):
     Request = ctx.get("Request")
     dashboard_counts = ctx.live("dashboard_counts")
     db = ctx.live("db")
+    saved_views = SavedViewService(db)
     format_bytes = ctx.live("format_bytes")
     mie = ctx.live("mie")
     scan_all_job = ctx.live("scan_all_job")
@@ -86,6 +88,7 @@ def build_router(ctx: RouteContext):
         )
         return templates.TemplateResponse(request, home_template, {
             "counts": counts, "roots": roots, "recent": recent, "favorites": favorites,
+            "saved_views": saved_views.list_for_user(request.state.user.id, pinned_only=True),
             "jobs": scan_jobs,
             "scan_all_job": all_scan_job,
             "mie_summary": mie_summary,

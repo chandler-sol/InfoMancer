@@ -22,6 +22,7 @@ class AppSettingsTests(unittest.TestCase):
         self.assertEqual(self.settings.get("installation_name"), "InfoMancer")
         self.assertEqual(self.settings.get("search_provider_name"), "example.test")
         self.assertEqual(self.settings.get("lockdown_mode"), "0")
+        self.assertEqual(self.settings.get("default_season_display"), "collapsed")
 
         values = self.settings.validate_general(
             "  Family   Archive  ", "America/New_York", "covers", "220"
@@ -55,6 +56,18 @@ class AppSettingsTests(unittest.TestCase):
         self.assertEqual(self.settings.validate_import({"lockdown_mode": "0"}), {"lockdown_mode": "0"})
         with self.assertRaisesRegex(AppSettingError, "Standard Mode or Lockdown Mode"):
             self.settings.validate_safety("reckless")
+
+    def test_tv_season_display_default_is_explicit_and_portable(self):
+        self.assertEqual(
+            self.settings.validate_season_display("Expanded"),
+            {"default_season_display": "expanded"},
+        )
+        self.assertEqual(
+            self.settings.validate_import({"default_season_display": "collapsed"}),
+            {"default_season_display": "collapsed"},
+        )
+        with self.assertRaisesRegex(AppSettingError, "Collapsed or Expanded"):
+            self.settings.validate_season_display("sometimes")
 
     def test_external_search_update(self):
         values = self.settings.validate_external_search(

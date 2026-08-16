@@ -399,6 +399,18 @@ CREATE TABLE IF NOT EXISTS user_search_history (
     UNIQUE(user_id, query)
 );
 
+CREATE TABLE IF NOT EXISTS user_saved_views (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL COLLATE NOCASE,
+    path TEXT NOT NULL CHECK(path IN ('/library','/movies','/shows')),
+    query_string TEXT NOT NULL DEFAULT '',
+    pinned INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, name)
+);
+
 CREATE TABLE IF NOT EXISTS mie_findings (
     id INTEGER PRIMARY KEY,
     fingerprint TEXT NOT NULL UNIQUE,
@@ -588,6 +600,8 @@ CREATE INDEX IF NOT EXISTS idx_user_episode_favorites_episode
     ON user_episode_favorites(expected_episode_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_user_search_history_recent
     ON user_search_history(user_id, searched_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_user_saved_views_user
+    ON user_saved_views(user_id, pinned DESC, name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_user_tags_name
     ON user_tags(user_id, name);
 CREATE INDEX IF NOT EXISTS idx_title_tags_title

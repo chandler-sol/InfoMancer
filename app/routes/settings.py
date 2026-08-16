@@ -546,17 +546,20 @@ def build_router(ctx: RouteContext):
     def save_general_settings(
         request: Request, timezone_name: str = Form(...),
         default_library_view: str = Form(...), default_cover_size: str = Form(...),
+        default_season_display: str = Form("collapsed"),
     ):
         submitted = {
             "timezone": timezone_name,
             "default_library_view": default_library_view,
             "default_cover_size": default_cover_size,
+            "default_season_display": default_season_display,
         }
         try:
             validated = app_settings.validate_general(
                 app_settings.get("installation_name"), timezone_name,
                 default_library_view, default_cover_size,
             )
+            validated.update(app_settings.validate_season_display(default_season_display))
             changed = app_settings.update(validated, request.state.user.id)
         except AppSettingError as exc:
             return render_settings(request, "general", str(exc), submitted, 400)

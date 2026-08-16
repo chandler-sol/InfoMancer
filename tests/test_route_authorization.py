@@ -21,7 +21,9 @@ class RouteAuthorizationTests(unittest.TestCase):
             "/titles/organize-bulk", "/tags/create",
         }:
             return True
-        if path.startswith(("/activate/", "/recovery/", "/account/", "/engagement/")):
+        if path.startswith((
+            "/activate/", "/recovery/", "/account/", "/engagement/", "/library/views",
+        )):
             return True
         return bool(
             re.fullmatch(r"/titles/\{title_id\}/(?:favorite|organize)", path)

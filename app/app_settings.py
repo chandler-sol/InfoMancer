@@ -17,6 +17,7 @@ class AppSettings:
         "timezone",
         "default_library_view",
         "default_cover_size",
+        "default_season_display",
         "search_provider_name",
         "search_url_template",
         "log_level",
@@ -40,6 +41,7 @@ class AppSettings:
             "timezone": "UTC",
             "default_library_view": "list",
             "default_cover_size": "180",
+            "default_season_display": "collapsed",
             "search_provider_name": provider or "External search",
             "search_url_template": environment_search_url,
             "log_level": "info",
@@ -128,6 +130,12 @@ class AppSettings:
         if level not in {"info", "verbose", "debug"}:
             raise AppSettingError("Choose Standard, Verbose, or Debug logging.")
         return {"log_level": level}
+
+    def validate_season_display(self, value: str) -> dict[str, str]:
+        display = value.strip().casefold()
+        if display not in {"collapsed", "expanded"}:
+            raise AppSettingError("Choose Collapsed or Expanded for the default TV season display.")
+        return {"default_season_display": display}
 
     def validate_safety(self, lockdown_mode: str) -> dict[str, str]:
         mode = lockdown_mode.strip().casefold()
@@ -228,6 +236,10 @@ class AppSettings:
             validated["trash_retention_days"] = retention
         if "log_level" in text_values:
             validated.update(self.validate_logging(text_values["log_level"]))
+        if "default_season_display" in text_values:
+            validated.update(
+                self.validate_season_display(text_values["default_season_display"])
+            )
         if "lockdown_mode" in text_values:
             validated.update(self.validate_safety(text_values["lockdown_mode"]))
         hashing_keys = {

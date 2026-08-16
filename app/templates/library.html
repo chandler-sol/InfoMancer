@@ -3,6 +3,38 @@
 {% block content %}
 {% set library_return = request.url.path ~ ('?' ~ request.url.query if request.url.query else '') %}
 <div class="catalog-tabs"><a href="/library{% if source_query %}?{{ source_query }}{% endif %}" {% if kind=='all' %}class="active"{% endif %}>All</a><a href="/movies{% if source_query %}?{{ source_query }}{% endif %}" {% if kind=='movie' %}class="active"{% endif %}>Movies</a><a href="/shows{% if source_query %}?{{ source_query }}{% endif %}" {% if kind=='tv' %}class="active"{% endif %}>TV Shows</a></div>
+{% if current_user.id > 0 %}
+<section class="saved-view-bar" aria-label="Saved library views">
+  <div class="saved-view-pins">
+    <span class="saved-view-label">SAVED VIEWS</span>
+    {% for view in pinned_saved_views %}<a class="saved-view-chip" href="{{ view.href }}" title="Open {{ view.name }}">{{ view.name }}</a>{% endfor %}
+    {% if not pinned_saved_views %}<span class="saved-view-empty">Pin a saved view to keep it here and on Dashboard.</span>{% endif %}
+  </div>
+  <details class="saved-view-manager">
+    <summary class="button">Saved views{% if saved_views %} <span>{{ saved_views|length }}</span>{% endif %}</summary>
+    <div class="saved-view-panel">
+      <form class="saved-view-create" method="post" action="/library/views">
+        <strong>Save this view</strong>
+        <input name="name" maxlength="60" placeholder="For example, Unmatched movies" required>
+        <input type="hidden" name="view_path" value="{{ current_view_path }}">
+        <input type="hidden" name="view_query" value="{{ current_view_query }}">
+        <label class="saved-view-pin-choice"><input type="checkbox" name="pinned" value="1"> Pin to Library and Dashboard</label>
+        <button class="button primary">Save view</button>
+      </form>
+      {% if saved_views %}<div class="saved-view-list">{% for view in saved_views %}
+        <article>
+          <a class="saved-view-open" href="{{ view.href }}"><strong>{{ view.name }}</strong><small>{{ 'Pinned' if view.pinned else 'Saved' }} · {{ 'Movies' if view.path == '/movies' else 'TV Shows' if view.path == '/shows' else 'All Media' }}</small></a>
+          <div class="saved-view-actions">
+            <form method="post" action="/library/views/{{ view.id }}/pin"><button type="submit" title="{{ 'Unpin' if view.pinned else 'Pin' }} {{ view.name }}" aria-label="{{ 'Unpin' if view.pinned else 'Pin' }} {{ view.name }}">{{ '★' if view.pinned else '☆' }}</button></form>
+            <details class="saved-view-rename"><summary title="Rename {{ view.name }}" aria-label="Rename {{ view.name }}">Rename</summary><form method="post" action="/library/views/{{ view.id }}/rename"><input name="name" value="{{ view.name }}" maxlength="60" required><button class="button small">Save</button></form></details>
+            <form method="post" action="/library/views/{{ view.id }}/delete" data-workspace-confirm="Delete the saved view {{ view.name }}? Your media and Library settings will not be changed."><button class="saved-view-delete" type="submit" title="Delete {{ view.name }}" aria-label="Delete {{ view.name }}">×</button></form>
+          </div>
+        </article>
+      {% endfor %}</div>{% endif %}
+    </div>
+  </details>
+</section>
+{% endif %}
 <form class="library-search library-controls" method="get">
   <div class="library-filter-search{% if q %} open{% endif %}" id="library-filter-search">
     <label class="sr-only" for="live-library-search">Search {{ heading|lower }}</label>
