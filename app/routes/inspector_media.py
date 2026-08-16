@@ -149,4 +149,4 @@ def build_router(ctx: RouteContext):
             "files": files,
         }
 
-    return router
+    return router, {}
