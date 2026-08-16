@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from ..access import require_librarian
+from ..operation_history import OperationHistoryService
 from ..review_queue import ReviewQueue
 from .context import RouteContext
 
@@ -52,6 +53,7 @@ def build_router(ctx: RouteContext):
     tv_match_job = ctx.live("tv_match_job")
     tv_match_lock = ctx.live("tv_match_lock")
     review_queue = ReviewQueue(db, mie, duplicates)
+    operation_history = OperationHistoryService(db)
 
     def librarian_get(path: str, **kwargs):
         dependencies = list(kwargs.pop("dependencies", ()))
@@ -778,13 +780,14 @@ def build_router(ctx: RouteContext):
     @librarian_post("/duplicates/{file_id}/trash")
     def move_duplicate_to_trash(request: Request, file_id: int):
         try:
-            duplicate_trash.move(file_id, trash_retention_days(), request.state.user.id)
+            trash_id = duplicate_trash.move(file_id, trash_retention_days(), request.state.user.id)
         except (DuplicateTrashError, OSError, sqlite3.Error) as exc:
             return redirect(
                 f"/duplicates/{file_id}/trash-preview",
                 str(exc) if isinstance(exc, DuplicateTrashError) else
                 "InfoMancer could not move the file into managed trash. The original file was left in place. Check that the source is writable, then try again.",
             )
+        operation_history.record_trash_move(trash_id, request.state.user.id)
         lockdown = app_settings.get("lockdown_mode") == "1"
         message = (
             "The selected copy was moved into managed trash and removed from the active catalog. "
@@ -859,6 +862,7 @@ def build_router(ctx: RouteContext):
                 str(exc) if isinstance(exc, DuplicateTrashError) else
                 "InfoMancer could not restore that file. Nothing was overwritten. Check that the source is mounted and writable, then try again.",
             )
+        operation_history.mark_trash_restored(trash_id, request.state.user.id, path)
         message = f"File restored to its original location and returned to the catalog: {path}"
         record_event(
             "duplicates", message, context={"trash_id": trash_id, "path": path},

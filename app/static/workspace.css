@@ -1184,3 +1184,34 @@ body.workspace-inspector-open .workspace-inspector {
   .saved-view-manager > summary {width:100%}
   .saved-view-panel {left:0;right:auto;width:min(430px,calc(100vw - 48px))}
 }
+
+
+/* W6 operation history and safe undo */
+.operation-history-head {align-items:flex-end}
+.operation-history-summary {display:grid;gap:10px;grid-template-columns:repeat(3,minmax(0,1fr));margin:14px 0}
+.operation-history-summary > div {background:var(--panel);border:1px solid var(--line);border-radius:9px;display:grid;gap:2px;padding:13px 15px}
+.operation-history-summary strong {color:var(--text);font-size:22px}
+.operation-history-summary span {color:var(--muted);font-size:11px}
+.operation-history-filters {align-items:end;display:flex;flex-wrap:wrap;gap:9px;margin:12px 0 16px}
+.operation-history-filters label {color:var(--muted);display:grid;font-size:11px;gap:4px;min-width:170px}
+.operation-history-filters select {background:var(--bg);border:1px solid var(--line);border-radius:5px;color:var(--text);font:inherit;padding:8px 10px}
+.operation-history-list {display:grid;gap:9px}
+.operation-history-item {align-items:center;display:flex;gap:16px;justify-content:space-between;margin:0;padding:14px 16px}
+.operation-history-main {display:grid;gap:5px;min-width:0}
+.operation-history-main h2 {font-size:15px;margin:0}
+.operation-history-main p {margin:0}
+.operation-history-main small {color:var(--muted);font-size:10px}
+.operation-history-main details {color:var(--muted);font-size:11px}
+.operation-history-main details code {display:block;margin-top:5px;max-width:min(900px,75vw);overflow:auto;padding:7px 0;white-space:pre-wrap;word-break:break-all}
+.operation-history-badges {align-items:center;display:flex;gap:6px}
+.operation-history-badges span,.operation-history-badges b {border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:9px;font-weight:700;letter-spacing:.07em;padding:3px 7px;text-transform:uppercase}
+.operation-history-item.status-undone .operation-history-badges b {border-color:color-mix(in srgb,var(--lime) 40%,var(--line));color:var(--lime)}
+.operation-history-actions {flex:0 0 auto}
+.operation-undone-mark {color:var(--lime);font-size:12px;font-weight:700}
+.operation-undo-warning {background:rgba(255,177,66,.08);border-left:2px solid #ffb142;color:#ffcb7a!important;font-size:11px;padding:6px 8px}
+.operation-history-note {color:var(--muted);font-size:11px;line-height:1.5;margin:14px 2px}
+@media (max-width:720px) {
+  .operation-history-summary {grid-template-columns:1fr}
+  .operation-history-item {align-items:stretch;flex-direction:column}
+  .operation-history-actions .button {width:100%}
+}

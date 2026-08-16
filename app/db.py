@@ -411,6 +411,25 @@ CREATE TABLE IF NOT EXISTS user_saved_views (
     UNIQUE(user_id, name)
 );
 
+CREATE TABLE IF NOT EXISTS operation_history (
+    id INTEGER PRIMARY KEY,
+    operation_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'completed'
+        CHECK(status IN ('completed','undoing','undone')),
+    summary TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    title_id INTEGER REFERENCES titles(id) ON DELETE SET NULL,
+    file_id INTEGER,
+    root_id INTEGER REFERENCES roots(id) ON DELETE SET NULL,
+    undo_kind TEXT,
+    undo_payload TEXT NOT NULL DEFAULT '{}',
+    undo_error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    undone_at TEXT,
+    undone_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS mie_findings (
     id INTEGER PRIMARY KEY,
     fingerprint TEXT NOT NULL UNIQUE,
@@ -602,6 +621,10 @@ CREATE INDEX IF NOT EXISTS idx_user_search_history_recent
     ON user_search_history(user_id, searched_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_user_saved_views_user
     ON user_saved_views(user_id, pinned DESC, name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_operation_history_recent
+    ON operation_history(created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_operation_history_status
+    ON operation_history(status, operation_type, id DESC);
 CREATE INDEX IF NOT EXISTS idx_user_tags_name
     ON user_tags(user_id, name);
 CREATE INDEX IF NOT EXISTS idx_title_tags_title

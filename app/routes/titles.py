@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from ..access import require_librarian
+from ..operation_history import OperationHistoryService
 from .context import RouteContext
 
 
@@ -31,6 +32,7 @@ def build_router(ctx: RouteContext):
     match_success_redirect = ctx.live("match_success_redirect")
     media_info_lock = ctx.live("media_info_lock")
     merged_episode_name = ctx.live("merged_episode_name")
+    operation_history = OperationHistoryService(db)
     plex_episode_filename = ctx.live("plex_episode_filename")
     plex_movie_filename = ctx.live("plex_movie_filename")
     plex_movie_ids = ctx.live("plex_movie_ids")
@@ -899,7 +901,7 @@ def build_router(ctx: RouteContext):
         })
 
     @librarian_post("/titles/{title_id}/rename-folder")
-    def rename_folder(title_id: int, confirm: str = Form("")):
+    def rename_folder(request: Request, title_id: int, confirm: str = Form("")):
         if confirm != "RENAME":
             return redirect(f"/titles/{title_id}", "Rename cancelled: confirmation did not match")
         with db.connect() as conn:
@@ -935,6 +937,9 @@ def build_router(ctx: RouteContext):
             for row in rows:
                 new_path = new_prefix + row["path"][len(old_prefix):]
                 conn.execute("UPDATE files SET path=? WHERE id=?", (new_path, row["id"]))
+        operation_history.record_folder_rename(
+            title_id, source, destination, request.state.user.id,
+        )
         record_event(
             "filesystem", f"Show folder renamed from {source.name} to {destination.name}.",
             context={"title_id": title_id, "source": str(source), "destination": str(destination)},
@@ -957,7 +962,7 @@ def build_router(ctx: RouteContext):
 
     @librarian_post("/titles/{title_id}/rename-episodes")
     def bulk_rename_apply(
-        title_id: int, selected_file_ids: list[int] = Form(default=[]),
+        request: Request, title_id: int, selected_file_ids: list[int] = Form(default=[]),
     ):
         selected = set(selected_file_ids)
         if not selected:
@@ -967,6 +972,7 @@ def build_router(ctx: RouteContext):
             )
         renamed = 0
         skipped = 0
+        renamed_operations = []
         with db.connect() as conn:
             title, proposals = episode_rename_proposals(conn, title_id)
             if not title:
@@ -988,6 +994,7 @@ def build_router(ctx: RouteContext):
                         (str(destination), destination.name, proposal["file_id"]),
                     )
                     renamed += 1
+                    renamed_operations.append((proposal["file_id"], source, destination))
                 except OSError as exc:
                     skipped += 1
                     record_event(
@@ -995,6 +1002,11 @@ def build_router(ctx: RouteContext):
                         level="error", detail=str(exc),
                         context={"title_id": title_id, "source": str(source), "destination": str(destination)},
                     )
+        for renamed_file_id, source, destination in renamed_operations:
+            operation_history.record_file_rename(
+                renamed_file_id, source, destination, request.state.user.id,
+                label="Episode file renamed",
+            )
         message = f"Renamed {renamed} selected episode files"
         if skipped:
             message += f"; skipped {skipped} conflicts or missing files"
@@ -1018,9 +1030,10 @@ def build_router(ctx: RouteContext):
         })
 
     @librarian_post("/titles/{title_id}/restore-filenames")
-    def restore_filenames_apply(title_id: int):
+    def restore_filenames_apply(request: Request, title_id: int):
         restored = 0
         skipped = 0
+        restored_operations = []
         with db.connect() as conn:
             title, proposals = restore_filename_proposals(conn, title_id)
             if not title:
@@ -1037,6 +1050,9 @@ def build_router(ctx: RouteContext):
                          proposal["file_id"]),
                     )
                     restored += 1
+                    restored_operations.append(
+                        (proposal["file_id"], proposal["source"], proposal["destination"])
+                    )
                 except OSError as exc:
                     skipped += 1
                     record_event(
@@ -1045,6 +1061,11 @@ def build_router(ctx: RouteContext):
                         level="error", detail=str(exc),
                         context={"title_id": title_id, "source": str(proposal["source"])},
                     )
+        for restored_file_id, source, destination in restored_operations:
+            operation_history.record_file_rename(
+                restored_file_id, source, destination, request.state.user.id,
+                label="Original filename restored",
+            )
         message = f"Restored {restored} original filenames"
         if skipped:
             message += f"; skipped {skipped} conflicts or missing files"
@@ -1081,7 +1102,8 @@ def build_router(ctx: RouteContext):
         })
 
     @librarian_post("/files/{file_id}/rename")
-    def rename_file(file_id: int):
+    def rename_file(request: Request, file_id: int):
+        renamed_operation = None
         with db.connect() as conn:
             row = conn.execute(
                 """SELECT f.*, t.title, t.metadata_title, t.year, t.metadata_year,
@@ -1117,10 +1139,16 @@ def build_router(ctx: RouteContext):
                         "The episode could not be renamed. Check that the file still exists and InfoMancer has permission to change it, then try again. The catalog was not changed.",
                     )
                 conn.execute("UPDATE files SET path=?, filename=? WHERE id=?", (str(destination), destination.name, file_id))
+                renamed_operation = (source, destination)
                 record_event(
                     "filesystem", f"Episode file renamed to {destination.name}.",
                     context={"file_id": file_id, "source": str(source), "destination": str(destination)},
                 )
+        if renamed_operation:
+            operation_history.record_file_rename(
+                file_id, renamed_operation[0], renamed_operation[1], request.state.user.id,
+                label="Episode file renamed",
+            )
         return redirect(f"/titles/{row['title_id']}", "Episode renamed")
 
     @librarian_get("/files/{file_id}/rename-movie", response_class=HTMLResponse)
@@ -1145,7 +1173,8 @@ def build_router(ctx: RouteContext):
         })
 
     @librarian_post("/files/{file_id}/rename-movie")
-    def rename_movie(file_id: int):
+    def rename_movie(request: Request, file_id: int):
+        renamed_operation = None
         with db.connect() as conn:
             row = conn.execute(
                 """SELECT f.*, t.title, t.metadata_title, t.year, t.metadata_year,
@@ -1185,10 +1214,16 @@ def build_router(ctx: RouteContext):
                         "UPDATE titles SET folder_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                         (str(destination), row["title_id"]),
                     )
+                renamed_operation = (source, destination)
                 record_event(
                     "filesystem", f"Movie file renamed to {destination.name}.",
                     context={"file_id": file_id, "source": str(source), "destination": str(destination)},
                 )
+        if renamed_operation:
+            operation_history.record_file_rename(
+                file_id, renamed_operation[0], renamed_operation[1], request.state.user.id,
+                label="Movie file renamed",
+            )
         return redirect(f"/titles/{row['title_id']}", "Movie file renamed")
 
     return router, {

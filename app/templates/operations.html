@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Operations · InfoMancer{% endblock %}
+{% block content %}
+<header class="page-head operation-history-head"><div><p class="eyebrow">W6 · FILESYSTEM SAFETY</p><h1>Operation History</h1><p>Review completed filesystem work and reverse eligible operations only when InfoMancer can prove the original path is still safe.</p></div><div class="actions"><a class="button" href="/activity">Activity</a></div></header>
+{% if message %}<div class="success-banner">{{ message }}</div>{% endif %}
+<section class="operation-history-summary" aria-label="Operation history summary"><div><strong>{{ counts.total }}</strong><span>Recorded</span></div><div><strong>{{ counts.undoable }}</strong><span>Safe undo available</span></div><div><strong>{{ counts.undone }}</strong><span>Undone</span></div></section>
+<form class="operation-history-filters" method="get" action="/operations">
+  <label>Status<select name="status"><option value="all" {% if status == 'all' %}selected{% endif %}>All</option><option value="completed" {% if status == 'completed' %}selected{% endif %}>Completed</option><option value="undone" {% if status == 'undone' %}selected{% endif %}>Undone</option></select></label>
+  <label>Type<select name="kind"><option value="all" {% if kind == 'all' %}selected{% endif %}>All operations</option><option value="rename_file" {% if kind == 'rename_file' %}selected{% endif %}>File renames</option><option value="rename_folder" {% if kind == 'rename_folder' %}selected{% endif %}>Folder renames</option><option value="managed_trash_move" {% if kind == 'managed_trash_move' %}selected{% endif %}>Managed Trash moves</option><option value="managed_trash_restore" {% if kind == 'managed_trash_restore' %}selected{% endif %}>Trash restores</option></select></label>
+  <button class="button">Apply</button>
+</form>
+<section class="operation-history-list">
+{% for operation in operations %}
+<article class="panel operation-history-item status-{{ operation.status }}">
+  <div class="operation-history-main"><div class="operation-history-badges"><span>{{ operation.display_type }}</span><b>{{ operation.status|replace('_',' ')|title }}</b></div><h2>{{ operation.summary }}</h2>{% if operation.title_name %}<p class="muted">{{ operation.title_name }}</p>{% endif %}{% if operation.detail %}<details><summary>Path details</summary><code>{{ operation.detail }}</code></details>{% endif %}{% if operation.undo_error %}<p class="operation-undo-warning">Last undo attempt was refused: {{ operation.undo_error }}</p>{% endif %}<small>{{ operation.actor_name or 'System' }} · {{ local_time(operation.created_at) }}{% if operation.undone_at %} · undone {{ local_time(operation.undone_at) }}{% endif %}</small></div>
+  <div class="operation-history-actions">{% if operation.can_undo %}<form method="post" action="/operations/{{ operation.id }}/undo" data-workspace-confirm="Undo this {{ operation.display_type|lower }}? InfoMancer will first verify the current file, destination, source boundary, and collision state. If anything has drifted, nothing will be changed."><button class="button">Undo</button></form>{% elif operation.status == 'undone' %}<span class="operation-undone-mark">✓ Undone</span>{% else %}<span class="muted">No automatic undo</span>{% endif %}</div>
+</article>
+{% else %}<div class="panel empty"><h2>No operations in this view</h2><p>New filesystem renames and managed-trash moves will appear here after they complete.</p></div>{% endfor %}
+</section>
+<p class="operation-history-note">Undo never replays shell commands. It revalidates the current catalog and filesystem state and refuses the operation if a path moved, disappeared, escaped its configured source, or would overwrite something.</p>
+{% endblock %}

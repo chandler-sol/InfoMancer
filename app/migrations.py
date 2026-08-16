@@ -150,6 +150,35 @@ def _user_saved_views(conn: sqlite3.Connection) -> None:
     )
 
 
+def _operation_history(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS operation_history (
+             id INTEGER PRIMARY KEY,
+             operation_type TEXT NOT NULL,
+             status TEXT NOT NULL DEFAULT 'completed'
+               CHECK(status IN ('completed','undoing','undone')),
+             summary TEXT NOT NULL,
+             detail TEXT NOT NULL DEFAULT '',
+             actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+             title_id INTEGER REFERENCES titles(id) ON DELETE SET NULL,
+             file_id INTEGER,
+             root_id INTEGER REFERENCES roots(id) ON DELETE SET NULL,
+             undo_kind TEXT,
+             undo_payload TEXT NOT NULL DEFAULT '{}',
+             undo_error TEXT NOT NULL DEFAULT '',
+             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+             undone_at TEXT,
+             undone_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+           )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_operation_history_recent ON operation_history(created_at DESC,id DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_operation_history_status ON operation_history(status,operation_type,id DESC)"
+    )
+
+
 MIGRATIONS = (
     Migration(1, "title metadata columns", _titles),
     Migration(2, "source health columns", _roots),
@@ -163,6 +192,7 @@ MIGRATIONS = (
     Migration(10, "single-runtime lease", _runtime_lease),
     Migration(11, "persistent aggregate login lockouts", _login_lockouts),
     Migration(12, "user saved library views", _user_saved_views),
+    Migration(13, "operation history and safe undo", _operation_history),
 )
 
 

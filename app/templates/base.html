@@ -75,7 +75,7 @@
         {% set workspace_review_active = request.url.path.startswith('/review') or request.url.path.startswith('/library-health') or request.url.path.startswith('/duplicates') or request.url.path.startswith('/bulk-match') or request.url.path.startswith('/movies/bulk-match') or request.url.path.startswith('/shows/bulk-match') %}
         {% set workspace_library_active = not workspace_review_active and (request.url.path.startswith('/library') or request.url.path.startswith('/movies') or request.url.path.startswith('/shows') or request.url.path.startswith('/titles') or request.url.path.startswith('/files') or request.url.path.startswith('/collections') or request.url.path.startswith('/libraries') or request.url.path.startswith('/favorites')) %}
         {% set workspace_sources_active = request.url.path.startswith('/sources') %}
-        {% set workspace_activity_active = request.url.path.startswith('/activity') or request.url.path.startswith('/announcements') %}
+        {% set workspace_activity_active = request.url.path.startswith('/activity') or request.url.path.startswith('/operations') or request.url.path.startswith('/announcements') %}
         {% set workspace_more_active = request.url.path.startswith('/settings') or request.url.path.startswith('/help') or request.url.path.startswith('/about') %}
         <nav class="site-menu-panel workspace-nav-ready" id="site-menu-panel" aria-hidden="true" data-workspace-nav>
           <div class="workspace-nav-primary">

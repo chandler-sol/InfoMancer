@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from ..access import require_librarian
+from ..operation_history import OperationHistoryError, OperationHistoryService
 from .context import RouteContext
 
 
@@ -14,6 +15,8 @@ def build_router(ctx: RouteContext):
     _other_background_work_running = ctx.live("_other_background_work_running")
     app_settings = ctx.live("app_settings")
     db = ctx.live("db")
+    duplicate_trash = ctx.live("duplicate_trash")
+    operation_history = OperationHistoryService(db)
     duplicate_verify_job = ctx.live("duplicate_verify_job")
     duplicate_verify_lock = ctx.live("duplicate_verify_lock")
     imdb_genre_job = ctx.live("imdb_genre_job")
@@ -58,6 +61,37 @@ def build_router(ctx: RouteContext):
         dependencies = list(kwargs.pop("dependencies", ()))
         dependencies.append(Depends(require_librarian))
         return router.post(path, dependencies=dependencies, **kwargs)
+
+    @librarian_get("/operations", response_class=HTMLResponse)
+    def operation_history_page(
+        request: Request, status: str = "all", kind: str = "all",
+    ):
+        return templates.TemplateResponse(request, "operations.html", {
+            "operations": operation_history.list(status=status, kind=kind),
+            "counts": operation_history.counts(),
+            "status": status if status in operation_history.ALLOWED_STATUS else "all",
+            "kind": kind if kind in operation_history.ALLOWED_KIND else "all",
+            "message": request.query_params.get("message", ""),
+        })
+
+    @librarian_post("/operations/{operation_id}/undo")
+    def undo_operation(request: Request, operation_id: int):
+        try:
+            message = operation_history.undo(
+                operation_id, request.state.user.id, duplicate_trash=duplicate_trash,
+            )
+        except OperationHistoryError as exc:
+            record_event(
+                "filesystem", "Operation undo was refused safely.", level="warning",
+                detail=str(exc), context={"operation_id": operation_id},
+                user_id=request.state.user.id,
+            )
+            return redirect("/operations", str(exc))
+        record_event(
+            "filesystem", "Operation undone safely.", detail=message,
+            context={"operation_id": operation_id}, user_id=request.state.user.id,
+        )
+        return redirect("/operations", message)
 
     @librarian_get("/api/scans/{root_id}")
     def scan_status(root_id: int) -> dict:
@@ -460,6 +494,8 @@ def build_router(ctx: RouteContext):
         )
 
     return router, {
+        "operation_history_page": operation_history_page,
+        "undo_operation": undo_operation,
         "scan_status": scan_status,
         "scan_all_status": scan_all_status,
         "start_scan_all": start_scan_all,

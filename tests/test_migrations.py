@@ -37,6 +37,11 @@ class MigrationTests(unittest.TestCase):
                 self.assertIn("version_preferred", columns)
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=11").fetchone())
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=12").fetchone())
+                self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=13").fetchone())
+                operation_columns = {
+                    row["name"] for row in upgraded.execute("PRAGMA table_info(operation_history)")
+                }
+                self.assertTrue({"operation_type", "status", "undo_kind", "undo_payload", "undone_at"}.issubset(operation_columns))
                 saved_view_columns = {
                     row["name"] for row in upgraded.execute("PRAGMA table_info(user_saved_views)")
                 }

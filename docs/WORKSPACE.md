@@ -22,7 +22,7 @@ Primary work domains are Dashboard, Library, Review, Sources, and Activity. Exis
 3. **W3 Review**: unified queue for MIE findings, duplicates, unmatched media, missing episodes, metadata issues, and quality decisions.
 4. **W4 Interaction**: reusable drawers, dialogs, toasts, partial navigation, keyboard shortcuts, and command palette.
 5. **W5 Saved Views (complete)**: named filter/sort workspaces that can be pinned to Library and Dashboard.
-6. **W6 Operations**: generalized operation history and reversible actions where filesystem semantics permit safe undo.
+6. **W6 Operations (complete)**: generalized operation history and reversible actions where filesystem semantics permit safe undo.
 
 W1 intentionally uses the existing rendered Library DOM as its inspector data source. W2 replaces that prototype with a dedicated read-only inspector endpoint/partial so the panel can expose richer metadata without duplicating page logic in JavaScript.
 
@@ -57,6 +57,20 @@ The full TV title view also gains an installation-wide collapsed/expanded defaul
 season groups. Collapsed remains the default, while Librarians can switch the starting
 state under General Settings; per-page Expand all and Collapse all controls remain
 available.
+
+## W6 Operation History + Safe Undo
+
+W6 adds a durable Librarian-only operation ledger for filesystem changes. Episode,
+movie, and show-folder renames record their before/after paths, while duplicate files
+moved into managed Trash record the existing reversible trash item. Activity links to
+a dedicated Operation History view with status/type filtering and clear undo state.
+
+Undo is deliberately narrow. InfoMancer never stores or replays arbitrary commands.
+Before reversing a file or folder rename it verifies the current catalog path, source
+boundary, expected filesystem object, and destination collision state. Managed-trash
+undo delegates to the existing guarded restore workflow. If any state has drifted,
+undo fails closed and records the reason while leaving the operation available for
+review. Manual managed-trash restores also mark their originating move as undone.
 
 ## W3 + W4: Unified Review and application interactions
 
