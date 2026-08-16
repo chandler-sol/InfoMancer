@@ -493,7 +493,7 @@ class RecoveryPackageTests(unittest.TestCase):
             for item in source.infolist():
                 payload = source.read(item)
                 if item.filename == "collection-art/collection-1.webp":
-                    payload = b"changed artwork"
+                    payload = b"evil artwork"
                 target.writestr(item.filename, payload)
         with self.assertRaisesRegex(RecoveryPackageError, "checksum failed"):
             self.service.verify(rebuilt)
