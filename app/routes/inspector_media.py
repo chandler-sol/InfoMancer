@@ -106,7 +106,7 @@ def build_router(ctx: RouteContext):
             rows = conn.execute(
                 f"""
                 SELECT id, filename, season, episode_start, episode_end, episode_name,
-                       size_bytes, duration_seconds, width, height, video_codec,
+                       size_bytes, runtime_seconds, width, height, video_codec,
                        audio_codec, audio_channels, dynamic_range, container
                 FROM files
                 WHERE title_id=? AND {clause}
@@ -122,7 +122,7 @@ def build_router(ctx: RouteContext):
                 f"{row['width']}×{row['height']}"
                 if row["width"] and row["height"] else ""
             )
-            duration = int(row["duration_seconds"] or 0)
+            duration = int(row["runtime_seconds"] or 0)
             runtime = ""
             if duration:
                 minutes = max(1, round(duration / 60))
