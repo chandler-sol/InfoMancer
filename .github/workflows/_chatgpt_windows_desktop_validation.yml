@@ -131,8 +131,13 @@ jobs:
           Remove-Item scripts/_chatgpt_windows_desktop.py
           Remove-Item scripts/_chatgpt_windows_desktop_fix1.py
           Remove-Item .github/workflows/_chatgpt_windows_desktop_validation.yml
+          Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
+          Remove-Item -Force infomancer-core.spec -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force desktop/src-tauri/gen -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force desktop/src-tauri/icons -ErrorAction SilentlyContinue
           git config user.name "chatgpt-integration"
           git config user.email "64607629+chandler-sol@users.noreply.github.com"
           git add -A
           git commit -m "Rebuild Windows desktop with clean uninstall and signed updater"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:feature/0.8-windows-desktop-updater
+          $pushUrl = "https://x-access-token:$env:GH_TOKEN@github.com/$env:GITHUB_REPOSITORY.git"
+          git push $pushUrl HEAD:feature/0.8-windows-desktop-updater
