@@ -154,9 +154,135 @@ body.has-app-sidebar .brand .workspace-nav-alpha {
   }
 }
 
+/* Detail storage should read like a compact file module, not an empty panel. */
+body.has-app-sidebar .media-dossier .dossier-on-disk {
+  padding: 0;
+  background:
+    linear-gradient(145deg, rgba(18, 25, 33, .78), rgba(9, 14, 19, .84));
+}
+
+body.has-app-sidebar .media-dossier .dossier-on-disk > .panel-head {
+  margin: 0;
+  padding: 15px 18px;
+  border-bottom: 1px solid #273542;
+  background: rgba(255, 255, 255, .012);
+}
+
+body.has-app-sidebar .media-dossier .dossier-on-disk > .file-list {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+}
+
+body.has-app-sidebar .media-dossier .dossier-on-disk .file-list > article:has(.movie-detail-menu) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  justify-content: stretch;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 16px 17px;
+  gap: 18px;
+  border: 1px solid #263643;
+  border-radius: var(--im-radius-md);
+  background:
+    linear-gradient(135deg, rgba(17, 25, 33, .9), rgba(10, 16, 22, .92));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .018);
+}
+
+body.has-app-sidebar .media-dossier .dossier-on-disk .file-list > article:has(.movie-detail-menu) > .grow {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+body.has-app-sidebar .media-dossier .dossier-on-disk .file-list > article:has(.movie-detail-menu) > .grow > strong {
+  display: block;
+  overflow: hidden;
+  color: #f2f6f9;
+  font-size: 15px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.has-app-sidebar .media-dossier .dossier-on-disk .file-summary {
+  display: inline-block;
+  margin-top: 7px;
+  color: #93a3b4;
+  font-size: 12px;
+}
+
+body.has-app-sidebar .media-dossier .dossier-on-disk .file-source {
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  margin: 7px 0 0 9px;
+  padding: 2px 7px;
+  border-color: #315062;
+  background: rgba(81, 214, 230, .045);
+  font-size: 10px;
+}
+
+body.has-app-sidebar .media-dossier .dossier-on-disk .file-path {
+  display: block;
+  max-width: 100%;
+  margin-top: 10px;
+  padding-top: 9px;
+  overflow: hidden;
+  border-top: 1px solid rgba(39, 53, 66, .72);
+  color: #71869a;
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.has-app-sidebar .media-dossier .dossier-on-disk .movie-detail-menu {
+  align-self: center;
+  justify-self: end;
+}
+
+body.has-app-sidebar .media-dossier .dossier-on-disk .movie-detail-menu > summary {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-color: #334451;
+  border-radius: var(--im-radius-sm);
+  background: rgba(13, 20, 27, .9);
+}
+
+body.has-app-sidebar .media-dossier .dossier-on-disk .movie-detail-menu > summary:hover,
+body.has-app-sidebar .media-dossier .dossier-on-disk .movie-detail-menu > summary:focus-visible {
+  border-color: #506272;
+  background: rgba(27, 38, 48, .96);
+}
+
 @media (max-width: 700px) {
   .workspace-drawer-panel { width: 100%; top: 12vh; border-top: 1px solid #344453; border-left: 0; border-radius: 16px 16px 0 0; }
   .workspace-toast-host { top: 10px; right: 10px; width: calc(100vw - 20px); }
+
+  body.has-app-sidebar .media-dossier .dossier-on-disk > .panel-head {
+    grid-template-columns: 1fr auto;
+    gap: 9px;
+  }
+
+  body.has-app-sidebar .media-dossier .dossier-on-disk .series-controls {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+  }
+
+  body.has-app-sidebar .media-dossier .dossier-on-disk .file-list > article:has(.movie-detail-menu) {
+    padding: 14px;
+    gap: 12px;
+  }
+
+  body.has-app-sidebar .media-dossier .dossier-on-disk .file-path {
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
