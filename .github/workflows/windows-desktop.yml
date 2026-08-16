@@ -49,17 +49,13 @@ jobs:
       - name: Smoke-test recovery helper
         shell: pwsh
         run: |
-          $tempRoot = Join-Path $env:RUNNER_TEMP 'infomancer-recovery-smoke'
-          $dataDir = Join-Path $tempRoot 'data'
-          $artDir = Join-Path $dataDir 'collection_artwork'
-          New-Item -ItemType Directory -Force $artDir | Out-Null
-          python -c "import sqlite3, pathlib; p=pathlib.Path(r'$dataDir')/'infomancer.db'; c=sqlite3.connect(p); c.execute('CREATE TABLE users(id INTEGER PRIMARY KEY)'); c.commit(); c.close()"
-          Set-Content -Path (Join-Path $artDir 'smoke.png') -Value 'artwork'
-          $backup = Join-Path $tempRoot 'smoke.infomancer-backup'
-          & dist/infomancer-core.exe --desktop-recovery-backup $backup --data-dir $dataDir
-          if ($LASTEXITCODE -ne 0) { throw 'Recovery helper create failed.' }
-          & dist/infomancer-core.exe --desktop-recovery-verify $backup
-          if ($LASTEXITCODE -ne 0) { throw 'Recovery helper verify failed.' }
+          $data = Join-Path $env:RUNNER_TEMP 'infomancer-recovery-smoke'
+          $backup = Join-Path $env:RUNNER_TEMP 'InfoMancer-Recovery-Smoke.infomancer-backup'
+          New-Item -ItemType Directory -Force $data | Out-Null
+          $env:SMOKE_DB = Join-Path $data 'infomancer.db'
+          python -c "import os; from pathlib import Path; from app.db import Database; Database(Path(os.environ['SMOKE_DB'])).initialize()"
+          & .\dist\infomancer-core.exe --data-dir $data --recovery-output $backup
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $backup)) { throw 'Recovery helper smoke test failed.' }
 
       - name: Install desktop dependencies
         working-directory: desktop
@@ -67,11 +63,11 @@ jobs:
 
       - name: Generate native icons
         working-directory: desktop
-        run: npm run tauri -- icon app-icon.svg
+        run: npm run icon
 
       - name: Check Rust shell
-        working-directory: desktop/src-tauri
-        run: cargo check --locked
+        working-directory: desktop
+        run: cargo check --manifest-path src-tauri/Cargo.toml --locked
 
       - name: Build NSIS installer
         working-directory: desktop
@@ -80,31 +76,32 @@ jobs:
       - name: Smoke-test zero-residue silent uninstall
         shell: pwsh
         run: |
-          $installer = Get-ChildItem -Path desktop/src-tauri/target/release/bundle/nsis -Filter '*-setup.exe' | Select-Object -First 1
+          $installer = Get-ChildItem 'desktop/src-tauri/target/release/bundle/nsis/*-setup.exe' | Select-Object -First 1
           if (-not $installer) { throw 'NSIS installer was not produced.' }
+          $process = Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Silent install failed: $($process.ExitCode)" }
           $installDir = Join-Path $env:LOCALAPPDATA 'InfoMancer'
-          $dataDir = Join-Path $env:APPDATA 'InfoMancer'
-          $localData = Join-Path $env:LOCALAPPDATA 'InfoMancer'
-          $legacyLocal = Join-Path $env:LOCALAPPDATA 'InfoMancerDesktop'
-          $legacyRoaming = Join-Path $env:APPDATA 'InfoMancerDesktop'
-          $tempData = Join-Path $env:TEMP 'InfoMancer'
-          Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait
-          New-Item -ItemType Directory -Force $dataDir, $legacyLocal, $legacyRoaming, $tempData | Out-Null
-          Set-Content -Path (Join-Path $dataDir 'ci-residue.txt') -Value 'delete me'
-          Set-Content -Path (Join-Path $legacyLocal 'ci-residue.txt') -Value 'delete me'
-          Set-Content -Path (Join-Path $legacyRoaming 'ci-residue.txt') -Value 'delete me'
-          Set-Content -Path (Join-Path $tempData 'ci-residue.txt') -Value 'delete me'
-          $uninstaller = Get-ChildItem -Path $installDir -Filter 'uninstall.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $uninstaller) { throw 'Installed uninstaller was not found.' }
-          Start-Process -FilePath $uninstaller.FullName -ArgumentList '/S' -Wait
-          Start-Sleep -Seconds 3
-          foreach ($path in @($dataDir, $legacyLocal, $legacyRoaming, $tempData)) {
-            if (Test-Path $path) { throw "InfoMancer residue remained after uninstall: $path" }
-          }
+          $uninstaller = Join-Path $installDir 'uninstall.exe'
+          if (-not (Test-Path $uninstaller)) { throw 'Installed uninstaller was not found.' }
+          $owned = @(
+            (Join-Path $env:APPDATA 'cloud.arsenik.infomancer'),
+            (Join-Path $env:LOCALAPPDATA 'cloud.arsenik.infomancer'),
+            (Join-Path $env:APPDATA 'cloud.arsenik.infomancer.desktop.poc'),
+            (Join-Path $env:LOCALAPPDATA 'cloud.arsenik.infomancer.desktop.poc'),
+            (Join-Path $env:TEMP 'InfoMancer')
+          )
+          foreach ($path in $owned) { New-Item -ItemType Directory -Force $path | Out-Null; Set-Content (Join-Path $path 'residue-marker.txt') 'owned by InfoMancer' }
+          $process = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Silent uninstall failed: $($process.ExitCode)" }
+          Start-Sleep -Seconds 2
+          foreach ($path in $owned) { if (Test-Path $path) { throw "Uninstall residue remains: $path" } }
+          if (Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\InfoMancer') { throw 'Uninstall registry entry remains.' }
+          if (Test-Path 'HKCU:\Software\Arsenik\InfoMancer') { throw 'InfoMancer publisher registry state remains.' }
 
       - name: Upload Windows installer
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: infomancer-windows-testing
+          name: InfoMancer-Windows-${{ github.sha }}
           path: desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
           if-no-files-found: error
+          compression-level: 0
