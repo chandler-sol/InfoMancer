@@ -36,6 +36,14 @@ class Ui08QaContracts(unittest.TestCase):
         self.assertIn("Type <strong>RESTORE</strong> to continue", preview)
         self.assertIn('name="confirm"', preview)
 
+    def test_recovery_upload_uses_csrf_header_so_multipart_can_stream(self):
+        page = (ROOT / "app/templates/recovery_restore.html").read_text(encoding="utf-8")
+        security = (ROOT / "app/request_security.py").read_text(encoding="utf-8")
+        self.assertIn('headers: {"X-CSRF-Token": {{ csrf_token|tojson }}}', page)
+        self.assertIn("body: new FormData(form)", page)
+        self.assertIn("Multipart uploads and API requests must send X-CSRF-Token", security)
+        self.assertIn('content_type.startswith("application/x-www-form-urlencoded")', security)
+
 
 if __name__ == "__main__":
     unittest.main()
