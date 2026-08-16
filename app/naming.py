@@ -5,12 +5,33 @@ from pathlib import Path
 
 
 INVALID_WINDOWS = re.compile(r'[<>:"/\\|?*]')
+CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f]")
+WINDOWS_RESERVED = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
 ID_TAG_RE = re.compile(r"\s*\{tvdb-\d+\}\s*", re.I)
 
 
 def safe_component(value: str) -> str:
-    value = INVALID_WINDOWS.sub("", value).strip().rstrip(".")
-    return re.sub(r"\s+", " ", value)
+    """Return one filesystem component that is safe on Windows and POSIX hosts.
+
+    Provider titles can contain Windows-invalid punctuation, control characters,
+    trailing dots/spaces, or DOS device names. InfoMancer generates names that may
+    later be applied on a different host/share, so normalize to the stricter common
+    denominator before previewing a filesystem change.
+    """
+    value = CONTROL_CHARACTERS.sub("", str(value))
+    value = INVALID_WINDOWS.sub("", value)
+    value = re.sub(r"\s+", " ", value).strip().rstrip(" .")
+    if not value:
+        return "_"
+    # Windows reserves the device stem even when an extension is present.
+    stem = value.split(".", 1)[0].upper()
+    if stem in WINDOWS_RESERVED:
+        value = f"{value}_"
+    return value
 
 
 def plex_show_folder(
@@ -36,7 +57,7 @@ def plex_episode_filename(
 ) -> str:
     label = safe_component(show)
     episode_title = safe_component(episode_name)
-    suffix = f" - {episode_title}" if episode_title else ""
+    suffix = f" - {episode_title}" if episode_title and episode_title != "_" else ""
     code = f"S{season:02d}E{episode:02d}"
     if episode_end and episode_end > episode:
         code += f"-E{episode_end:02d}"
