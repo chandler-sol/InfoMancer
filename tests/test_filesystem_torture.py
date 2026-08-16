@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from app.db import Database
-from app.naming import contained_destination, safe_component
+from app.naming import WINDOWS_RESERVED, contained_destination, safe_component
 from app.scanner import SourceUnavailableError, scan_root
 from app.season_folders import SeasonFolderError, SeasonFolderService
 
@@ -155,8 +155,8 @@ class FilesystemTortureTests(unittest.TestCase):
         for value in ("CON", "prn", "AUX.txt", "NUL", "COM1", "LPT9"):
             with self.subTest(value=value):
                 rendered = safe_component(value)
-                self.assertNotEqual(rendered.split(".", 1)[0].upper(), value.split(".", 1)[0].upper())
-                self.assertTrue(rendered.endswith("_"))
+                self.assertTrue(rendered.startswith("_"))
+                self.assertNotIn(rendered.split(".", 1)[0].upper(), WINDOWS_RESERVED)
         self.assertEqual(safe_component("Title. "), "Title")
         self.assertEqual(safe_component("A\x00B"), "AB")
 
