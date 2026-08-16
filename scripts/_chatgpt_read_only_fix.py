@@ -12,4 +12,9 @@ text = text.replace(
     '        self.assertEqual(self.settings.validate_safety("lockdown"), {"read_only_mode": "0", "lockdown_mode": "1"})\n',
     1,
 )
+text = text.replace(
+    '        with self.assertRaisesRegex(AppSettingError, "Standard Mode or Lockdown Mode"):\n',
+    '        with self.assertRaisesRegex(AppSettingError, "Read-Only Mode, Standard Mode, or Lockdown Mode"):\n',
+    1,
+)
 path.write_text(text, encoding="utf-8")
