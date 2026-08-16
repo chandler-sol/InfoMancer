@@ -25,6 +25,59 @@
   <a href="/library-health?status=dismissed"><strong>{{ summary.dismissed }}</strong><span>Dismissed</span></a>
 </section>
 
+<section class="mie-09-grid" aria-label="0.9 intelligence overview">
+  <article class="panel mie-09-card">
+    <p class="eyebrow">MIE 2.0</p>
+    <h2>Change pulse</h2>
+    {% if analysis_history %}
+    <div class="mie-09-metrics">
+      <div><strong>{{ analysis_history[0].opened_findings }}</strong><span>Opened this run</span></div>
+      <div><strong>{{ analysis_history[0].resolved_findings }}</strong><span>Resolved this run</span></div>
+    </div>
+    {% endif %}
+    {% if title_health %}
+    <div class="mie-title-health-list">
+      {% for item in title_health[:5] %}
+      <a href="/titles/{{ item.title_id }}"><span><strong>{{ item.title_name }}</strong><small>{{ item.state }}</small></span><b>{{ item.score }}</b></a>
+      {% endfor %}
+    </div>
+    {% else %}<p class="muted">Run analysis to create title-level health snapshots.</p>{% endif %}
+  </article>
+
+  <article class="panel mie-09-card">
+    <p class="eyebrow">MEDIA ERROR SCAN FRAMEWORK</p>
+    <h2>Deep media integrity</h2>
+    <p>FFmpeg decode sampling is read-only. It never repairs, remuxes, or rewrites a media file.</p>
+    <div class="mie-09-metrics">
+      <div><strong>{{ integrity_summary.passed }}</strong><span>Passed</span></div>
+      <div><strong>{{ integrity_summary.failed + integrity_summary.warning + integrity_summary.error }}</strong><span>Needs review</span></div>
+      <div><strong>{{ integrity_summary.unchecked_or_stale }}</strong><span>Unchecked / changed</span></div>
+    </div>
+    {% if current_user.is_librarian %}
+    <form method="post" action="/library-health/integrity/sample">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="button primary" {% if integrity_job.status in ['starting','running'] %}disabled{% endif %}>
+        {{ 'Sampling media…' if integrity_job.status in ['starting','running'] else 'Sample unchecked / changed media' }}
+      </button>
+    </form>
+    {% endif %}
+  </article>
+</section>
+
+<section class="panel mie-stream-intelligence">
+  <header><div><p class="eyebrow">AUDIO & SUBTITLE INTELLIGENCE</p><h2>Stream expectations</h2><p>MIE compares stored FFprobe stream inventories with goals you choose. Blank goals do not create findings.</p></div></header>
+  {% if current_user.is_librarian %}
+  <form class="mie-profile-form" method="post" action="/library-health/stream-expectations">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Required audio languages<input name="required_audio_languages" value="{{ stream_expectations.required_audio_languages }}" placeholder="eng, spa"><small>Use language codes reported by FFprobe.</small></label>
+    <label>Required subtitle languages<input name="required_subtitle_languages" value="{{ stream_expectations.required_subtitle_languages }}" placeholder="eng"><small>Example: eng, spa.</small></label>
+    <label>Minimum audio channels<input name="minimum_audio_channels" inputmode="numeric" value="{{ stream_expectations.minimum_audio_channels }}" placeholder="6"></label>
+    <label class="mie-profile-checkbox"><input type="checkbox" name="require_subtitles" value="1" {% if stream_expectations.require_subtitles %}checked{% endif %}> Require at least one indexed subtitle track per inspected file</label>
+    <button class="button primary">Save stream goals and analyze</button>
+  </form>
+  {% else %}<p class="muted">A Librarian can configure stream expectations for this installation.</p>{% endif %}
+</section>
+
 <section class="panel duplicate-impact" aria-labelledby="duplicate-impact-title">
   <header>
     <div>
@@ -151,8 +204,8 @@
 <details class="panel mie-quality-profiles mie-history">
   <summary><span><strong>Analysis history</strong><small>Compare the last {{ analysis_history|length }} health snapshots.</small></span></summary>
   <div class="mie-history-table">
-    <table><thead><tr><th>Analyzed</th><th>Score</th><th>Active</th><th>Excluded by feedback</th></tr></thead><tbody>
-      {% for run in analysis_history %}<tr><td>{{ local_time(run.analyzed_at) }}</td><td>{{ run.overall_score }}</td><td>{{ run.active_findings }}</td><td>{{ run.suppressed_findings }}</td></tr>{% endfor %}
+    <table><thead><tr><th>Analyzed</th><th>Score</th><th>Active</th><th>Opened</th><th>Resolved</th><th>Excluded by feedback</th></tr></thead><tbody>
+      {% for run in analysis_history %}<tr><td>{{ local_time(run.analyzed_at) }}</td><td>{{ run.overall_score }}</td><td>{{ run.active_findings }}</td><td>{{ run.opened_findings }}</td><td>{{ run.resolved_findings }}</td><td>{{ run.suppressed_findings }}</td></tr>{% endfor %}
     </tbody></table>
   </div>
 </details>

@@ -47,6 +47,8 @@ from .event_log import EventLog
 from .file_hashes import MediaHashService
 from .imdb import sync_genres
 from .media_info import MediaInspectionError, inspect_media
+from .media_integrity import MediaIntegrityService
+from .stream_inventory import MediaStreamService
 from .mie import CATEGORIES as MIE_CATEGORIES
 from .mie import SEVERITIES as MIE_SEVERITIES
 from .mie import MediaIntelligenceEngine
@@ -88,6 +90,8 @@ engagement = EngagementService(db)
 event_log = EventLog(db)
 mie = MediaIntelligenceEngine(db)
 media_hashes = MediaHashService(db)
+media_streams = MediaStreamService(db)
+media_integrity = MediaIntegrityService(db)
 duplicates = DuplicateService(db, media_hashes)
 edition_versions = EditionVersionService(db)
 duplicate_trash = DuplicateTrashService(db)
@@ -101,7 +105,7 @@ try:
 except ProviderSecretError as exc:
     stored_provider_secrets = {}
     provider_secret_error = str(exc)
-APP_VERSION = "0.8.0-alpha.1"
+APP_VERSION = "0.9.0-alpha.1"
 app = FastAPI(
     title="InfoMancer", version=APP_VERSION,
     docs_url=None, redoc_url=None, openapi_url=None,
@@ -272,6 +276,8 @@ tv_match_job = background.tv_match_job
 tv_match_lock = background.tv_match_lock
 media_info_job = background.media_info_job
 media_info_lock = background.media_info_lock
+media_integrity_job = {"status": "idle", "processed": 0, "total": 0, "passed": 0, "issues": 0, "current": ""}
+media_integrity_lock = threading.Lock()
 duplicate_verify_job = background.duplicate_verify_job
 duplicate_verify_lock = background.duplicate_verify_lock
 media_hash_job = background.media_hash_job
@@ -284,7 +290,13 @@ trash_cleanup_lock = background.trash_cleanup_lock
 run_media_hashing = background.run_media_hashing
 start_media_hashing = background.start_media_hashing
 handle_import_hashing = background.handle_import_hashing
-_other_background_work_running = background.other_background_work_running
+_background_other_work_running = background.other_background_work_running
+
+def _other_background_work_running() -> bool:
+    with media_integrity_lock:
+        if media_integrity_job.get("status") in {"starting", "running"}:
+            return True
+    return _background_other_work_running()
 maybe_start_scheduled_hashing = background.maybe_start_scheduled_hashing
 run_background_scheduler = background.run_scheduler
 trash_retention_days = background.trash_retention_days
@@ -2076,10 +2088,11 @@ def run_media_inspection(file_ids: list[int] | None = None) -> None:
                         values["container"], values["dynamic_range"], row["id"],
                     ),
                 )
+                media_streams.replace(row["id"], values.get("streams", []), conn=conn)
             updated += 1
             record_event(
                 "media", f"Media details collected for {row['filename']}.",
-                level="verbose", context={"file_id": row["id"], **values},
+                level="verbose", context={"file_id": row["id"], **{key: value for key, value in values.items() if key != "streams"}},
             )
         except MediaInspectionError as exc:
             errors += 1
@@ -2111,6 +2124,51 @@ def run_media_inspection(file_ids: list[int] | None = None) -> None:
         context={"updated": updated, "errors": errors},
     )
 
+
+
+def run_media_integrity(file_ids: list[int] | None = None, mode: str = "sample") -> None:
+    rows = media_integrity.pending_files(file_ids)
+    with media_integrity_lock:
+        media_integrity_job.clear()
+        media_integrity_job.update({
+            "status": "running", "processed": 0, "total": len(rows),
+            "passed": 0, "issues": 0, "current": "",
+        })
+    record_event(
+        "media-integrity", f"Media integrity sampling started for {len(rows):,} files.",
+        context={"file_count": len(rows), "mode": mode},
+    )
+    passed = issues = 0
+    for index, row in enumerate(rows, start=1):
+        with media_integrity_lock:
+            media_integrity_job.update({"processed": index - 1, "current": f"{row['title']} · {row['filename']}"})
+        result = media_integrity.check_file(row, mode=mode)
+        if result["status"] == "passed":
+            passed += 1
+        else:
+            issues += 1
+            record_event(
+                "media-integrity",
+                f"Integrity review needed for {row['filename']}.",
+                level="warning", detail="\n".join(result.get("issues") or [])[:4000],
+                context={"file_id": row["id"], "status": result["status"], "mode": mode},
+            )
+        with media_integrity_lock:
+            media_integrity_job.update({"processed": index, "passed": passed, "issues": issues})
+    with media_integrity_lock:
+        media_integrity_job.update({
+            "status": "complete", "processed": len(rows), "passed": passed,
+            "issues": issues, "current": "",
+        })
+    try:
+        analyze_library_health_with_activity()
+    except sqlite3.Error as exc:
+        record_event("mie", "MIE could not refresh after integrity sampling.", level="error", detail=str(exc))
+    record_event(
+        "media-integrity",
+        f"Media integrity sampling finished: {passed:,} passed and {issues:,} need review.",
+        level="warning" if issues else "info", context={"passed": passed, "issues": issues, "mode": mode},
+    )
 
 def run_scan(
     root_id: int, *, hash_after: bool = True, force_cleanup: bool = False,

@@ -30,6 +30,11 @@ def build_router(ctx: RouteContext):
     maybe_start_trash_cleanup = ctx.live("maybe_start_trash_cleanup")
     media_info_job = ctx.live("media_info_job")
     media_info_lock = ctx.live("media_info_lock")
+    media_integrity = ctx.live("media_integrity")
+    media_integrity_job = ctx.live("media_integrity_job")
+    media_integrity_lock = ctx.live("media_integrity_lock")
+    run_media_integrity = ctx.live("run_media_integrity")
+    other_background_work_running = ctx.live("_other_background_work_running")
     mie = ctx.live("mie")
     movie_match_job = ctx.live("movie_match_job")
     movie_match_lock = ctx.live("movie_match_lock")
@@ -296,6 +301,14 @@ def build_router(ctx: RouteContext):
                         "analysis_history": mie.analysis_history(),
                         "feedback_rules": mie.feedback(),
                         "duplicate_impact": duplicate_trash.impact(),
+            "stream_expectations": mie.stream_expectations(),
+            "title_health": mie.title_health_overview(),
+            "integrity_summary": media_integrity.summary(),
+            "integrity_job": dict(media_integrity_job),
+                        "stream_expectations": mie.stream_expectations(),
+                        "title_health": mie.title_health_overview(),
+                        "integrity_summary": media_integrity.summary(),
+                        "integrity_job": dict(media_integrity_job),
                         "message": "",
                         "error": (
                             "InfoMancer could not analyze the catalog because its "
@@ -319,6 +332,10 @@ def build_router(ctx: RouteContext):
             "analysis_history": mie.analysis_history(),
             "feedback_rules": mie.feedback(),
             "duplicate_impact": duplicate_trash.impact(),
+            "stream_expectations": mie.stream_expectations(),
+            "title_health": mie.title_health_overview(),
+            "integrity_summary": media_integrity.summary(),
+            "integrity_job": dict(media_integrity_job),
             "message": request.query_params.get("message", ""),
             "error": "",
         })
@@ -328,6 +345,10 @@ def build_router(ctx: RouteContext):
         return templates.TemplateResponse(request, "storage_intelligence.html", {
             "report": mie.storage_report(),
             "duplicate_impact": duplicate_trash.impact(),
+            "stream_expectations": mie.stream_expectations(),
+            "title_health": mie.title_health_overview(),
+            "integrity_summary": media_integrity.summary(),
+            "integrity_job": dict(media_integrity_job),
         })
 
     @router.get("/titles/{title_id}/identity", response_class=HTMLResponse)
@@ -336,6 +357,45 @@ def build_router(ctx: RouteContext):
         if report is None:
             raise HTTPException(404, "That library title no longer exists.")
         return templates.TemplateResponse(request, "identity_report.html", {"report": report})
+
+    @librarian_post("/library-health/integrity/sample")
+    def start_integrity_sampling(request: Request):
+        if other_background_work_running():
+            return redirect(
+                "/library-health",
+                "Wait for the current scan, matching, inspection, fingerprint, or cleanup task to finish before starting media integrity sampling.",
+            )
+        with media_integrity_lock:
+            if media_integrity_job.get("status") == "running":
+                return redirect("/library-health", "Media integrity sampling is already running.")
+            media_integrity_job.update({"status": "starting", "processed": 0, "total": 0, "passed": 0, "issues": 0, "current": ""})
+        threading.Thread(
+            target=run_media_integrity, kwargs={"mode": "sample"}, daemon=True,
+            name="infomancer-media-integrity",
+        ).start()
+        return redirect(
+            "/library-health",
+            "Read-only FFmpeg integrity sampling started for media that has not been checked or has changed since its last check.",
+        )
+
+    @librarian_post("/library-health/stream-expectations")
+    def save_stream_expectations(
+        request: Request, required_audio_languages: str = Form(""),
+        required_subtitle_languages: str = Form(""),
+        minimum_audio_channels: str = Form(""), require_subtitles: str = Form(""),
+    ):
+        try:
+            mie.save_stream_expectations(
+                required_audio_languages=required_audio_languages,
+                required_subtitle_languages=required_subtitle_languages,
+                minimum_audio_channels=minimum_audio_channels,
+                require_subtitles=require_subtitles == "1",
+                user_id=request.state.user.id,
+            )
+            analyze_library_health_with_activity()
+        except ValueError as exc:
+            return redirect("/library-health", str(exc))
+        return redirect("/library-health", "Audio and subtitle intelligence goals saved and analysis refreshed.")
 
     @librarian_post("/library-health/analyze")
     def analyze_library_health(request: Request):

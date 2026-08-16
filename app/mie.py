@@ -105,6 +105,11 @@ class MediaIntelligenceEngine:
             calibration = dict(DEFAULT_CALIBRATION)
             if calibration_row:
                 calibration.update({key: calibration_row[key] for key in DEFAULT_CALIBRATION})
+            previous_active_fingerprints = {
+                str(row["fingerprint"]) for row in conn.execute(
+                    "SELECT fingerprint FROM mie_findings WHERE status='active'"
+                )
+            }
             titles = {
                 row["id"]: row for row in conn.execute(
                     """SELECT id,root_id,kind,title,year,metadata_title,
@@ -610,6 +615,118 @@ class MediaIntelligenceEngine:
                         },
                     })
 
+            expectations = self._stream_expectations_raw(conn)
+            if expectations:
+                stream_rows = conn.execute(
+                    """SELECT s.*,f.title_id,f.filename FROM media_streams s
+                       JOIN files f ON f.id=s.file_id ORDER BY s.file_id,s.stream_index"""
+                ).fetchall()
+                streams_by_file: dict[int, list[dict[str, Any]]] = defaultdict(list)
+                for row in stream_rows:
+                    streams_by_file[int(row["file_id"])].append(dict(row))
+                required_audio = set(expectations.get("required_audio_languages") or [])
+                required_subtitles = set(expectations.get("required_subtitle_languages") or [])
+                require_subtitles = bool(expectations.get("require_subtitles"))
+                minimum_channels = int(expectations.get("minimum_audio_channels") or 0)
+                for title_id, title_files in files_by_title.items():
+                    title = titles.get(title_id)
+                    if not title:
+                        continue
+                    named = title["metadata_title"] or title["title"]
+                    checked = [file for file in title_files if int(file["id"]) in streams_by_file]
+                    if not checked:
+                        continue
+                    def missing_language(stream_type: str, language: str) -> list[dict[str, Any]]:
+                        result = []
+                        for file in checked:
+                            streams = streams_by_file[int(file["id"])]
+                            if not any(s["stream_type"] == stream_type and s["language"] == language for s in streams):
+                                result.append(file)
+                        return result
+                    for language in sorted(required_audio):
+                        missing = missing_language("audio", language)
+                        if missing:
+                            candidates.append({
+                                "fingerprint": f"stream-audio-language:{language}:title:{title_id}",
+                                "rule_key": "stream-audio-language-missing", "category": "completeness",
+                                "severity": "warning", "root_id": title["root_id"], "title_id": title_id,
+                                "file_id": missing[0]["id"],
+                                "summary": f"{named} has {len(missing)} file{'s' if len(missing) != 1 else ''} without {language.upper()} audio",
+                                "explanation": "Stored FFprobe stream inventories were compared with the Librarian's audio-language expectation.",
+                                "recommendation": "Review the affected files or adjust the stream expectation when this variation is intentional.",
+                                "evidence": {"language": language, "missing_count": len(missing), "sample_files": [f["filename"] for f in missing[:8]]},
+                            })
+                    for language in sorted(required_subtitles):
+                        missing = missing_language("subtitle", language)
+                        if missing:
+                            candidates.append({
+                                "fingerprint": f"stream-subtitle-language:{language}:title:{title_id}",
+                                "rule_key": "stream-subtitle-language-missing", "category": "completeness",
+                                "severity": "warning", "root_id": title["root_id"], "title_id": title_id,
+                                "file_id": missing[0]["id"],
+                                "summary": f"{named} has {len(missing)} file{'s' if len(missing) != 1 else ''} without {language.upper()} subtitles",
+                                "explanation": "Stored subtitle inventories were compared with the Librarian's subtitle-language expectation.",
+                                "recommendation": "Review whether subtitle tracks are missing, external and unindexed, or intentionally absent.",
+                                "evidence": {"language": language, "missing_count": len(missing), "sample_files": [f["filename"] for f in missing[:8]]},
+                            })
+                    if require_subtitles:
+                        missing = [
+                            file for file in checked
+                            if not any(s["stream_type"] == "subtitle" for s in streams_by_file[int(file["id"])])
+                        ]
+                        if missing:
+                            candidates.append({
+                                "fingerprint": f"stream-subtitle-required:title:{title_id}",
+                                "rule_key": "stream-subtitles-missing", "category": "completeness",
+                                "severity": "warning", "root_id": title["root_id"], "title_id": title_id,
+                                "file_id": missing[0]["id"],
+                                "summary": f"{named} has {len(missing)} file{'s' if len(missing) != 1 else ''} with no indexed subtitle track",
+                                "explanation": "The active stream expectation requires at least one subtitle track in every inspected file.",
+                                "recommendation": "Review the files or disable the requirement when subtitles are intentionally external or unnecessary.",
+                                "evidence": {"missing_count": len(missing), "sample_files": [f["filename"] for f in missing[:8]]},
+                            })
+                    if minimum_channels:
+                        low = []
+                        for file in checked:
+                            channels = [int(s["channels"] or 0) for s in streams_by_file[int(file["id"])] if s["stream_type"] == "audio"]
+                            if channels and max(channels) < minimum_channels:
+                                low.append((file, max(channels)))
+                        if low:
+                            candidates.append({
+                                "fingerprint": f"stream-audio-channels:title:{title_id}",
+                                "rule_key": "stream-audio-channels-low", "category": "quality",
+                                "severity": "information", "root_id": title["root_id"], "title_id": title_id,
+                                "file_id": low[0][0]["id"],
+                                "summary": f"{named} has {len(low)} file{'s' if len(low) != 1 else ''} below the {minimum_channels}-channel audio goal",
+                                "explanation": "The best indexed audio track in each affected file has fewer channels than the configured library goal.",
+                                "recommendation": "Treat this as a quality review signal, not a repair instruction. Keep intentional stereo or mono sources as-is.",
+                                "evidence": {"minimum_channels": minimum_channels, "sample_files": [{"filename": f["filename"], "channels": c} for f, c in low[:8]]},
+                            })
+
+            for row in conn.execute(
+                """SELECT i.*,f.filename,f.title_id,t.root_id
+                   FROM media_integrity_results i
+                   JOIN files f ON f.id=i.file_id
+                   JOIN titles t ON t.id=f.title_id
+                   WHERE i.status IN ('warning','failed','error')
+                     AND COALESCE(i.checked_modified_at,-1)=COALESCE(f.modified_at,-1)
+                     AND i.checked_size_bytes=f.size_bytes"""
+            ):
+                try:
+                    details = json.loads(row["details_json"] or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    details = {}
+                severity = "critical" if row["status"] == "failed" else "warning"
+                candidates.append({
+                    "fingerprint": f"media-integrity:file:{row['file_id']}",
+                    "rule_key": "media-integrity", "category": "health", "severity": severity,
+                    "root_id": row["root_id"], "title_id": row["title_id"], "file_id": row["file_id"],
+                    "summary": f"{row['filename']} did not cleanly pass media integrity sampling",
+                    "explanation": "InfoMancer asked FFmpeg to decode media samples without writing an output file. FFmpeg reported an error, warning, or could not complete the check.",
+                    "recommendation": "Review the recorded decode evidence. Re-scan or replace the source file if the problem is reproducible; InfoMancer will not attempt an automatic repair.",
+                    "evidence": {"mode": row["mode"], "status": row["status"], "checked_at": row["checked_at"], "issues": (details.get("issues") or [])[:8]},
+                })
+
             duplicate_candidates = self.duplicates.candidates()
             identity_review_titles: set[int] = set()
             for duplicate in duplicate_candidates:
@@ -748,9 +865,12 @@ class MediaIntelligenceEngine:
             }
             scored_findings = [
                 dict(row) for row in conn.execute(
-                    "SELECT category,severity FROM mie_findings WHERE status='active'"
+                    "SELECT fingerprint,category,severity,title_id FROM mie_findings WHERE status='active'"
                 )
             ]
+            current_active_fingerprints = {str(item["fingerprint"]) for item in scored_findings}
+            opened_findings = len(current_active_fingerprints - previous_active_fingerprints)
+            resolved_findings = len(previous_active_fingerprints - current_active_fingerprints)
             category_scores = []
             for category in sorted(CATEGORIES):
                 counts = Counter(
@@ -764,9 +884,11 @@ class MediaIntelligenceEngine:
             )
             cursor = conn.execute(
                 """INSERT INTO mie_analysis_runs(
-                     analyzed_at,active_findings,suppressed_findings,overall_score
-                   ) VALUES (?,?,?,?)""",
-                (analyzed_at, len(scored_findings), suppressed_count, overall_score),
+                     analyzed_at,active_findings,suppressed_findings,overall_score,
+                     opened_findings,resolved_findings
+                   ) VALUES (?,?,?,?,?,?)""",
+                (analyzed_at, len(scored_findings), suppressed_count, overall_score,
+                 opened_findings, resolved_findings),
             )
             run_id = cursor.lastrowid
             conn.executemany(
@@ -776,6 +898,24 @@ class MediaIntelligenceEngine:
                 [
                     (run_id, category, score, counts["critical"], counts["warning"], counts["information"])
                     for category, score, counts in category_scores
+                ],
+            )
+            findings_by_title: dict[int, Counter] = defaultdict(Counter)
+            for finding in scored_findings:
+                if finding.get("title_id") is not None:
+                    findings_by_title[int(finding["title_id"])][finding["severity"]] += 1
+            conn.executemany(
+                """INSERT INTO mie_title_health_snapshots(
+                     run_id,title_id,score,critical_count,warning_count,information_count
+                   ) VALUES (?,?,?,?,?,?)""",
+                [
+                    (
+                        run_id, title_id,
+                        max(0, 100 - sum(counts[level] * weight for level, weight in weights.items())),
+                        counts["critical"], counts["warning"], counts["information"],
+                    )
+                    for title_id in titles
+                    for counts in [findings_by_title.get(title_id, Counter())]
                 ],
             )
             conn.execute(
@@ -903,6 +1043,85 @@ class MediaIntelligenceEngine:
                    ORDER BY id DESC LIMIT ?""", (max(1, min(limit, 50)),)
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def title_health_overview(self, limit: int = 12) -> list[dict[str, Any]]:
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """SELECT h.*,COALESCE(t.metadata_title,t.title) title_name,t.kind
+                   FROM mie_title_health_snapshots h JOIN titles t ON t.id=h.title_id
+                   WHERE h.run_id=(SELECT MAX(id) FROM mie_analysis_runs)
+                   ORDER BY h.score ASC,h.critical_count DESC,h.warning_count DESC,title_name COLLATE NOCASE
+                   LIMIT ?""",
+                (max(1, min(limit, 100)),),
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["state"] = "Critical" if item["critical_count"] else ("Needs attention" if item["warning_count"] else ("Review suggested" if item["information_count"] else "Healthy"))
+            result.append(item)
+        return result
+
+    def _stream_expectations_raw(self, conn=None) -> dict[str, Any] | None:
+        if conn is None:
+            with self.database.connect() as connection:
+                return self._stream_expectations_raw(connection)
+        row = conn.execute("SELECT value FROM app_settings WHERE key='mie_stream_expectations'").fetchone()
+        if not row:
+            return None
+        try:
+            value = json.loads(row["value"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    def stream_expectations(self) -> dict[str, Any]:
+        raw = self._stream_expectations_raw() or {}
+        return {
+            "configured": bool(raw),
+            "required_audio_languages": ", ".join(raw.get("required_audio_languages") or []),
+            "required_subtitle_languages": ", ".join(raw.get("required_subtitle_languages") or []),
+            "minimum_audio_channels": raw.get("minimum_audio_channels") or "",
+            "require_subtitles": bool(raw.get("require_subtitles")),
+        }
+
+    def save_stream_expectations(
+        self, *, required_audio_languages: str = "", required_subtitle_languages: str = "",
+        minimum_audio_channels: str = "", require_subtitles: bool = False,
+        user_id: int | None = None,
+    ) -> None:
+        def languages(value: str) -> list[str]:
+            result = []
+            for token in value.split(","):
+                token = token.strip().casefold()
+                if not token:
+                    continue
+                if not re.fullmatch(r"[a-z0-9-]{2,15}", token):
+                    raise ValueError("Language entries must be short language codes separated by commas, such as eng, spa.")
+                if token not in result:
+                    result.append(token)
+            return result
+        channels = 0
+        if minimum_audio_channels.strip():
+            try:
+                channels = int(minimum_audio_channels)
+            except ValueError as exc:
+                raise ValueError("Minimum audio channels must be a whole number or left blank.") from exc
+            if channels < 1 or channels > 32:
+                raise ValueError("Minimum audio channels must be between 1 and 32.")
+        payload = {
+            "required_audio_languages": languages(required_audio_languages),
+            "required_subtitle_languages": languages(required_subtitle_languages),
+            "minimum_audio_channels": channels or None,
+            "require_subtitles": bool(require_subtitles),
+        }
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO app_settings(key,value,updated_by,updated_at)
+                   VALUES ('mie_stream_expectations',?,?,CURRENT_TIMESTAMP)
+                   ON CONFLICT(key) DO UPDATE SET value=excluded.value,
+                     updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP""",
+                (json.dumps(payload, ensure_ascii=False), user_id if user_id and user_id > 0 else None),
+            )
 
     def feedback(self) -> list[dict[str, Any]]:
         with self.database.connect() as conn:

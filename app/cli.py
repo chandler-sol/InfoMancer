@@ -15,6 +15,7 @@ from .config import Settings, get_settings
 from .db import Database
 from .event_log import EventLog
 from .media_info import MediaInspectionError, inspect_media
+from .stream_inventory import MediaStreamService
 from .scanner import scan_root
 
 
@@ -295,6 +296,7 @@ def command_inspect(database: Database, args: argparse.Namespace) -> int:
         args.yes,
     )
     log = EventLog(database)
+    stream_service = MediaStreamService(database)
     updated = errors = 0
     for index, row in enumerate(rows, start=1):
         print(f"[{index:,}/{len(rows):,}] {row['title']} — {row['filename']}")
@@ -313,6 +315,7 @@ def command_inspect(database: Database, args: argparse.Namespace) -> int:
                         values["container"], values["dynamic_range"], row["id"],
                     ),
                 )
+                stream_service.replace(row["id"], values.get("streams", []), conn=conn)
             updated += 1
         except MediaInspectionError as exc:
             errors += 1

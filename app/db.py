@@ -508,7 +508,9 @@ CREATE TABLE IF NOT EXISTS mie_analysis_runs (
     analyzed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     active_findings INTEGER NOT NULL DEFAULT 0,
     suppressed_findings INTEGER NOT NULL DEFAULT 0,
-    overall_score INTEGER NOT NULL DEFAULT 100
+    overall_score INTEGER NOT NULL DEFAULT 100,
+    opened_findings INTEGER NOT NULL DEFAULT 0,
+    resolved_findings INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS mie_category_scores (
@@ -536,6 +538,47 @@ CREATE TABLE IF NOT EXISTS mie_feedback (
     active INTEGER NOT NULL DEFAULT 1,
     created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE IF NOT EXISTS media_streams (
+    file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    stream_index INTEGER NOT NULL,
+    stream_type TEXT NOT NULL,
+    codec TEXT NOT NULL DEFAULT '',
+    language TEXT NOT NULL DEFAULT 'und',
+    title TEXT NOT NULL DEFAULT '',
+    channels INTEGER,
+    channel_layout TEXT NOT NULL DEFAULT '',
+    sample_rate INTEGER,
+    default_flag INTEGER NOT NULL DEFAULT 0,
+    forced_flag INTEGER NOT NULL DEFAULT 0,
+    hearing_impaired INTEGER NOT NULL DEFAULT 0,
+    visual_impaired INTEGER NOT NULL DEFAULT 0,
+    commentary INTEGER NOT NULL DEFAULT 0,
+    disposition_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY(file_id,stream_index)
+);
+
+CREATE TABLE IF NOT EXISTS media_integrity_results (
+    file_id INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK(status IN ('passed','warning','failed','error')),
+    mode TEXT NOT NULL CHECK(mode IN ('sample','full')),
+    checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    checked_modified_at REAL,
+    checked_size_bytes INTEGER NOT NULL DEFAULT 0,
+    issue_count INTEGER NOT NULL DEFAULT 0,
+    details_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS mie_title_health_snapshots (
+    run_id INTEGER NOT NULL REFERENCES mie_analysis_runs(id) ON DELETE CASCADE,
+    title_id INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
+    score INTEGER NOT NULL DEFAULT 100,
+    critical_count INTEGER NOT NULL DEFAULT 0,
+    warning_count INTEGER NOT NULL DEFAULT 0,
+    information_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(run_id,title_id)
 );
 
 CREATE TABLE IF NOT EXISTS duplicate_reviews (
@@ -675,6 +718,12 @@ CREATE INDEX IF NOT EXISTS idx_mie_feedback_active
     ON mie_feedback(active, rule_key, scope);
 CREATE INDEX IF NOT EXISTS idx_mie_analysis_runs_time
     ON mie_analysis_runs(analyzed_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_mie_title_health_title
+    ON mie_title_health_snapshots(title_id, run_id DESC);
+CREATE INDEX IF NOT EXISTS idx_media_streams_file_type
+    ON media_streams(file_id, stream_type, language);
+CREATE INDEX IF NOT EXISTS idx_media_integrity_status
+    ON media_integrity_results(status, checked_at DESC);
 CREATE INDEX IF NOT EXISTS idx_duplicate_reviews_decision
     ON duplicate_reviews(decision, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_media_file_hashes_status

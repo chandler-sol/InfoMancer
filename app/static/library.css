@@ -4563,3 +4563,7 @@ button.season-heading:focus-visible {
     flex-basis: 100%;
   }
 }
+
+
+/* 0.9 intelligence foundation */
+.mie-09-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:14px 0}.mie-09-card{margin:0;min-width:0}.mie-09-card h2,.mie-stream-intelligence h2{margin:.2rem 0 .55rem}.mie-09-metrics{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.mie-09-metrics>div{min-width:110px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-soft,rgba(255,255,255,.02));display:flex;flex-direction:column}.mie-09-metrics strong{font-size:1.3rem}.mie-09-metrics span,.mie-title-health-list small{color:var(--muted);font-size:.78rem}.mie-title-health-list{display:grid;gap:6px}.mie-title-health-list a{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;text-decoration:none}.mie-title-health-list a span{min-width:0;display:flex;flex-direction:column}.mie-title-health-list a strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mie-title-health-list a b{color:var(--lime)}.mie-stream-intelligence{margin:14px 0}.mie-stream-intelligence .mie-profile-form{margin-top:12px}@media(max-width:900px){.mie-09-grid{grid-template-columns:1fr}}

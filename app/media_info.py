@@ -113,6 +113,39 @@ def _dynamic_range(video: dict) -> str:
     return "SDR"
 
 
+
+def _stream_details(streams: list[dict]) -> list[dict]:
+    details = []
+    for ordinal, stream in enumerate(streams):
+        tags = stream.get("tags") or {}
+        disposition = stream.get("disposition") or {}
+        title = str(tags.get("title") or "").strip()
+        codec_type = str(stream.get("codec_type") or "unknown").strip().lower()
+        language = str(tags.get("language") or "und").strip().lower() or "und"
+        commentary = bool(disposition.get("comment")) or "commentary" in title.casefold()
+        sample_rate = stream.get("sample_rate")
+        try:
+            sample_rate = int(sample_rate) if sample_rate not in {None, ""} else None
+        except (TypeError, ValueError):
+            sample_rate = None
+        details.append({
+            "index": int(stream.get("index") if stream.get("index") is not None else ordinal),
+            "type": codec_type,
+            "codec": str(stream.get("codec_name") or "").upper(),
+            "language": language,
+            "title": title,
+            "channels": _number(stream.get("channels"), int) if codec_type == "audio" else None,
+            "channel_layout": str(stream.get("channel_layout") or ""),
+            "sample_rate": sample_rate,
+            "default": bool(disposition.get("default")),
+            "forced": bool(disposition.get("forced")),
+            "hearing_impaired": bool(disposition.get("hearing_impaired")),
+            "visual_impaired": bool(disposition.get("visual_impaired")),
+            "commentary": commentary,
+            "disposition": {str(key): int(bool(value)) for key, value in disposition.items()},
+        })
+    return details
+
 def inspect_media(path: Path, timeout: int = 90) -> dict:
     if not path.exists() or not path.is_file():
         raise MediaInspectionError(
@@ -122,7 +155,7 @@ def inspect_media(path: Path, timeout: int = 90) -> dict:
         )
     command = [
         "ffprobe", "-v", "error", "-show_entries",
-        "format=duration,bit_rate,format_name:stream=index,codec_type,codec_name,width,height,channels,color_transfer,color_primaries:stream_side_data",
+        "format=duration,bit_rate,format_name:stream=index,codec_type,codec_name,width,height,channels,channel_layout,sample_rate,color_transfer,color_primaries:stream_tags=language,title:stream_disposition=default,forced,hearing_impaired,visual_impaired,comment:stream_side_data",
         "-of", "json", str(path),
     ]
     try:
@@ -168,4 +201,5 @@ def inspect_media(path: Path, timeout: int = 90) -> dict:
         "bitrate": _number(media_format.get("bit_rate"), int),
         "container": str(media_format.get("format_name") or "").split(",", 1)[0].upper(),
         "dynamic_range": _dynamic_range(video) if video else "",
+        "streams": _stream_details(streams),
     }
