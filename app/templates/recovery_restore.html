@@ -13,12 +13,13 @@
     <p class="eyebrow">PORTABLE RECOVERY</p>
     <h2>Restore an InfoMancer installation</h2>
     <p>Select a recovery package created by InfoMancer. The next screen verifies every declared file and shows the package contents before any live data is changed.</p>
-    <form method="post" action="/settings/recovery/preview" enctype="multipart/form-data" class="stacked-form">
+    <form id="recovery-upload-form" method="post" action="/settings/recovery/preview" enctype="multipart/form-data" class="stacked-form">
       <label>Recovery package
         <input type="file" name="recovery_file" accept=".infomancer-backup,application/octet-stream" required>
       </label>
       <button type="submit" class="button primary">Verify package &amp; preview restore</button>
     </form>
+    <noscript><p class="form-error" role="alert">JavaScript is required for portable recovery upload so InfoMancer can send the CSRF token as a request header without buffering the backup inside the application middleware.</p></noscript>
   </section>
 
   <section class="panel settings-card">
@@ -33,4 +34,45 @@
     <p class="muted">After a reinstall, restore the portable package first, then re-enter provider credentials and confirm that the same media paths or shares are available.</p>
   </section>
 </section>
+<script>
+(() => {
+  const form = document.getElementById("recovery-upload-form");
+  if (!form) return;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!form.reportValidity()) return;
+    const submit = form.querySelector('button[type="submit"]');
+    const original = submit?.textContent || "Verify package & preview restore";
+    if (submit) {
+      submit.disabled = true;
+      submit.textContent = "Uploading & verifying…";
+    }
+    try {
+      const response = await fetch(form.action, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {"X-CSRF-Token": {{ csrf_token|tojson }}},
+        body: new FormData(form),
+      });
+      const html = await response.text();
+      document.open();
+      document.write(html);
+      document.close();
+    } catch (_error) {
+      if (submit) {
+        submit.disabled = false;
+        submit.textContent = original;
+      }
+      let error = form.querySelector(".recovery-upload-error");
+      if (!error) {
+        error = document.createElement("p");
+        error.className = "form-error recovery-upload-error";
+        error.setAttribute("role", "alert");
+        form.append(error);
+      }
+      error.textContent = "The recovery package could not be uploaded. Check the connection and try again.";
+    }
+  });
+})();
+</script>
 {% endblock %}
