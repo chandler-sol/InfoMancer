@@ -17,10 +17,10 @@ Primary work domains are Dashboard, Library, Review, Sources, and Activity. Exis
 
 ## Workspace phases
 
-1. **W1 Foundation + stabilization**: server-rendered workspace shell, collapsible navigation hierarchy, intentional compact rail, contextual bulk-action toolbar, cohesive title dossier, local-library people previews, and the first persistent Library inspector.
+1. **W1 Foundation + stabilization (complete)**: server-rendered workspace shell, collapsible navigation hierarchy, intentional compact rail, contextual bulk-action toolbar, cohesive title dossier, local-library people previews, and the first persistent Library inspector.
 2. **W2 Library (complete)**: server-backed inspector partials, richer file/edition/quality information, history-aware selection state, instantaneous favorite/tag actions.
-3. **W3 Review**: unified queue for MIE findings, duplicates, unmatched media, missing episodes, metadata issues, and quality decisions.
-4. **W4 Interaction**: reusable drawers, dialogs, toasts, partial navigation, keyboard shortcuts, and command palette.
+3. **W3 Review (complete)**: unified queue for MIE findings, duplicates, unmatched media, missing episodes, metadata issues, and quality decisions.
+4. **W4 Interaction (complete)**: reusable drawers, dialogs, toasts, partial navigation, keyboard shortcuts, and command palette.
 5. **W5 Saved Views (complete)**: named filter/sort workspaces that can be pinned to Library and Dashboard.
 6. **W6 Operations (complete)**: generalized operation history and reversible actions where filesystem semantics permit safe undo.
 
@@ -41,7 +41,6 @@ W2 replaces the W1 DOM-scraping Inspector with a dedicated read-only `/library/i
 ### W2 validation
 
 The final W2 application tree passes 198 tests plus `python -m compileall app`. Coverage includes server-rendered Inspector data, read-only GET behavior, member-safe CSRF-protected favorite/tag mutations, route authorization, keyboard and range selection contracts, browser-history restoration, aggregate media totals beyond the bounded file preview, and correct runtime handling for alternate movie editions. The permanent repository matrix also passes dependency audit plus Python 3.13 tests and compilation on Ubuntu, macOS, and Windows.
-
 
 ## W5 Saved Views
 
@@ -67,10 +66,21 @@ a dedicated Operation History view with status/type filtering and clear undo sta
 
 Undo is deliberately narrow. InfoMancer never stores or replays arbitrary commands.
 Before reversing a file or folder rename it verifies the current catalog path, source
-boundary, expected filesystem object, and destination collision state. Managed-trash
-undo delegates to the existing guarded restore workflow. If any state has drifted,
-undo fails closed and records the reason while leaving the operation available for
-review. Manual managed-trash restores also mark their originating move as undone.
+boundary, expected filesystem object, destination collision state, and original parent
+folder. Managed-trash undo delegates to the existing guarded restore workflow. If any
+state has drifted, undo fails closed and records the reason while leaving the operation
+available for review. Manual managed-trash restores also mark their originating move as
+undone. Synthetic auth-disabled identities are recorded as system actions instead of
+creating invalid user references.
+
+### W5 + W6 validation
+
+The integrated 0.8 tree exercises saved-view isolation and query normalization,
+installation-wide TV season display defaults, file and folder rename undo, collision
+refusal, managed-trash restore, synthetic auth-disabled actors, migrations, and the
+Operation History interface. The W6 integration validation passes 229 tests plus
+`python -m compileall -q app`; the permanent cross-platform CI matrix remains the
+release gate for the merged `testing/0.8-alpha` branch.
 
 ## W3 + W4: Unified Review and application interactions
 
