@@ -914,8 +914,7 @@ class MediaIntelligenceEngine:
                         max(0, 100 - sum(counts[level] * weight for level, weight in weights.items())),
                         counts["critical"], counts["warning"], counts["information"],
                     )
-                    for title_id in titles
-                    for counts in [findings_by_title.get(title_id, Counter())]
+                    for title_id, counts in findings_by_title.items()
                 ],
             )
             conn.execute(

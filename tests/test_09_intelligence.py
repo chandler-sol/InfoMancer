@@ -101,11 +101,24 @@ class Intelligence09Tests(unittest.TestCase):
         self.assertIn("will not attempt an automatic repair", finding["recommendation"])
 
     def test_mie_20_records_opened_resolved_and_title_health(self):
+        with self.database.connect() as conn:
+            conn.execute(
+                "INSERT INTO titles(id,root_id,kind,title,folder_path) VALUES (2,1,'movie','Second title',?)",
+                (str(Path(self.temp.name) / "Second title"),),
+            )
         self.mie.analyze()
         first = self.mie.analysis_history()[0]
         self.assertGreaterEqual(first["opened_findings"], 0)
         health = self.mie.title_health_overview()
-        self.assertEqual(health[0]["title_id"], 1)
+        self.assertTrue(health)
+        with self.database.connect() as conn:
+            snapshot_ids = {row[0] for row in conn.execute(
+                "SELECT title_id FROM mie_title_health_snapshots WHERE run_id=(SELECT MAX(id) FROM mie_analysis_runs)"
+            )}
+            finding_ids = {row[0] for row in conn.execute(
+                "SELECT DISTINCT title_id FROM mie_findings WHERE status='active' AND title_id IS NOT NULL"
+            )}
+        self.assertEqual(snapshot_ids, finding_ids)
         with self.database.connect() as conn:
             conn.execute("UPDATE roots SET last_scanned_at=CURRENT_TIMESTAMP WHERE id=1")
         self.mie.analyze()
