@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Recovery · InfoMancer{% endblock %}
+{% block content %}
+{% set section = 'recovery' %}
+<section class="settings-shell">
+  <header class="page-head compact-page-head">
+    <div><p class="eyebrow">APP SETTINGS</p><h1>Recovery</h1><p>Verify and restore a portable <code>.infomancer-backup</code> package.</p></div>
+  </header>
+  {% include "_settings_nav.html" %}
+  {% if message %}<div class="notice">{{ message }}</div>{% endif %}
+
+  <section class="panel settings-card">
+    <p class="eyebrow">PORTABLE RECOVERY</p>
+    <h2>Restore an InfoMancer installation</h2>
+    <p>Select a recovery package created by InfoMancer. The next screen verifies every declared file and shows the package contents before any live data is changed.</p>
+    <form method="post" action="/settings/recovery/preview" enctype="multipart/form-data" class="stacked-form">
+      <label>Recovery package
+        <input type="file" name="recovery_file" accept=".infomancer-backup,application/octet-stream" required>
+      </label>
+      <button type="submit" class="button primary">Verify package &amp; preview restore</button>
+    </form>
+  </section>
+
+  <section class="panel settings-card">
+    <p class="eyebrow">SAFETY MODEL</p>
+    <h2>What restore does</h2>
+    <ul>
+      <li>Verifies the package and staged database before touching the live installation.</li>
+      <li>Creates a fresh, self-verified portable safety backup of the current database and collection artwork.</li>
+      <li>Restores the catalog database and collection artwork together with automatic rollback if commit fails.</li>
+      <li>Never restores provider credentials, provider-secret encryption keys, deployment environment files, media files, or application binaries.</li>
+    </ul>
+    <p class="muted">After a reinstall, restore the portable package first, then re-enter provider credentials and confirm that the same media paths or shares are available.</p>
+  </section>
+</section>
+{% endblock %}
