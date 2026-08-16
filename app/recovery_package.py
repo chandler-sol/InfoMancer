@@ -3,14 +3,19 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
 import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import BinaryIO
+from typing import BinaryIO, Iterable
 
-from .maintenance import MaintenanceError, validate_database_backup
+from .maintenance import (
+    MaintenanceError,
+    validate_database_backup,
+    validate_database_paths,
+)
 
 
 class RecoveryPackageError(ValueError):
@@ -53,6 +58,11 @@ class RecoveryPackageService:
         path = PurePosixPath(name)
         return not path.is_absolute() and ".." not in path.parts
 
+    @staticmethod
+    def _replace(source: Path, destination: Path) -> None:
+        """Small seam used by restore fault-injection tests."""
+        os.replace(source, destination)
+
     def _database_snapshot(self, destination: Path) -> None:
         try:
             source = sqlite3.connect(self.database_path, timeout=30)
@@ -86,7 +96,7 @@ class RecoveryPackageService:
 
     def create(self) -> Path:
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
         final = self.output_dir / f"infomancer-recovery-{timestamp}.infomancer-backup"
         temp_package: Path | None = None
         temp_database: Path | None = None
@@ -164,6 +174,25 @@ class RecoveryPackageService:
             if temp_package:
                 temp_package.unlink(missing_ok=True)
 
+    def _read_manifest(self, archive: zipfile.ZipFile) -> dict:
+        try:
+            manifest_info = archive.getinfo("manifest.json")
+        except KeyError as exc:
+            raise RecoveryPackageError("The recovery package is missing its manifest.") from exc
+        if manifest_info.file_size > self.MAX_MANIFEST_BYTES:
+            raise RecoveryPackageError("The recovery package manifest is too large.")
+        try:
+            manifest = json.loads(archive.read(manifest_info))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise RecoveryPackageError("The recovery package manifest is unreadable.") from exc
+        if not isinstance(manifest, dict) or manifest.get("format") != self.FORMAT:
+            raise RecoveryPackageError("This is not an InfoMancer recovery package.")
+        if manifest.get("format_version") != self.FORMAT_VERSION:
+            raise RecoveryPackageError(
+                "This recovery package uses a format this version of InfoMancer does not support."
+            )
+        return manifest
+
     def verify(self, package_path: Path) -> dict:
         package_path = Path(package_path)
         if not package_path.is_file():
@@ -171,6 +200,10 @@ class RecoveryPackageService:
         if package_path.stat().st_size > self.MAX_PACKAGE_BYTES:
             raise RecoveryPackageError("The recovery package is larger than the 4 GB safety limit.")
         temp_database: Path | None = None
+        manifest: dict = {}
+        file_records: list[dict] = []
+        database_record: dict | None = None
+        artwork_count = 0
         try:
             with zipfile.ZipFile(package_path, "r") as archive:
                 infos = archive.infolist()
@@ -184,28 +217,12 @@ class RecoveryPackageService:
                 total = sum(int(item.file_size) for item in infos)
                 if total > self.MAX_UNCOMPRESSED_BYTES:
                     raise RecoveryPackageError("The recovery package expands beyond the 4 GB safety limit.")
-                try:
-                    manifest_info = archive.getinfo("manifest.json")
-                except KeyError as exc:
-                    raise RecoveryPackageError("The recovery package is missing its manifest.") from exc
-                if manifest_info.file_size > self.MAX_MANIFEST_BYTES:
-                    raise RecoveryPackageError("The recovery package manifest is too large.")
-                try:
-                    manifest = json.loads(archive.read(manifest_info))
-                except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-                    raise RecoveryPackageError("The recovery package manifest is unreadable.") from exc
-                if not isinstance(manifest, dict) or manifest.get("format") != self.FORMAT:
-                    raise RecoveryPackageError("This is not an InfoMancer recovery package.")
-                if manifest.get("format_version") != self.FORMAT_VERSION:
-                    raise RecoveryPackageError(
-                        "This recovery package uses a format this version of InfoMancer does not support."
-                    )
-                file_records = manifest.get("files")
-                if not isinstance(file_records, list) or not file_records:
+                manifest = self._read_manifest(archive)
+                records = manifest.get("files")
+                if not isinstance(records, list) or not records:
                     raise RecoveryPackageError("The recovery package manifest has no files to restore.")
+                file_records = records
                 expected_names = {"manifest.json"}
-                database_record = None
-                artwork_count = 0
                 for record in file_records:
                     if not isinstance(record, dict):
                         raise RecoveryPackageError("The recovery package manifest contains an invalid file record.")
@@ -260,9 +277,136 @@ class RecoveryPackageService:
                 "files": len(file_records),
                 "artwork_files": artwork_count,
                 "database_size": int(database_record["size"]),
+                "contains_media": bool(manifest.get("contains_media", False)),
+                "excluded": list(manifest.get("excluded") or []),
+                "notes": str(manifest.get("notes") or ""),
             }
         except zipfile.BadZipFile as exc:
             raise RecoveryPackageError("The selected file is not a readable recovery package.") from exc
         finally:
             if temp_database:
                 temp_database.unlink(missing_ok=True)
+
+    def _extract_for_restore(self, package_path: Path, staging: Path) -> tuple[dict, Path, Path]:
+        """Verify first, then re-check every extracted payload before it can be used."""
+        summary = self.verify(package_path)
+        database = staging / "database" / "infomancer.db"
+        artwork = staging / "collection-art"
+        database.parent.mkdir(parents=True, exist_ok=True)
+        artwork.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(package_path, "r") as archive:
+            manifest = self._read_manifest(archive)
+            records = manifest["files"]
+            for record in records:
+                name = str(record["path"])
+                role = record["role"]
+                if role == "database":
+                    destination = database
+                else:
+                    relative = PurePosixPath(name).relative_to("collection-art")
+                    destination = artwork.joinpath(*relative.parts)
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(name, "r") as source, destination.open("wb") as target:
+                    shutil.copyfileobj(source, target, length=1024 * 1024)
+                if destination.stat().st_size != int(record["size"]):
+                    raise RecoveryPackageError(f"The staged restore size check failed for {name}.")
+                if self._sha256_file(destination) != str(record["sha256"]).casefold():
+                    raise RecoveryPackageError(f"The staged restore checksum failed for {name}.")
+        try:
+            validate_database_backup(database)
+        except MaintenanceError as exc:
+            raise RecoveryPackageError(str(exc)) from exc
+        return summary, database, artwork
+
+    def restore(self, package_path: Path, media_browse_roots: Iterable[Path]) -> dict:
+        """Restore database + collection artwork as one rollback-protected operation.
+
+        The incoming archive is verified and fully staged before any live file is
+        touched. A fresh portable recovery package of the current installation is
+        also created before commit. Provider-secret storage is intentionally outside
+        this operation and is never read, replaced, or removed.
+        """
+        package_path = Path(package_path)
+        staging_root = Path(tempfile.mkdtemp(prefix="recovery-restore-", dir=self.database_path.parent))
+        rollback_art = self.database_path.parent / f".collection-art-rollback-{staging_root.name}"
+        rollback_database = staging_root / "rollback-live.db"
+        old_art_moved = False
+        incoming_art_installed = False
+        database_replaced = False
+        safety_package: Path | None = None
+        try:
+            summary, staged_database, staged_artwork = self._extract_for_restore(
+                package_path, staging_root
+            )
+            try:
+                validate_database_paths(staged_database, media_browse_roots)
+            except MaintenanceError as exc:
+                raise RecoveryPackageError(str(exc)) from exc
+
+            # A complete, self-verified package of the current installation is a
+            # hard precondition. If this fails, restore stops before touching live state.
+            safety_package = self.create()
+            self._database_snapshot(rollback_database)
+
+            if rollback_art.exists():
+                shutil.rmtree(rollback_art)
+            if self.artwork_dir.exists():
+                self._replace(self.artwork_dir, rollback_art)
+                old_art_moved = True
+            self._replace(staged_artwork, self.artwork_dir)
+            incoming_art_installed = True
+
+            for suffix in ("-wal", "-shm"):
+                Path(str(self.database_path) + suffix).unlink(missing_ok=True)
+            self._replace(staged_database, self.database_path)
+            database_replaced = True
+            validate_database_backup(self.database_path)
+
+            if rollback_art.exists():
+                shutil.rmtree(rollback_art)
+            rollback_database.unlink(missing_ok=True)
+            return {
+                **summary,
+                "safety_package": safety_package.name,
+                "restored_database": self.database_path.name,
+                "restored_artwork_files": summary["artwork_files"],
+            }
+        except (OSError, zipfile.BadZipFile, MaintenanceError, RecoveryPackageError) as exc:
+            rollback_failures: list[str] = []
+            if database_replaced:
+                try:
+                    for suffix in ("-wal", "-shm"):
+                        Path(str(self.database_path) + suffix).unlink(missing_ok=True)
+                    if rollback_database.exists():
+                        self._replace(rollback_database, self.database_path)
+                        validate_database_backup(self.database_path)
+                except Exception as rollback_exc:  # pragma: no cover - emergency path
+                    rollback_failures.append(f"database: {rollback_exc}")
+            if incoming_art_installed or old_art_moved:
+                try:
+                    if incoming_art_installed and self.artwork_dir.exists():
+                        if self.artwork_dir.is_dir():
+                            shutil.rmtree(self.artwork_dir)
+                        else:
+                            self.artwork_dir.unlink()
+                    if old_art_moved and rollback_art.exists():
+                        self._replace(rollback_art, self.artwork_dir)
+                except Exception as rollback_exc:  # pragma: no cover - emergency path
+                    rollback_failures.append(f"collection artwork: {rollback_exc}")
+            if rollback_failures:
+                safety = safety_package.name if safety_package else "unavailable"
+                raise RecoveryPackageError(
+                    "Portable recovery failed and automatic rollback was incomplete. "
+                    f"Safety package: {safety}. Rollback errors: {'; '.join(rollback_failures)}"
+                ) from exc
+            if isinstance(exc, RecoveryPackageError):
+                raise RecoveryPackageError(
+                    f"{exc} The live installation was left unchanged or rolled back safely."
+                ) from exc
+            raise RecoveryPackageError(
+                "Portable recovery could not be completed. The live installation was left unchanged or rolled back safely."
+            ) from exc
+        finally:
+            if rollback_art.exists() and not old_art_moved:
+                shutil.rmtree(rollback_art, ignore_errors=True)
+            shutil.rmtree(staging_root, ignore_errors=True)
