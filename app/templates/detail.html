@@ -12,7 +12,7 @@
   <aside class="title-hero-aside">
     <section class="title-synopsis">
       <h2>Overview</h2>
-      {% if title.overview %}<p class="title-overview">{{ title.overview }}</p>
+      {% if title.overview %}<p class="title-overview" id="title-overview">{{ title.overview }}</p><button type="button" class="overview-more" id="overview-more" hidden aria-haspopup="dialog" aria-controls="overview-dialog">See full overview</button><dialog id="overview-dialog" class="workspace-confirm-dialog title-overview-dialog" aria-labelledby="overview-dialog-title"><section class="workspace-dialog-card"><p class="eyebrow">FULL OVERVIEW</p><div class="overview-dialog-heading"><h2 id="overview-dialog-title">{{ title.metadata_title or title.title }}</h2><button type="button" class="overview-dialog-close" data-overview-close aria-label="Close full overview">×</button></div><p class="overview-dialog-copy">{{ title.overview }}</p><div class="workspace-dialog-actions"><button type="button" class="button" data-overview-close>Close</button></div></section></dialog>
       {% else %}<div class="title-overview-empty"><p>No synopsis is cached for this title yet.</p>{% if current_user and current_user.is_librarian and tvdb_enabled %}<form method="post" action="/titles/{{ title.id }}/metadata/enrich"><button type="submit" class="overview-refresh">Refresh metadata</button></form>{% endif %}</div>{% endif %}
     </section>
     {% if actors or (title.kind == 'movie' and (directors or writers)) %}<section class="movie-credits" aria-label="IMDb title credits"><h2>Cast &amp; crew</h2>
@@ -142,6 +142,33 @@
     creditMore.setAttribute("aria-expanded", String(show));
   });
 
+  const overview = document.getElementById("title-overview");
+  const overviewMore = document.getElementById("overview-more");
+  const overviewDialog = document.getElementById("overview-dialog");
+  const syncOverviewMore = () => {
+    if (!overview || !overviewMore) return;
+    overviewMore.hidden = !(overview.scrollHeight > overview.clientHeight + 1);
+  };
+  const closeOverviewDialog = () => {
+    if (!overviewDialog) return;
+    if (typeof overviewDialog.close === "function" && overviewDialog.open) overviewDialog.close();
+    else overviewDialog.removeAttribute("open");
+  };
+  overviewMore?.addEventListener("click", () => {
+    if (!overviewDialog) return;
+    if (typeof overviewDialog.showModal === "function") overviewDialog.showModal();
+    else overviewDialog.setAttribute("open", "");
+  });
+  overviewDialog?.querySelectorAll("[data-overview-close]").forEach((button) => {
+    button.addEventListener("click", closeOverviewDialog);
+  });
+  overviewDialog?.addEventListener("click", (event) => {
+    if (event.target === overviewDialog) closeOverviewDialog();
+  });
+  window.addEventListener("resize", syncOverviewMore);
+  window.addEventListener("load", syncOverviewMore, { once: true });
+  window.requestAnimationFrame(syncOverviewMore);
+
   // The episode action already carries the canonical TVDB URL. Make the
   // visible episode name use the same destination without duplicating data.
   document.querySelectorAll("[data-episode-row]").forEach((row) => {
@@ -199,6 +226,36 @@
     missingButton.closest("details")?.removeAttribute("open");
     if (show) missingPanel.scrollIntoView({ behavior: "smooth", block: "start" });
   });
+
+  const movieMenus = Array.from(document.querySelectorAll(".movie-detail-menu"));
+  const fitMovieMenu = (menu) => {
+    const popover = menu.querySelector(".series-menu-popover");
+    const summary = menu.querySelector(":scope > summary");
+    if (!popover || !summary || !menu.open) return;
+    menu.classList.remove("menu-open-up");
+    popover.style.maxHeight = "none";
+    const trigger = summary.getBoundingClientRect();
+    const naturalHeight = popover.scrollHeight;
+    const roomBelow = Math.max(0, window.innerHeight - trigger.bottom - 12);
+    const roomAbove = Math.max(0, trigger.top - 12);
+    const openUp = naturalHeight > roomBelow && roomAbove > roomBelow;
+    menu.classList.toggle("menu-open-up", openUp);
+    const available = openUp ? roomAbove : roomBelow;
+    popover.style.maxHeight = `${Math.max(96, Math.floor(available - 8))}px`;
+  };
+  movieMenus.forEach((menu) => {
+    menu.addEventListener("toggle", () => {
+      if (!menu.open) {
+        menu.classList.remove("menu-open-up");
+        menu.querySelector(".series-menu-popover")?.style.removeProperty("max-height");
+        return;
+      }
+      window.requestAnimationFrame(() => fitMovieMenu(menu));
+    });
+  });
+  const refitMovieMenus = () => movieMenus.forEach((menu) => menu.open && fitMovieMenu(menu));
+  window.addEventListener("resize", refitMovieMenus);
+  window.addEventListener("scroll", refitMovieMenus, true);
 
   document.addEventListener("click", (event) => {
     document.querySelectorAll(".series-menu[open], .episode-menu[open]").forEach((menu) => {

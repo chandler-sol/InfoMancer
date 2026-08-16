@@ -387,12 +387,17 @@
       if (!cache.has(link.href)) load(link);
     };
 
-    const scheduleClose = () => {
+    const closeNow = () => {
+      window.clearTimeout(openTimer);
       window.clearTimeout(closeTimer);
-      closeTimer = window.setTimeout(() => {
-        popover.hidden = true;
-        activeLink = null;
-      }, 140);
+      popover.hidden = true;
+      activeLink = null;
+    };
+
+    const scheduleClose = () => {
+      window.clearTimeout(openTimer);
+      window.clearTimeout(closeTimer);
+      closeTimer = window.setTimeout(closeNow, 120);
     };
 
     personLinks.forEach((link) => {
@@ -410,6 +415,13 @@
 
     popover.addEventListener("pointerenter", () => window.clearTimeout(closeTimer));
     popover.addEventListener("pointerleave", scheduleClose);
+    document.addEventListener("pointerdown", (event) => {
+      if (popover.hidden || popover.contains(event.target) || activeLink?.contains(event.target)) return;
+      closeNow();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !popover.hidden) closeNow();
+    });
     window.addEventListener("resize", () => activeLink && position(activeLink));
     window.addEventListener("scroll", () => activeLink && position(activeLink), true);
   };

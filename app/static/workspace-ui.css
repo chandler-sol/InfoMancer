@@ -291,3 +291,96 @@ body.has-app-sidebar .media-dossier .dossier-on-disk .movie-detail-menu > summar
   .workspace-drawer-scrim { transition: none; }
   .workspace-drawer-state.loading span { animation-duration: 1.5s; }
 }
+
+
+/* Detail viewport/menu and full-overview polish. */
+body.has-app-sidebar .media-dossier .overview-more {
+  justify-self: start;
+  margin: -2px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--cyan);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-decoration: none;
+}
+body.has-app-sidebar .media-dossier .overview-more:hover,
+body.has-app-sidebar .media-dossier .overview-more:focus-visible {
+  color: var(--lime);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.title-overview-dialog { width: min(720px, calc(100vw - 32px)); }
+.title-overview-dialog .workspace-dialog-card { gap: 14px; }
+.title-overview-dialog .overview-dialog-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.title-overview-dialog .overview-dialog-heading h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(24px, 4vw, 34px);
+  letter-spacing: -.025em;
+  text-transform: none;
+}
+.title-overview-dialog .overview-dialog-close {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 24px;
+  line-height: 1;
+}
+.title-overview-dialog .overview-dialog-close:hover,
+.title-overview-dialog .overview-dialog-close:focus-visible {
+  background: rgba(255,255,255,.055);
+  color: var(--text);
+}
+.title-overview-dialog .overview-dialog-copy {
+  max-width: 66ch;
+  margin: 0;
+  color: #c3ced8;
+  font-size: 16px;
+  line-height: 1.72;
+  white-space: pre-line;
+}
+body.has-app-sidebar .media-dossier .dossier-on-disk .movie-detail-menu > .series-menu-popover {
+  top: calc(100% + 7px);
+  bottom: auto;
+  width: 270px;
+  padding: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+body.has-app-sidebar .media-dossier .dossier-on-disk .movie-detail-menu.menu-open-up > .series-menu-popover {
+  top: auto;
+  bottom: calc(100% + 7px);
+}
+body.has-app-sidebar .media-dossier .dossier-on-disk .movie-detail-menu .series-menu-popover > a,
+body.has-app-sidebar .media-dossier .dossier-on-disk .movie-detail-menu .series-menu-popover > span,
+body.has-app-sidebar .media-dossier .dossier-on-disk .movie-detail-menu .series-menu-popover form > button {
+  min-height: 31px;
+  padding: 5px 8px;
+  font-size: 11.5px;
+}
+body.has-app-sidebar .media-dossier .dossier-on-disk .movie-detail-menu .series-menu-popover hr { margin: 4px 3px; }
+body.has-app-sidebar .media-dossier .dossier-on-disk .movie-detail-menu .series-menu-popover > .menu-section-label {
+  min-height: 0;
+  padding: 4px 8px 2px;
+  font-size: 8.5px;
+}
+@media (max-width: 700px) {
+  .title-overview-dialog { width: calc(100vw - 20px); }
+  .title-overview-dialog .workspace-dialog-card { padding: 18px; }
+}
