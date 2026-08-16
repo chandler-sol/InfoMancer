@@ -22,3 +22,21 @@ new = '''          updaterJsonPreferNsis: true
 if release.count(old) != 1:
     raise RuntimeError("Expected one updater JSON option block")
 release_path.write_text(release.replace(old, new, 1), encoding="utf-8")
+
+# Build-generated Tauri schemas and icon renditions are recreated in CI/local builds
+# from source configuration and desktop/app-icon.svg. Keep them out of the source
+# branch along with the bundled sidecar binary and Cargo target directory.
+desktop_ignore = ROOT / "desktop/.gitignore"
+ignore = desktop_ignore.read_text(encoding="utf-8")
+for entry in ("src-tauri/gen/", "src-tauri/icons/"):
+    if entry not in ignore.splitlines():
+        ignore += entry + "\n"
+desktop_ignore.write_text(ignore, encoding="utf-8")
+
+# PyInstaller creates these at the repository root during desktop builds.
+root_ignore = ROOT / ".gitignore"
+ignore = root_ignore.read_text(encoding="utf-8")
+for entry in ("build/", "*.spec"):
+    if entry not in ignore.splitlines():
+        ignore += entry + "\n"
+root_ignore.write_text(ignore, encoding="utf-8")
