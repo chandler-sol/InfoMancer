@@ -57,6 +57,20 @@ season groups. Collapsed remains the default, while Librarians can switch the st
 state under General Settings; per-page Expand all and Collapse all controls remain
 available.
 
+## Persisted Global Rename Review
+
+Rename suggestions are now stored as background-generated filesystem snapshots instead
+of being recomputed from disk whenever Review loads. Librarians can explicitly refresh
+the snapshot, then use the **Renames** Review bucket to inspect ready, blocked,
+dismissed, and resolved suggestions across the whole catalog. The saved proposal
+records source/destination paths plus file size and nanosecond modification time.
+
+Applying a proposal revalidates the catalog path, configured-source boundary, source
+signature, and destination collision before changing anything. A stale or occupied
+proposal fails closed and must be refreshed. Successful renames update the catalog and
+flow into W6 Operation History for guarded undo. Read-Only Mode blocks apply but never
+blocks proposal generation or review.
+
 ## Season Folder Organization
 
 Full TV title pages include a preview-first season-folder workflow. Parsed episode

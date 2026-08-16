@@ -6,7 +6,7 @@ from typing import Any
 
 SEVERITY_ORDER = {"critical": 0, "warning": 1, "information": 2}
 BUCKET_ORDER = (
-    "health", "matching", "missing", "duplicates", "metadata",
+    "health", "matching", "missing", "duplicates", "metadata", "renames",
     "quality", "editions", "sources", "storage",
 )
 BUCKET_LABELS = {
@@ -15,6 +15,7 @@ BUCKET_LABELS = {
     "missing": "Missing",
     "duplicates": "Duplicates",
     "metadata": "Metadata",
+    "renames": "Renames",
     "quality": "Quality",
     "editions": "Editions",
     "sources": "Sources",
@@ -74,10 +75,11 @@ class ReviewQueue:
     jobs keep their existing ownership and security boundaries.
     """
 
-    def __init__(self, database, mie, duplicates) -> None:
+    def __init__(self, database, mie, duplicates, rename_proposals=None) -> None:
         self.database = database
         self.mie = mie
         self.duplicates = duplicates
+        self.rename_proposals = rename_proposals
 
     @staticmethod
     def _bucket(finding: dict[str, Any]) -> str:
@@ -175,6 +177,56 @@ class ReviewQueue:
         item["drawer_url"] = f"/review/items/duplicate/{left}:{right}"
         return item
 
+    def _rename_items(self, status: str) -> list[dict[str, Any]]:
+        if self.rename_proposals is None:
+            return []
+        items = []
+        for row in self.rename_proposals.list_for_review(status):
+            proposal_status = row["status"]
+            review_status = (
+                "dismissed" if proposal_status == "dismissed"
+                else "resolved" if proposal_status in {"resolved", "applied", "stale"}
+                else "active"
+            )
+            blocked = proposal_status == "blocked"
+            evidence = {
+                "current filename": row["source_name"],
+                "proposed filename": row["destination_name"],
+                "source path": row["source_path"],
+                "destination path": row["destination_path"],
+                "snapshot state": proposal_status,
+                "validation": row["reason"],
+            }
+            item = {
+                "key": f"rename:{row['id']}", "source": "rename",
+                "source_label": "Rename Snapshot", "item_id": str(row["id"]),
+                "status": review_status, "proposal_status": proposal_status,
+                "severity": "warning" if blocked else "information",
+                "bucket": "renames", "bucket_label": "Renames",
+                "summary": (
+                    f"Rename blocked: {row['source_name']}" if blocked
+                    else f"Rename {row['source_name']}"
+                ),
+                "explanation": (
+                    row["reason"] if blocked else
+                    "This proposal was generated in the background and saved as a filesystem snapshot. Review does not stat the file again until you explicitly apply it."
+                ),
+                "recommendation": (
+                    "Resolve the collision or missing-file condition, then refresh rename proposals."
+                    if blocked else "Review the proposed filename, then apply it or dismiss the suggestion."
+                ),
+                "title_id": row["title_id"], "title_name": row["title_name"],
+                "title_kind": row["title_kind"], "root_id": row["root_id"],
+                "root_label": row["root_label"] or "", "affected": row["title_name"],
+                "href": f"/titles/{row['title_id']}", "review_label": "Open title",
+                "last_seen_at": row["updated_at"] or row["last_checked_at"] or "",
+                "rule_key": "persisted-rename-proposal", "evidence": evidence,
+                "evidence_rows": _evidence_rows(evidence), "files": [],
+            }
+            item["drawer_url"] = f"/review/items/rename/{row['id']}"
+            items.append(item)
+        return items
+
     def _metadata_items(self) -> list[dict[str, Any]]:
         with self.database.connect() as conn:
             rows = conn.execute(
@@ -236,6 +288,8 @@ class ReviewQueue:
                 # Members cannot open Duplicate Review, so omit duplicate cleanup work.
                 continue
             items.append(self._finding_item(finding))
+        if include_librarian:
+            items.extend(self._rename_items(status))
         if status == "active" and include_librarian:
             items.extend(self._metadata_items())
             items.extend(self._duplicate_item(item) for item in self.duplicates.candidates(status="active"))
@@ -327,4 +381,11 @@ class ReviewQueue:
         if source == "metadata" and include_librarian and item_id.isdigit():
             target = f"metadata:{int(item_id)}"
             return next((item for item in self._metadata_items() if item["key"] == target), None)
+        if source == "rename" and include_librarian and item_id.isdigit():
+            target = int(item_id)
+            for review_status in ("active", "dismissed", "resolved"):
+                for item in self._rename_items(review_status):
+                    if int(item["item_id"]) == target:
+                        return item
+            return None
         return None

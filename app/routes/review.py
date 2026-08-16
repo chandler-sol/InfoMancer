@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends
 from ..access import require_librarian
 from ..file_protection import FileProtectionService, MediaWriteBlocked
 from ..operation_history import OperationHistoryService
+from ..rename_proposals import RenameProposalError, RenameProposalService
 from ..review_queue import ReviewQueue
 from .context import RouteContext
 
@@ -53,9 +54,12 @@ def build_router(ctx: RouteContext):
     trash_retention_days = ctx.live("trash_retention_days")
     tv_match_job = ctx.live("tv_match_job")
     tv_match_lock = ctx.live("tv_match_lock")
-    review_queue = ReviewQueue(db, mie, duplicates)
     operation_history = OperationHistoryService(db)
     file_protection = FileProtectionService(app_settings)
+    rename_proposals = RenameProposalService(db)
+    rename_refresh_lock = threading.Lock()
+    rename_refresh_job = {"status": "idle", "detail": "", "active": 0, "blocked": 0}
+    review_queue = ReviewQueue(db, mie, duplicates, rename_proposals)
 
     def librarian_get(path: str, **kwargs):
         dependencies = list(kwargs.pop("dependencies", ()))
@@ -79,6 +83,7 @@ def build_router(ctx: RouteContext):
         response = templates.TemplateResponse(request, "review.html", {
             "queue": queue,
             "filters": queue["filters"],
+            "rename_refresh_job": dict(rename_refresh_job),
             "message": request.query_params.get("message", ""),
         })
         response.headers["Cache-Control"] = "no-store"
@@ -96,6 +101,79 @@ def build_router(ctx: RouteContext):
         )
         response.headers["Cache-Control"] = "no-store"
         return response
+
+    def run_rename_refresh(user_id: int | None) -> None:
+        with rename_refresh_lock:
+            rename_refresh_job.update({"status": "running", "detail": "Checking rename proposals"})
+        try:
+            result = rename_proposals.refresh_all()
+        except Exception as exc:
+            with rename_refresh_lock:
+                rename_refresh_job.update({"status": "error", "detail": str(exc)[:500]})
+            record_event(
+                "filesystem", "Rename proposal refresh failed.", level="error",
+                detail=str(exc), context={"operation": "rename-proposal-refresh"}, user_id=user_id,
+            )
+            return
+        with rename_refresh_lock:
+            rename_refresh_job.update({"status": "complete", "detail": "", **result})
+        record_event(
+            "filesystem",
+            f"Rename proposal refresh finished with {result['active']} ready and {result['blocked']} blocked proposals.",
+            context={"operation": "rename-proposal-refresh", **result}, user_id=user_id,
+        )
+
+    @librarian_post("/review/renames/refresh")
+    def refresh_rename_proposals(request: Request):
+        with rename_refresh_lock:
+            if rename_refresh_job.get("status") in {"starting", "running"}:
+                return redirect("/review?bucket=renames", "Rename proposals are already refreshing.")
+            rename_refresh_job.update({"status": "starting", "detail": "Starting rename snapshot refresh"})
+        threading.Thread(
+            target=run_rename_refresh, args=(request.state.user.id,), daemon=True,
+            name="infomancer-rename-proposals",
+        ).start()
+        return redirect(
+            "/review?bucket=renames",
+            "Rename proposal refresh started in the background. Review will keep using the last saved snapshot until it finishes.",
+        )
+
+    @librarian_post("/api/review/renames/{proposal_id}/apply")
+    def apply_rename_proposal(request: Request, proposal_id: int) -> dict:
+        try:
+            file_protection.require_media_write("apply media rename proposals")
+            proposal = rename_proposals.apply(proposal_id)
+        except (MediaWriteBlocked, RenameProposalError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        operation_history.record_file_rename(
+            proposal["file_id"], proposal["source_path"], proposal["destination_path"],
+            request.state.user.id,
+            label="Persisted rename proposal applied",
+        )
+        record_event(
+            "filesystem", f"Rename proposal applied: {proposal['destination_name']}.",
+            context={"proposal_id": proposal_id, "file_id": proposal["file_id"], "title_id": proposal["title_id"]},
+            user_id=request.state.user.id,
+        )
+        active = review_queue.view(include_librarian=True)
+        counts = dict(active["counts"]); counts["buckets"] = active["bucket_counts"]
+        return {"ok": True, "message": "Rename applied. Undo is available in Operation History.", "remove_key": f"rename:{proposal_id}", "counts": counts}
+
+    @librarian_post("/api/review/renames/{proposal_id}/dismiss")
+    def dismiss_rename_proposal(request: Request, proposal_id: int) -> dict:
+        if not rename_proposals.dismiss(proposal_id):
+            raise HTTPException(409, "That rename proposal is no longer active.")
+        active = review_queue.view(include_librarian=True)
+        counts = dict(active["counts"]); counts["buckets"] = active["bucket_counts"]
+        return {"ok": True, "message": "Rename proposal dismissed. It stays dismissed until the file or expected name changes.", "remove_key": f"rename:{proposal_id}", "counts": counts}
+
+    @librarian_post("/api/review/renames/{proposal_id}/restore")
+    def restore_rename_proposal(request: Request, proposal_id: int) -> dict:
+        if not rename_proposals.restore(proposal_id):
+            raise HTTPException(409, "That rename proposal is no longer dismissed.")
+        dismissed = review_queue.view(status="dismissed", include_librarian=True)
+        counts = dict(dismissed["counts"]); counts["buckets"] = dismissed["bucket_counts"]
+        return {"ok": True, "message": "Rename proposal restored. Refresh rename proposals to revalidate it.", "remove_key": f"rename:{proposal_id}", "counts": counts}
 
     @librarian_post("/review/analyze")
     def analyze_review_workspace(request: Request):

@@ -179,6 +179,34 @@ def _operation_history(conn: sqlite3.Connection) -> None:
     )
 
 
+def _rename_proposals(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS rename_proposals (
+             id INTEGER PRIMARY KEY,
+             file_id INTEGER NOT NULL UNIQUE REFERENCES files(id) ON DELETE CASCADE,
+             title_id INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
+             root_id INTEGER NOT NULL REFERENCES roots(id) ON DELETE CASCADE,
+             proposal_kind TEXT NOT NULL CHECK(proposal_kind IN ('movie','episode')),
+             source_path TEXT NOT NULL,
+             destination_path TEXT NOT NULL,
+             source_size INTEGER NOT NULL DEFAULT 0,
+             source_mtime_ns INTEGER NOT NULL DEFAULT 0,
+             status TEXT NOT NULL DEFAULT 'active'
+               CHECK(status IN ('active','blocked','dismissed','resolved','applied','stale')),
+             reason TEXT NOT NULL DEFAULT '',
+             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+             last_checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+           )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_rename_proposals_review ON rename_proposals(status,updated_at DESC,id DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_rename_proposals_title ON rename_proposals(title_id,status,id)"
+    )
+
+
 MIGRATIONS = (
     Migration(1, "title metadata columns", _titles),
     Migration(2, "source health columns", _roots),
@@ -193,6 +221,7 @@ MIGRATIONS = (
     Migration(11, "persistent aggregate login lockouts", _login_lockouts),
     Migration(12, "user saved library views", _user_saved_views),
     Migration(13, "operation history and safe undo", _operation_history),
+    Migration(14, "persisted global rename proposals", _rename_proposals),
 )
 
 

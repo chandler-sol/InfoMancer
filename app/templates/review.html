@@ -14,6 +14,10 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="button primary" data-workspace-command="Refresh review analysis">Refresh analysis</button>
       </form>
+      <form method="post" action="/review/renames/refresh">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button" {% if rename_refresh_job.status in ['starting','running'] %}disabled{% endif %}>{{ 'Refreshing renames…' if rename_refresh_job.status in ['starting','running'] else 'Refresh rename proposals' }}</button>
+      </form>
       {% endif %}
       <a class="button" href="/library-health">Health details</a>
     </div>
@@ -31,6 +35,7 @@
 
   <div class="review-meta-line">
     {% if queue.last_analyzed_at %}Media Intelligence last analyzed {{ local_time(queue.last_analyzed_at) }}.{% else %}Media Intelligence has not been analyzed yet.{% endif %}
+    {% if rename_refresh_job.status == 'complete' %}<span>Rename snapshot: {{ rename_refresh_job.active or 0 }} ready · {{ rename_refresh_job.blocked or 0 }} blocked</span>{% elif rename_refresh_job.status == 'error' %}<span>Rename refresh needs attention</span>{% endif %}
     <span>{{ queue.status_counts.active }} active · {{ queue.status_counts.dismissed }} dismissed · {{ queue.status_counts.resolved }} resolved</span>
   </div>
 

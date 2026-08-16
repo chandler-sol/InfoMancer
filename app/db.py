@@ -430,6 +430,24 @@ CREATE TABLE IF NOT EXISTS operation_history (
     undone_by INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS rename_proposals (
+    id INTEGER PRIMARY KEY,
+    file_id INTEGER NOT NULL UNIQUE REFERENCES files(id) ON DELETE CASCADE,
+    title_id INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
+    root_id INTEGER NOT NULL REFERENCES roots(id) ON DELETE CASCADE,
+    proposal_kind TEXT NOT NULL CHECK(proposal_kind IN ('movie','episode')),
+    source_path TEXT NOT NULL,
+    destination_path TEXT NOT NULL,
+    source_size INTEGER NOT NULL DEFAULT 0,
+    source_mtime_ns INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK(status IN ('active','blocked','dismissed','resolved','applied','stale')),
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS mie_findings (
     id INTEGER PRIMARY KEY,
     fingerprint TEXT NOT NULL UNIQUE,
@@ -625,6 +643,10 @@ CREATE INDEX IF NOT EXISTS idx_operation_history_recent
     ON operation_history(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_operation_history_status
     ON operation_history(status, operation_type, id DESC);
+CREATE INDEX IF NOT EXISTS idx_rename_proposals_review
+    ON rename_proposals(status, updated_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_rename_proposals_title
+    ON rename_proposals(title_id, status, id);
 CREATE INDEX IF NOT EXISTS idx_user_tags_name
     ON user_tags(user_id, name);
 CREATE INDEX IF NOT EXISTS idx_title_tags_title

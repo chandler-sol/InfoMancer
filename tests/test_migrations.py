@@ -38,6 +38,9 @@ class MigrationTests(unittest.TestCase):
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=11").fetchone())
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=12").fetchone())
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=13").fetchone())
+                self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=14").fetchone())
+                rename_columns = {row["name"] for row in upgraded.execute("PRAGMA table_info(rename_proposals)")}
+                self.assertTrue({"file_id", "source_path", "destination_path", "source_size", "source_mtime_ns", "status"}.issubset(rename_columns))
                 operation_columns = {
                     row["name"] for row in upgraded.execute("PRAGMA table_info(operation_history)")
                 }

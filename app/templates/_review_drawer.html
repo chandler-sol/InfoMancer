@@ -60,6 +60,24 @@
   </form>
   {% endif %}
 
+  {% if current_user.is_librarian and item.source == 'rename' %}
+  <section class="review-drawer-section review-rename-actions">
+    <h3>Rename decision</h3>
+    {% if item.status == 'active' and item.proposal_status == 'active' %}
+    <p>Apply revalidates the saved source path, file size, modification time, source boundary, and destination collision before touching the file.</p>
+    <div class="button-row">
+      <form method="post" action="/api/review/renames/{{ item.item_id }}/apply" data-workspace-ajax data-workspace-remove-key="{{ item.key }}" data-workspace-confirm="Apply this reviewed rename? InfoMancer will revalidate the file snapshot and refuse the operation if anything changed."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button primary">Apply rename</button></form>
+      <form method="post" action="/api/review/renames/{{ item.item_id }}/dismiss" data-workspace-ajax data-workspace-remove-key="{{ item.key }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button">Dismiss suggestion</button></form>
+    </div>
+    {% elif item.status == 'active' and item.proposal_status == 'blocked' %}
+    <p>This snapshot is blocked. Resolve the condition shown above, then refresh rename proposals before applying.</p>
+    <form method="post" action="/api/review/renames/{{ item.item_id }}/dismiss" data-workspace-ajax data-workspace-remove-key="{{ item.key }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button">Dismiss suggestion</button></form>
+    {% elif item.status == 'dismissed' %}
+    <form method="post" action="/api/review/renames/{{ item.item_id }}/restore" data-workspace-ajax data-workspace-remove-key="{{ item.key }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button">Restore for revalidation</button></form>
+    {% endif %}
+  </section>
+  {% endif %}
+
   {% if current_user.is_librarian and item.source == 'duplicate' %}
   <section class="review-drawer-section review-duplicate-decisions">
     <h3>Review decision</h3>
