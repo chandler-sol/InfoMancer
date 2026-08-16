@@ -256,18 +256,35 @@ class AppSettings:
             validated.update(
                 self.validate_season_display(text_values["default_season_display"])
             )
-        safety_imported = bool(
-            {"lockdown_mode", "read_only_mode"}.intersection(text_values)
-        )
+        safety_keys = {"lockdown_mode", "read_only_mode"}.intersection(text_values)
+        safety_imported = bool(safety_keys)
         if safety_imported:
             current = self.values()
-            read_only = text_values.get("read_only_mode", current["read_only_mode"]).strip()
-            lockdown = text_values.get("lockdown_mode", current["lockdown_mode"]).strip()
-            if read_only not in {"0", "1"} or lockdown not in {"0", "1"}:
-                raise AppSettingError(
-                    "Imported file-protection flags must be 0 or 1. No settings were changed."
+            supplied_read_only = text_values.get("read_only_mode")
+            supplied_lockdown = text_values.get("lockdown_mode")
+            for value in (supplied_read_only, supplied_lockdown):
+                if value is not None and value.strip() not in {"0", "1"}:
+                    raise AppSettingError(
+                        "Imported file-protection flags must be 0 or 1. No settings were changed."
+                    )
+            if supplied_read_only is not None and supplied_lockdown is not None:
+                read_only = supplied_read_only.strip()
+                lockdown = supplied_lockdown.strip()
+                if read_only == "1" and lockdown == "1":
+                    raise AppSettingError(
+                        "Read-Only Mode and Lockdown Mode cannot both be enabled. No settings were changed."
+                    )
+                mode = "readonly" if read_only == "1" else "lockdown" if lockdown == "1" else "standard"
+            elif supplied_read_only is not None:
+                mode = (
+                    "readonly" if supplied_read_only.strip() == "1"
+                    else "lockdown" if current["lockdown_mode"] == "1" else "standard"
                 )
-            mode = "readonly" if read_only == "1" else "lockdown" if lockdown == "1" else "standard"
+            else:
+                mode = (
+                    "lockdown" if supplied_lockdown.strip() == "1"
+                    else "readonly" if current["read_only_mode"] == "1" else "standard"
+                )
             validated.update(self.validate_safety(mode))
         hashing_keys = {
             "hash_mode", "hash_immediate_limit", "hash_schedule_frequency",
@@ -285,8 +302,8 @@ class AppSettings:
             )))
         result = {key: validated[key] for key in text_values}
         if safety_imported:
-            # A partial import must still update both flags so Read-Only and
-            # Lockdown can never be left active at the same time.
+            # A partial import still returns both flags so the persisted state
+            # cannot represent Read-Only and Lockdown simultaneously.
             result["read_only_mode"] = validated["read_only_mode"]
             result["lockdown_mode"] = validated["lockdown_mode"]
         return result
