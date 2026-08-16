@@ -41,7 +41,9 @@
       <div><small>Container</small><strong>{{ primary_file.container or primary_file.extension or 'Unknown' }}</strong></div>
       <div><small>Runtime</small><strong>{{ runtime_display or primary_file.runtime_display or 'Unknown' }}</strong></div>
     </div>{% else %}<p class="workspace-inspector-empty-state">No indexed files are currently attached to this title.</p>{% endif %}
-    {% if files %}<div class="workspace-inspector-files">
+    {% if files and title.kind == 'tv' %}
+      <div class="workspace-inspector-seasons" data-inspector-tv-seasons data-title-id="{{ title.id }}" aria-live="polite"><p class="workspace-inspector-empty-state">Loading seasons…</p></div>
+    {% elif files %}<div class="workspace-inspector-files">
       {% for file in files[:5] %}<article>
         <div><strong>{{ file.filename }}</strong><small>{{ file.size_display }}{% if file.resolution_display %} · {{ file.resolution_display }}{% endif %}{% if file.dynamic_range %} · {{ file.dynamic_range }}{% endif %}</small></div>
         {% if file.edition_name or file.version_name or file.version_preferred %}<span class="workspace-file-version">{% if file.version_preferred %}Preferred{% endif %}{% if file.edition_name %} · {{ file.edition_name }}{% endif %}{% if file.version_name %} · {{ file.version_name }}{% endif %}</span>{% endif %}
