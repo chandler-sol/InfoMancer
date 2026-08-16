@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from ..access import require_librarian
+from ..file_protection import FileProtectionService, MediaWriteBlocked
 from ..operation_history import OperationHistoryService
 from ..review_queue import ReviewQueue
 from .context import RouteContext
@@ -54,6 +55,7 @@ def build_router(ctx: RouteContext):
     tv_match_lock = ctx.live("tv_match_lock")
     review_queue = ReviewQueue(db, mie, duplicates)
     operation_history = OperationHistoryService(db)
+    file_protection = FileProtectionService(app_settings)
 
     def librarian_get(path: str, **kwargs):
         dependencies = list(kwargs.pop("dependencies", ()))
@@ -774,13 +776,17 @@ def build_router(ctx: RouteContext):
         return templates.TemplateResponse(request, "duplicate_trash_preview.html", {
             "preview": preview,
             "lockdown_mode": app_settings.get("lockdown_mode") == "1",
+            "read_only_mode": app_settings.get("read_only_mode") == "1",
             "message": request.query_params.get("message", ""),
         })
 
     @librarian_post("/duplicates/{file_id}/trash")
     def move_duplicate_to_trash(request: Request, file_id: int):
         try:
+            file_protection.require_media_write("move media files into managed Trash")
             trash_id = duplicate_trash.move(file_id, trash_retention_days(), request.state.user.id)
+        except MediaWriteBlocked as exc:
+            return redirect(f"/duplicates/{file_id}/trash-preview", str(exc))
         except (DuplicateTrashError, OSError, sqlite3.Error) as exc:
             return redirect(
                 f"/duplicates/{file_id}/trash-preview",
@@ -826,6 +832,7 @@ def build_router(ctx: RouteContext):
             "items": duplicate_trash.items(),
             "retention": app_settings.get("trash_retention_days"),
             "lockdown_mode": app_settings.get("lockdown_mode") == "1",
+            "read_only_mode": app_settings.get("read_only_mode") == "1",
             "message": request.query_params.get("message", ""),
         })
 
@@ -855,7 +862,10 @@ def build_router(ctx: RouteContext):
     @librarian_post("/duplicates/trash/{trash_id}/restore")
     def restore_duplicate_trash(request: Request, trash_id: int):
         try:
+            file_protection.require_media_write("restore media files from managed Trash")
             path = duplicate_trash.restore(trash_id)
+        except MediaWriteBlocked as exc:
+            return redirect("/duplicates/trash", str(exc))
         except (DuplicateTrashError, OSError, sqlite3.Error) as exc:
             return redirect(
                 "/duplicates/trash",

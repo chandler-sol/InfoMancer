@@ -166,6 +166,7 @@ def shared_template_context(request: Request) -> dict:
         "app_name": "InfoMancer",
         "default_library_view": preferences["default_library_view"],
         "default_cover_size": int(preferences["default_cover_size"]),
+        "file_protection_mode": app_settings.file_protection_mode(),
         "search_provider_name": preferences["search_provider_name"],
         "show_onboarding_tour": show_tour,
         "setup_choice_pending": setup_choice_pending,

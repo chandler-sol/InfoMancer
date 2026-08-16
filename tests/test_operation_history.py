@@ -44,6 +44,24 @@ class OperationHistoryTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
+    def test_malformed_undo_payload_fails_closed_before_operation_is_claimed(self):
+        operation_id = self.history.record(
+            "rename_file", "Bad payload", actor_user_id=self.user_id,
+            undo_kind="rename_file", undo_payload={"file_id": self.file_id},
+        )
+        with self.database.connect() as conn:
+            conn.execute(
+                "UPDATE operation_history SET undo_payload='not-json' WHERE id=?",
+                (operation_id,),
+            )
+        with self.assertRaisesRegex(OperationHistoryError, "recorded operation data is invalid"):
+            self.history.undo(operation_id, self.user_id)
+        with self.database.connect() as conn:
+            status = conn.execute(
+                "SELECT status FROM operation_history WHERE id=?", (operation_id,)
+            ).fetchone()["status"]
+        self.assertEqual(status, "completed")
+
     def test_synthetic_auth_disabled_actor_is_recorded_as_system(self):
         operation_id = self.history.record(
             "rename_file", "Synthetic actor test", actor_user_id=999999,

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from ..access import require_librarian
+from ..file_protection import FileProtectionService, MediaWriteBlocked
 from ..operation_history import OperationHistoryService
 from .context import RouteContext
 
@@ -33,6 +34,7 @@ def build_router(ctx: RouteContext):
     media_info_lock = ctx.live("media_info_lock")
     merged_episode_name = ctx.live("merged_episode_name")
     operation_history = OperationHistoryService(db)
+    file_protection = FileProtectionService(app_settings)
     plex_episode_filename = ctx.live("plex_episode_filename")
     plex_movie_filename = ctx.live("plex_movie_filename")
     plex_movie_ids = ctx.live("plex_movie_ids")
@@ -902,6 +904,10 @@ def build_router(ctx: RouteContext):
 
     @librarian_post("/titles/{title_id}/rename-folder")
     def rename_folder(request: Request, title_id: int, confirm: str = Form("")):
+        try:
+            file_protection.require_media_write("rename show folders")
+        except MediaWriteBlocked as exc:
+            return redirect(f"/titles/{title_id}", str(exc))
         if confirm != "RENAME":
             return redirect(f"/titles/{title_id}", "Rename cancelled: confirmation did not match")
         with db.connect() as conn:
@@ -964,6 +970,10 @@ def build_router(ctx: RouteContext):
     def bulk_rename_apply(
         request: Request, title_id: int, selected_file_ids: list[int] = Form(default=[]),
     ):
+        try:
+            file_protection.require_media_write("rename episode files")
+        except MediaWriteBlocked as exc:
+            return redirect(f"/titles/{title_id}", str(exc))
         selected = set(selected_file_ids)
         if not selected:
             return redirect(
@@ -1031,6 +1041,10 @@ def build_router(ctx: RouteContext):
 
     @librarian_post("/titles/{title_id}/restore-filenames")
     def restore_filenames_apply(request: Request, title_id: int):
+        try:
+            file_protection.require_media_write("restore original media filenames")
+        except MediaWriteBlocked as exc:
+            return redirect(f"/titles/{title_id}", str(exc))
         restored = 0
         skipped = 0
         restored_operations = []
@@ -1103,6 +1117,10 @@ def build_router(ctx: RouteContext):
 
     @librarian_post("/files/{file_id}/rename")
     def rename_file(request: Request, file_id: int):
+        try:
+            file_protection.require_media_write("rename episode files")
+        except MediaWriteBlocked as exc:
+            return redirect("/library", str(exc))
         renamed_operation = None
         with db.connect() as conn:
             row = conn.execute(
@@ -1174,6 +1192,10 @@ def build_router(ctx: RouteContext):
 
     @librarian_post("/files/{file_id}/rename-movie")
     def rename_movie(request: Request, file_id: int):
+        try:
+            file_protection.require_media_write("rename movie files")
+        except MediaWriteBlocked as exc:
+            return redirect("/library", str(exc))
         renamed_operation = None
         with db.connect() as conn:
             row = conn.execute(

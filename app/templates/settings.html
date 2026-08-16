@@ -102,12 +102,14 @@
     <div class="actions hashing-command-bar"><button class="button primary" type="submit" form="hashing-settings-form">Save fingerprint settings</button><form method="post" action="/hashes/run"><button class="button">Run now</button></form><form method="post" action="/hashes/pause"><button class="button">Pause</button></form><form method="post" action="/hashes/resume"><button class="button">Resume</button></form><form method="post" action="/hashes/cancel"><button class="button danger">Cancel</button></form></div>
   </section>
   <section class="panel settings-card system-safety-card full-width" id="safety">
-    <div class="settings-card-head"><div><p class="eyebrow">SAFETY</p><h2>File protection mode</h2></div><span class="settings-state {{ 'warn' if preferences.lockdown_mode == '1' else 'good' }}">{{ 'Lockdown' if preferences.lockdown_mode == '1' else 'Standard' }}</span></div>
-    <p class="muted">Standard Mode uses clear confirmation dialogs for destructive actions. Lockdown Mode adds typed confirmation to irreversible file decisions and pauses automatic managed-trash deletion.</p>
-    <form class="settings-form safety-mode-form" method="post" action="/settings/safety">
-      <label class="safety-mode-choice"><input type="radio" name="lockdown_mode" value="0" {% if preferences.lockdown_mode != '1' %}checked{% endif %}><span><strong>Standard Mode</strong><small>Confirm destructive actions with a normal warning dialog.</small></span></label>
-      <label class="safety-mode-choice"><input type="radio" name="lockdown_mode" value="1" {% if preferences.lockdown_mode == '1' %}checked{% endif %}><span><strong>Lockdown Mode</strong><small>Require additional typed confirmation for irreversible file deletion. Automatic managed-trash purging is paused.</small></span></label>
-      <button class="button primary">Save safety mode</button>
+    {% set protection_mode = 'readonly' if preferences.read_only_mode == '1' else 'lockdown' if preferences.lockdown_mode == '1' else 'standard' %}
+    <div class="settings-card-head"><div><p class="eyebrow">SAFETY</p><h2>File protection mode</h2></div><span class="settings-state {{ 'active' if protection_mode == 'readonly' else 'warn' if protection_mode == 'lockdown' else 'good' }}">{{ 'Read-Only' if protection_mode == 'readonly' else 'Lockdown' if protection_mode == 'lockdown' else 'Standard' }}</span></div>
+    <p class="muted">Choose how much authority InfoMancer has over your actual media files. Catalog, metadata, analysis, matching, and organization remain available in every mode.</p>
+    <form class="settings-form safety-mode-form safety-mode-three" method="post" action="/settings/safety">
+      <label class="safety-mode-choice"><input type="radio" name="protection_mode" value="readonly" {% if protection_mode == 'readonly' %}checked{% endif %}><span><strong>Read-Only Mode</strong><small>Never rename, move, restore, or permanently delete media files. Scanning, inspection, matching, MIE, tags, collections, and backups keep working.</small></span></label>
+      <label class="safety-mode-choice"><input type="radio" name="protection_mode" value="standard" {% if protection_mode == 'standard' %}checked{% endif %}><span><strong>Standard Mode</strong><small>Allow reviewed filesystem changes with normal confirmation and managed-trash retention.</small></span></label>
+      <label class="safety-mode-choice"><input type="radio" name="protection_mode" value="lockdown" {% if protection_mode == 'lockdown' %}checked{% endif %}><span><strong>Lockdown Mode</strong><small>Allow reviewed reversible file changes, but add stronger confirmation for irreversible actions and pause automatic permanent managed-trash deletion.</small></span></label>
+      <button class="button primary">Save file protection mode</button>
     </form>
   </section>
   <section class="panel settings-card full-width backup-protection-card" id="backups">

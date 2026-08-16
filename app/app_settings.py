@@ -23,6 +23,7 @@ class AppSettings:
         "log_level",
         "trash_retention_days",
         "lockdown_mode",
+        "read_only_mode",
         "hash_mode",
         "hash_immediate_limit",
         "hash_schedule_frequency",
@@ -47,6 +48,7 @@ class AppSettings:
             "log_level": "info",
             "trash_retention_days": "30",
             "lockdown_mode": "0",
+            "read_only_mode": "0",
             "hash_mode": "automatic",
             "hash_immediate_limit": "200",
             "hash_schedule_frequency": "weekly",
@@ -137,11 +139,25 @@ class AppSettings:
             raise AppSettingError("Choose Collapsed or Expanded for the default TV season display.")
         return {"default_season_display": display}
 
-    def validate_safety(self, lockdown_mode: str) -> dict[str, str]:
-        mode = lockdown_mode.strip().casefold()
-        if mode not in {"0", "1", "standard", "lockdown"}:
-            raise AppSettingError("Choose Standard Mode or Lockdown Mode.")
-        return {"lockdown_mode": "1" if mode in {"1", "lockdown"} else "0"}
+    def file_protection_mode(self) -> str:
+        if self.get("read_only_mode") == "1":
+            return "readonly"
+        if self.get("lockdown_mode") == "1":
+            return "lockdown"
+        return "standard"
+
+    def validate_safety(self, protection_mode: str) -> dict[str, str]:
+        mode = protection_mode.strip().casefold().replace("-", "_")
+        aliases = {"0": "standard", "1": "lockdown", "read_only": "readonly"}
+        mode = aliases.get(mode, mode)
+        if mode not in {"readonly", "standard", "lockdown"}:
+            raise AppSettingError(
+                "Choose Read-Only Mode, Standard Mode, or Lockdown Mode."
+            )
+        return {
+            "read_only_mode": "1" if mode == "readonly" else "0",
+            "lockdown_mode": "1" if mode == "lockdown" else "0",
+        }
 
     def validate_hashing(
         self, mode: str, immediate_limit: str, frequency: str,
@@ -240,8 +256,16 @@ class AppSettings:
             validated.update(
                 self.validate_season_display(text_values["default_season_display"])
             )
-        if "lockdown_mode" in text_values:
-            validated.update(self.validate_safety(text_values["lockdown_mode"]))
+        if {"lockdown_mode", "read_only_mode"}.intersection(text_values):
+            current = self.values()
+            read_only = text_values.get("read_only_mode", current["read_only_mode"]).strip()
+            lockdown = text_values.get("lockdown_mode", current["lockdown_mode"]).strip()
+            if read_only not in {"0", "1"} or lockdown not in {"0", "1"}:
+                raise AppSettingError(
+                    "Imported file-protection flags must be 0 or 1. No settings were changed."
+                )
+            mode = "readonly" if read_only == "1" else "lockdown" if lockdown == "1" else "standard"
+            validated.update(self.validate_safety(mode))
         hashing_keys = {
             "hash_mode", "hash_immediate_limit", "hash_schedule_frequency",
             "hash_schedule_day", "hash_schedule_time", "hash_io_intensity",

@@ -184,18 +184,25 @@ def build_router(ctx: RouteContext):
         )
 
     @librarian_post("/settings/safety")
-    def update_safety_mode(request: Request, lockdown_mode: str = Form("0")):
+    def update_safety_mode(
+        request: Request, protection_mode: str = Form("standard"),
+    ):
         try:
-            values = app_settings.validate_safety(lockdown_mode)
+            values = app_settings.validate_safety(protection_mode)
             changed = app_settings.update(values, request.state.user.id)
         except AppSettingError as exc:
             return render_settings(request, "system", str(exc), status_code=400)
-        mode = "Lockdown Mode" if values["lockdown_mode"] == "1" else "Standard Mode"
+        mode = app_settings.file_protection_mode()
+        label = {
+            "readonly": "Read-Only Mode", "standard": "Standard Mode",
+            "lockdown": "Lockdown Mode",
+        }[mode]
         message = (
-            f"Safety mode changed to {mode}." if changed else f"{mode} is already active."
+            f"File protection changed to {label}."
+            if changed else f"{label} is already active."
         )
         record_event(
-            "settings", message, context={"lockdown_mode": values["lockdown_mode"]},
+            "settings", message, context={"file_protection_mode": mode},
             user_id=request.state.user.id,
         )
         return redirect("/settings/system", message)

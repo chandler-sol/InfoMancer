@@ -1215,3 +1215,12 @@ body.workspace-inspector-open .workspace-inspector {
   .operation-history-item {align-items:stretch;flex-direction:column}
   .operation-history-actions .button {width:100%}
 }
+
+
+/* Global media read-only mode */
+.read-only-mode-banner {align-items:center;background:rgba(74,160,255,.08);border:1px solid rgba(74,160,255,.38);border-radius:8px;color:var(--text);display:flex;gap:10px;margin:0 0 12px;padding:9px 12px}
+.read-only-mode-banner strong {color:#78b9ff;font-size:12px;white-space:nowrap}
+.read-only-mode-banner span {color:var(--muted);font-size:11px;line-height:1.35}
+.read-only-mode-banner a {color:#9bceff;font-size:11px;margin-left:auto;white-space:nowrap}
+.safety-mode-three {grid-template-columns:repeat(3,minmax(0,1fr))!important}
+@media (max-width:900px) {.safety-mode-three {grid-template-columns:1fr!important}.read-only-mode-banner {align-items:flex-start;flex-wrap:wrap}.read-only-mode-banner a {margin-left:0}}

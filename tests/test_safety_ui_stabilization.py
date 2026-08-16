@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parent.parent
 class SafetyUiStabilizationContractTests(unittest.TestCase):
     def test_lockdown_guards_automatic_permanent_trash_cleanup(self):
         background = (ROOT / "app" / "background.py").read_text(encoding="utf-8")
-        self.assertIn('self.app_settings.get("lockdown_mode") == "1"', background)
+        self.assertIn('protection_mode in {"readonly", "lockdown"}', background)
         self.assertIn("preventing permanent managed-trash deletion", background)
 
     def test_sources_use_standard_confirmation_and_one_edit_surface(self):
@@ -42,12 +42,14 @@ class SafetyUiStabilizationContractTests(unittest.TestCase):
         trash = (ROOT / "app" / "templates" / "duplicate_trash.html").read_text(encoding="utf-8")
         preview = (ROOT / "app" / "templates" / "duplicate_trash_preview.html").read_text(encoding="utf-8")
         self.assertIn('"lockdown_mode": app_settings.get("lockdown_mode") == "1"', routes)
+        self.assertIn('"read_only_mode": app_settings.get("read_only_mode") == "1"', routes)
         self.assertIn("Automatic permanent removal is paused", trash)
         self.assertIn("Paused by Lockdown Mode", preview)
 
-    def test_system_settings_expose_standard_and_lockdown_modes(self):
+    def test_system_settings_expose_read_only_standard_and_lockdown_modes(self):
         template = (ROOT / "app" / "templates" / "settings.html").read_text(encoding="utf-8")
         routes = (ROOT / "app" / "routes" / "settings.py").read_text(encoding="utf-8")
+        self.assertIn("Read-Only Mode", template)
         self.assertIn("Standard Mode", template)
         self.assertIn("Lockdown Mode", template)
         self.assertIn('/settings/safety', template)

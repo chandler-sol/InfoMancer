@@ -5,7 +5,8 @@
   <div>
     <p class="eyebrow">DUPLICATE REVIEW</p>
     <h1>Managed Trash</h1>
-    <p>Files moved here are outside the active catalog but remain on their original source until restored or permanently removed.{% if lockdown_mode %} Lockdown Mode currently prevents automatic permanent removal.{% endif %}</p>
+    <p>Files moved here are outside the active catalog but remain on their original source until restored or permanently removed.{% if read_only_mode %}<div class="form-error"><strong>Read-Only Mode</strong><br>Restore and other media-file changes are blocked. Existing managed-trash files are preserved and automatic permanent removal is paused.</div>{% endif %}
+{% if lockdown_mode %} Lockdown Mode currently prevents automatic permanent removal.{% endif %}</p>
   </div>
   <a class="button" href="/duplicates">Back to Duplicate Review</a>
 </section>

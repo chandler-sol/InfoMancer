@@ -201,13 +201,22 @@ class OperationHistoryService:
                 raise OperationHistoryError("That operation has already been undone.")
             if row["status"] != "completed" or not row["undo_kind"]:
                 raise OperationHistoryError("That operation does not have a safe automatic undo.")
+            try:
+                payload = json.loads(row["undo_payload"] or "{}")
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise OperationHistoryError(
+                    "Undo stopped because the recorded operation data is invalid. Nothing was changed."
+                ) from exc
+            if not isinstance(payload, dict):
+                raise OperationHistoryError(
+                    "Undo stopped because the recorded operation data is invalid. Nothing was changed."
+                )
             claimed = conn.execute(
                 "UPDATE operation_history SET status='undoing',undo_error='' WHERE id=? AND status='completed'",
                 (operation_id,),
             )
             if not claimed.rowcount:
                 raise OperationHistoryError("That operation is already being changed. Refresh and try again.")
-            payload = json.loads(row["undo_payload"] or "{}")
             undo_kind = row["undo_kind"]
         try:
             if undo_kind == "rename_file":

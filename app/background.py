@@ -233,12 +233,14 @@ class BackgroundCoordinator:
 
     def maybe_start_trash_cleanup(self) -> None:
         """Check for expired managed-trash items at most once per day."""
-        if self.app_settings.get("lockdown_mode") == "1":
+        protection_mode = self.app_settings.file_protection_mode()
+        if protection_mode in {"readonly", "lockdown"}:
+            label = "Read-Only Mode" if protection_mode == "readonly" else "Lockdown Mode"
             with self.trash_cleanup_lock:
                 self.trash_cleanup_job.clear()
                 self.trash_cleanup_job.update({
                     "status": "paused",
-                    "detail": "Lockdown Mode is preventing permanent managed-trash deletion",
+                    "detail": f"{label} is preventing permanent managed-trash deletion",
                 })
             return
         now = time.time()

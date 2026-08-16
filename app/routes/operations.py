@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from ..access import require_librarian
+from ..file_protection import FileProtectionService, MediaWriteBlocked
 from ..operation_history import OperationHistoryError, OperationHistoryService
 from .context import RouteContext
 
@@ -14,9 +15,11 @@ def build_router(ctx: RouteContext):
     Request = ctx.get("Request")
     _other_background_work_running = ctx.live("_other_background_work_running")
     app_settings = ctx.live("app_settings")
+    app_settings = ctx.live("app_settings")
     db = ctx.live("db")
     duplicate_trash = ctx.live("duplicate_trash")
     operation_history = OperationHistoryService(db)
+    file_protection = FileProtectionService(app_settings)
     duplicate_verify_job = ctx.live("duplicate_verify_job")
     duplicate_verify_lock = ctx.live("duplicate_verify_lock")
     imdb_genre_job = ctx.live("imdb_genre_job")
@@ -77,9 +80,12 @@ def build_router(ctx: RouteContext):
     @librarian_post("/operations/{operation_id}/undo")
     def undo_operation(request: Request, operation_id: int):
         try:
+            file_protection.require_media_write("undo filesystem operations")
             message = operation_history.undo(
                 operation_id, request.state.user.id, duplicate_trash=duplicate_trash,
             )
+        except MediaWriteBlocked as exc:
+            return redirect("/operations", str(exc))
         except OperationHistoryError as exc:
             record_event(
                 "filesystem", "Operation undo was refused safely.", level="warning",

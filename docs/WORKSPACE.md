@@ -57,6 +57,21 @@ season groups. Collapsed remains the default, while Librarians can switch the st
 state under General Settings; per-page Expand all and Collapse all controls remain
 available.
 
+## Global File Protection Modes
+
+InfoMancer exposes three mutually exclusive installation-wide media safety modes.
+**Read-Only Mode** blocks every InfoMancer operation that renames, moves, restores,
+or permanently deletes user media while leaving scans, matching, inspection, MIE,
+metadata, tags, collections, and application/database maintenance available.
+**Standard Mode** permits reviewed filesystem changes. **Lockdown Mode** permits
+reviewed reversible changes while pausing automatic permanent managed-trash deletion
+and reserving stronger confirmation for irreversible actions.
+
+The media-write boundary is enforced server-side through one FileProtectionService and
+not only by hidden or disabled controls. Current rename paths, managed-trash move and
+restore, W6 undo, and scheduled permanent trash cleanup all consult that boundary.
+A persistent Librarian banner makes Read-Only state visible throughout the workspace.
+
 ## W6 Operation History + Safe Undo
 
 W6 adds a durable Librarian-only operation ledger for filesystem changes. Episode,
