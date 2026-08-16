@@ -30,6 +30,7 @@ class InspectorTvSeasonTests(unittest.TestCase):
         database = Database(settings.database)
         database.initialize()
         self.original = (main.db, main.settings, main.auth_service, main.app_settings, main.engagement)
+        self.addCleanup(self._restore_globals)
         main.db, main.settings = database, settings
         main.auth_service = AuthService(database, settings)
         main.app_settings = AppSettings(database, settings.search_url_template)
@@ -54,17 +55,23 @@ class InspectorTvSeasonTests(unittest.TestCase):
                     """INSERT INTO files(
                          title_id,path,filename,extension,size_bytes,runtime_seconds,
                          width,height,video_codec,audio_codec,audio_channels,container,
-                         dynamic_range,season,episode_start,episode_name,seen_scan
-                       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                         dynamic_range,season,episode_start,seen_scan
+                       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         self.title_id,
                         str(Path(self.temporary.name) / "tv" / filename),
                         filename, ".mkv", 1_500_000_000, 1320,
                         1920, 1080, "h264", "dts", 6, "matroska", "SDR",
-                        season, episode, name, "test",
+                        season, episode, "test",
                     ),
                 )
+                conn.execute(
+                    """INSERT INTO expected_episodes(title_id,season,episode,name)
+                       VALUES (?,?,?,?)""",
+                    (self.title_id, season, episode, name),
+                )
         self.client = TestClient(main.app, follow_redirects=False)
+        self.addCleanup(self.client.close)
         login = self.client.get("/login")
         token = re.search(r'name="preauth_token" value="([^"]+)', login.text).group(1)
         signed_in = self.client.post("/login", data={
@@ -72,9 +79,10 @@ class InspectorTvSeasonTests(unittest.TestCase):
         })
         self.assertEqual(signed_in.status_code, 303)
 
-    def tearDown(self):
-        self.client.close()
+    def _restore_globals(self):
         main.db, main.settings, main.auth_service, main.app_settings, main.engagement = self.original
+
+    def tearDown(self):
         self.temporary.cleanup()
 
     def test_tv_inspector_uses_season_shell_instead_of_eager_file_rows(self):
