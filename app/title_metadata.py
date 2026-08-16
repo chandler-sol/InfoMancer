@@ -65,29 +65,37 @@ class TitleMetadataService:
         movie = None
         movie_id = title["tvdb_movie_id"]
         if not movie_id and (title["tmdb_id"] or title["imdb_id"]):
-            candidates = self.tvdb.search_movies(
-                title["metadata_title"] or title["title"],
-                title["metadata_year"] or title["year"],
-            )
-            for candidate in candidates:
-                confidence = self.match_confidence(
-                    title["metadata_title"] or title["title"],
-                    title["metadata_year"] or title["year"], candidate,
-                )
-                if not (confidence["exact_title"] and confidence["exact_year"]):
-                    continue
-                candidate_id = candidate.get("tvdb_id") or candidate.get("id")
-                if not candidate_id:
-                    continue
-                candidate_movie = self.tvdb.movie(candidate_id)
-                tmdb_id, imdb_id = self.plex_movie_ids(candidate_movie)
-                same_external_id = (
-                    bool(title["tmdb_id"] and tmdb_id == str(title["tmdb_id"]))
-                    or bool(title["imdb_id"] and imdb_id == title["imdb_id"])
-                )
-                if same_external_id:
-                    movie_id = candidate_id
-                    movie = candidate_movie
+            query = title["metadata_title"] or title["title"]
+            year = title["metadata_year"] or title["year"]
+            searches = [(query, year)]
+            if year:
+                searches.append((query, None))
+            seen_candidate_ids: set[int] = set()
+            for search_query, search_year in searches:
+                candidates = self.tvdb.search_movies(search_query, search_year)
+                for candidate in candidates[:20]:
+                    candidate_id = candidate.get("tvdb_id") or candidate.get("id")
+                    try:
+                        candidate_id = int(candidate_id)
+                    except (TypeError, ValueError):
+                        continue
+                    if candidate_id in seen_candidate_ids:
+                        continue
+                    seen_candidate_ids.add(candidate_id)
+                    confidence = self.match_confidence(query, year, candidate)
+                    if not confidence["exact_title"]:
+                        continue
+                    candidate_movie = self.tvdb.movie(candidate_id)
+                    tmdb_id, imdb_id = self.plex_movie_ids(candidate_movie)
+                    same_external_id = (
+                        bool(title["tmdb_id"] and tmdb_id == str(title["tmdb_id"]))
+                        or bool(title["imdb_id"] and imdb_id == title["imdb_id"])
+                    )
+                    if same_external_id:
+                        movie_id = candidate_id
+                        movie = candidate_movie
+                        break
+                if movie_id:
                     break
         if not movie_id:
             return False
