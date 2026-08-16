@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 import secrets
-import tempfile
 import threading
 import time
 from pathlib import Path
@@ -141,8 +140,6 @@ def build_router(ctx: RouteContext):
                 raise RecoveryPackageError(
                     "That verified recovery package is no longer staged. Upload it again before restoring."
                 )
-            # This event lands before the safety package is created, so the rollback
-            # package itself records that a restore was intentionally started.
             record_event(
                 "restore", "Portable recovery restore started.",
                 user_id=request.state.user.id,
@@ -160,8 +157,6 @@ def build_router(ctx: RouteContext):
             except (RecoveryPackageError, OSError):
                 pass
 
-        # The restored database may contain a different user set, so do not attach
-        # the old request user id to the post-commit event.
         record_event(
             "restore", "Portable recovery restore completed.",
             context={
@@ -178,4 +173,4 @@ def build_router(ctx: RouteContext):
             "message": "",
         })
 
-    return router
+    return router, {}
