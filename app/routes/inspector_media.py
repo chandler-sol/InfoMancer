@@ -56,6 +56,8 @@ def _episode_code(row, season: int | None) -> str:
 def build_router(ctx: RouteContext):
     router = APIRouter()
     db = ctx.live("db")
+    expected_name_map = ctx.live("expected_name_map")
+    merged_episode_name = ctx.live("merged_episode_name")
 
     def _tv_title(title_id: int):
         with db.connect() as conn:
@@ -105,7 +107,7 @@ def build_router(ctx: RouteContext):
         with db.connect() as conn:
             rows = conn.execute(
                 f"""
-                SELECT id, filename, season, episode_start, episode_end, episode_name,
+                SELECT id, filename, season, episode_start, episode_end,
                        size_bytes, runtime_seconds, width, height, video_codec,
                        audio_codec, audio_channels, dynamic_range, container
                 FROM files
@@ -116,6 +118,7 @@ def build_router(ctx: RouteContext):
                 """,
                 params,
             ).fetchall()
+            episode_names = expected_name_map(conn, title_id)
         files = []
         for row in rows:
             resolution = (
@@ -130,7 +133,9 @@ def build_router(ctx: RouteContext):
             files.append({
                 "id": int(row["id"]),
                 "filename": row["filename"],
-                "episode_name": row["episode_name"] or "",
+                "episode_name": merged_episode_name(
+                    episode_names, row["season"], row["episode_start"], row["episode_end"]
+                ),
                 "episode_code": _episode_code(row, season),
                 "size_display": _format_bytes(row["size_bytes"]),
                 "runtime_display": runtime,
