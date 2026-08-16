@@ -1,0 +1,59 @@
+name: ChatGPT 0.8 UI and Security Integration
+
+on:
+  push:
+    branches:
+      - integration/0.8-ui-security
+
+permissions:
+  contents: write
+
+jobs:
+  integrate-and-test:
+    if: github.event.head_commit.message != 'Polish 0.8 UI and integrate auth hardening'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out integration branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: integration/0.8-ui-security
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Bring forward validated authentication files
+        run: |
+          git fetch origin security/0.8-login-audit
+          git checkout origin/security/0.8-login-audit -- app/auth.py app/event_log.py tests/test_auth.py tests/test_security_surface.py
+
+      - name: Apply UI polish and composition-root security changes
+        run: python scripts/_chatgpt_ui_security_integration.py
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Check patch whitespace
+        run: git diff --check
+
+      - name: Run full tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Compile application
+        run: python -m compileall -q app
+
+      - name: Commit validated integration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm scripts/_chatgpt_ui_security_integration.py
+          rm .github/workflows/_chatgpt_ui_security_integration.yml
+          git config user.name "chatgpt-integration"
+          git config user.email "64607629+chandler-sol@users.noreply.github.com"
+          git add -A
+          git commit -m "Polish 0.8 UI and integrate auth hardening"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:integration/0.8-ui-security
