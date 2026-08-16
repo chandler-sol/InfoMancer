@@ -256,7 +256,10 @@ class AppSettings:
             validated.update(
                 self.validate_season_display(text_values["default_season_display"])
             )
-        if {"lockdown_mode", "read_only_mode"}.intersection(text_values):
+        safety_imported = bool(
+            {"lockdown_mode", "read_only_mode"}.intersection(text_values)
+        )
+        if safety_imported:
             current = self.values()
             read_only = text_values.get("read_only_mode", current["read_only_mode"]).strip()
             lockdown = text_values.get("lockdown_mode", current["lockdown_mode"]).strip()
@@ -280,7 +283,13 @@ class AppSettings:
                     "hash_pause_for_activity",
                 )
             )))
-        return {key: validated[key] for key in text_values}
+        result = {key: validated[key] for key in text_values}
+        if safety_imported:
+            # A partial import must still update both flags so Read-Only and
+            # Lockdown can never be left active at the same time.
+            result["read_only_mode"] = validated["read_only_mode"]
+            result["lockdown_mode"] = validated["lockdown_mode"]
+        return result
 
     def set_internal(self, key: str, value: str) -> None:
         if key not in self.defaults:
