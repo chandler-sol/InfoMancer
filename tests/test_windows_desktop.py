@@ -1,0 +1,65 @@
+import json
+import re
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class WindowsDesktopContractTests(unittest.TestCase):
+    def test_desktop_version_matches_application_alpha(self):
+        main = (ROOT / "app/main.py").read_text(encoding="utf-8")
+        match = re.search(r'APP_VERSION = "([^"]+)"', main)
+        self.assertIsNotNone(match)
+        config = json.loads((ROOT / "desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
+        self.assertEqual(config["version"], match.group(1))
+        self.assertEqual(config["productName"], "InfoMancer")
+        self.assertEqual(config["identifier"], "cloud.arsenik.infomancer")
+
+    def test_nsis_uninstall_is_zero_residue_but_update_safe(self):
+        config = json.loads((ROOT / "desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
+        nsis = config["bundle"]["windows"]["nsis"]
+        self.assertEqual(nsis["installerHooks"], "./windows/hooks.nsh")
+        self.assertEqual(nsis["customLanguageFiles"]["English"], "./windows/English.nsh")
+        hooks = (ROOT / "desktop/src-tauri/windows/hooks.nsh").read_text(encoding="utf-8")
+        for path in (
+            r'$APPDATA\cloud.arsenik.infomancer',
+            r'$LOCALAPPDATA\cloud.arsenik.infomancer',
+            r'$TEMP\InfoMancer',
+        ):
+            self.assertIn(path, hooks)
+        self.assertIn("$DeleteAppDataCheckboxState != 1", hooks)
+        self.assertIn("$UpdateMode == 1", hooks)
+        self.assertIn("$UpdateMode != 1", hooks)
+        self.assertIn("--recovery-output", hooks)
+        language = (ROOT / "desktop/src-tauri/windows/English.nsh").read_text(encoding="utf-8")
+        self.assertIn("all InfoMancer application data will be permanently removed", language)
+
+    def test_uninstaller_recovery_uses_verified_portable_package(self):
+        sidecar = (ROOT / "desktop/sidecar.py").read_text(encoding="utf-8")
+        self.assertIn("RecoveryPackageService", sidecar)
+        self.assertIn("service.verify(output)", sidecar)
+        self.assertIn("Choose a recovery destination outside", sidecar)
+
+    def test_updater_uses_signed_github_release_channel(self):
+        rust = (ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
+        self.assertIn("tauri_plugin_updater", rust)
+        self.assertIn("desktop-alpha/latest.json", rust)
+        self.assertIn("INFOMANCER_UPDATER_PUBLIC_KEY", rust)
+        self.assertIn("download_and_install", rust)
+        capability = json.loads((ROOT / "desktop/src-tauri/capabilities/launcher.json").read_text(encoding="utf-8"))
+        self.assertEqual(capability["permissions"], ["core:default"])
+        release_config = json.loads((ROOT / "desktop/src-tauri/tauri.release.conf.json").read_text(encoding="utf-8"))
+        self.assertTrue(release_config["bundle"]["createUpdaterArtifacts"])
+
+    def test_release_workflow_keeps_private_key_out_of_source(self):
+        workflow = (ROOT / ".github/workflows/windows-desktop-release.yml").read_text(encoding="utf-8")
+        self.assertIn("secrets.TAURI_SIGNING_PRIVATE_KEY", workflow)
+        self.assertIn("vars.TAURI_UPDATER_PUBLIC_KEY", workflow)
+        self.assertIn("desktop-alpha", workflow)
+        self.assertNotIn("BEGIN PRIVATE KEY", workflow)
+
+
+if __name__ == "__main__":
+    unittest.main()

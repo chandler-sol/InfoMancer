@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "launcher",
+  "description": "Core permissions for the bundled InfoMancer Desktop launcher only.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

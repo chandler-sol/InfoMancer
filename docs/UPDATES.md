@@ -84,3 +84,22 @@ python scripts/host_updater.py --watch --compose-file compose.yaml --compose-fil
 Keep it running under a dedicated operating-system account with access only to
 the InfoMancer checkout, Docker, and the release-signing public key needed for
 verification.
+
+## Native Windows updater
+
+The native Windows shell uses Tauri's signed updater rather than the host-update
+request mechanism used by the self-hosted deployment. No InfoMancer-operated file
+server is required. GitHub Releases stores the NSIS updater bundle, signature, and
+`latest.json` manifest. Alpha clients read a rolling `desktop-alpha/latest.json`
+asset whose download URLs point at immutable versioned releases.
+
+Tauri updater signatures are mandatory. The public verification key is compiled
+into release builds through `TAURI_UPDATER_PUBLIC_KEY`; the private key is supplied
+only to GitHub Actions through `TAURI_SIGNING_PRIVATE_KEY` (and optional password).
+Preview builds made without the public key remain buildable but report the updater
+as not configured rather than accepting unsigned updates.
+
+Before the Windows updater launches the replacement installer, the desktop shell
+stops its bundled local core. The NSIS uninstaller hooks detect updater mode and
+preserve application data, so ordinary updates replace binaries without invoking
+the zero-residue uninstall policy.

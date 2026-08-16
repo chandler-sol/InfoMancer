@@ -1,0 +1,19 @@
+[package]
+name = "infomancer-desktop"
+version = "0.8.0-alpha.1"
+description = "Native Windows shell for InfoMancer"
+authors = ["InfoMancer contributors"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "=2.11.5", features = [] }
+tauri-plugin-shell = "=2.3.5"
+tauri-plugin-updater = "=2.10.1"
+tokio = { version = "1", features = ["time"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }

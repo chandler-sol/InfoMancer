@@ -138,3 +138,22 @@ Before enabling installer builds, add:
   signing and notarization requirements.
 - [Microsoft code-signing options](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options)
   — Windows trust and signing choices.
+
+## Windows desktop alpha implementation
+
+The Windows desktop shell is now carried in `desktop/` and built as an NSIS
+current-user installer. It bundles the current InfoMancer Python core as a
+PyInstaller sidecar and stores standalone state under Tauri's
+`cloud.arsenik.infomancer` application-data directory.
+
+The NSIS confirmation deliberately treats application-data deletion as mandatory
+for a normal uninstall. Before destructive removal, an installation with a local
+database offers to create and verify a portable `.infomancer-backup` at a
+user-selected destination. Updates use Tauri's `/UPDATE` path and explicitly skip
+the purge so a binary upgrade never erases the catalog. Silent uninstall is
+reserved for unattended/CI use and performs the zero-residue purge without an
+interactive backup prompt.
+
+The desktop build has an automated Windows smoke test that seeds known Roaming and
+Local AppData paths, silently uninstalls InfoMancer, and fails if owned state or
+installer registration survives.

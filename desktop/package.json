@@ -1,0 +1,13 @@
+{
+  "name": "infomancer-desktop",
+  "private": true,
+  "version": "0.8.0-alpha.1",
+  "scripts": {
+    "tauri": "tauri",
+    "build": "tauri build --bundles nsis",
+    "icon": "tauri icon app-icon.svg"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4"
+  }
+}

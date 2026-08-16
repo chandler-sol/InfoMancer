@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InfoMancer</title>
+  <style>
+    :root { color-scheme: dark; --bg:#080c10; --panel:#0d141b; --line:#23313d; --text:#edf3f7; --muted:#8998a6; --cyan:#51d6e6; --lime:#b9f542; --danger:#ef9090; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; min-height:100%; background:var(--bg); color:var(--text); font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    body { min-height:100vh; display:grid; place-items:center; background:radial-gradient(circle at 25% 15%,rgba(81,214,230,.11),transparent 34rem),radial-gradient(circle at 80% 88%,rgba(185,245,66,.055),transparent 32rem),var(--bg); }
+    .shell { width:min(980px,calc(100vw - 48px)); padding:34px 0 42px; }
+    .brand { display:flex; align-items:center; gap:13px; margin-bottom:34px; }
+    .mark { display:grid; width:44px; height:44px; place-items:center; border:1px solid rgba(81,214,230,.38); border-radius:12px; background:linear-gradient(145deg,rgba(81,214,230,.13),rgba(185,245,66,.045)); color:var(--cyan); font-weight:900; letter-spacing:-.08em; }
+    .brand-copy strong { display:block; font-size:18px; letter-spacing:-.02em; }
+    .brand-copy span { color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+    .alpha { margin-left:auto; padding:5px 8px; border:1px solid rgba(81,214,230,.3); border-radius:999px; color:var(--cyan); font-size:9px; font-weight:900; letter-spacing:.1em; }
+    header { max-width:690px; margin-bottom:26px; }
+    header p:first-child { margin:0 0 7px; color:var(--cyan); font-size:10px; font-weight:900; letter-spacing:.16em; }
+    h1 { margin:0; font-size:clamp(30px,4vw,46px); line-height:1.02; letter-spacing:-.045em; }
+    header p:last-child { margin:14px 0 0; color:#aab6c0; font-size:14px; line-height:1.6; }
+    .modes { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    .mode { min-height:255px; padding:22px; border:1px solid var(--line); border-radius:16px; background:linear-gradient(180deg,rgba(255,255,255,.025),transparent),var(--panel); box-shadow:0 20px 60px rgba(0,0,0,.18); }
+    .mode.recommended { border-color:rgba(81,214,230,.34); }
+    .mode-label { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .mode-label span:first-child { color:var(--muted); font-size:9px; font-weight:900; letter-spacing:.14em; }
+    .mode-label b { padding:4px 7px; border-radius:999px; background:rgba(81,214,230,.08); color:var(--cyan); font-size:8px; letter-spacing:.08em; }
+    .mode h2 { margin:26px 0 7px; font-size:22px; letter-spacing:-.03em; }
+    .mode>p { min-height:62px; margin:0 0 20px; color:var(--muted); font-size:12px; line-height:1.55; }
+    button,input { font:inherit; }
+    button { border:0; border-radius:9px; padding:10px 13px; cursor:pointer; font-size:11px; font-weight:800; }
+    button.primary { width:100%; background:var(--lime); color:#0a0e0c; }
+    button.secondary { background:#17232d; color:var(--text); }
+    button:disabled { cursor:wait; opacity:.55; }
+    .remote-row { display:grid; grid-template-columns:1fr auto; gap:7px; }
+    input { min-width:0; border:1px solid #30404d; border-radius:9px; padding:9px 10px; background:#091016; color:var(--text); outline:none; font-size:11px; }
+    input:focus { border-color:var(--cyan); box-shadow:0 0 0 2px rgba(81,214,230,.09); }
+    .status { min-height:20px; margin-top:14px; color:var(--muted); font-size:10px; }
+    .status.error { color:var(--danger); }
+    .token-panel { display:none; margin-top:16px; padding:14px; border:1px solid rgba(185,245,66,.25); border-radius:10px; background:rgba(185,245,66,.045); }
+    .token-panel.visible { display:grid; gap:9px; }
+    .token-panel strong { font-size:11px; }
+    .token-panel p { margin:0; color:var(--muted); font-size:10px; line-height:1.45; }
+    .token-copy { display:grid; grid-template-columns:1fr auto; gap:6px; }
+    .token-copy code { overflow:hidden; padding:8px 9px; border-radius:7px; background:#080d11; color:var(--lime); font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+    .token-actions { display:flex; justify-content:flex-end; gap:7px; }
+    .update-card { display:grid; gap:10px; grid-template-columns:1fr auto; align-items:center; margin-top:14px; padding:13px 15px; border:1px solid var(--line); border-radius:12px; background:rgba(255,255,255,.018); }
+    .update-card strong { display:block; font-size:11px; }
+    .update-card p { margin:3px 0 0; color:var(--muted); font-size:10px; line-height:1.4; }
+    .update-actions { display:flex; gap:7px; }
+    #install-update { display:none; }
+    #install-update.visible { display:inline-block; }
+    footer { margin-top:18px; color:#61707d; font-size:9px; line-height:1.5; }
+    @media(max-width:720px) { .modes{grid-template-columns:1fr}.mode{min-height:auto}.update-card{grid-template-columns:1fr}.update-actions{justify-content:flex-start} }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <div class="brand"><div class="mark">IM</div><div class="brand-copy"><strong>InfoMancer</strong><span>Windows Desktop</span></div><span class="alpha">0.8 ALPHA</span></div>
+    <header><p>CHOOSE HOW INFOMANCER RUNS</p><h1>Your Workspace, without the browser.</h1><p>Run the InfoMancer core on this PC or use the desktop shell as a client for an existing server.</p></header>
+    <section class="modes">
+      <article class="mode recommended">
+        <div class="mode-label"><span>LOCAL DESKTOP</span><b>STANDALONE</b></div><h2>Run on this computer</h2><p>Starts a bundled InfoMancer core on loopback. Your database stays in Windows application data while media can remain on local disks or network shares.</p>
+        <button id="start-local" class="primary" type="button">Start InfoMancer locally</button><div id="local-status" class="status" role="status"></div>
+        <div id="token-panel" class="token-panel"><strong>First-run setup token</strong><p>InfoMancer's hardened first-run setup still applies. Copy this one-time token, then continue to setup.</p><div class="token-copy"><code id="bootstrap-token"></code><button id="copy-token" class="secondary" type="button">Copy</button></div><div class="token-actions"><button id="open-setup" class="primary" type="button">Continue to setup</button></div></div>
+      </article>
+      <article class="mode">
+        <div class="mode-label"><span>SERVER CLIENT</span></div><h2>Connect to a server</h2><p>Use this machine as a native InfoMancer client while your catalog, scans, and background work stay on an existing self-hosted server.</p>
+        <div class="remote-row"><input id="server-url" type="url" spellcheck="false" placeholder="https://infomancer.example.com" aria-label="InfoMancer server URL"><button id="connect-server" class="secondary" type="button">Connect</button></div><div id="remote-status" class="status" role="status"></div>
+      </article>
+    </section>
+    <section class="update-card" aria-live="polite"><div><strong>Desktop updates</strong><p id="update-status">Checking the signed GitHub release channel...</p></div><div class="update-actions"><button id="check-update" class="secondary" type="button">Check again</button><button id="install-update" class="primary" type="button">Install update</button></div></section>
+    <footer>The bundled launcher alone has native Tauri command access. Once it connects to the InfoMancer HTTP application, that remote content is not granted updater or shell IPC permissions.</footer>
+  </main>
+  <script>
+    const invoke = window.__TAURI__.core.invoke;
+    const localButton = document.getElementById('start-local'); const localStatus = document.getElementById('local-status'); const tokenPanel = document.getElementById('token-panel'); const tokenValue = document.getElementById('bootstrap-token'); const openSetup = document.getElementById('open-setup'); let startup = null;
+    const showError = (element,error) => { element.classList.add('error'); element.textContent = String(error || 'Something went wrong.'); };
+    localButton.addEventListener('click', async () => { localButton.disabled=true; localStatus.classList.remove('error'); localStatus.textContent='Starting the local InfoMancer core...'; try { startup=await invoke('start_local'); if(startup.first_run){tokenValue.textContent=startup.bootstrap_token;tokenPanel.classList.add('visible');localStatus.textContent='Local core is ready. Complete first-run setup to continue.';}else{localStatus.textContent='Local core ready. Opening Workspace...';window.location.replace(startup.url);}} catch(error){showError(localStatus,error);localButton.disabled=false;} });
+    document.getElementById('copy-token').addEventListener('click', async()=>{ if(!startup)return; await navigator.clipboard.writeText(startup.bootstrap_token); document.getElementById('copy-token').textContent='Copied'; });
+    openSetup.addEventListener('click',()=>{if(startup)window.location.replace(startup.setup_url);});
+    const connect=async()=>{const input=document.getElementById('server-url'),status=document.getElementById('remote-status'),button=document.getElementById('connect-server');button.disabled=true;status.classList.remove('error');status.textContent='Checking server address...';try{const normalized=await invoke('normalize_remote',{url:input.value});status.textContent='Opening InfoMancer...';window.location.replace(normalized);}catch(error){showError(status,error);button.disabled=false;}};
+    document.getElementById('connect-server').addEventListener('click',connect); document.getElementById('server-url').addEventListener('keydown',event=>{if(event.key==='Enter')connect();});
+    const updateStatus=document.getElementById('update-status'),checkUpdate=document.getElementById('check-update'),installUpdate=document.getElementById('install-update');
+    const check=async()=>{checkUpdate.disabled=true;installUpdate.classList.remove('visible');updateStatus.textContent='Checking the signed GitHub release channel...';try{const result=await invoke('check_for_update');updateStatus.textContent=result.message;if(result.available)installUpdate.classList.add('visible');}catch(error){updateStatus.textContent=String(error);}finally{checkUpdate.disabled=false;}};
+    checkUpdate.addEventListener('click',check); installUpdate.addEventListener('click',async()=>{installUpdate.disabled=true;updateStatus.textContent='Downloading and verifying the signed update...';try{const installed=await invoke('install_update');if(!installed){updateStatus.textContent='InfoMancer is already up to date.';installUpdate.classList.remove('visible');}else{updateStatus.textContent='Installing update...';}}catch(error){updateStatus.textContent=String(error);installUpdate.disabled=false;}}); check();
+  </script>
+</body>
+</html>
