@@ -27,10 +27,12 @@ def safe_component(value: str) -> str:
     value = re.sub(r"\s+", " ", value).strip().rstrip(" .")
     if not value:
         return "_"
-    # Windows reserves the device stem even when an extension is present.
+    # Windows reserves the device stem even when an extension is present. Prefix
+    # the whole component so AUX.txt becomes _AUX.txt rather than AUX.txt_, whose
+    # device stem would still be AUX on Windows.
     stem = value.split(".", 1)[0].upper()
     if stem in WINDOWS_RESERVED:
-        value = f"{value}_"
+        value = f"_{value}"
     return value
 
 
