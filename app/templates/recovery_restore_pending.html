@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Restoring InfoMancer{% endblock %}
+{% block content %}
+<section class="panel auth-card">
+  <p class="eyebrow">PORTABLE RECOVERY</p>
+  <h1>Recovery completed</h1>
+  <div class="success-banner"><strong>The verified package was restored and InfoMancer is restarting.</strong></div>
+  <p>Restored data from InfoMancer {{ source_version }} with {{ artwork_files }} collection artwork file{% if artwork_files != 1 %}s{% endif %}.</p>
+  <p>A pre-restore safety package named <code>{{ safety_package }}</code> was created and verified before the live installation was changed.</p>
+  <p>Provider credentials were not restored. After InfoMancer returns, sign in using an account from the restored database and re-enter provider credentials if needed.</p>
+  <p><a class="button primary" href="/login">Return to InfoMancer</a></p>
+</section>
+<script>window.setTimeout(()=>window.location.assign('/login'),6000);</script>
+{% endblock %}
