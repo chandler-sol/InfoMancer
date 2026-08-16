@@ -16,6 +16,7 @@ from .context import RouteContext
 
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{20,96}$")
 _STAGED_MAX_AGE = 24 * 60 * 60
+_ACTIVE_STATES = {"starting", "running"}
 
 
 def build_router(ctx: RouteContext):
@@ -27,7 +28,30 @@ def build_router(ctx: RouteContext):
     redirect = ctx.live("redirect")
     record_event = ctx.live("record_event")
     restart_after_restore = ctx.live("restart_after_restore")
-    service = RecoveryPackageService(db.path, APP_VERSION)
+    other_background_work_running = ctx.live("_other_background_work_running")
+    imdb_genre_job = ctx.live("imdb_genre_job")
+    duplicate_verify_job = ctx.live("duplicate_verify_job")
+    media_hash_job = ctx.live("media_hash_job")
+    trash_cleanup_job = ctx.live("trash_cleanup_job")
+    restore_lock = threading.Lock()
+
+    def recovery_service() -> RecoveryPackageService:
+        # Resolve the live database path per request so test/runtime data-dir swaps
+        # do not leave this router pinned to the process-start path.
+        return RecoveryPackageService(Path(db.path), APP_VERSION)
+
+    def restore_work_running() -> bool:
+        if other_background_work_running():
+            return True
+        return any(
+            job.get("status") in _ACTIVE_STATES
+            for job in (
+                imdb_genre_job,
+                duplicate_verify_job,
+                media_hash_job,
+                trash_cleanup_job,
+            )
+        )
 
     def librarian_get(path: str, **kwargs):
         dependencies = list(kwargs.pop("dependencies", ()))
@@ -40,7 +64,7 @@ def build_router(ctx: RouteContext):
         return router.post(path, dependencies=dependencies, **kwargs)
 
     def staging_dir() -> Path:
-        directory = db.path.parent / "restore-staging"
+        directory = Path(db.path).parent / "restore-staging"
         directory.mkdir(parents=True, exist_ok=True)
         try:
             directory.chmod(0o700)
@@ -78,6 +102,7 @@ def build_router(ctx: RouteContext):
         recovery_file: UploadFile = File(...),
     ):
         cleanup_staging()
+        package_service = recovery_service()
         token = secrets.token_urlsafe(32)
         candidate = staged_path(token)
         try:
@@ -85,7 +110,7 @@ def build_router(ctx: RouteContext):
                 total = 0
                 while chunk := await recovery_file.read(1024 * 1024):
                     total += len(chunk)
-                    if total > service.MAX_PACKAGE_BYTES:
+                    if total > package_service.MAX_PACKAGE_BYTES:
                         raise RecoveryPackageError(
                             "The uploaded recovery package is larger than the 4 GB restore limit."
                         )
@@ -94,7 +119,7 @@ def build_router(ctx: RouteContext):
                 candidate.chmod(0o600)
             except OSError:
                 pass
-            summary = service.verify(candidate)
+            summary = package_service.verify(candidate)
         except (RecoveryPackageError, OSError) as exc:
             candidate.unlink(missing_ok=True)
             record_event(
@@ -134,17 +159,32 @@ def build_router(ctx: RouteContext):
                 "/settings/recovery",
                 "Portable recovery cancelled; the live installation was not changed.",
             )
+        if not restore_lock.acquire(blocking=False):
+            return redirect(
+                "/settings/recovery",
+                "Another portable recovery is already in progress.",
+            )
         try:
             candidate = staged_path(staged_token)
             if not candidate.is_file():
                 raise RecoveryPackageError(
                     "That verified recovery package is no longer staged. Upload it again before restoring."
                 )
+            if restore_work_running():
+                raise RecoveryPackageError(
+                    "Wait for active scans, metadata, fingerprint, duplicate, or maintenance work to finish before restoring."
+                )
             record_event(
                 "restore", "Portable recovery restore started.",
                 user_id=request.state.user.id,
             )
-            result = service.restore(candidate, settings.media_browse_roots)
+            # Check once more after the event write so a task that was already
+            # transitioning to running cannot overlap the live database swap.
+            if restore_work_running():
+                raise RecoveryPackageError(
+                    "Background work started while recovery was preparing. Wait for it to finish and try again."
+                )
+            result = recovery_service().restore(candidate, settings.media_browse_roots)
         except RecoveryPackageError as exc:
             record_event(
                 "restore", "Portable recovery restore failed.",
@@ -152,6 +192,7 @@ def build_router(ctx: RouteContext):
             )
             return redirect("/settings/recovery", str(exc))
         finally:
+            restore_lock.release()
             try:
                 staged_path(staged_token).unlink(missing_ok=True)
             except (RecoveryPackageError, OSError):
