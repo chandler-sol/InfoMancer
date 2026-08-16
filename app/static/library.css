@@ -4445,3 +4445,85 @@ body.has-app-sidebar main.shell:has(> .media-dossier) { max-width:1760px; paddin
 @media (prefers-reduced-motion: reduce) {
   .organize-dialog[open], .organize-dialog.closing, .organize-dialog::backdrop, .organize-dialog.closing::backdrop { animation-duration: .01ms; }
 }
+
+
+/* Collapsible season groups: full TV title view */
+.season-collapse-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+  justify-content: flex-end;
+  margin: 4px 0 10px;
+}
+.season-collapse-toolbar > span {
+  color: var(--muted);
+  font-size: 11px;
+  margin-right: 3px;
+}
+.season-collapse-toolbar button {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 5px 9px;
+}
+.season-collapse-toolbar button:hover,
+.season-collapse-toolbar button:focus-visible {
+  border-color: var(--lime);
+  color: var(--lime);
+  outline: none;
+}
+button.season-heading {
+  -webkit-appearance: none;
+  appearance: none;
+  align-items: center;
+  background: #101820;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-weight: 700;
+  justify-content: space-between;
+  text-align: left;
+  width: 100%;
+}
+button.season-heading:hover,
+button.season-heading:focus-visible {
+  background: #141e27;
+  border-color: var(--lime);
+  color: var(--lime);
+  outline: none;
+}
+.season-heading-meta {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 500;
+  gap: 9px;
+  white-space: nowrap;
+}
+.season-heading-chevron {
+  color: var(--lime);
+  display: inline-block;
+  font-size: 16px;
+  line-height: 1;
+  transition: transform .16s ease;
+}
+.season-heading[aria-expanded="true"] .season-heading-chevron {
+  transform: rotate(180deg);
+}
+@media (max-width: 680px) {
+  .season-collapse-toolbar {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+  .season-collapse-toolbar > span {
+    flex-basis: 100%;
+  }
+}

@@ -44,6 +44,25 @@ Candidate build route:
 - Run a tray/background launcher rather than an always-visible console.
 - Sign both the launcher and installer with a trusted code-signing certificate.
 
+### Windows uninstall contract
+
+The Windows uninstaller must leave no InfoMancer-owned state behind unless the
+user explicitly chooses to save a recovery package. Before destructive removal,
+offer **Create recovery backup & uninstall**, **Uninstall everything**, and
+**Cancel**. A requested recovery package must be written to a user-selected
+location outside InfoMancer-managed directories and verified before uninstall
+continues; if creation or verification fails, keep InfoMancer installed unless
+the user explicitly chooses to proceed without the backup.
+
+A complete uninstall removes application binaries, databases, configuration,
+provider-secret/encryption-key files, artwork, caches, logs, updater data,
+crash data created by InfoMancer, shortcuts, services, scheduled tasks, file or
+protocol associations, firewall rules, and registry values created by
+InfoMancer. The cleanup implementation should use an explicit ownership
+manifest rather than searching the whole machine by product name. **Media files and user-selected recovery packages are never deleted.** Installer tests
+must create representative state, uninstall, and assert that every registered
+InfoMancer-owned resource is gone.
+
 Test Windows 11 first, then supported Windows 10 editions while they remain in
 scope. Include local NTFS folders, removable drives, UNC shares, and unavailable
 network shares in the test matrix.

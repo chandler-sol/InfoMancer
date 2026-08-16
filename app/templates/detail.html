@@ -21,7 +21,7 @@
 {% if title_facts %}<section class="detail-technical-rail" aria-label="Technical metadata"><dl>{% for label, value in title_facts %}<div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}</dl></section>{% endif %}
 {% if credit_update_active and not actors and not directors and not writers %}<div class="credits-updating" id="credits-updating"><span class="task-dot"></span><span><strong>IMDb credits are updating</strong><small>Director, writer, and top-billed cast will appear automatically when name resolution finishes.</small></span></div>{% endif %}
 <section class="dossier-on-disk"><div class="panel-head"><button type="button" class="on-disk-copy" id="on-disk-copy" data-path="{{ title.folder_path }}" title="Copy directory" aria-label="Copy media directory"><span id="on-disk-label">On Disk</span></button><span class="dossier-file-count"><span id="visible-file-count">{{ files|length }}</span> {{ 'file' if files|length == 1 else 'files' }}</span>
-<div class="series-controls">{% if title.kind == 'tv' and title.tvdb_id %}<button type="button" class="missing-episodes-toggle" id="toggle-missing" aria-expanded="{{ 'true' if request.query_params.get('show_missing') == '1' else 'false' }}" aria-controls="missing-panel">Missing Episodes <span class="missing-episodes-count{% if missing %} has-missing{% endif %}">{{ missing|length }}</span></button>{% endif %}{% if title.kind == 'tv' and seasons %}<label class="season-filter" for="season-filter"><span>Season</span><select id="season-filter"><option value="all">All seasons</option>{% for season in seasons %}<option value="{{ season }}">Season {{ '%02d'|format(season) }}</option>{% endfor %}</select></label>{% endif %}
+<div class="series-controls">{% if title.kind == 'tv' and title.tvdb_id %}<button type="button" class="missing-episodes-toggle" id="toggle-missing" aria-expanded="{{ 'true' if request.query_params.get('show_missing') == '1' else 'false' }}" aria-controls="missing-panel">Missing Episodes <span class="missing-episodes-count{% if missing %} has-missing{% endif %}">{{ missing|length }}</span></button>{% endif %}{% if title.kind == 'tv' and seasons %}<label class="season-filter" for="season-filter"><span>Season</span><select id="season-filter"><option value="all">All seasons</option>{% for season in seasons %}<option value="{{ season }}">{% if season == 0 %}Specials{% else %}Season {{ '%02d'|format(season) }}{% endif %}</option>{% endfor %}</select></label>{% endif %}
 {% if title.kind == 'tv' %}<details class="series-menu item-action-menu"><summary aria-label="Series actions" title="Series actions">⋮</summary><div class="series-menu-popover">
 <form method="post" action="/titles/{{ title.id }}/favorite"><input type="hidden" name="return_to" value="/titles/{{ title.id }}"><button class="favorite-action{% if title_state and title_state.favorite %} active{% endif %}"><span>★</span>{{ 'Remove favorite' if title_state and title_state.favorite else 'Add favorite' }}</button></form><a href="/titles/{{ title.id }}/organize">Organize &amp; Tags</a><a href="/titles/{{ title.id }}/collections">Add to Collection</a>{% if title.tvdb_id %}<a href="/titles/{{ title.id }}/cover">Change Cover</a>{% endif %}<form method="post" action="/titles/{{ title.id }}/media-info"><button>Inspect Media Information</button></form><hr>
 {% if title.tvdb_id %}<div class="menu-status"><span class="status-icon {% if not scan_at %}bad{% elif scan_stale or missing %}warn{% else %}good{% endif %}">{% if not scan_at %}×{% elif scan_stale or missing %}×{% else %}✓{% endif %}</span><span><strong>Scanned</strong><small>{% if scan_at %}Last scan {{ local_time(scan_at) }}{% if scan_stale %} · Needs Rescan{% endif %}{% else %}Needs Scan{% endif %}{% if missing %} · {{ missing|length }} known missing{% endif %}</small></span></div>{% else %}<div class="menu-status"><span class="status-icon {% if not scan_at %}bad{% elif scan_stale %}warn{% else %}good{% endif %}">{% if not scan_at or scan_stale %}×{% else %}✓{% endif %}</span><span><strong>Scanned</strong><small>{% if scan_at %}Last scan {{ local_time(scan_at) }}{% if scan_stale %} · Needs Rescan{% endif %}{% else %}Needs Scan{% endif %}</small></span></div>{% endif %}
@@ -31,8 +31,8 @@
 </div></details>
 {% elif title.kind == 'movie' and not files %}{{ movie_action_menu() }}
 {% endif %}</div></div>
-{% if title.kind == 'tv' and seasons %}<nav class="season-nav" aria-label="Filter episodes by season"><button type="button" class="active" data-season-choice="all">All</button>{% for season in seasons %}<button type="button" data-season-choice="{{ season }}">{% if season == 0 %}Specials{% else %}Season {{ '%02d'|format(season) }}{% endif %}</button>{% endfor %}</nav>{% endif %}
-<div class="file-list">{% set grouping = namespace(season=none) %}{% for file in files %}{% if title.kind == 'tv' and file.season is not none and file.season != grouping.season %}<div class="season-heading" id="season-{{ file.season }}" data-season-heading="{{ file.season }}">{% if file.season == 0 %}Specials{% else %}Season {{ '%02d'|format(file.season) }}{% endif %}</div>{% set grouping.season = file.season %}{% endif %}<article data-episode-row data-season="{{ file.season if file.season is not none else 'other' }}">{% if title.kind == 'tv' %}<div class="episode-code">{% if file.season is not none %}{{ '%02d'|format(file.episode_start) }}{% if file.episode_end and file.episode_end > file.episode_start %}–{{ '%02d'|format(file.episode_end) }}{% endif %}{% if file.season_total %}/{{ '%02d'|format(file.season_total) }}{% endif %}{% else %}File{% endif %}</div>{% endif %}<div class="grow"><strong>{% if title.kind == 'tv' and file.episode_name %}{{ file.episode_name }}{% else %}{{ file.filename }}{% endif %}</strong>{% if file.identity_confirmed %}<span class="file-identity">{% if file.edition_name %}<b>{{ file.edition_name }}</b>{% endif %}{% if file.version_name %}<b>{{ file.version_name }}</b>{% endif %}{% if file.version_preferred %}<b class="preferred">Preferred</b>{% endif %}</span>{% endif %}{% if file.episode_directors or file.episode_writers %}<div class="episode-credits">{% if file.episode_directors %}<span>Directed by {% for person in file.episode_directors %}<a href="/library?q={{ person.person_name|urlencode }}">{{ person.person_name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endif %}{% if file.episode_writers %}<span>Written by {% for person in file.episode_writers %}<a href="/library?q={{ person.person_name|urlencode }}">{{ person.person_name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endif %}</div>{% endif %}{% if title.kind == 'movie' %}<small class="file-summary">{{ (file.size_bytes / 1073741824)|round(2) }} GB · {{ (file.container or file.extension|replace('.', ''))|upper }} · Main feature</small>{% if title.source_label %}<span class="file-source">{{ title.source_label }}</span>{% endif %}<small class="file-path">{{ file.path }}</small>{% else %}<small>{{ (file.size_bytes / 1073741824)|round(2) }} GB{% if file.runtime_seconds %} · {{ (file.runtime_seconds / 60)|round|int }} min{% endif %}{% if file.width and file.height %} · {{ file.width }}×{{ file.height }}{% endif %}{% if file.video_codec %} · {{ file.video_codec|upper }}{% endif %}{% if file.audio_codec %} / {{ file.audio_codec|upper }}{% endif %}{% if file.dynamic_range %} · {{ file.dynamic_range }}{% endif %}{% if file.container %} · {{ file.container|upper }}{% endif %} · {{ file.path }}</small>{% endif %}{% if file.media_info_error %}<small class="media-info-error">Media details unavailable: {{ file.media_info_error }}</small>{% endif %}</div>{% if title.kind == 'movie' and loop.first %}{{ movie_action_menu() }}{% endif %}{% if title.kind=='tv' and file.season is not none %}
+{% if title.kind == 'tv' and seasons %}<nav class="season-nav" aria-label="Filter episodes by season"><button type="button" class="active" data-season-choice="all">All</button>{% for season in seasons %}<button type="button" data-season-choice="{{ season }}">{% if season == 0 %}Specials{% else %}Season {{ '%02d'|format(season) }}{% endif %}</button>{% endfor %}</nav><div class="season-collapse-toolbar" aria-label="Season display controls"><span>Season groups start collapsed</span><button type="button" id="expand-all-seasons">Expand all</button><button type="button" id="collapse-all-seasons">Collapse all</button></div>{% endif %}
+<div class="file-list">{% set grouping = namespace(season=none) %}{% for file in files %}{% if title.kind == 'tv' and file.season is not none and file.season != grouping.season %}<button type="button" class="season-heading" id="season-{{ file.season }}" data-season-heading="{{ file.season }}" aria-expanded="false"><span>{% if file.season == 0 %}Specials{% else %}Season {{ '%02d'|format(file.season) }}{% endif %}</span><span class="season-heading-meta"><span data-season-count="{{ file.season }}"></span><span class="season-heading-chevron" aria-hidden="true">⌄</span></span></button>{% set grouping.season = file.season %}{% endif %}<article data-episode-row data-season="{{ file.season if file.season is not none else 'other' }}">{% if title.kind == 'tv' %}<div class="episode-code">{% if file.season is not none %}{{ '%02d'|format(file.episode_start) }}{% if file.episode_end and file.episode_end > file.episode_start %}–{{ '%02d'|format(file.episode_end) }}{% endif %}{% if file.season_total %}/{{ '%02d'|format(file.season_total) }}{% endif %}{% else %}File{% endif %}</div>{% endif %}<div class="grow"><strong>{% if title.kind == 'tv' and file.episode_name %}{{ file.episode_name }}{% else %}{{ file.filename }}{% endif %}</strong>{% if file.identity_confirmed %}<span class="file-identity">{% if file.edition_name %}<b>{{ file.edition_name }}</b>{% endif %}{% if file.version_name %}<b>{{ file.version_name }}</b>{% endif %}{% if file.version_preferred %}<b class="preferred">Preferred</b>{% endif %}</span>{% endif %}{% if file.episode_directors or file.episode_writers %}<div class="episode-credits">{% if file.episode_directors %}<span>Directed by {% for person in file.episode_directors %}<a href="/library?q={{ person.person_name|urlencode }}">{{ person.person_name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endif %}{% if file.episode_writers %}<span>Written by {% for person in file.episode_writers %}<a href="/library?q={{ person.person_name|urlencode }}">{{ person.person_name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endif %}</div>{% endif %}{% if title.kind == 'movie' %}<small class="file-summary">{{ (file.size_bytes / 1073741824)|round(2) }} GB · {{ (file.container or file.extension|replace('.', ''))|upper }} · Main feature</small>{% if title.source_label %}<span class="file-source">{{ title.source_label }}</span>{% endif %}<small class="file-path">{{ file.path }}</small>{% else %}<small>{{ (file.size_bytes / 1073741824)|round(2) }} GB{% if file.runtime_seconds %} · {{ (file.runtime_seconds / 60)|round|int }} min{% endif %}{% if file.width and file.height %} · {{ file.width }}×{{ file.height }}{% endif %}{% if file.video_codec %} · {{ file.video_codec|upper }}{% endif %}{% if file.audio_codec %} / {{ file.audio_codec|upper }}{% endif %}{% if file.dynamic_range %} · {{ file.dynamic_range }}{% endif %}{% if file.container %} · {{ file.container|upper }}{% endif %} · {{ file.path }}</small>{% endif %}{% if file.media_info_error %}<small class="media-info-error">Media details unavailable: {{ file.media_info_error }}</small>{% endif %}</div>{% if title.kind == 'movie' and loop.first %}{{ movie_action_menu() }}{% endif %}{% if title.kind=='tv' and file.season is not none %}
 <details class="episode-menu item-action-menu"><summary aria-label="Episode actions" title="Episode actions">⋮</summary><div>
 <a href="/files/{{ file.id }}/edition-version" data-organize-dialog>Edit Edition &amp; Version</a>
 <a href="/files/{{ file.id }}/favorite">Favorite Episode</a>
@@ -59,26 +59,72 @@
   const seasonHeadings = Array.from(document.querySelectorAll("[data-season-heading]"));
   const episodeRows = Array.from(document.querySelectorAll("[data-episode-row]"));
   const visibleCount = document.getElementById("visible-file-count");
-  const applySeason = (season) => {
-    let shown = 0;
+  const expandAllSeasons = document.getElementById("expand-all-seasons");
+  const collapseAllSeasons = document.getElementById("collapse-all-seasons");
+  const expandedSeasons = new Set();
+  let activeSeason = "all";
+
+  const rowsForSeason = (season) => episodeRows.filter((row) => row.dataset.season === season);
+  const updateSeasonView = () => {
+    let filteredCount = 0;
     episodeRows.forEach((row) => {
-      const visible = season === "all" || row.dataset.season === season;
-      row.hidden = !visible;
-      if (visible) shown += 1;
+      const season = row.dataset.season;
+      const inFilter = activeSeason === "all" || season === activeSeason;
+      if (inFilter) filteredCount += 1;
+      const expanded = season === "other" || expandedSeasons.has(season);
+      row.hidden = !(inFilter && expanded);
     });
     seasonHeadings.forEach((heading) => {
-      heading.hidden = season !== "all" && heading.dataset.seasonHeading !== season;
+      const season = heading.dataset.seasonHeading;
+      const inFilter = activeSeason === "all" || season === activeSeason;
+      const expanded = expandedSeasons.has(season);
+      heading.hidden = !inFilter;
+      heading.setAttribute("aria-expanded", String(expanded));
+      const count = heading.querySelector("[data-season-count]");
+      if (count) {
+        const files = rowsForSeason(season).length;
+        count.textContent = `${files} ${files === 1 ? "file" : "files"}`;
+      }
     });
     seasonChoices.forEach((choice) => {
-      choice.classList.toggle("active", choice.dataset.seasonChoice === season);
+      choice.classList.toggle("active", choice.dataset.seasonChoice === activeSeason);
     });
-    if (seasonFilter) seasonFilter.value = season;
-    if (visibleCount) visibleCount.textContent = shown;
+    if (seasonFilter) seasonFilter.value = activeSeason;
+    if (visibleCount) visibleCount.textContent = filteredCount;
   };
+
+  const applySeason = (season) => {
+    activeSeason = season;
+    // Filtering directly to one season should reveal its episodes rather than
+    // leaving the user with an apparently empty filtered view.
+    if (season !== "all") expandedSeasons.add(season);
+    updateSeasonView();
+  };
+
   seasonFilter?.addEventListener("change", () => applySeason(seasonFilter.value));
   seasonChoices.forEach((choice) => {
     choice.addEventListener("click", () => applySeason(choice.dataset.seasonChoice));
   });
+  seasonHeadings.forEach((heading) => {
+    heading.addEventListener("click", () => {
+      const season = heading.dataset.seasonHeading;
+      if (expandedSeasons.has(season)) expandedSeasons.delete(season);
+      else expandedSeasons.add(season);
+      updateSeasonView();
+    });
+  });
+  expandAllSeasons?.addEventListener("click", () => {
+    seasonHeadings.forEach((heading) => expandedSeasons.add(heading.dataset.seasonHeading));
+    updateSeasonView();
+  });
+  collapseAllSeasons?.addEventListener("click", () => {
+    expandedSeasons.clear();
+    updateSeasonView();
+  });
+  // Chandler's installation preference: season groups are collapsed until the
+  // viewer explicitly opens one or chooses Expand all.
+  updateSeasonView();
+
 
   const creditMore = document.getElementById("credit-more");
   const additionalCast = document.getElementById("additional-cast");
