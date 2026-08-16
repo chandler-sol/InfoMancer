@@ -89,6 +89,12 @@ class Intelligence09Tests(unittest.TestCase):
             coordinator.media_integrity_job["status"] = "complete"
         self.assertFalse(coordinator.other_background_work_running())
 
+    def test_task_panel_includes_media_integrity_job_contract(self):
+        source = (Path(__file__).resolve().parents[1] / "app" / "routes" / "operations.py").read_text(encoding="utf-8")
+        self.assertIn('media_integrity_job = ctx.live("media_integrity_job")', source)
+        self.assertIn('"id": "media-integrity"', source)
+        self.assertIn('"label": "Sampling media integrity"', source)
+
     @patch("app.media_integrity.subprocess.run")
     def test_integrity_sampling_is_read_only_and_surfaces_decode_failure(self, run):
         run.return_value = FakeProcess(stderr="Invalid data found when processing input", returncode=1)

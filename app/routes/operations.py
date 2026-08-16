@@ -32,6 +32,8 @@ def build_router(ctx: RouteContext):
     media_hashes = ctx.live("media_hashes")
     media_info_job = ctx.live("media_info_job")
     media_info_lock = ctx.live("media_info_lock")
+    media_integrity_job = ctx.live("media_integrity_job")
+    media_integrity_lock = ctx.live("media_integrity_lock")
     movie_match_job = ctx.live("movie_match_job")
     movie_match_lock = ctx.live("movie_match_lock")
     queue_metadata_refresh = ctx.live("queue_metadata_refresh")
@@ -284,6 +286,21 @@ def build_router(ctx: RouteContext):
                     )
                 ),
             })
+        with media_integrity_lock:
+            integrity_job = dict(media_integrity_job)
+        if integrity_job.get("status") in {"starting", "running"}:
+            current = integrity_job.get("current") or "Preparing decode samples"
+            tasks.append({
+                "id": "media-integrity",
+                "label": "Sampling media integrity",
+                "detail": (
+                    f"{integrity_job.get('processed', 0):,} of "
+                    f"{integrity_job.get('total', 0):,} checked · "
+                    f"{integrity_job.get('issues', 0):,} need review"
+                    + (f" · {current}" if current else "")
+                ),
+            })
+
         with media_hash_lock:
             hash_job = dict(media_hash_job)
         if hash_job.get("status") in {"starting", "running"}:
