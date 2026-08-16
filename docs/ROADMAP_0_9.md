@@ -26,9 +26,26 @@
 - Aggregate gaps at title/series scope so a TV season does not create hundreds of noisy findings.
 - Grow toward Atmos/DTS:X detection, external subtitle awareness, forced-subtitle logic, and per-library/source policy overrides.
 
+## P2: Appearance & Themes
+
+Keep InfoMancer's canonical appearance dark and OLED-first while making the UI adaptable to different environments and accessibility needs.
+
+- Make **InfoMancer OLED** the default theme with true-black canvas areas and carefully elevated dark surfaces.
+- Add a small curated theme set rather than a large theme marketplace:
+  - **OLED** — true black, canonical InfoMancer appearance.
+  - **Graphite** — softer neutral dark surfaces.
+  - **Midnight** — very dark blue-black surfaces.
+  - **Light** — intentionally designed light surfaces rather than a simple color inversion.
+  - **System** — follow the operating system/browser light or dark preference.
+- Move remaining hard-coded presentation colors toward semantic CSS variables such as canvas, surface, raised surface, text, border, accent, and semantic status tokens.
+- Keep status meaning stable across themes: critical/error, warning, healthy/success, and informational colors must remain recognizable and accessible.
+- Persist appearance per user so different accounts can choose different themes without changing the installation globally.
+- Keep theme selection separate from any future accent-color selection so appearance and brand accents do not multiply into dozens of theme combinations.
+- Treat this as a lightweight 0.9 UI feature built primarily through CSS tokens and a small persisted preference, not a new rendering architecture.
+
 ## Next 0.9 priorities
 
-After the three P0 intelligence systems stabilize: automation rules, notification destinations, read-only Plex/Jellyfin/Emby comparison, provider abstraction, and passkeys/TOTP MFA.
+After the three P0 intelligence systems stabilize: automation rules, notification destinations, read-only Plex/Jellyfin/Emby comparison, provider abstraction, passkeys/TOTP MFA, and the lightweight appearance/theme pass above.
 
 ## Long-range 2.0 direction
 
