@@ -26,7 +26,9 @@ jobs:
           cache: pip
 
       - name: Apply W5 changes
-        run: python scripts/_chatgpt_w5_saved_views.py
+        run: |
+          python scripts/_chatgpt_w5_bootstrap_fix.py
+          python scripts/_chatgpt_w5_saved_views.py
 
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
@@ -45,6 +47,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           rm scripts/_chatgpt_w5_saved_views.py
+          rm scripts/_chatgpt_w5_bootstrap_fix.py
           rm .github/workflows/_chatgpt_w5_saved_views.yml
           git config user.name "chatgpt-integration"
           git config user.email "64607629+chandler-sol@users.noreply.github.com"
