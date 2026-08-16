@@ -1224,3 +1224,31 @@ body.workspace-inspector-open .workspace-inspector {
 .read-only-mode-banner a {color:#9bceff;font-size:11px;margin-left:auto;white-space:nowrap}
 .safety-mode-three {grid-template-columns:repeat(3,minmax(0,1fr))!important}
 @media (max-width:900px) {.safety-mode-three {grid-template-columns:1fr!important}.read-only-mode-banner {align-items:flex-start;flex-wrap:wrap}.read-only-mode-banner a {margin-left:0}}
+
+
+/* Preview-first season-folder organization */
+.season-folder-summary {display:grid;gap:10px;grid-template-columns:repeat(4,minmax(0,1fr));margin:12px 0;padding:14px}
+.season-folder-summary > div {display:grid;gap:2px}
+.season-folder-summary strong {font-size:21px}
+.season-folder-summary span {color:var(--muted);font-size:11px}
+.season-folder-explainer {background:rgba(173,255,47,.04);border:1px solid var(--line);border-radius:8px;display:grid;gap:4px;margin:10px 0 14px;padding:11px 13px}
+.season-folder-explainer strong {color:var(--lime);font-size:12px}
+.season-folder-explainer span {color:var(--muted);font-size:11px;line-height:1.45}
+.season-folder-toolbar {align-items:center;display:flex;justify-content:space-between;margin:10px 2px 7px;color:var(--muted);font-size:11px}
+.season-folder-toolbar label {align-items:center;display:flex;gap:7px}
+.season-folder-list {border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.season-folder-row {align-items:flex-start;background:var(--panel);border-bottom:1px solid var(--line);display:grid;gap:10px;grid-template-columns:26px minmax(0,1fr);padding:11px 13px}
+.season-folder-row:last-child {border-bottom:0}
+.season-folder-row.status-organized {opacity:.72}
+.season-folder-row.status-blocked {background:rgba(255,107,107,.035)}
+.season-folder-choice {padding-top:2px;text-align:center}
+.season-folder-status-icon {align-items:center;border:1px solid var(--line);border-radius:50%;display:inline-flex;font-size:10px;height:18px;justify-content:center;width:18px}
+.status-organized .season-folder-status-icon {border-color:var(--lime);color:var(--lime)}
+.status-blocked .season-folder-status-icon {border-color:#ff6b6b;color:#ff6b6b}
+.season-folder-copy {display:grid;gap:3px;min-width:0}
+.season-folder-copy > div {align-items:center;display:flex;gap:8px;justify-content:space-between}
+.season-folder-copy > div span {border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:9px;padding:3px 7px;white-space:nowrap}
+.season-folder-copy code,.season-folder-copy small {color:var(--muted);font-size:10px;overflow-wrap:anywhere}
+.season-folder-copy p {color:#ff9a9a;font-size:11px;margin:3px 0 0}
+.season-folder-apply {margin-top:12px}
+@media (max-width:720px) {.season-folder-summary {grid-template-columns:repeat(2,minmax(0,1fr))}.season-folder-copy > div {align-items:flex-start;flex-direction:column}}

@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends
 from ..access import require_librarian
 from ..file_protection import FileProtectionService, MediaWriteBlocked
 from ..operation_history import OperationHistoryService
+from ..season_folders import SeasonFolderError, SeasonFolderService
 from .context import RouteContext
 
 
@@ -34,6 +35,7 @@ def build_router(ctx: RouteContext):
     media_info_lock = ctx.live("media_info_lock")
     merged_episode_name = ctx.live("merged_episode_name")
     operation_history = OperationHistoryService(db)
+    season_folders = SeasonFolderService(db)
     file_protection = FileProtectionService(app_settings)
     plex_episode_filename = ctx.live("plex_episode_filename")
     plex_movie_filename = ctx.live("plex_movie_filename")
@@ -884,6 +886,44 @@ def build_router(ctx: RouteContext):
             )
         return redirect(f"/titles/{title_id}", "Match metadata removed; media files were unchanged")
 
+    @librarian_get("/titles/{title_id}/organize-seasons", response_class=HTMLResponse)
+    def season_folder_preview(request: Request, title_id: int):
+        try:
+            preview = season_folders.preview(title_id)
+        except SeasonFolderError as exc:
+            return redirect(f"/titles/{title_id}", str(exc))
+        return templates.TemplateResponse(request, "season_folders.html", {
+            **preview,
+            "message": request.query_params.get("message", ""),
+            "read_only_mode": app_settings.file_protection_mode() == "readonly",
+        })
+
+    @librarian_post("/titles/{title_id}/organize-seasons")
+    def season_folder_apply(
+        request: Request, title_id: int,
+        selected_file_ids: list[int] = Form(default=[]),
+    ):
+        try:
+            file_protection.require_media_write("move episode files into season folders")
+            moved = season_folders.apply(title_id, selected_file_ids)
+        except (MediaWriteBlocked, SeasonFolderError) as exc:
+            return redirect(f"/titles/{title_id}/organize-seasons", str(exc))
+        for item in moved:
+            operation_history.record_file_rename(
+                item["file_id"], item["source"], item["destination"],
+                request.state.user.id, label="Episode moved into season folder",
+            )
+        record_event(
+            "filesystem",
+            f"Organized {len(moved)} episode file{'s' if len(moved) != 1 else ''} into season folders.",
+            context={"title_id": title_id, "files": len(moved)},
+            user_id=request.state.user.id,
+        )
+        return redirect(
+            f"/titles/{title_id}",
+            f"Organized {len(moved)} episode file{'s' if len(moved) != 1 else ''} into season folders. Undo is available in Operation History.",
+        )
+
     @librarian_get("/titles/{title_id}/rename-folder", response_class=HTMLResponse)
     def rename_folder_preview(request: Request, title_id: int):
         with db.connect() as conn:
@@ -1267,6 +1307,8 @@ def build_router(ctx: RouteContext):
         "match_tvdb": match_tvdb,
         "match_tvdb_manual": match_tvdb_manual,
         "unmatch_title": unmatch_title,
+        "season_folder_preview": season_folder_preview,
+        "season_folder_apply": season_folder_apply,
         "rename_folder_preview": rename_folder_preview,
         "rename_folder": rename_folder,
         "bulk_rename_preview": bulk_rename_preview,

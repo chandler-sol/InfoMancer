@@ -57,6 +57,19 @@ season groups. Collapsed remains the default, while Librarians can switch the st
 state under General Settings; per-page Expand all and Collapse all controls remain
 available.
 
+## Season Folder Organization
+
+Full TV title pages include a preview-first season-folder workflow. Parsed episode
+files can be moved into `Season 01`, `Season 02`, and equivalent folders, while season
+zero maps to `Specials`. The preview does not create directories or alter media.
+Unparsed files remain untouched, existing destinations block the proposal, and apply
+revalidates each source and destination before moving anything. Old empty folders are
+left in place rather than being deleted automatically.
+
+Completed moves update the catalog and are written to W6 Operation History as ordinary
+file moves, so the same guarded undo checks can restore the previous path. Global
+Read-Only Mode blocks apply while still allowing the preview.
+
 ## Global File Protection Modes
 
 InfoMancer exposes three mutually exclusive installation-wide media safety modes.

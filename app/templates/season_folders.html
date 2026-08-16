@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Organize Seasons · {{ title.metadata_title or title.title }} · InfoMancer{% endblock %}
+{% block content %}
+<header class="page-head"><div><p class="eyebrow">PREVIEW · FILESYSTEM ORGANIZATION</p><h1>Organize into season folders</h1><p>{{ title.metadata_title or title.title }}</p></div><div class="actions"><a class="button" href="/titles/{{ title.id }}">Back to title</a></div></header>
+{% if message %}<div class="notice">{{ message }}</div>{% endif %}
+<section class="panel season-folder-summary"><div><strong>{{ ready|length }}</strong><span>Ready to move</span></div><div><strong>{{ organized|length }}</strong><span>Already organized</span></div><div><strong>{{ blocked|length }}</strong><span>Blocked</span></div><div><strong>{{ skipped_unparsed }}</strong><span>Unparsed files skipped</span></div></section>
+<div class="season-folder-explainer"><strong>Preview first, move second.</strong><span>Season 00 becomes <code>Specials</code>. Other seasons become <code>Season 01</code>, <code>Season 02</code>, and so on. Filenames are not changed, existing destinations are never overwritten, and empty old folders are left alone.</span></div>
+{% if read_only_mode %}<div class="form-error"><strong>Read-Only Mode is active.</strong> You can review this plan, but InfoMancer will not move any media files until File Protection Mode is changed.</div>{% endif %}
+<form method="post" action="/titles/{{ title.id }}/organize-seasons" data-workspace-confirm="Move the selected episode files into their reviewed season folders? Existing destinations will never be overwritten, and completed moves can be reversed from Operation History.">
+  {% if ready %}<div class="season-folder-toolbar"><label><input type="checkbox" data-season-select-all checked> Select all ready files</label><span>{{ ready|length }} move{% if ready|length != 1 %}s{% endif %} ready</span></div>{% endif %}
+  <div class="season-folder-list">{% for item in proposals %}<article class="season-folder-row status-{{ item.status }}">
+    <div class="season-folder-choice">{% if item.status == 'ready' %}<input type="checkbox" name="selected_file_ids" value="{{ item.file_id }}" checked aria-label="Move {{ item.filename }}">{% else %}<span class="season-folder-status-icon" aria-hidden="true">{{ '✓' if item.status == 'organized' else '!' }}</span>{% endif %}</div>
+    <div class="season-folder-copy"><div><strong>{{ item.filename }}</strong><span>{{ 'Specials' if item.season == 0 else 'Season %02d'|format(item.season) }}</span></div><code>{{ item.source }}</code><small>→ {{ item.destination }}</small>{% if item.status != 'ready' %}<p>{{ item.reason }}</p>{% endif %}</div>
+  </article>{% endfor %}</div>
+  {% if ready %}<div class="actions season-folder-apply"><button class="button primary" {% if read_only_mode %}disabled{% endif %}>Move selected files</button><a class="button" href="/titles/{{ title.id }}">Cancel</a></div>{% endif %}
+</form>
+{% if not proposals %}<div class="panel empty"><h2>No parsed episode files</h2><p>InfoMancer needs a recognized season number before it can choose a safe destination folder.</p></div>{% endif %}
+<script>
+(() => {
+  const all = document.querySelector("[data-season-select-all]");
+  if (!all) return;
+  const choices = [...document.querySelectorAll('input[name="selected_file_ids"]')];
+  all.addEventListener("change", () => choices.forEach(choice => { choice.checked = all.checked; }));
+  choices.forEach(choice => choice.addEventListener("change", () => {
+    all.checked = choices.every(item => item.checked);
+    all.indeterminate = !all.checked && choices.some(item => item.checked);
+  }));
+})();
+</script>
+{% endblock %}
