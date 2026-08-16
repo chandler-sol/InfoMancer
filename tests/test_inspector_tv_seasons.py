@@ -19,6 +19,7 @@ from app.engagement import EngagementService
 class InspectorTvSeasonTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
         settings = replace(
             main.settings,
             database=Path(self.temporary.name) / "tv-inspector.db",
@@ -66,9 +67,10 @@ class InspectorTvSeasonTests(unittest.TestCase):
                     ),
                 )
                 conn.execute(
-                    """INSERT INTO expected_episodes(title_id,season,episode,name)
-                       VALUES (?,?,?,?)""",
-                    (self.title_id, season, episode, name),
+                    """INSERT INTO expected_episodes(
+                         title_id,season,episode,tvdb_episode_id,name
+                       ) VALUES (?,?,?,?,?)""",
+                    (self.title_id, season, episode, season * 1000 + episode, name),
                 )
         self.client = TestClient(main.app, follow_redirects=False)
         self.addCleanup(self.client.close)
@@ -81,9 +83,6 @@ class InspectorTvSeasonTests(unittest.TestCase):
 
     def _restore_globals(self):
         main.db, main.settings, main.auth_service, main.app_settings, main.engagement = self.original
-
-    def tearDown(self):
-        self.temporary.cleanup()
 
     def test_tv_inspector_uses_season_shell_instead_of_eager_file_rows(self):
         response = self.client.get(f"/library/inspector/{self.title_id}")
