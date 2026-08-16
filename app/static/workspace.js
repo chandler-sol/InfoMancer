@@ -1,4 +1,13 @@
 (() => {
+  const ensureWorkspacePolishStyles = () => {
+    if (document.querySelector('link[data-workspace-detail-polish]')) return;
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "/static/workspace-detail-polish.css";
+    link.dataset.workspaceDetailPolish = "1";
+    document.head.append(link);
+  };
+
   const enhanceWorkspaceNavigation = () => {
     const panel = document.getElementById("site-menu-panel");
     if (!panel) return;
@@ -98,6 +107,128 @@
       });
     };
 
+    const renderInspectorEpisode = (file) => {
+      const row = document.createElement("article");
+      row.className = "workspace-inspector-episode";
+      const code = document.createElement("span");
+      code.className = "workspace-inspector-episode-code";
+      code.textContent = file.episode_code || "File";
+      const copy = document.createElement("span");
+      copy.className = "workspace-inspector-episode-copy";
+      const name = document.createElement("strong");
+      name.textContent = file.episode_name || file.filename;
+      name.title = file.filename || "";
+      const facts = document.createElement("small");
+      facts.textContent = [
+        file.size_display,
+        file.runtime_display,
+        file.resolution_display,
+        file.video_codec,
+        file.audio_codec,
+        file.dynamic_range,
+      ].filter(Boolean).join(" · ");
+      copy.append(name, facts);
+      row.append(code, copy);
+      return row;
+    };
+
+    const enhanceInspectorMedia = async (panel) => {
+      const host = panel?.querySelector("[data-inspector-tv-seasons]");
+      if (!host) return;
+      const titleId = host.dataset.titleId;
+      if (!titleId) return;
+      try {
+        const response = await fetch(`/api/titles/${encodeURIComponent(titleId)}/inspector-media`, {
+          credentials: "same-origin",
+          cache: "no-store",
+          signal: requestController?.signal,
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (String(titleId) !== selectedTitleId || !host.isConnected) return;
+        host.replaceChildren();
+        if (!data.seasons?.length) {
+          const empty = document.createElement("p");
+          empty.className = "workspace-inspector-empty-state";
+          empty.textContent = "No indexed seasons are attached to this title.";
+          host.append(empty);
+          return;
+        }
+        data.seasons.forEach((season) => {
+          const shell = document.createElement("section");
+          shell.className = "workspace-inspector-season";
+          const trigger = document.createElement("button");
+          trigger.type = "button";
+          trigger.setAttribute("aria-expanded", "false");
+          const label = document.createElement("strong");
+          label.textContent = season.label;
+          const meta = document.createElement("small");
+          meta.textContent = `${season.file_count} file${season.file_count === 1 ? "" : "s"} · ${season.total_size_display}`;
+          const chevron = document.createElement("span");
+          chevron.className = "workspace-inspector-season-chevron";
+          chevron.setAttribute("aria-hidden", "true");
+          chevron.textContent = "⌄";
+          const seasonBody = document.createElement("div");
+          seasonBody.className = "workspace-inspector-season-body";
+          seasonBody.hidden = true;
+          seasonBody.dataset.loaded = "false";
+          trigger.append(label, meta, chevron);
+          shell.append(trigger, seasonBody);
+
+          trigger.addEventListener("click", async () => {
+            const opening = seasonBody.hidden;
+            seasonBody.hidden = !opening;
+            shell.classList.toggle("open", opening);
+            trigger.setAttribute("aria-expanded", String(opening));
+            if (!opening || seasonBody.dataset.loaded === "true" || seasonBody.dataset.loading === "true") return;
+            seasonBody.dataset.loading = "true";
+            const state = document.createElement("p");
+            state.className = "workspace-inspector-season-state";
+            state.textContent = `Loading ${season.label.toLowerCase()}…`;
+            seasonBody.replaceChildren(state);
+            try {
+              const detailResponse = await fetch(
+                `/api/titles/${encodeURIComponent(titleId)}/inspector-media/${encodeURIComponent(season.key)}`,
+                {credentials: "same-origin", cache: "no-store", signal: requestController?.signal},
+              );
+              if (!detailResponse.ok) throw new Error(`HTTP ${detailResponse.status}`);
+              const detail = await detailResponse.json();
+              if (String(titleId) !== selectedTitleId || !seasonBody.isConnected) return;
+              seasonBody.replaceChildren();
+              detail.files.forEach((file) => seasonBody.append(renderInspectorEpisode(file)));
+              if (!detail.files.length) {
+                const empty = document.createElement("p");
+                empty.className = "workspace-inspector-season-state";
+                empty.textContent = "No indexed files are in this season.";
+                seasonBody.append(empty);
+              }
+              const full = document.createElement("a");
+              full.className = "workspace-inspector-season-link";
+              full.href = season.season === null ? `/titles/${titleId}` : `/titles/${titleId}#season-${season.season}`;
+              full.textContent = `Open ${season.label} in full details →`;
+              seasonBody.append(full);
+              seasonBody.dataset.loaded = "true";
+            } catch (error) {
+              if (error.name !== "AbortError") {
+                state.textContent = "Season files could not be loaded. Open full details to continue.";
+                seasonBody.replaceChildren(state);
+              }
+            } finally {
+              seasonBody.dataset.loading = "false";
+            }
+          });
+          host.append(shell);
+        });
+      } catch (error) {
+        if (error.name !== "AbortError" && host.isConnected) {
+          const failed = document.createElement("p");
+          failed.className = "workspace-inspector-empty-state";
+          failed.textContent = "Season groups could not be loaded. Open full details to continue.";
+          host.replaceChildren(failed);
+        }
+      }
+    };
+
     const enhanceInspectorActions = () => {
       const panel = body.querySelector("[data-workspace-inspector-panel]");
       if (!panel) return;
@@ -136,6 +267,7 @@
           }
         });
       });
+      enhanceInspectorMedia(panel);
     };
 
     const inspectTitle = async (titleId, item = null, historyMode = "push") => {
@@ -195,8 +327,6 @@
       rangeAnchorId = targetId;
     };
 
-    // Prevent the browser's native Shift+mousedown text-range selection from
-    // painting over cover titles before the click handler selects media cards.
     document.addEventListener("mousedown", (event) => {
       const item = event.target.closest(".library-title-row, .cover-card");
       if (item && event.shiftKey && !interactive(event.target)) event.preventDefault();
@@ -427,6 +557,7 @@
   };
 
   const initialize = () => {
+    ensureWorkspacePolishStyles();
     enhanceWorkspaceNavigation();
     enhanceLibraryInspector();
     enhanceCreditHoverCards();
