@@ -72,7 +72,7 @@ For the long-form inventory, see **[the complete feature catalog](docs/reference
 ### Recovery, security, and operations
 
 - Consistent SQLite backups and validated database restore
-- Verified portable `.infomancer-backup` creation and verification
+- Verified portable `.infomancer-backup` creation, preview/verification, and rollback-protected in-app restore
 - CSV, JSON, and XML library exports
 - Structured event/activity logging and security events
 - Local Argon2id authentication, revocable sessions, CSRF protection, invitation/recovery links, throttling/lockouts, and Librarian/Member authorization
@@ -153,7 +153,7 @@ Librarian Settings cover installation preferences, metadata/provider status, ext
 
 Portable settings exports deliberately omit accounts, passwords, sessions, provider credentials, encryption keys, sources, and media. Database backups contain the SQLite catalog/account state but never media files.
 
-The newer `.infomancer-backup` recovery package adds a versioned manifest, a consistent SQLite snapshot, collection artwork where present, and SHA-256 verification. It deliberately excludes movie/TV files, provider credentials, encryption keys, deployment environment files, application binaries, and caches. Package creation and upload verification are implemented; full in-app restore from that portable package remains release work.
+The `.infomancer-backup` recovery package contains a versioned manifest, a consistent SQLite snapshot, collection artwork where present, and SHA-256 verification. The Recovery settings page verifies an uploaded package and shows its source version and contents before any live data is changed. Restore creates and verifies a fresh safety package of the current installation, stages the recovered database and artwork, and rolls them back together if commit fails. Provider credentials, provider-secret encryption keys, movie/TV files, deployment environment files, application binaries, and caches are never restored from the archive. This is also the format produced by the native Windows uninstall recovery flow, so it can be used after a clean reinstall once the same media paths or shares are available.
 
 ## Native Windows alpha
 
@@ -218,9 +218,9 @@ See **[Remote access with Cloudflare](docs/REMOTE_ACCESS.md)** for setup and ver
 
 The repository is public, but InfoMancer is still an alpha project and no final open-source license has been selected yet. Do not treat an alpha build as a guarantee that database migrations, packaging, or interfaces have reached long-term compatibility.
 
-Current release work includes portable recovery-package restore, production updater/code signing, large-library performance qualification, filesystem/data-durability torture testing, accessibility/responsive QA, and final licensing/privacy/provider review.
+Current release work includes production updater/code signing, large-library performance qualification, filesystem/data-durability torture testing, accessibility/responsive QA, clean reinstall/recovery qualification, and final licensing/privacy/provider review.
 
-See **[the release review checklist](docs/RELEASE_REVIEW.md)**.
+See **[the 0.8 release gate](docs/RELEASE_REVIEW.md)** and **[qualification matrix](docs/QA_0_8.md)**.
 
 ## Tests
 
