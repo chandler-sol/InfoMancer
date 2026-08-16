@@ -4,6 +4,7 @@
 /* The technical rail should wrap into the available width instead of creating a
    page-level horizontal scroller when a value such as Source is long. */
 body.has-app-sidebar .media-dossier .detail-technical-rail {
+  width: 100%;
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
@@ -40,6 +41,9 @@ body.has-app-sidebar .media-dossier .dossier-on-disk .season-heading {
   box-sizing: border-box;
   min-width: 0;
   max-width: 100%;
+}
+body.has-app-sidebar .media-dossier .dossier-on-disk {
+  width: 100%;
 }
 body.has-app-sidebar .media-dossier .dossier-on-disk .file-list {
   width: 100%;
