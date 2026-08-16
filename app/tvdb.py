@@ -70,6 +70,16 @@ class TVDBClient:
             detail = response.text[:300]
             raise TVDBError(f"TVDB returned {response.status_code}: {detail}") from exc
 
+    @staticmethod
+    def _apply_english_translation(record: dict, translation: dict) -> dict:
+        """Prefer English display text without discarding the provider base record."""
+        record["_english_translation"] = translation
+        if translation.get("name"):
+            record["name"] = translation["name"]
+        if translation.get("overview"):
+            record["overview"] = translation["overview"]
+        return record
+
     def search_series(self, query: str) -> list[dict]:
         payload = self._get("/search", {"query": query, "type": "series"})
         return payload.get("data") or []
@@ -84,18 +94,16 @@ class TVDBClient:
     def series(self, series_id: int) -> dict:
         record = self._get(f"/series/{series_id}/extended").get("data") or {}
         record["_default_name"] = record.get("name")
-        record["_english_translation"] = self.translation("series", series_id, "eng")
-        if record["_english_translation"].get("name"):
-            record["name"] = record["_english_translation"]["name"]
-        return record
+        return self._apply_english_translation(
+            record, self.translation("series", series_id, "eng")
+        )
 
     def movie(self, movie_id: int) -> dict:
         record = self._get(f"/movies/{movie_id}/extended").get("data") or {}
         record["_default_name"] = record.get("name")
-        record["_english_translation"] = self.translation("movie", movie_id, "eng")
-        if record["_english_translation"].get("name"):
-            record["name"] = record["_english_translation"]["name"]
-        return record
+        return self._apply_english_translation(
+            record, self.translation("movie", movie_id, "eng")
+        )
 
     def translation(self, entity: str, entity_id: int, language: str = "eng") -> dict:
         """Load one localized title without making missing translations fatal."""
