@@ -172,7 +172,7 @@ def build_router(ctx: RouteContext):
                 )
             if restore_work_running():
                 raise RecoveryPackageError(
-                    "Wait for active scans, metadata, fingerprint, duplicate, or maintenance work to finish before restoring."
+                    "Wait for active scans, metadata, fingerprint, duplicate, trash-cleanup, or maintenance work to finish before restoring."
                 )
             record_event(
                 "restore", "Portable recovery restore started.",
