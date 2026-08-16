@@ -1,0 +1,181 @@
+/* 0.8 detail/inspector containment fixes.
+   Kept separate from library.css so these late layout corrections stay easy to audit. */
+
+/* The technical rail should wrap into the available width instead of creating a
+   page-level horizontal scroller when a value such as Source is long. */
+body.has-app-sidebar .media-dossier .detail-technical-rail {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+body.has-app-sidebar .media-dossier .detail-technical-rail dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
+  scrollbar-width: auto;
+}
+body.has-app-sidebar .media-dossier .detail-technical-rail dl > div {
+  min-width: 0;
+  width: auto;
+  max-width: 100%;
+}
+body.has-app-sidebar .media-dossier .detail-technical-rail dd {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Expanded TV rows contain long filesystem paths. Grid children default to an
+   intrinsic min-width, which allowed one path to widen the entire On Disk panel
+   and push the season heading beyond its border. Explicit zero minimums keep the
+   grid bounded and let the path wrap instead. */
+body.has-app-sidebar .media-dossier .dossier-on-disk,
+body.has-app-sidebar .media-dossier .dossier-on-disk .file-list,
+body.has-app-sidebar .media-dossier .dossier-on-disk .file-list > article,
+body.has-app-sidebar .media-dossier .dossier-on-disk .file-list > article > .grow,
+body.has-app-sidebar .media-dossier .dossier-on-disk .season-heading {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
+body.has-app-sidebar .media-dossier .dossier-on-disk .file-list {
+  width: 100%;
+  overflow: hidden;
+}
+body.has-app-sidebar .media-dossier .dossier-on-disk .season-heading {
+  width: 100%;
+}
+body.has-app-sidebar .media-dossier .dossier-on-disk .file-path,
+body.has-app-sidebar .media-dossier .dossier-on-disk .file-list > article > .grow > small {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* TV inspector season accordion. Season shells arrive with the inspector;
+   episode rows are fetched only when a season is opened. */
+.workspace-inspector-seasons {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+.workspace-inspector-season {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(12, 17, 23, .52);
+}
+.workspace-inspector-season > button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+.workspace-inspector-season > button:hover,
+.workspace-inspector-season > button:focus-visible {
+  background: rgba(255, 255, 255, .035);
+}
+.workspace-inspector-season > button > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-inspector-season > button > small {
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.workspace-inspector-season-chevron {
+  color: var(--lime);
+  font-size: 14px;
+  transform: rotate(0deg);
+  transition: transform 140ms ease;
+}
+.workspace-inspector-season.open .workspace-inspector-season-chevron {
+  transform: rotate(180deg);
+}
+.workspace-inspector-season-body {
+  display: grid;
+  gap: 6px;
+  padding: 0 7px 7px;
+}
+.workspace-inspector-season-body[hidden] {
+  display: none;
+}
+.workspace-inspector-season-state {
+  margin: 0;
+  padding: 9px 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.workspace-inspector-episode {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  min-width: 0;
+  padding: 8px;
+  border-radius: 5px;
+  background: rgba(18, 24, 32, .76);
+}
+.workspace-inspector-episode-code {
+  color: var(--cyan);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.workspace-inspector-episode-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.workspace-inspector-episode-copy strong {
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-inspector-episode-copy small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-inspector-season-link {
+  display: block;
+  padding: 6px 8px 2px;
+  color: var(--cyan);
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.workspace-inspector-season-link:hover,
+.workspace-inspector-season-link:focus-visible {
+  color: var(--lime);
+  text-decoration: underline;
+}
+
+@media (max-width: 720px) {
+  body.has-app-sidebar .media-dossier .detail-technical-rail dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-inspector-season-chevron { transition: none; }
+}
