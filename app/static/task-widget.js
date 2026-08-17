@@ -1,0 +1,1 @@
+/* InfoMancer task widget state module. */
