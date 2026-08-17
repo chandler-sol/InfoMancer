@@ -11,6 +11,34 @@ ACTIVITY_CATEGORIES = {
     "scan", "source-guard", "hashing", "duplicates", "metadata", "mie",
     "media", "media-info", "library",
 }
+SENSITIVE_CONTEXT_KEYS = {
+    "password", "passwd", "passphrase", "token", "secret", "api_key", "apikey",
+    "pin", "authorization", "cookie", "session", "session_id", "csrf_token",
+}
+SENSITIVE_CONTEXT_SUFFIXES = (
+    "_password", "_passwd", "_passphrase", "_token", "_secret", "_api_key",
+    "_apikey", "_pin", "_authorization", "_cookie", "_session", "_session_id",
+)
+
+
+def _sensitive_context_key(key: object) -> bool:
+    normalized = str(key).strip().casefold().replace("-", "_").replace(" ", "_")
+    return normalized in SENSITIVE_CONTEXT_KEYS or normalized.endswith(SENSITIVE_CONTEXT_SUFFIXES)
+
+
+def _safe_context_value(value: Any, *, depth: int = 0) -> Any:
+    """Recursively redact credentials while keeping useful diagnostic structure."""
+    if depth >= 8:
+        return "[truncated]"
+    if isinstance(value, dict):
+        return {
+            str(key): "[redacted]" if _sensitive_context_key(key)
+            else _safe_context_value(item, depth=depth + 1)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple, set)):
+        return [_safe_context_value(item, depth=depth + 1) for item in value]
+    return value
 
 
 class EventLog:
@@ -30,10 +58,7 @@ class EventLog:
         user_id: int | None = None,
     ) -> None:
         normalized_level = level if level in LEVELS else "info"
-        safe_context = {
-            str(key): value for key, value in (context or {}).items()
-            if key.lower() not in {"password", "token", "secret", "api_key", "pin"}
-        }
+        safe_context = _safe_context_value(context or {})
         try:
             encoded = json.dumps(safe_context, ensure_ascii=False, default=str)
         except (TypeError, ValueError):
