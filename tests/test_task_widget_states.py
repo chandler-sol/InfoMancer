@@ -21,7 +21,7 @@ class TaskWidgetStateContracts(unittest.TestCase):
         self.assertIn('Details', script)
         self.assertIn('Open Activity', script)
         self.assertIn('No Tasks Currently Active', script)
-        self.assertIn('/settings/system#fingerprints', script)
+        self.assertIn('/settings/scheduled-tasks', script)
         self.assertIn('Scheduled Tasks', script)
 
         self.assertIn('.task-widget.has-failure', styles)
