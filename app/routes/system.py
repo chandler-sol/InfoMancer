@@ -18,8 +18,9 @@ def build_router(ctx: RouteContext):
 
     @router.post("/engagement/announcements/{announcement_id}/seen")
     def mark_announcement_seen(request: Request, announcement_id: int):
+        user = request.state.user
         try:
-            engagement.mark_seen(announcement_id, request.state.user.id)
+            engagement.mark_seen(announcement_id, user.id, user.role)
         except EngagementError:
             return JSONResponse(
                 {"detail": "That announcement is no longer available. Refresh and try again."},
@@ -33,7 +34,7 @@ def build_router(ctx: RouteContext):
         rows = engagement.list_for_user(user.id, user.role)
         for row in rows:
             if row["due_now"]:
-                engagement.mark_seen(row["id"], user.id)
+                engagement.mark_seen(row["id"], user.id, user.role)
         return templates.TemplateResponse(
             request, "announcements.html", announcement_page_context(request)
         )
