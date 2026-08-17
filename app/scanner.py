@@ -25,13 +25,46 @@ def _walk_files(root: Path, errors: list[str]):
     def on_error(error: OSError) -> None:
         errors.append(str(error))
 
+    try:
+        resolved_root = root.resolve(strict=True)
+    except OSError as exc:
+        errors.append(str(exc))
+        return
+
     for directory, names, filenames in os.walk(
         root, topdown=True, onerror=on_error, followlinks=False,
     ):
-        names[:] = [name for name in names if name != ".infomancer-trash"]
         folder = Path(directory)
+        safe_names: list[str] = []
+        for name in names:
+            candidate = folder / name
+            if name == ".infomancer-trash":
+                continue
+            try:
+                if candidate.is_symlink() or candidate.is_junction():
+                    continue
+            except OSError as exc:
+                errors.append(str(exc))
+                continue
+            safe_names.append(name)
+        names[:] = safe_names
+
         for filename in filenames:
-            yield folder / filename
+            candidate = folder / filename
+            try:
+                # A file symlink can escape a configured source even when os.walk
+                # itself does not follow linked directories. Catalog only physical
+                # files whose resolved path remains under the configured root.
+                if candidate.is_symlink() or candidate.is_junction():
+                    continue
+                candidate.resolve(strict=True).relative_to(resolved_root)
+            except ValueError:
+                errors.append(f"Skipped a file that resolves outside the configured source: {candidate}")
+                continue
+            except OSError as exc:
+                errors.append(str(exc))
+                continue
+            yield candidate
 EPISODE_RE = re.compile(
     r"(?i)(?:^|[. _\-])s(?P<season>\d{1,3})[. _\-]*e(?P<start>\d{1,3})"
     r"(?:[. _\-]*(?:e|-e?)(?P<end>\d{1,3}))?"
