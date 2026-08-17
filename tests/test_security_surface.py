@@ -23,6 +23,17 @@ class SecuritySurfaceTests(unittest.TestCase):
         self.assertIn("responseUrl.origin !== window.location.origin", script)
         self.assertIn('headers: {"X-CSRF-Token": csrfToken}', script)
 
+    def test_task_status_get_does_not_start_background_maintenance(self):
+        operations = (Path(__file__).resolve().parents[1] / "app/routes/operations.py").read_text(
+            encoding="utf-8"
+        )
+        start = operations.index('@router.get("/api/tasks")')
+        end = operations.index('@librarian_get("/api/movie-match-analysis")')
+        task_handler = operations[start:end]
+        self.assertNotIn("maybe_start_scheduled_hashing", task_handler)
+        self.assertNotIn("maybe_start_trash_cleanup", task_handler)
+        self.assertNotIn("Â·", operations)
+
     def test_lockout_notification_targets_first_active_librarian(self):
         original = main.db, main.app_settings, main.event_log
         with tempfile.TemporaryDirectory() as temporary:
