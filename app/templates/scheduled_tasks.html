@@ -23,7 +23,7 @@
       <div><span>Last scheduled run</span><strong>{{ hash_schedule.last_run }}</strong></div>
       <div><span>Waiting</span><strong>{{ '{:,}'.format(hash_counts.queued or 0) }} files</strong></div>
     </div>
-    <form class="settings-form scheduled-task-form" id="scheduled-fingerprint-form" method="post" action="/scheduled-tasks/fingerprints">
+    <form class="settings-form scheduled-task-form" id="scheduled-fingerprint-form" method="post" action="/settings/scheduled-tasks/fingerprints">
       <div class="settings-form-grid">
         <label>Behavior<select name="hash_mode"><option value="automatic" {% if preferences.hash_mode == 'automatic' %}selected{% endif %}>Automatic + scheduled fallback</option><option value="scheduled" {% if preferences.hash_mode == 'scheduled' %}selected{% endif %}>Scheduled only</option><option value="on_demand" {% if preferences.hash_mode == 'on_demand' %}selected{% endif %}>On demand only</option><option value="off" {% if preferences.hash_mode == 'off' %}selected{% endif %}>Off</option></select><small>Automatic can fingerprint a limited number of new files immediately and leave the rest for the schedule.</small></label>
         <label>Immediate file limit<input type="number" name="hash_immediate_limit" min="1" max="10000" value="{{ preferences.hash_immediate_limit }}" required><small>Used by Automatic mode before remaining files are deferred.</small></label>
@@ -36,7 +36,7 @@
     </form>
     <div class="actions scheduled-task-actions">
       <button class="button primary" type="submit" form="scheduled-fingerprint-form">Save fingerprint schedule</button>
-      {% if hash_job.status in ['starting','running'] %}{% if hash_paused %}<form method="post" action="/scheduled-tasks/fingerprints/resume"><button class="button">Resume</button></form>{% else %}<form method="post" action="/scheduled-tasks/fingerprints/pause"><button class="button">Pause</button></form>{% endif %}<form method="post" action="/scheduled-tasks/fingerprints/cancel"><button class="button danger">Cancel</button></form>{% else %}<form method="post" action="/scheduled-tasks/fingerprints/run"><button class="button">Run now</button></form>{% endif %}
+      {% if hash_job.status in ['starting','running'] %}{% if hash_paused %}<form method="post" action="/settings/scheduled-tasks/fingerprints/resume"><button class="button">Resume</button></form>{% else %}<form method="post" action="/settings/scheduled-tasks/fingerprints/pause"><button class="button">Pause</button></form>{% endif %}<form method="post" action="/settings/scheduled-tasks/fingerprints/cancel"><button class="button danger">Cancel</button></form>{% else %}<form method="post" action="/settings/scheduled-tasks/fingerprints/run"><button class="button">Run now</button></form>{% endif %}
     </div>
   </section>
 
@@ -52,7 +52,7 @@
       <div><span>Protection</span><strong>{{ trash_task.protection_mode|replace('_',' ')|title }}</strong></div>
       <div><span>Current state</span><strong>{{ trash_task.detail }}</strong></div>
     </div>
-    <form class="scheduled-retention-form" method="post" action="/scheduled-tasks/trash-retention">
+    <form class="scheduled-retention-form" method="post" action="/settings/scheduled-tasks/trash-retention">
       <label>Default managed-trash retention<select name="trash_retention_days"><option value="never" {% if trash_task.retention == 'never' %}selected{% endif %}>Never expire automatically</option><option value="7" {% if trash_task.retention == '7' %}selected{% endif %}>7 days</option><option value="30" {% if trash_task.retention == '30' %}selected{% endif %}>30 days</option><option value="90" {% if trash_task.retention == '90' %}selected{% endif %}>90 days</option><option value="365" {% if trash_task.retention == '365' %}selected{% endif %}>1 year</option></select><small>This controls how long eligible managed-trash items are kept before automatic cleanup can remove them.</small></label>
       <button class="button primary">Save retention</button>
     </form>
