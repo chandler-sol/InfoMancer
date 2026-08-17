@@ -8,6 +8,13 @@ services:
     container_name: infomancer
     restart: unless-stopped
     env_file: .env
+    # InfoMancer runs as an unprivileged image user and does not require Linux
+    # capabilities. Keep privilege escalation unavailable even if a dependency is
+    # compromised inside the container.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     ports:
       # Keep this loopback-only; Cloudflare Tunnel is the public entry point.
       - "127.0.0.1:8787:8787"
