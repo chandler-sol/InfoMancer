@@ -6,7 +6,7 @@ import tempfile
 import zlib
 from pathlib import Path
 
-from fastapi import APIRouter, File, Request, UploadFile
+from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from .. import auth as auth_module
@@ -153,6 +153,20 @@ def _svg_avatar(user) -> str:
     )
 
 
+async def _read_small_body(request: Request) -> tuple[bytes, str]:
+    length_text = request.headers.get("content-length", "").strip()
+    if length_text.isdigit() and int(length_text) > MAX_AVATAR_BYTES:
+        return b"", "The processed profile image must be no larger than 2 MB."
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > MAX_AVATAR_BYTES:
+            return b"", "The processed profile image must be no larger than 2 MB."
+        chunks.append(chunk)
+    return b"".join(chunks), ""
+
+
 def build_router(ctx: RouteContext):
     router = APIRouter()
     settings = ctx.live("settings")
@@ -177,17 +191,19 @@ def build_router(ctx: RouteContext):
         )
 
     @router.post("/account/profile/avatar")
-    async def upload_profile_avatar(request: Request, avatar: UploadFile = File(...)):
+    async def upload_profile_avatar(request: Request):
         user = getattr(request.state, "user", None)
         if not user or int(getattr(user, "id", 0) or 0) <= 0:
             return JSONResponse({"error": "Custom profile images require an account."}, status_code=400)
-        if avatar.content_type != "image/png":
+        content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().casefold()
+        if content_type != "image/png":
             return JSONResponse(
                 {"error": "InfoMancer only stores the sanitized PNG produced by the profile editor."},
                 status_code=415,
             )
-        payload = await avatar.read(MAX_AVATAR_BYTES + 1)
-        await avatar.close()
+        payload, read_error = await _read_small_body(request)
+        if read_error:
+            return JSONResponse({"error": read_error}, status_code=413)
         error = _validate_canvas_png(payload)
         if error:
             return JSONResponse({"error": error}, status_code=400)
