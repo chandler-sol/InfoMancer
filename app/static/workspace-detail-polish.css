@@ -122,6 +122,44 @@ body.has-app-sidebar .media-dossier .season-collapse-toolbar button {
   padding: 6px 10px;
 }
 
+/* Selected cover cards use the cyan Workspace accent as one coherent object.
+   Move the whole card on hover so the selection frame follows the artwork rather
+   than staying behind. The poster gets rounded top corners and a square lower
+   edge for this alpha pass so the artwork flows into the title/meta area. */
+.cover-card {
+  border-radius: var(--im-radius-md) var(--im-radius-md) 0 0;
+  transition: transform .18s ease;
+}
+.cover-art,
+.cover-card-actions {
+  border-radius: var(--im-radius-md) var(--im-radius-md) 0 0;
+}
+.cover-card.workspace-selected {
+  outline: 0;
+  border-radius: var(--im-radius-md) var(--im-radius-md) 0 0;
+}
+.cover-card.workspace-selected::after {
+  content: "";
+  position: absolute;
+  z-index: 8;
+  inset: -2px;
+  border: 2px solid rgba(81, 214, 230, .65);
+  border-radius: calc(var(--im-radius-md) + 2px) calc(var(--im-radius-md) + 2px) 0 0;
+  pointer-events: none;
+}
+.cover-card:hover {
+  transform: translateY(-4px);
+}
+.cover-card:hover .cover-art,
+.cover-card:hover .cover-card-actions {
+  transform: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .cover-card:hover .cover-favorite-button {
+    transform: scale(1);
+  }
+}
+
 /* Keep the inspector's primary navigation shortcut near the synopsis instead of
    making users traverse the entire inspector first. The secondary organization
    actions remain at the bottom where they read as a utility group. */
@@ -291,5 +329,7 @@ body.has-app-sidebar .media-dossier .season-collapse-toolbar button {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .cover-card { transition: none; }
+  .cover-card:hover { transform: none; }
   .workspace-inspector-season-chevron { transition: none; }
 }
