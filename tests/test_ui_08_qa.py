@@ -18,7 +18,11 @@ class Ui08QaContracts(unittest.TestCase):
     def test_detail_layout_explicitly_contains_long_rows_and_technical_rail(self):
         css = (ROOT / "app/static/workspace-detail-polish.css").read_text(encoding="utf-8")
         loader = (ROOT / "app/static/review.css").read_text(encoding="utf-8")
+        script = (ROOT / "app/static/workspace.js").read_text(encoding="utf-8")
         self.assertIn('@import url("workspace-detail-polish.css?v=1")', loader)
+        self.assertIn("workspaceAssetVersion", script)
+        self.assertIn('searchParams.get("v")', script)
+        self.assertIn("workspace-detail-polish.css${version}", script)
         self.assertIn("flex-wrap: wrap", css)
         self.assertIn("flex: 1 1 128px", css)
         self.assertIn("flex-basis: 190px", css)
