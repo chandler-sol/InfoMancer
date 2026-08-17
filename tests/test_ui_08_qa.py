@@ -57,6 +57,22 @@ class Ui08QaContracts(unittest.TestCase):
         self.assertIn(".workspace-inspector-meta.compact dd", css)
         self.assertIn("font-size: 11.5px", css)
 
+    def test_topbar_task_widget_replaces_sidebar_floating_card(self):
+        css = (ROOT / "app/static/review.css").read_text(encoding="utf-8")
+        template = (ROOT / "app/templates/base.html").read_text(encoding="utf-8")
+        self.assertIn('class="task-widget idle"', template)
+        self.assertIn('class="topbar-actions"', template)
+        self.assertIn("body.has-app-sidebar .topbar .task-widget", css)
+        self.assertIn("position: relative", css)
+        self.assertIn("flex: 0 0 42px", css)
+        self.assertIn("width: 42px", css)
+        self.assertIn("body.has-app-sidebar .topbar .task-popover", css)
+        self.assertIn("top: calc(100% + 12px)", css)
+        self.assertIn("right: 0", css)
+        self.assertIn('content: "Tasks & notifications"', css)
+        self.assertIn(".topbar #task-minimize", css)
+        self.assertIn("display: none", css)
+
     def test_inspector_quick_details_and_media_spacing_are_preserved(self):
         template = (ROOT / "app/templates/_workspace_inspector.html").read_text(encoding="utf-8")
         css = (ROOT / "app/static/workspace-detail-polish.css").read_text(encoding="utf-8")
