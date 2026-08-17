@@ -176,7 +176,7 @@
     footer.className = "task-widget-footer";
     const link = document.createElement("a");
     link.className = "task-scheduled-link";
-    link.href = "/scheduled-tasks";
+    link.href = "/settings/scheduled-tasks";
     link.textContent = "Scheduled Tasks";
     link.title = "Open scheduled task settings";
     footer.append(link);
