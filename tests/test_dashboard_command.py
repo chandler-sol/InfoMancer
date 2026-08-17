@@ -33,6 +33,8 @@ class DashboardCommandContracts(unittest.TestCase):
         self.assertIn(".home-favorite-strip", styles)
         self.assertIn("@media(max-width:760px)", styles)
         self.assertIn("@media(prefers-reduced-motion:reduce)", styles)
+        self.assertIn(".home-ops-panel-head>a{font-weight:800}", styles)
+        self.assertIn(".home-change-card>b{font-weight:900}", styles)
 
 
 if __name__ == "__main__":
