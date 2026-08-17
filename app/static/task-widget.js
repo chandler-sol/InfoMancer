@@ -315,14 +315,35 @@
     setTimeout(pollFailures, active.length ? 1800 : 4000);
   };
 
-  toggle.addEventListener("click", () => queueMicrotask(() => {
-    open = widget.classList.contains("is-pinned") && !popover.hidden;
+  toggle.addEventListener("click", (event) => {
+    event.preventDefault();
+    open = !open;
     applyOpen();
-  }));
+  });
 
-  document.getElementById("task-dismiss")?.addEventListener("click", () => {
+  document.getElementById("task-minimize")?.addEventListener("click", (event) => {
+    event.stopPropagation();
     open = false;
-    queueMicrotask(applyOpen);
+    applyOpen();
+  });
+
+  document.getElementById("task-dismiss")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    open = false;
+    applyOpen();
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!open || widget.contains(event.target)) return;
+    open = false;
+    applyOpen();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !open) return;
+    open = false;
+    applyOpen();
+    toggle.focus();
   });
 
   new MutationObserver(() => {
