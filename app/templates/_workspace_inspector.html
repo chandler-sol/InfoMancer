@@ -18,6 +18,7 @@
   </div>
 
   {% if title.overview %}<p class="workspace-inspector-overview">{{ title.overview }}</p>{% endif %}
+  <div class="workspace-inspector-quick-action"><a class="button primary" href="/titles/{{ title.id }}">Open full details</a></div>
 
   <section class="workspace-inspector-section" aria-labelledby="inspector-health-title">
     <div class="workspace-inspector-section-head"><span><small>REVIEW</small><strong id="inspector-health-title">Health &amp; attention</strong></span><a href="/library-health">Open Review →</a></div>
@@ -76,7 +77,6 @@
   </section>
 
   <div class="workspace-inspector-actions workspace-inspector-footer-actions">
-    <a class="button primary" href="/titles/{{ title.id }}">Open full details</a>
     <div class="workspace-inspector-action-list">
       <a href="/titles/{{ title.id }}/organize" data-organize-dialog>Organize &amp; Tags</a>
       <a href="/titles/{{ title.id }}/libraries" data-organize-dialog>Custom Libraries</a>
