@@ -14,7 +14,6 @@ class TaskWidgetStateContracts(unittest.TestCase):
 
         self.assertIn('task.id !== "media-fingerprints-queued"', script)
         self.assertIn("COMPLETE_TTL_MS = 600000", script)
-        self.assertIn('"determinate" : "indeterminate"'.replace('" : "', '" : "'), script.replace('?', '?')) if False else None
         self.assertIn('progress ? "determinate" : "indeterminate"', script)
         self.assertIn('aria-valuenow', script)
         self.assertIn('/api/task-failures', script)
