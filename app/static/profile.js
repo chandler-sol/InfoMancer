@@ -13,7 +13,7 @@
   const accountAvatar = document.querySelector(".account-avatar");
   const dialog = document.getElementById("profile-avatar-dialog");
   const openAvatar = document.querySelector("[data-profile-avatar-open]");
-  const closeAvatar = document.querySelector("[data-profile-avatar-close]");
+  const closeAvatarButtons = [...document.querySelectorAll("[data-profile-avatar-close]")];
   const dropZone = document.querySelector("[data-profile-avatar-drop]");
   const fileInput = document.getElementById("profile-avatar-file");
   const canvas = document.getElementById("profile-avatar-canvas");
@@ -95,7 +95,7 @@
     if (useAvatar) useAvatar.disabled = true;
     status();
     if (!file) return;
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
       status("Choose a PNG, JPEG, or WebP image.", true);
       return;
     }
@@ -144,14 +144,15 @@
       useAvatar.disabled = false;
       return;
     }
-    const data = new FormData();
-    data.append("avatar", blob, "profile-avatar.png");
     try {
       const response = await fetch("/account/profile/avatar", {
         method: "POST",
         credentials: "same-origin",
-        headers: csrf ? {"X-CSRF-Token": csrf} : {},
-        body: data,
+        headers: {
+          "Content-Type": "image/png",
+          ...(csrf ? {"X-CSRF-Token": csrf} : {}),
+        },
+        body: blob,
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || `Upload failed with HTTP ${response.status}.`);
@@ -177,7 +178,7 @@
   iconChoices.forEach(choice => choice.addEventListener("change", updatePreview));
   displayName?.addEventListener("input", updatePreview);
   openAvatar?.addEventListener("click", openDialog);
-  closeAvatar?.addEventListener("click", closeDialog);
+  closeAvatarButtons.forEach(button => button.addEventListener("click", closeDialog));
   fileInput?.addEventListener("change", () => prepareFile(fileInput.files?.[0]));
   useAvatar?.addEventListener("click", uploadPrepared);
   dropZone?.addEventListener("dragover", event => {
@@ -189,7 +190,7 @@
     event.preventDefault();
     dropZone.classList.remove("dragging");
     const file = event.dataTransfer?.files?.[0];
-    if (fileInput && file) {
+    if (fileInput && file && typeof DataTransfer === "function") {
       const transfer = new DataTransfer();
       transfer.items.add(file);
       fileInput.files = transfer.files;
