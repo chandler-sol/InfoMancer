@@ -20,8 +20,18 @@ sandbox-media/
 *.log
 *.tar.gz
 dist/
+build/
+*.spec
+
+# Desktop build output and dependency caches are reproducible and must not be committed.
+node_modules/
+desktop/src-tauri/target/
+desktop/src-tauri/binaries/infomancer-core-*
+
+# Operating-system metadata is never part of an InfoMancer build.
+.DS_Store
+Thumbs.db
+Desktop.ini
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 graft/
-build/
-*.spec
