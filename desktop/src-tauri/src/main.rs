@@ -127,15 +127,14 @@ async fn start_local(app: tauri::AppHandle) -> Result<LocalStartup, String> {
         port.to_string(),
         "--data-dir".to_string(),
         data_dir.to_string_lossy().into_owned(),
-        "--bootstrap-token".to_string(),
-        bootstrap_token.clone(),
     ];
     let sidecar = app
         .shell()
         .sidecar("infomancer-core")
-        .map_err(|error| format!("Could not locate the bundled InfoMancer core: {error}"))?;
-    let (mut events, child) = sidecar
+        .map_err(|error| format!("Could not locate the bundled InfoMancer core: {error}"))?
         .args(args)
+        .env("INFOMANCER_BOOTSTRAP_TOKEN", &bootstrap_token);
+    let (mut events, child) = sidecar
         .spawn()
         .map_err(|error| format!("Could not start the bundled InfoMancer core: {error}"))?;
 
