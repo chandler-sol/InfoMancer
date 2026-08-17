@@ -15,6 +15,14 @@ class SecuritySurfaceTests(unittest.TestCase):
         self.assertNotIn("/redoc", routes)
         self.assertNotIn("/openapi.json", routes)
 
+    def test_multipart_helper_never_sends_csrf_to_another_origin(self):
+        script = (Path(__file__).resolve().parents[1] / "app/static/multipart-submit.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("actionUrl.origin !== window.location.origin", script)
+        self.assertIn("responseUrl.origin !== window.location.origin", script)
+        self.assertIn('headers: {"X-CSRF-Token": csrfToken}', script)
+
     def test_lockout_notification_targets_first_active_librarian(self):
         original = main.db, main.app_settings, main.event_log
         with tempfile.TemporaryDirectory() as temporary:
