@@ -31,13 +31,15 @@
             <strong>{{ icon_labels.get(icon, icon|replace('_', ' ')|title) }}</strong>
           </label>
           {% endfor %}
-          <label class="profile-icon-choice profile-custom-choice" data-symbol="{{ current_user.display_name[:1]|upper }}">
-            <input type="radio" name="profile_icon" value="custom" {% if current_user.profile_icon == 'custom' %}checked{% endif %}>
-            <span class="profile-icon-glyph" data-profile-custom-choice-glyph {% if current_user.profile_icon == 'custom' %}hidden{% endif %}>+</span>
-            <img class="profile-icon-glyph" data-profile-custom-choice-image {% if current_user.profile_icon != 'custom' %}hidden{% endif %} src="/account/avatar/current" alt="">
-            <span class="profile-custom-copy"><strong>Custom</strong><small>Upload your own square image</small></span>
+          <div class="profile-icon-choice profile-custom-choice" data-symbol="{{ current_user.display_name[:1]|upper }}">
+            <label class="profile-custom-select">
+              <input type="radio" name="profile_icon" value="custom" {% if current_user.profile_icon == 'custom' %}checked{% endif %}>
+              <span class="profile-icon-glyph" data-profile-custom-choice-glyph {% if current_user.profile_icon == 'custom' %}hidden{% endif %}>+</span>
+              <img class="profile-icon-glyph" data-profile-custom-choice-image {% if current_user.profile_icon != 'custom' %}hidden{% endif %} src="/account/avatar/current" alt="">
+              <span class="profile-custom-copy"><strong>Custom</strong><small>Upload your own square image</small></span>
+            </label>
             <button class="button small profile-custom-upload" type="button" data-profile-avatar-open>{{ 'Change custom icon' if current_user.profile_icon == 'custom' else 'Upload custom icon' }}</button>
-          </label>
+          </div>
         </div>
       </fieldset>
     </section>
