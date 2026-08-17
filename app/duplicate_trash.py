@@ -35,8 +35,10 @@ class DuplicateTrashService:
         source = Path(row["path"])
         root = Path(row["root_path"])
         self._require_inside(source, root)
-        trash_dir = root / ".infomancer-trash" / datetime.now().strftime("%Y-%m-%d")
+        trash_root = self._managed_trash_root(root)
+        trash_dir = trash_root / datetime.now().strftime("%Y-%m-%d")
         destination = trash_dir / f"{uuid.uuid4().hex[:10]}-{source.name}"
+        self._require_inside(destination, trash_root)
         purge_after = self._purge_after(retention_days)
         return {
             "file": row,
@@ -55,10 +57,15 @@ class DuplicateTrashService:
             raise DuplicateTrashError(
                 "The selected file is no longer present at its cataloged path. Use “I deleted it myself” so InfoMancer can verify and update the catalog."
             )
-        trash_dir = root / ".infomancer-trash" / datetime.now().strftime("%Y-%m-%d")
+        trash_root = self._managed_trash_root(root)
+        trash_dir = trash_root / datetime.now().strftime("%Y-%m-%d")
         destination = trash_dir / f"{uuid.uuid4().hex[:10]}-{source.name}"
+        self._require_inside(destination, trash_root)
         trash_dir.mkdir(parents=True, exist_ok=True)
-        self._require_inside(destination, root / ".infomancer-trash")
+        # Re-resolve after creation so an existing or concurrently replaced symlink
+        # cannot redirect managed Trash outside the configured media root.
+        trash_root = self._managed_trash_root(root)
+        self._require_inside(destination, trash_root)
         snapshot = {column: row[column] for column in FILE_COLUMNS}
         shutil.move(str(source), str(destination))
         try:
@@ -207,7 +214,8 @@ class DuplicateTrashService:
         source = Path(row["trash_path"])
         destination = Path(row["original_path"])
         root = Path(row["root_path"])
-        self._require_inside(source, root / ".infomancer-trash")
+        trash_root = self._managed_trash_root(root)
+        self._require_inside(source, trash_root)
         self._require_inside(destination, root)
         if destination.exists():
             raise DuplicateTrashError(
@@ -252,9 +260,17 @@ class DuplicateTrashService:
             ).fetchall()
         purged = 0
         for row in rows:
+            if not row["root_path"]:
+                # A stale or tampered catalog row must never become permission to
+                # delete an arbitrary path after its media root disappears.
+                continue
             path = Path(row["trash_path"])
-            if row["root_path"]:
-                self._require_inside(path, Path(row["root_path"]) / ".infomancer-trash")
+            root = Path(row["root_path"])
+            try:
+                trash_root = self._managed_trash_root(root)
+                self._require_inside(path, trash_root)
+            except DuplicateTrashError:
+                continue
             try:
                 path.unlink(missing_ok=True)
             except OSError:
@@ -280,6 +296,11 @@ class DuplicateTrashService:
                 "That file is no longer in the catalog. Rescan the source and review the current duplicate candidates."
             )
         return dict(row)
+
+    def _managed_trash_root(self, root: Path) -> Path:
+        trash_root = root / ".infomancer-trash"
+        self._require_inside(trash_root, root)
+        return trash_root
 
     @staticmethod
     def _require_inside(path: Path, parent: Path) -> None:
