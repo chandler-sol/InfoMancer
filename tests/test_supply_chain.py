@@ -51,6 +51,16 @@ class SupplyChainTests(unittest.TestCase):
                     f"{workflow.name} contains mutable action reference {reference}",
                 )
 
+    def test_dependency_audits_cover_python_rust_and_desktop_js(self):
+        tests = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+        windows = (ROOT / ".github/workflows/windows-desktop.yml").read_text(encoding="utf-8")
+        release = (ROOT / ".github/workflows/windows-desktop-release.yml").read_text(encoding="utf-8")
+        self.assertIn("python -m pip_audit -r requirements.txt", tests)
+        self.assertIn("cargo-audit --version 0.22.2", tests)
+        self.assertIn("cargo audit --file desktop/src-tauri/Cargo.lock", tests)
+        self.assertIn("npm audit --audit-level=high", windows)
+        self.assertIn("npm audit --audit-level=high", release)
+
 
 if __name__ == "__main__":
     unittest.main()
