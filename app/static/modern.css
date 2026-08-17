@@ -224,3 +224,117 @@ html.library-view-ready .library-view-toolbar {
     transition: none;
   }
 }
+
+/* Desktop density pass. 16:9 workstations have abundant width but limited vertical
+   room, so keep page chrome and section transitions deliberate without spending a
+   full row of height on empty space. Mobile keeps the existing touch-friendly rhythm. */
+@media (min-width: 981px) {
+  body.has-app-sidebar .shell {
+    padding-top: 24px;
+    padding-bottom: 56px;
+  }
+
+  body.has-app-sidebar main.shell:has(> .home-modern),
+  body.has-app-sidebar main.shell:has(> .home-ops) {
+    padding-top: 18px;
+  }
+
+  body.has-app-sidebar .page-head {
+    margin-bottom: 20px;
+  }
+
+  body.has-app-sidebar .catalog-tabs {
+    margin-bottom: 16px;
+  }
+
+  body.has-app-sidebar .library-display-toolbar {
+    margin-bottom: 14px;
+  }
+
+  body.has-app-sidebar .favorites-heading {
+    margin-bottom: 1.25rem;
+  }
+
+  body.has-app-sidebar .favorites-section {
+    margin: 1.25rem 0 2rem;
+  }
+
+  body.has-app-sidebar .settings-heading {
+    margin: .65rem 0 1rem;
+  }
+
+  body.has-app-sidebar .settings-heading p:not(.eyebrow) {
+    margin: .35rem 0 0;
+    line-height: 1.5;
+  }
+
+  body.has-app-sidebar .account-nav {
+    margin-bottom: 1rem;
+  }
+
+  body.has-app-sidebar .account-nav a {
+    padding: .65rem 1rem;
+  }
+
+  body.has-app-sidebar .app-settings-heading {
+    margin-bottom: .9rem;
+  }
+
+  body.has-app-sidebar .settings-section-nav {
+    margin-bottom: 1rem;
+  }
+
+  body.has-app-sidebar .settings-section-nav a {
+    padding: .65rem .9rem;
+  }
+
+  body.has-app-sidebar .settings-page-grid,
+  body.has-app-sidebar .settings-column-stack,
+  body.has-app-sidebar .system-overview-grid {
+    gap: 1rem;
+  }
+
+  body.has-app-sidebar .settings-card {
+    gap: .9rem;
+  }
+
+  body.has-app-sidebar .settings-metrics > div {
+    padding: .8rem .9rem;
+  }
+
+  body.has-app-sidebar .profile-page {
+    margin-top: 0;
+  }
+
+  body.has-app-sidebar .profile-page .settings-heading {
+    margin: 0 0 .85rem;
+  }
+
+  body.has-app-sidebar .profile-page .account-nav {
+    margin-bottom: .85rem;
+  }
+
+  body.has-app-sidebar .profile-form-shell,
+  body.has-app-sidebar .profile-primary-grid,
+  body.has-app-sidebar .profile-preference-grid {
+    gap: 14px;
+  }
+
+  body.has-app-sidebar .profile-card {
+    padding: 22px;
+  }
+
+  body.has-app-sidebar .profile-card-head {
+    margin-bottom: 16px;
+  }
+
+  body.has-app-sidebar .profile-icon-fieldset {
+    margin-top: 20px !important;
+    padding-top: 16px !important;
+  }
+
+  body.has-app-sidebar .profile-preview-inner {
+    min-height: 350px;
+    padding: 30px;
+  }
+}
