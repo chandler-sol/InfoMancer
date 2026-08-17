@@ -44,8 +44,11 @@ class WindowsDesktopContractTests(unittest.TestCase):
 
     def test_desktop_bootstrap_token_is_not_exposed_in_child_command_line(self):
         rust = (ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
+        sidecar = (ROOT / "desktop/sidecar.py").read_text(encoding="utf-8")
         self.assertIn('.env("INFOMANCER_BOOTSTRAP_TOKEN", &bootstrap_token)', rust)
         self.assertNotIn('"--bootstrap-token"', rust)
+        self.assertIn('os.getenv("INFOMANCER_BOOTSTRAP_TOKEN", "")', sidecar)
+        self.assertIn('os.environ["INFOMANCER_BOOTSTRAP_TOKEN"] = bootstrap_token', sidecar)
 
     def test_updater_uses_signed_github_release_channel(self):
         rust = (ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
