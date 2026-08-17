@@ -40,7 +40,7 @@ class Ui08QaContracts(unittest.TestCase):
         template = (ROOT / "app/templates/_workspace_inspector.html").read_text(encoding="utf-8")
         css = (ROOT / "app/static/workspace-detail-polish.css").read_text(encoding="utf-8")
         identity_pos = template.index('class="workspace-inspector-identity"')
-        details_pos = template.index("workspace-inspector-details-shortcut")
+        details_pos = template.index('<a class="button workspace-inspector-details-shortcut"')
         favorite_pos = template.index("workspace-inspector-favorite")
         overview_pos = template.index("workspace-inspector-overview")
         self.assertLess(identity_pos, details_pos)
