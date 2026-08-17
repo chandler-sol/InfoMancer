@@ -172,6 +172,13 @@ textarea:focus {
   flex: 0 0 auto;
 }
 
+/* Keep smaller covers in a predictable reading grid. The older space-between rule
+   made unused row width look like part of the sizing control and exaggerated gaps. */
+.cover-library {
+  justify-content: start;
+  column-gap: clamp(16px, 1.8vw, 28px);
+}
+
 /* The Library script restores the saved List/Covers preference at the end of the
    document. Hold only the view surface for a fraction of a second so the browser
    cannot paint the server-default List view between parse and preference restore.
