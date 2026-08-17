@@ -127,6 +127,87 @@ textarea:focus {
   border-radius: var(--radius-md);
 }
 
+/* Library display controls read as one compact tool instead of a toggle followed by
+   a detached slider stretching toward the viewport edge. */
+.library-view-toolbar {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: min(100%, 430px);
+  margin-left: auto;
+}
+
+.library-view-controls {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: auto;
+  max-width: 100%;
+  gap: 7px;
+  padding: 4px;
+  border: 1px solid #2d3945;
+  border-radius: var(--radius-md);
+  background: rgba(13, 19, 25, .76);
+}
+
+.library-view-toggle {
+  flex: 0 0 auto;
+}
+
+.cover-size-control:not([hidden]) {
+  display: flex;
+  flex: 0 1 220px;
+  width: 220px;
+  max-width: min(38vw, 220px);
+  gap: 6px;
+  padding-left: 7px;
+  border-left: 1px solid #2d3945;
+}
+
+.cover-size-slider {
+  flex: 1 1 120px;
+  min-width: 105px;
+}
+
+.cover-size-step {
+  flex: 0 0 auto;
+}
+
+/* The Library script restores the saved List/Covers preference at the end of the
+   document. Hold only the view surface for a fraction of a second so the browser
+   cannot paint the server-default List view between parse and preference restore.
+   The animation fallback still reveals the content if JavaScript is unavailable. */
+.library-table,
+#cover-library,
+.library-view-toolbar {
+  animation: library-first-paint-fallback 0s linear .24s both;
+}
+
+html.library-view-ready .library-table,
+html.library-view-ready #cover-library,
+html.library-view-ready .library-view-toolbar {
+  visibility: visible;
+  animation: none;
+}
+
+@keyframes library-first-paint-fallback {
+  0% { visibility: hidden; }
+  100% { visibility: visible; }
+}
+
+@media (max-width: 760px) {
+  .library-view-toolbar {
+    max-width: 100%;
+  }
+  .library-view-controls {
+    flex-wrap: wrap;
+  }
+  .cover-size-control:not([hidden]) {
+    flex-basis: 190px;
+    width: 190px;
+    max-width: calc(100vw - 48px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .button,
   button,
