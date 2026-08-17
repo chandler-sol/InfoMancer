@@ -38,6 +38,16 @@ class TaskWidgetStateContracts(unittest.TestCase):
         self.assertIn('@router.get("/api/task-failures"', routes)
         self.assertIn('dependencies=[Depends(require_librarian)]', routes)
 
+    def test_task_widget_has_reliable_close_interactions(self):
+        script = (ROOT / "app/static/task-widget.js").read_text(encoding="utf-8")
+
+        self.assertIn("open = !open", script)
+        self.assertIn('document.getElementById("task-minimize")', script)
+        self.assertIn('document.getElementById("task-dismiss")', script)
+        self.assertIn("if (!open || widget.contains(event.target)) return", script)
+        self.assertIn('event.key !== "Escape"', script)
+        self.assertIn("toggle.focus()", script)
+
 
 if __name__ == "__main__":
     unittest.main()
