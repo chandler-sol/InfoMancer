@@ -50,6 +50,14 @@ class WindowsDesktopContractTests(unittest.TestCase):
         self.assertIn('os.getenv("INFOMANCER_BOOTSTRAP_TOKEN", "")', sidecar)
         self.assertIn('os.environ["INFOMANCER_BOOTSTRAP_TOKEN"] = bootstrap_token', sidecar)
 
+    def test_remote_http_pages_are_not_granted_tauri_ipc(self):
+        capability = json.loads((ROOT / "desktop/src-tauri/capabilities/launcher.json").read_text(encoding="utf-8"))
+        config = json.loads((ROOT / "desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
+        self.assertEqual(capability["windows"], ["main"])
+        self.assertNotIn("remote", capability)
+        self.assertNotIn("dangerousRemoteDomainIpcAccess", config["app"]["security"])
+        self.assertNotIn("dangerousRemoteUrlIpcAccess", config["app"]["security"])
+
     def test_updater_uses_signed_github_release_channel(self):
         rust = (ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
         self.assertIn("tauri_plugin_updater", rust)
