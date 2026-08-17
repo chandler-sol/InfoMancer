@@ -77,8 +77,11 @@ def create_recovery_package(data_dir: Path, output: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="InfoMancer Desktop local core")
     parser.add_argument("--port", type=int)
-    parser.add_argument("--data-dir", required=True)
+    # Retained for backwards-compatible manual launches. The native launcher sends
+    # this secret through the inherited environment so it is not exposed in process
+    # command-line listings.
     parser.add_argument("--bootstrap-token", default="")
+    parser.add_argument("--data-dir", required=True)
     parser.add_argument("--recovery-output")
     args = parser.parse_args()
 
@@ -96,6 +99,9 @@ def main() -> None:
 
     data_dir.mkdir(parents=True, exist_ok=True)
     database = data_dir / "infomancer.db"
+    bootstrap_token = (
+        args.bootstrap_token or os.getenv("INFOMANCER_BOOTSTRAP_TOKEN", "")
+    ).strip()
 
     os.environ["INFOMANCER_DATABASE"] = str(database)
     os.environ["INFOMANCER_AUTH_MODE"] = "local"
@@ -103,8 +109,10 @@ def main() -> None:
     os.environ["INFOMANCER_PUBLIC_URL"] = f"http://127.0.0.1:{args.port}"
     os.environ["INFOMANCER_TRUSTED_HOSTS"] = "127.0.0.1,localhost"
     os.environ["INFOMANCER_TRUST_CLOUDFLARE_PROXY"] = "false"
-    if args.bootstrap_token:
-        os.environ["INFOMANCER_BOOTSTRAP_TOKEN"] = args.bootstrap_token
+    if bootstrap_token:
+        os.environ["INFOMANCER_BOOTSTRAP_TOKEN"] = bootstrap_token
+    else:
+        os.environ.pop("INFOMANCER_BOOTSTRAP_TOKEN", None)
     if not os.getenv("MEDIA_BROWSE_ROOTS", "").strip():
         os.environ["MEDIA_BROWSE_ROOTS"] = ",".join(str(path) for path in _default_media_roots())
 
