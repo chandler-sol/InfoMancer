@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Scheduled Tasks · {{ app_name }}{% endblock %}
+{% block content %}
+<header class="settings-heading app-settings-heading scheduled-tasks-heading">
+  <p class="eyebrow">LIBRARIAN</p>
+  <h1>Scheduled Tasks</h1>
+  <p>Manage maintenance InfoMancer can run without a browser session. Scheduled work stays here until it actually starts, then live progress moves into the task widget.</p>
+</header>
+{% include "_settings_nav.html" %}
+{% if error %}<div class="form-error page-error" role="alert">{{ error }}</div>{% endif %}
+
+<div class="scheduled-task-layout">
+  <section class="panel settings-card scheduled-task-card scheduled-fingerprint-card">
+    <div class="settings-card-head scheduled-task-head">
+      <div><p class="eyebrow">FILE FINGERPRINTS</p><h2>Content fingerprinting</h2></div>
+      <span class="settings-state {{ 'active' if hash_job.status in ['starting','running'] else 'good' if hash_schedule.enabled else '' }}">{% if hash_job.status in ['starting','running'] %}Running{% elif hash_schedule.enabled %}Scheduled{% elif preferences.hash_mode == 'on_demand' %}On demand{% else %}Off{% endif %}</span>
+    </div>
+    <p class="muted">SHA-256 fingerprints let Duplicate Review prove whether files are byte-for-byte identical. Scheduling controls when queued or deferred fingerprints are processed.</p>
+    <div class="scheduled-task-summary">
+      <div><span>Schedule</span><strong>{{ hash_schedule.label if hash_schedule.enabled else 'Not scheduled' }}</strong></div>
+      <div><span>Next run</span><strong>{{ hash_schedule.next_run }}</strong></div>
+      <div><span>Last scheduled run</span><strong>{{ hash_schedule.last_run }}</strong></div>
+      <div><span>Waiting</span><strong>{{ '{:,}'.format(hash_counts.queued or 0) }} files</strong></div>
+    </div>
+    <form class="settings-form scheduled-task-form" id="scheduled-fingerprint-form" method="post" action="/scheduled-tasks/fingerprints">
+      <div class="settings-form-grid">
+        <label>Behavior<select name="hash_mode"><option value="automatic" {% if preferences.hash_mode == 'automatic' %}selected{% endif %}>Automatic + scheduled fallback</option><option value="scheduled" {% if preferences.hash_mode == 'scheduled' %}selected{% endif %}>Scheduled only</option><option value="on_demand" {% if preferences.hash_mode == 'on_demand' %}selected{% endif %}>On demand only</option><option value="off" {% if preferences.hash_mode == 'off' %}selected{% endif %}>Off</option></select><small>Automatic can fingerprint a limited number of new files immediately and leave the rest for the schedule.</small></label>
+        <label>Immediate file limit<input type="number" name="hash_immediate_limit" min="1" max="10000" value="{{ preferences.hash_immediate_limit }}" required><small>Used by Automatic mode before remaining files are deferred.</small></label>
+        <label>Frequency<select name="hash_schedule_frequency"><option value="daily" {% if preferences.hash_schedule_frequency == 'daily' %}selected{% endif %}>Daily</option><option value="weekly" {% if preferences.hash_schedule_frequency == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if preferences.hash_schedule_frequency == 'monthly' %}selected{% endif %}>Monthly</option></select></label>
+        <label>Schedule day<input type="number" name="hash_schedule_day" min="0" max="28" value="{{ preferences.hash_schedule_day }}" required><small>Weekly: 0 Monday through 6 Sunday. Monthly: 1 through 28. Daily ignores this value.</small></label>
+        <label>Start time<input type="time" name="hash_schedule_time" value="{{ preferences.hash_schedule_time }}" required><small>Uses the installation time zone.</small></label>
+        <label>Disk activity<select name="hash_io_intensity"><option value="low" {% if preferences.hash_io_intensity == 'low' %}selected{% endif %}>Low</option><option value="balanced" {% if preferences.hash_io_intensity == 'balanced' %}selected{% endif %}>Balanced</option><option value="high" {% if preferences.hash_io_intensity == 'high' %}selected{% endif %}>High</option></select></label>
+      </div>
+      <label class="checkbox-label"><input type="checkbox" name="hash_pause_for_activity" value="1" {% if preferences.hash_pause_for_activity == '1' %}checked{% endif %}> Pause fingerprinting while scans, matching, or media inspection are running</label>
+    </form>
+    <div class="actions scheduled-task-actions">
+      <button class="button primary" type="submit" form="scheduled-fingerprint-form">Save fingerprint schedule</button>
+      {% if hash_job.status in ['starting','running'] %}{% if hash_paused %}<form method="post" action="/scheduled-tasks/fingerprints/resume"><button class="button">Resume</button></form>{% else %}<form method="post" action="/scheduled-tasks/fingerprints/pause"><button class="button">Pause</button></form>{% endif %}<form method="post" action="/scheduled-tasks/fingerprints/cancel"><button class="button danger">Cancel</button></form>{% else %}<form method="post" action="/scheduled-tasks/fingerprints/run"><button class="button">Run now</button></form>{% endif %}
+    </div>
+  </section>
+
+  <section class="panel settings-card scheduled-task-card">
+    <div class="settings-card-head scheduled-task-head">
+      <div><p class="eyebrow">MANAGED TRASH</p><h2>Retention cleanup</h2></div>
+      <span class="settings-state {{ 'active' if trash_task.status == 'Running' else 'warn' if 'Paused' in trash_task.status or trash_task.status == 'Needs attention' else 'good' }}">{{ trash_task.status }}</span>
+    </div>
+    <p class="muted">InfoMancer checks once per day for managed-trash items whose retention period has expired. Read-Only and Lockdown modes pause permanent deletion even when an item has reached its expiry date.</p>
+    <div class="scheduled-task-summary scheduled-task-summary-compact">
+      <div><span>Cadence</span><strong>Daily eligibility check</strong></div>
+      <div><span>Retention</span><strong>{{ trash_task.retention_label }}</strong></div>
+      <div><span>Protection</span><strong>{{ trash_task.protection_mode|replace('_',' ')|title }}</strong></div>
+      <div><span>Current state</span><strong>{{ trash_task.detail }}</strong></div>
+    </div>
+    <form class="scheduled-retention-form" method="post" action="/scheduled-tasks/trash-retention">
+      <label>Default managed-trash retention<select name="trash_retention_days"><option value="never" {% if trash_task.retention == 'never' %}selected{% endif %}>Never expire automatically</option><option value="7" {% if trash_task.retention == '7' %}selected{% endif %}>7 days</option><option value="30" {% if trash_task.retention == '30' %}selected{% endif %}>30 days</option><option value="90" {% if trash_task.retention == '90' %}selected{% endif %}>90 days</option><option value="365" {% if trash_task.retention == '365' %}selected{% endif %}>1 year</option></select><small>This controls how long eligible managed-trash items are kept before automatic cleanup can remove them.</small></label>
+      <button class="button primary">Save retention</button>
+    </form>
+  </section>
+
+  <section class="panel settings-card scheduled-task-card scheduled-task-future">
+    <div><p class="eyebrow">SCHEDULE CENTER</p><h2>One home for recurring maintenance</h2><p class="muted">Only tasks with an actual automatic schedule are shown here. If future maintenance features gain scheduling controls, they can join this page without cluttering the live task widget.</p></div>
+    <a class="button" href="/activity">Open task history</a>
+  </section>
+</div>
+{% endblock %}
