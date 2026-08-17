@@ -41,7 +41,7 @@ class TVDBClient:
 
     def _get(
         self, path: str, params: dict | None = None, *,
-        allow_not_found: bool = False,
+        allow_not_found: bool = False, _retry_auth: bool = True,
     ) -> dict:
         token = self._token or self._login()
         try:
@@ -54,9 +54,13 @@ class TVDBClient:
                 "TheTVDB disconnected before the metadata request finished. "
                 "Try again shortly."
             ) from exc
-        if response.status_code == 401:
+        if response.status_code == 401 and _retry_auth:
+            # A cached bearer token may have expired. Retry exactly once with a
+            # fresh login so persistent 401 responses cannot recurse indefinitely.
             self._token = ""
-            return self._get(path, params, allow_not_found=allow_not_found)
+            return self._get(
+                path, params, allow_not_found=allow_not_found, _retry_auth=False,
+            )
         if allow_not_found and response.status_code == 404:
             return {}
         self._check(response)
