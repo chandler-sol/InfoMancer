@@ -1,30 +1,90 @@
 {% extends "base.html" %}
 {% block title %}Profile · InfoMancer{% endblock %}
 {% block content %}
-<header class="settings-heading"><p class="eyebrow">ACCOUNT</p><h1>Profile</h1><p>Choose how your account appears inside InfoMancer.</p></header>
+<link rel="stylesheet" href="{{ url_for('static', path='profile.css') }}?v={{ app_version }}">
+<div class="profile-page">
+<header class="settings-heading"><p class="eyebrow">ACCOUNT</p><h1>Profile</h1><p>Choose how your account appears inside InfoMancer and preview changes before you save them.</p></header>
 {% include "_account_nav.html" %}
-<form class="panel settings-form" method="post" action="/account/profile">
+{% set icon_symbols = {'film':'◆','television':'▣','star':'★','library':'▤','disc':'◎','camera':'▰','headphones':'∩','folder':'▱','server':'≡','heart':'♥','clapperboard':'▥'} %}
+{% set icon_labels = {'initials':'Initials','film':'Film','television':'Television','star':'Star','library':'Library','disc':'Disc','camera':'Camera','headphones':'Headphones','folder':'Folder','server':'Server','heart':'Heart','clapperboard':'Clapperboard'} %}
+<form class="profile-form-shell" id="profile-form" method="post" action="/account/profile" data-custom-avatar="{{ '1' if current_user.profile_icon == 'custom' else '0' }}">
   {% if error %}<div class="form-error">{{ error }}</div>{% endif %}
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <label>Username<input value="{{ current_user.username }}" disabled><small>Usernames are permanent identifiers.</small></label>
-  <label>Display name<input name="display_name" value="{{ current_user.display_name }}" maxlength="100" required></label>
-  <label>Email<input name="email" type="email" value="{{ current_user.email }}"></label>
-  <fieldset><legend>Profile icon</legend><div class="icon-options">{% for icon in profile_icons|sort %}<label><input type="radio" name="profile_icon" value="{{ icon }}" {% if current_user.profile_icon == icon %}checked{% endif %}><span>{{ icon|replace('_', ' ')|title }}</span></label>{% endfor %}</div></fieldset>
-  <fieldset>
-    <legend>Home</legend>
-    <label class="preference-check">
-      <input type="checkbox" name="show_home_hero" value="1" {% if current_user.show_home_hero %}checked{% endif %}>
-      <span><strong>Show the large Home introduction</strong><small>Turn this off for a compact InfoMancer heading while keeping Library Health and your shortcuts visible.</small></span>
-    </label>
-  </fieldset>
-  <fieldset>
-    <legend>Accessibility</legend>
-    <label class="preference-check">
-      <input type="checkbox" name="high_contrast" value="1" {% if current_user.high_contrast %}checked{% endif %}>
-      <span><strong>Use higher-contrast text</strong><small>Display supporting text in white instead of gray throughout InfoMancer.</small></span>
-    </label>
-  </fieldset>
-  <div class="settings-actions"><button class="button primary">Save profile</button></div>
+  <div class="profile-primary-grid">
+    <section class="profile-card profile-details-card">
+      <div class="profile-card-head"><div><p class="eyebrow">PROFILE DETAILS</p><h2>Your identity</h2><p>These details are visible inside this InfoMancer installation.</p></div></div>
+      <div class="profile-identity-fields">
+        <label>Username<input value="{{ current_user.username }}" disabled><small>Usernames are permanent identifiers.</small></label>
+        <label>Display name<input id="profile-display-name" name="display_name" value="{{ current_user.display_name }}" maxlength="100" required></label>
+        <label>Email<input name="email" type="email" value="{{ current_user.email }}"></label>
+      </div>
+
+      <fieldset class="profile-icon-fieldset">
+        <legend>Profile icon</legend>
+        <p>Pick a built-in mark or use your own image. The preview updates immediately.</p>
+        <div class="profile-icon-options">
+          {% for icon in profile_icons|sort if icon != 'custom' %}
+          {% set symbol = (current_user.display_name[:1]|upper if icon == 'initials' else icon_symbols.get(icon, '•')) %}
+          <label class="profile-icon-choice" data-symbol="{{ symbol }}">
+            <input type="radio" name="profile_icon" value="{{ icon }}" {% if current_user.profile_icon == icon %}checked{% endif %}>
+            <span class="profile-icon-glyph">{{ symbol }}</span>
+            <strong>{{ icon_labels.get(icon, icon|replace('_', ' ')|title) }}</strong>
+          </label>
+          {% endfor %}
+          <label class="profile-icon-choice profile-custom-choice" data-symbol="{{ current_user.display_name[:1]|upper }}">
+            <input type="radio" name="profile_icon" value="custom" {% if current_user.profile_icon == 'custom' %}checked{% endif %}>
+            <span class="profile-icon-glyph" data-profile-custom-choice-glyph {% if current_user.profile_icon == 'custom' %}hidden{% endif %}>+</span>
+            <img class="profile-icon-glyph" data-profile-custom-choice-image {% if current_user.profile_icon != 'custom' %}hidden{% endif %} src="/account/avatar/current" alt="">
+            <span class="profile-custom-copy"><strong>Custom</strong><small>Upload your own square image</small></span>
+            <button class="button small profile-custom-upload" type="button" data-profile-avatar-open>{{ 'Change custom icon' if current_user.profile_icon == 'custom' else 'Upload custom icon' }}</button>
+          </label>
+        </div>
+      </fieldset>
+    </section>
+
+    <aside class="profile-card profile-preview-card" aria-label="Profile preview">
+      <div class="profile-preview-grid" aria-hidden="true"></div>
+      <div class="profile-preview-inner">
+        <p class="eyebrow">PROFILE PREVIEW</p>
+        <div class="profile-preview-avatar">
+          <span data-profile-preview-glyph {% if current_user.profile_icon == 'custom' %}hidden{% endif %}>{{ current_user.symbol }}</span>
+          <img data-profile-preview-image {% if current_user.profile_icon != 'custom' %}hidden{% endif %} {% if current_user.profile_icon == 'custom' %}src="/account/avatar/current"{% endif %} alt="">
+        </div>
+        <div class="profile-preview-identity"><strong data-profile-preview-name>{{ current_user.display_name }}</strong><span>@{{ current_user.username }}</span><b class="profile-preview-role">{{ current_user.role|title }}</b></div>
+        <p class="profile-preview-note">This is how your identity will read in account menus and user-facing surfaces.</p>
+      </div>
+    </aside>
+  </div>
+
+  <div class="profile-preference-grid">
+    <section class="profile-card profile-preference-card">
+      <div class="profile-card-head"><div><p class="eyebrow">HOME</p><h2>Home preferences</h2><p>Personalize the way supporting dashboard layouts greet you.</p></div></div>
+      <div class="profile-option-list">
+        <label class="profile-option"><input type="checkbox" name="show_home_hero" value="1" {% if current_user.show_home_hero %}checked{% endif %}><span><strong>Expanded home welcome</strong><small>Show the larger introduction when a dashboard layout supports it.</small></span></label>
+      </div>
+    </section>
+    <section class="profile-card profile-preference-card">
+      <div class="profile-card-head"><div><p class="eyebrow">ACCESSIBILITY</p><h2>Reading preferences</h2><p>Increase visual separation where you need it.</p></div></div>
+      <div class="profile-option-list">
+        <label class="profile-option"><input type="checkbox" name="high_contrast" value="1" {% if current_user.high_contrast %}checked{% endif %}><span><strong>High contrast</strong><small>Strengthen borders, muted text, and interactive emphasis.</small></span></label>
+      </div>
+    </section>
+  </div>
+
+  <div class="profile-save-bar"><span>Icon and display-name changes preview live. Save Profile to make them permanent.</span><button class="button primary">Save Profile</button></div>
 </form>
-<section class="panel profile-tour-card"><div><p class="eyebrow">GETTING STARTED</p><h2>InfoMancer walkthrough</h2><p class="muted">Replay the guided overview of search, navigation, tasks, announcements, and account controls whenever you need it.</p></div><a class="button" href="/tour">Take the tour again</a></section>
+
+<section class="panel profile-tour-card"><p class="eyebrow">GETTING STARTED</p><h2>Want the guided walkthrough again?</h2><p>Restarting the tour only changes your onboarding progress. It does not modify your libraries, metadata, account details, or files.</p><div class="actions"><a class="button" href="/tour">Open Tour</a>{% if current_user.id > 0 %}<form method="post" action="/getting-started/restart"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button">Restart from the beginning</button></form>{% endif %}</div></section>
+</div>
+
+<dialog class="profile-avatar-dialog" id="profile-avatar-dialog" aria-labelledby="profile-avatar-dialog-title">
+  <div class="profile-avatar-dialog-shell">
+    <div class="profile-avatar-dialog-head"><div><p class="eyebrow">CUSTOM PROFILE ICON</p><h2 id="profile-avatar-dialog-title">Choose an image</h2></div><button class="button profile-avatar-dialog-close" type="button" data-profile-avatar-close aria-label="Close custom icon window">×</button></div>
+    <div class="profile-avatar-requirements"><span><b>PNG, JPEG, WebP</b><small>SVG is not accepted</small></span><span><b>128 × 128 minimum</b><small>512 × 512 recommended</small></span><span><b>2 MB maximum</b><small>Square images work best</small></span></div>
+    <label class="profile-avatar-drop" data-profile-avatar-drop><input id="profile-avatar-file" type="file" accept="image/png,image/jpeg,image/webp"><strong>Choose or drop an image</strong><small>The original is never stored. InfoMancer center-crops it and re-encodes a clean 256 × 256 PNG.</small></label>
+    <div class="profile-avatar-editor"><canvas class="profile-avatar-canvas" id="profile-avatar-canvas" width="256" height="256" aria-label="Custom icon crop preview"></canvas><div class="profile-avatar-editor-copy"><strong>Preview</strong><p>The editor uses a centered square crop so the result stays readable in small circular account icons.</p><p class="profile-avatar-status" data-profile-avatar-status aria-live="polite"></p></div></div>
+    <div class="profile-avatar-dialog-actions"><button class="button" type="button" data-profile-avatar-close>Cancel</button><button class="button primary" type="button" data-profile-avatar-use disabled>Use this icon</button></div>
+  </div>
+</dialog>
+<script src="{{ url_for('static', path='profile.js') }}?v={{ static_version }}" defer></script>
 {% endblock %}
