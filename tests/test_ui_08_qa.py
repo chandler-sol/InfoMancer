@@ -37,10 +37,17 @@ class Ui08QaContracts(unittest.TestCase):
         self.assertIn("transform: none", css)
 
     def test_inspector_quick_details_and_media_spacing_are_preserved(self):
+        template = (ROOT / "app/templates/_workspace_inspector.html").read_text(encoding="utf-8")
         css = (ROOT / "app/static/workspace-detail-polish.css").read_text(encoding="utf-8")
-        self.assertIn(".workspace-inspector-footer-actions { display: contents; }", css)
-        self.assertIn("workspace-inspector-footer-actions > .button.primary", css)
-        self.assertIn("justify-self: start", css)
+        overview_pos = template.index("workspace-inspector-overview")
+        quick_pos = template.index("workspace-inspector-quick-action")
+        health_pos = template.index('aria-labelledby="inspector-health-title"')
+        self.assertLess(overview_pos, quick_pos)
+        self.assertLess(quick_pos, health_pos)
+        self.assertEqual(template.count("Open full details"), 1)
+        self.assertIn("workspace-inspector-quick-action > .button.primary", css)
+        self.assertIn("width: auto", css)
+        self.assertNotIn(".workspace-inspector-footer-actions { display: contents; }", css)
         self.assertIn("workspace-inspector-media-grid + .workspace-inspector-seasons", css)
         self.assertIn("margin-top: 13px", css)
 
