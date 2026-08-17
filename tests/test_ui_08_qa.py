@@ -27,6 +27,22 @@ class Ui08QaContracts(unittest.TestCase):
         self.assertIn("max-width: 100%", css)
         self.assertIn("text-overflow: ellipsis", css)
 
+    def test_inspector_quick_details_and_media_spacing_are_preserved(self):
+        css = (ROOT / "app/static/workspace-detail-polish.css").read_text(encoding="utf-8")
+        self.assertIn(".workspace-inspector-footer-actions { display: contents; }", css)
+        self.assertIn("workspace-inspector-footer-actions > .button.primary", css)
+        self.assertIn("justify-self: start", css)
+        self.assertIn("workspace-inspector-media-grid + .workspace-inspector-seasons", css)
+        self.assertIn("margin-top: 13px", css)
+
+    def test_native_desktop_open_path_requirement_is_documented(self):
+        note = (ROOT / "desktop/NATIVE_FEATURES.md").read_text(encoding="utf-8")
+        self.assertIn("Open Path", note)
+        self.assertIn("File Explorer", note)
+        self.assertIn("Finder", note)
+        self.assertIn("ordinary browser sessions", note)
+        self.assertIn("remote InfoMancer server", note)
+
     def test_new_motion_respects_reduced_motion(self):
         css = (ROOT / "app/static/workspace-detail-polish.css").read_text(encoding="utf-8")
         self.assertIn("@media (prefers-reduced-motion: reduce)", css)
