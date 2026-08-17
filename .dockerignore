@@ -13,3 +13,15 @@ __pycache__
 *.db
 *.db-*
 *.log
+
+# Desktop and local build products are unrelated to the server container.
+node_modules
+desktop/src-tauri/target
+desktop/src-tauri/binaries
+dist
+build
+graft
+*.spec
+.DS_Store
+Thumbs.db
+Desktop.ini
