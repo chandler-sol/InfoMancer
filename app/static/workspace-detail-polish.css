@@ -160,15 +160,14 @@ body.has-app-sidebar .media-dossier .season-collapse-toolbar button {
   }
 }
 
-/* Keep the inspector's primary navigation shortcut near the synopsis instead of
-   making users traverse the entire inspector first. The secondary organization
-   actions remain at the bottom where they read as a utility group. */
-.workspace-inspector-panel > .workspace-inspector-summary { order: 10; }
-.workspace-inspector-panel > .workspace-inspector-overview { order: 20; }
-.workspace-inspector-footer-actions { display: contents; }
-.workspace-inspector-footer-actions > .button.primary {
-  order: 30;
-  justify-self: start;
+/* The primary details shortcut now lives directly after the synopsis in the
+   inspector template. Do not rely on CSS order/display:contents to relocate it. */
+.workspace-inspector-quick-action {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: -2px;
+}
+.workspace-inspector-quick-action > .button.primary {
   width: auto;
   min-height: 36px;
   padding: 8px 14px;
@@ -179,14 +178,11 @@ body.has-app-sidebar .media-dossier .season-collapse-toolbar button {
   color: #0b1009;
   font-size: 12px;
 }
-.workspace-inspector-footer-actions > .button.primary:hover,
-.workspace-inspector-footer-actions > .button.primary:focus-visible {
+.workspace-inspector-quick-action > .button.primary:hover,
+.workspace-inspector-quick-action > .button.primary:focus-visible {
   border-color: var(--lime);
   background: color-mix(in srgb, var(--lime) 90%, #25311f);
 }
-.workspace-inspector-panel > .workspace-inspector-section { order: 40; }
-.workspace-inspector-footer-actions > .workspace-inspector-action-list { order: 50; }
-.workspace-inspector-panel > .workspace-inspector-hint { order: 60; }
 
 /* The media facts and season accordion are separate information layers. A small
    breathing gap keeps the first season header from visually attaching to the
