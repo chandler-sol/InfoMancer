@@ -63,6 +63,10 @@ jobs:
         working-directory: desktop
         run: npm ci
 
+      - name: Audit desktop dependencies
+        working-directory: desktop
+        run: npm audit --audit-level=high
+
       - name: Generate native icons
         working-directory: desktop
         run: npm run icon
