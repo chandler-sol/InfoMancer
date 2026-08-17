@@ -112,7 +112,7 @@ def build_router(ctx: RouteContext):
         dependencies.append(Depends(require_librarian))
         return router.post(path, dependencies=dependencies, **kwargs)
 
-    @librarian_get("/scheduled-tasks", response_class=HTMLResponse)
+    @librarian_get("/settings/scheduled-tasks", response_class=HTMLResponse)
     def scheduled_tasks_page(request: Request):
         preferences = app_settings.values()
         with media_hash_lock:
@@ -157,7 +157,7 @@ def build_router(ctx: RouteContext):
             "error": "",
         })
 
-    @librarian_post("/scheduled-tasks/fingerprints")
+    @librarian_post("/settings/scheduled-tasks/fingerprints")
     def save_fingerprint_schedule(
         request: Request,
         hash_mode: str = Form(...),
@@ -176,76 +176,76 @@ def build_router(ctx: RouteContext):
             )
             changed = app_settings.update(validated, request.state.user.id)
         except AppSettingError as exc:
-            return redirect("/scheduled-tasks", str(exc))
+            return redirect("/settings/scheduled-tasks", str(exc))
         record_event(
             "settings", "File fingerprint schedule updated.",
             context={"changed": changed, "mode": validated["hash_mode"]},
             user_id=request.state.user.id,
         )
         return redirect(
-            "/scheduled-tasks",
+            "/settings/scheduled-tasks",
             "Fingerprint schedule saved." if changed else
             "Fingerprint schedule was already up to date; nothing changed.",
         )
 
-    @librarian_post("/scheduled-tasks/fingerprints/run")
+    @librarian_post("/settings/scheduled-tasks/fingerprints/run")
     def run_fingerprints_now():
         ids = media_hashes.eligible_ids()
         if not ids:
             return redirect(
-                "/scheduled-tasks",
+                "/settings/scheduled-tasks",
                 "Every current media file already has a fingerprint.",
             )
         if not start_media_hashing(ids, "Manual file fingerprinting"):
             return redirect(
-                "/scheduled-tasks",
+                "/settings/scheduled-tasks",
                 "Fingerprinting is already running. Progress remains visible in the task widget.",
             )
         return redirect(
-            "/scheduled-tasks",
+            "/settings/scheduled-tasks",
             f"Fingerprinting started for {len(ids):,} files. You can continue using InfoMancer while it runs.",
         )
 
-    @librarian_post("/scheduled-tasks/fingerprints/pause")
+    @librarian_post("/settings/scheduled-tasks/fingerprints/pause")
     def pause_fingerprints():
         with media_hash_lock:
             running = media_hash_job.get("status") in {"starting", "running"}
         if not running:
-            return redirect("/scheduled-tasks", "There is no fingerprinting task to pause.")
+            return redirect("/settings/scheduled-tasks", "There is no fingerprinting task to pause.")
         media_hash_pause.set()
         return redirect(
-            "/scheduled-tasks",
+            "/settings/scheduled-tasks",
             "Fingerprinting paused after the current file. Select Resume when you are ready.",
         )
 
-    @librarian_post("/scheduled-tasks/fingerprints/resume")
+    @librarian_post("/settings/scheduled-tasks/fingerprints/resume")
     def resume_fingerprints():
         with media_hash_lock:
             running = media_hash_job.get("status") in {"starting", "running"}
         if not running:
-            return redirect("/scheduled-tasks", "There is no paused fingerprinting task to resume.")
+            return redirect("/settings/scheduled-tasks", "There is no paused fingerprinting task to resume.")
         media_hash_pause.clear()
-        return redirect("/scheduled-tasks", "Fingerprinting resumed.")
+        return redirect("/settings/scheduled-tasks", "Fingerprinting resumed.")
 
-    @librarian_post("/scheduled-tasks/fingerprints/cancel")
+    @librarian_post("/settings/scheduled-tasks/fingerprints/cancel")
     def cancel_fingerprints():
         with media_hash_lock:
             running = media_hash_job.get("status") in {"starting", "running"}
         if not running:
-            return redirect("/scheduled-tasks", "There is no fingerprinting task to cancel.")
+            return redirect("/settings/scheduled-tasks", "There is no fingerprinting task to cancel.")
         media_hash_cancel.set()
         media_hash_pause.clear()
         return redirect(
-            "/scheduled-tasks",
+            "/settings/scheduled-tasks",
             "Fingerprinting is stopping after the current file. Unfinished files remain available for the next run.",
         )
 
-    @librarian_post("/scheduled-tasks/trash-retention")
+    @librarian_post("/settings/scheduled-tasks/trash-retention")
     def save_trash_retention(request: Request, trash_retention_days: str = Form(...)):
         retention = trash_retention_days.strip().casefold()
         if retention not in {"never", "7", "30", "90", "365"}:
             return redirect(
-                "/scheduled-tasks",
+                "/settings/scheduled-tasks",
                 "Choose Never, 7 days, 30 days, 90 days, or 1 year for managed-trash retention.",
             )
         changed = app_settings.update(
@@ -256,7 +256,7 @@ def build_router(ctx: RouteContext):
             context={"retention_days": retention}, user_id=request.state.user.id,
         )
         return redirect(
-            "/scheduled-tasks",
+            "/settings/scheduled-tasks",
             "Managed-trash retention saved." if changed else
             "Managed-trash retention was already up to date; nothing changed.",
         )
