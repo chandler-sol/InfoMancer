@@ -40,7 +40,7 @@ class EngagementTests(unittest.TestCase):
         for _ in OFFICIAL_ANNOUNCEMENTS:
             due = self.service.due(2, "member")
             self.assertIsNotNone(due)
-            self.service.mark_seen(due["id"], 2)
+            self.service.mark_seen(due["id"], 2, "member")
         self.assertIsNone(self.service.due(2, "member"))
 
     def test_since_0_4_release_notes_cover_current_safety_features(self):
@@ -64,7 +64,7 @@ class EngagementTests(unittest.TestCase):
         )
         self.assertEqual(self.service.due(2, "member")["id"], announcement_id)
         self.assertIsNone(self.service.due(1, "librarian"))
-        self.service.mark_seen(announcement_id, 2)
+        self.service.mark_seen(announcement_id, 2, "member")
         self.assertIsNone(self.service.due(2, "member"))
         with self.database.connect() as conn:
             conn.execute(
@@ -73,6 +73,22 @@ class EngagementTests(unittest.TestCase):
                 (announcement_id,),
             )
         self.assertEqual(self.service.due(2, "member")["id"], announcement_id)
+
+    def test_mark_seen_rejects_wrong_audience_and_future_announcement(self):
+        librarian_only = self.service.create(
+            "Librarian note", "For librarians only.", "information", "librarians",
+            "2020-01-01 00:00:00", "2099-01-01 00:00:00", None, 1,
+        )
+        with self.assertRaisesRegex(EngagementError, "not available"):
+            self.service.mark_seen(librarian_only, 2, "member")
+        self.service.mark_seen(librarian_only, 1, "librarian")
+
+        future = self.service.create(
+            "Future note", "Not visible yet.", "information", "all",
+            "2098-01-01 00:00:00", "2099-01-01 00:00:00", None, 1,
+        )
+        with self.assertRaisesRegex(EngagementError, "not available"):
+            self.service.mark_seen(future, 2, "member")
 
     def test_recurring_requires_end_and_official_cannot_be_disabled(self):
         with self.assertRaisesRegex(EngagementError, "need an end date"):
