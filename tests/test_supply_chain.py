@@ -23,10 +23,19 @@ class SupplyChainTests(unittest.TestCase):
         self.assertNotIn(":latest", cloudflare)
 
     def test_checkout_does_not_persist_ci_credentials(self):
-        workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(
-            encoding="utf-8"
-        )
-        self.assertEqual(workflow.count("persist-credentials: false"), 2)
+        workflow_dir = ROOT / ".github" / "workflows"
+        workflows = list(workflow_dir.glob("*.yml")) + list(workflow_dir.glob("*.yaml"))
+        for workflow in workflows:
+            if workflow.name.startswith("_agent_"):
+                continue
+            text = workflow.read_text(encoding="utf-8")
+            checkout_count = len(re.findall(r"^\s*uses:\s*actions/checkout@", text, re.MULTILINE))
+            if checkout_count:
+                self.assertGreaterEqual(
+                    text.count("persist-credentials: false"),
+                    checkout_count,
+                    f"{workflow.name} must disable checkout credential persistence",
+                )
 
     def test_github_actions_use_full_commit_shas(self):
         workflow_dir = ROOT / ".github" / "workflows"
