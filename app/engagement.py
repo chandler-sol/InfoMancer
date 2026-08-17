@@ -238,16 +238,21 @@ class EngagementService:
             ).fetchone()
         return int(row["count"])
 
-    def mark_seen(self, announcement_id: int, user_id: int) -> None:
+    def mark_seen(self, announcement_id: int, user_id: int, role: str) -> None:
         if user_id <= 0:
             return
+        audience = self._audience_clause(role)
         with self.database.connect() as conn:
             allowed = conn.execute(
-                "SELECT id FROM announcements WHERE id=? AND active=1",
-                (announcement_id,),
+                """SELECT id FROM announcements
+                   WHERE id=? AND active=1
+                     AND starts_at<=CURRENT_TIMESTAMP
+                     AND (ends_at IS NULL OR ends_at>CURRENT_TIMESTAMP)
+                     AND audience IN ('all', ?)""",
+                (announcement_id, audience),
             ).fetchone()
             if not allowed:
-                raise EngagementError("That announcement is no longer available.")
+                raise EngagementError("That announcement is not available to this account.")
             conn.execute(
                 """INSERT INTO announcement_receipts
                    (announcement_id,user_id) VALUES (?,?)
