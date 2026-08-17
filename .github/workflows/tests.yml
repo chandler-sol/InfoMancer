@@ -28,6 +28,11 @@ jobs:
           python -m pip install pip-audit==2.10.1
           python -m pip_audit -r requirements.txt
 
+      - name: Audit Rust desktop dependencies
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          cargo audit --file desktop/src-tauri/Cargo.lock
+
   test:
     name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
