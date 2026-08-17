@@ -110,7 +110,7 @@
   {% endif %}
 
   <section class="home-ops-favorites">
-    <div class="home-ops-panel-head"><div><p class="eyebrow">FAVORITES</p><h2>Kept close at hand</h2></div><a href="/favorites">View all &rarr;</a></div>
+    <div class="home-ops-panel-head"><div><p class="eyebrow">FAVORITES</p><h2>Kept close at hand</h2><p class="home-favorite-count">{{ counts.favorites }} saved item{% if counts.favorites != 1 %}s{% endif %}</p></div><a href="/favorites">View all &rarr;</a></div>
     {% if favorites %}
     <div class="home-favorite-strip">
       {% for title in favorites[:6] %}
