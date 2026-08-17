@@ -80,7 +80,7 @@
       <div class="home-ops-panel-head"><div><p class="eyebrow">RECENTLY CHANGED</p><h2>Latest library updates</h2></div><a href="/library">Open Library &rarr;</a></div>
       {% if recent %}
       <div class="home-change-grid">
-        {% for title in recent[:4] %}
+        {% for title in recent[:6] %}
         <a class="home-change-card" href="/titles/{{ title.id }}">
           <span class="home-change-poster">{% if title.poster_url %}<img src="{{ title.poster_url }}" alt="" loading="lazy">{% else %}<i>{{ title_initial(title) }}</i>{% endif %}</span>
           <span class="home-change-copy"><small>{{ 'TV SHOW' if title.kind == 'tv' else 'MOVIE' }}</small><strong>{{ title.metadata_title or title.title }}</strong><em>{% if title.metadata_year or title.year %}{{ title.metadata_year or title.year }}{% else %}Year unknown{% endif %} &middot; Updated {{ local_time(title.updated_at) }}</em></span>
