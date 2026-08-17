@@ -22,6 +22,12 @@ class SupplyChainTests(unittest.TestCase):
         )
         self.assertNotIn(":latest", cloudflare)
 
+    def test_server_container_drops_linux_capabilities(self):
+        compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+        self.assertIn("cap_drop:\n      - ALL", compose)
+        self.assertIn("no-new-privileges:true", compose)
+        self.assertIn('"127.0.0.1:8787:8787"', compose)
+
     def test_checkout_does_not_persist_ci_credentials(self):
         workflow_dir = ROOT / ".github" / "workflows"
         workflows = list(workflow_dir.glob("*.yml")) + list(workflow_dir.glob("*.yaml"))
