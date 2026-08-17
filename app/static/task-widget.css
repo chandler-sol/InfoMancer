@@ -21,4 +21,8 @@
 .task-failure-detail[hidden]{display:none}
 .task-activity-link{width:max-content;color:var(--cyan);font-size:11px;font-weight:700;text-decoration:none}
 .task-activity-link:hover,.task-activity-link:focus-visible{color:var(--lime);text-decoration:underline}
+.task-empty{padding:14px 0 13px;text-align:center;color:#8d9aa7}
+.task-widget-footer{display:flex;justify-content:flex-end;padding-top:11px;border-top:1px solid var(--line)}
+.task-scheduled-link{display:inline-flex;align-items:center;justify-content:center;min-height:28px;padding:5px 9px;border:1px solid #334351;border-radius:6px;background:#10171e;color:#aab6c1;font-size:10px;font-weight:750;line-height:1;text-decoration:none}
+.task-scheduled-link:hover,.task-scheduled-link:focus-visible{border-color:#4a632b;color:var(--lime);background:#131c22}
 @media(prefers-reduced-motion:reduce){.task-track.determinate i{transition:none}.task-track.indeterminate i{animation:none;width:100%}}
