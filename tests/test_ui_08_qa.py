@@ -17,11 +17,15 @@ class Ui08QaContracts(unittest.TestCase):
 
     def test_detail_layout_explicitly_contains_long_rows_and_technical_rail(self):
         css = (ROOT / "app/static/workspace-detail-polish.css").read_text(encoding="utf-8")
-        self.assertIn("grid-template-columns: repeat(auto-fit, minmax(140px, 1fr))", css)
+        loader = (ROOT / "app/static/review.css").read_text(encoding="utf-8")
+        self.assertIn('@import url("workspace-detail-polish.css?v=1")', loader)
+        self.assertIn("flex-wrap: wrap", css)
+        self.assertIn("flex: 1 1 128px", css)
+        self.assertIn("flex-basis: 190px", css)
         self.assertIn(".dossier-on-disk .file-list > article > .grow", css)
-        self.assertIn("overflow-wrap: anywhere", css)
         self.assertIn(".dossier-on-disk .season-heading", css)
         self.assertIn("max-width: 100%", css)
+        self.assertIn("text-overflow: ellipsis", css)
 
     def test_new_motion_respects_reduced_motion(self):
         css = (ROOT / "app/static/workspace-detail-polish.css").read_text(encoding="utf-8")
