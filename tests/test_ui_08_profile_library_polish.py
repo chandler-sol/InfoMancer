@@ -36,6 +36,23 @@ class ProfileLibraryPolishContracts(unittest.TestCase):
         self.assertIn("library-first-paint-fallback", css)
         self.assertIn('classList.add("library-view-ready")', script)
 
+    def test_desktop_density_pass_reclaims_vertical_space(self):
+        css = (ROOT / "app/static/modern.css").read_text(encoding="utf-8")
+
+        self.assertIn("Desktop density pass", css)
+        self.assertIn("@media (min-width: 981px)", css)
+        self.assertIn("body.has-app-sidebar .shell", css)
+        self.assertIn("padding-top: 24px", css)
+        self.assertIn("padding-bottom: 56px", css)
+        self.assertIn("main.shell:has(> .home-ops)", css)
+        self.assertIn("body.has-app-sidebar .catalog-tabs", css)
+        self.assertIn("body.has-app-sidebar .settings-section-nav", css)
+        self.assertIn("body.has-app-sidebar .profile-page", css)
+        self.assertIn("margin-top: 0", css)
+        self.assertIn("min-height: 350px", css)
+        self.assertIn("border-top: 1px solid var(--line) !important", css)
+        self.assertIn("body.has-app-sidebar .profile-custom-choice", css)
+
     def test_profile_page_has_live_visual_picker_and_custom_upload_contract(self):
         template = (ROOT / "app/templates/account_profile.html").read_text(encoding="utf-8")
         css = (ROOT / "app/static/profile.css").read_text(encoding="utf-8")
