@@ -160,44 +160,35 @@ body.has-app-sidebar .media-dossier .season-collapse-toolbar button {
   }
 }
 
-/* Keep top-level inspector actions together in the narrow action rail. Details
-   remains immediately available without competing with the poster, identity copy,
-   status pills, or synopsis for horizontal or vertical space. */
-.workspace-inspector-summary-actions {
-  display: grid;
-  align-content: start;
-  justify-items: stretch;
-  gap: 8px;
-  min-width: 48px;
-}
+/* The details shortcut borrows the compact rounded treatment used by the Help
+   jump links. It stays inside the identity column so it fits within the poster's
+   natural height instead of adding a new row or competing with Favorite. */
 .workspace-inspector-details-shortcut {
-  display: grid;
-  min-width: 48px;
-  place-items: center;
-  gap: 1px;
-  padding: 7px 8px;
-  border: 1px solid rgba(185, 245, 66, .34);
-  border-radius: var(--im-radius-sm);
-  background: rgba(185, 245, 66, .06);
-  color: var(--lime);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-height: 30px;
+  margin-top: 9px;
+  padding: 6px 11px;
+  border: 1px solid #33414f;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
   text-decoration: none;
   transition: border-color .14s ease, background .14s ease, color .14s ease;
 }
-.workspace-inspector-details-shortcut > span {
-  font-size: 17px;
-  line-height: 1;
-}
-.workspace-inspector-details-shortcut > small {
-  font-size: 8px;
-  font-weight: 800;
-  line-height: 1.1;
-  text-transform: uppercase;
+.workspace-inspector-details-shortcut:visited {
+  color: var(--muted);
 }
 .workspace-inspector-details-shortcut:hover,
 .workspace-inspector-details-shortcut:focus-visible {
-  border-color: rgba(185, 245, 66, .7);
-  background: rgba(185, 245, 66, .12);
-  color: #d8ff8d;
+  border-color: var(--lime);
+  background: var(--lime);
+  color: #0b1009;
 }
 
 /* The media facts and season accordion are separate information layers. A small
@@ -274,7 +265,7 @@ body.has-app-sidebar .media-dossier .season-collapse-toolbar button {
 }
 .workspace-inspector-episode {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: 72px minmax(0, 1fr);
   gap: 9px;
   min-width: 0;
   padding: 8px;
@@ -282,9 +273,12 @@ body.has-app-sidebar .media-dossier .season-collapse-toolbar button {
   background: rgba(18, 24, 32, .76);
 }
 .workspace-inspector-episode-code {
+  align-self: center;
+  justify-self: center;
   color: var(--cyan);
   font-size: 10px;
   font-weight: 800;
+  text-align: center;
   white-space: nowrap;
 }
 .workspace-inspector-episode-copy {
@@ -319,6 +313,19 @@ body.has-app-sidebar .media-dossier .season-collapse-toolbar button {
 .workspace-inspector-season-link:focus-visible {
   color: var(--lime);
   text-decoration: underline;
+}
+
+/* Settings metadata queue links should never fall back to browser-default blue or
+   visited purple against the dark Freshness panel. */
+.settings-table-wrap a,
+.settings-table-wrap a:visited {
+  color: var(--text);
+  text-decoration-color: rgba(255, 255, 255, .34);
+}
+.settings-table-wrap a:hover,
+.settings-table-wrap a:focus-visible {
+  color: var(--lime);
+  text-decoration-color: var(--lime);
 }
 
 @media (max-width: 720px) {
