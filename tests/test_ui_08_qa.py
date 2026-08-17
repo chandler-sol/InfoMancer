@@ -27,6 +27,15 @@ class Ui08QaContracts(unittest.TestCase):
         self.assertIn("max-width: 100%", css)
         self.assertIn("text-overflow: ellipsis", css)
 
+    def test_selected_cover_frame_moves_with_card_and_matches_poster_shape(self):
+        css = (ROOT / "app/static/workspace-detail-polish.css").read_text(encoding="utf-8")
+        self.assertIn(".cover-card.workspace-selected::after", css)
+        self.assertIn(".cover-card:hover {", css)
+        self.assertIn("transform: translateY(-4px)", css)
+        self.assertIn("border-radius: var(--im-radius-md) var(--im-radius-md) 0 0", css)
+        self.assertIn(".cover-card:hover .cover-art", css)
+        self.assertIn("transform: none", css)
+
     def test_inspector_quick_details_and_media_spacing_are_preserved(self):
         css = (ROOT / "app/static/workspace-detail-polish.css").read_text(encoding="utf-8")
         self.assertIn(".workspace-inspector-footer-actions { display: contents; }", css)
@@ -40,12 +49,15 @@ class Ui08QaContracts(unittest.TestCase):
         self.assertIn("Open Path", note)
         self.assertIn("File Explorer", note)
         self.assertIn("Finder", note)
+        self.assertIn("reveal the exact indexed movie file", note)
+        self.assertIn("org.freedesktop.FileManager1.ShowItems", note)
         self.assertIn("ordinary browser sessions", note)
         self.assertIn("remote InfoMancer server", note)
 
     def test_new_motion_respects_reduced_motion(self):
         css = (ROOT / "app/static/workspace-detail-polish.css").read_text(encoding="utf-8")
         self.assertIn("@media (prefers-reduced-motion: reduce)", css)
+        self.assertIn(".cover-card:hover { transform: none; }", css)
         self.assertIn(".workspace-inspector-season-chevron { transition: none; }", css)
 
     def test_recovery_confirmation_has_explicit_accessible_labels(self):
