@@ -42,6 +42,11 @@ class WindowsDesktopContractTests(unittest.TestCase):
         self.assertIn("service.verify(output)", sidecar)
         self.assertIn("Choose a recovery destination outside", sidecar)
 
+    def test_desktop_bootstrap_token_is_not_exposed_in_child_command_line(self):
+        rust = (ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
+        self.assertIn('.env("INFOMANCER_BOOTSTRAP_TOKEN", &bootstrap_token)', rust)
+        self.assertNotIn('"--bootstrap-token"', rust)
+
     def test_updater_uses_signed_github_release_channel(self):
         rust = (ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
         self.assertIn("tauri_plugin_updater", rust)
@@ -59,6 +64,14 @@ class WindowsDesktopContractTests(unittest.TestCase):
         self.assertIn("vars.TAURI_UPDATER_PUBLIC_KEY", workflow)
         self.assertIn("desktop-alpha", workflow)
         self.assertNotIn("BEGIN PRIVATE KEY", workflow)
+
+    def test_release_workflow_is_owner_gated_and_version_bound(self):
+        workflow = (ROOT / ".github/workflows/windows-desktop-release.yml").read_text(encoding="utf-8")
+        self.assertIn("if: github.actor == github.repository_owner", workflow)
+        self.assertIn("timeout-minutes: 60", workflow)
+        self.assertIn("Verify release tag matches application version", workflow)
+        self.assertIn("desktop/src-tauri/tauri.conf.json", workflow)
+        self.assertIn('$env:GITHUB_REF_NAME -ne $expectedTag', workflow)
 
 
 if __name__ == "__main__":
