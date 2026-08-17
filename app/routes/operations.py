@@ -15,7 +15,6 @@ def build_router(ctx: RouteContext):
     Request = ctx.get("Request")
     _other_background_work_running = ctx.live("_other_background_work_running")
     app_settings = ctx.live("app_settings")
-    app_settings = ctx.live("app_settings")
     db = ctx.live("db")
     duplicate_trash = ctx.live("duplicate_trash")
     operation_history = OperationHistoryService(db)
@@ -24,8 +23,6 @@ def build_router(ctx: RouteContext):
     duplicate_verify_lock = ctx.live("duplicate_verify_lock")
     imdb_genre_job = ctx.live("imdb_genre_job")
     imdb_genre_lock = ctx.live("imdb_genre_lock")
-    maybe_start_scheduled_hashing = ctx.live("maybe_start_scheduled_hashing")
-    maybe_start_trash_cleanup = ctx.live("maybe_start_trash_cleanup")
     media_hash_job = ctx.live("media_hash_job")
     media_hash_lock = ctx.live("media_hash_lock")
     media_hash_pause = ctx.live("media_hash_pause")
@@ -140,8 +137,6 @@ def build_router(ctx: RouteContext):
 
     @router.get("/api/tasks")
     def active_tasks() -> dict:
-        maybe_start_trash_cleanup()
-        maybe_start_scheduled_hashing()
         tasks = []
         with scan_all_lock:
             all_scan = dict(scan_all_job)
@@ -279,7 +274,7 @@ def build_router(ctx: RouteContext):
                     f"{media_job.get('processed', 0):,} of "
                     f"{media_job.get('total', 0):,} checked"
                     + (
-                        f" Â· {media_job.get('current', '')}"
+                        f" · {media_job.get('current', '')}"
                         if media_job.get("current") else ""
                     )
                 ),
