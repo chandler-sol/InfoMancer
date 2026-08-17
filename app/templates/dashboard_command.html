@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', path='dashboard-command.css') }}?v={{ app_version }}">
+<div class="home-compare-switch" aria-label="Dashboard layout preview">
+  <span><b>Preview</b> Operational dashboard</span>
+  <a href="/?layout=old">Compare current layout</a>
+</div>
+<main class="home-ops">
+  <section class="home-ops-overview">
+    <div class="home-ops-today">
+      <div class="home-ops-heading">
+        <p class="eyebrow">LIBRARY OVERVIEW</p>
+        <h1>Your library today</h1>
+        <p class="home-ops-summary"><strong>{{ '{:,}'.format(counts.movies + counts.shows) }}</strong> titles <span>&middot;</span> <strong>{{ '{:,}'.format(counts.episodes) }}</strong> episodes <span>&middot;</span> <strong>{{ format_bytes(counts.bytes) }}</strong> indexed across <strong>{{ roots|length }}</strong> source{% if roots|length != 1 %}s{% endif %}.</p>
+      </div>
+
+      <div class="home-checkin">
+        <div class="home-checkin-head">
+          <div><p class="eyebrow">SINCE YOUR LAST CHECK-IN</p><h2>{% if activity_unread_count %}{{ activity_unread_display }} unread activity event{% if activity_unread_count != 1 %}s{% endif %}{% else %}You're caught up{% endif %}</h2></div>
+          <a href="/activity">Open Activity &rarr;</a>
+        </div>
+        {% if activity_unread %}
+        <div class="home-checkin-events">
+          {% for event in activity_unread[:3] %}
+          <a href="{{ event.href }}"><span class="home-event-level {{ event.level }}"></span><span><strong>{{ event.message }}</strong><small>{{ event.category|replace('-', ' ')|title }} &middot; {{ local_time(event.created_at) }}</small></span></a>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="home-checkin-clear">No unread library activity needs your attention right now.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <aside class="home-ops-health{% if mie_summary.critical %} critical{% elif mie_summary.warning %} warning{% else %} clear{% endif %}">
+      <div class="home-health-grid" aria-hidden="true"></div>
+      <div class="home-ops-health-top"><span class="home-pulse"><i></i></span><span>MEDIA INTELLIGENCE</span><b>{{ 'LIVE' if mie_summary.last_analyzed_at else 'READY' }}</b></div>
+      {% if mie_summary.last_analyzed_at %}
+        {% if mie_summary.critical %}
+        <strong class="home-health-focus">{{ '{:,}'.format(mie_summary.critical) }}</strong><h2>critical finding{% if mie_summary.critical != 1 %}s{% endif %}</h2><p>These are the findings worth reviewing first.</p>
+        {% elif mie_summary.warning %}
+        <strong class="home-health-focus">{{ '{:,}'.format(mie_summary.warning) }}</strong><h2>warning{% if mie_summary.warning != 1 %}s{% endif %}</h2><p>No critical findings. Warnings are ready when you are.</p>
+        {% else %}
+        <strong class="home-health-clear-mark">Clear</strong><h2>Nothing needs your attention</h2><p>The last analysis found no active critical or warning conditions.</p>
+        {% endif %}
+        <div class="home-health-facts"><span><b>{{ '{:,}'.format(mie_summary.active) }}</b>Total findings</span><span><b>{{ '{:,}'.format(mie_summary.warning) }}</b>Warnings</span></div>
+        <a class="home-health-button" href="/library-health">{% if mie_summary.critical %}Review critical findings{% else %}Open Library Health{% endif %}<span>&rarr;</span></a>
+      {% else %}
+        <strong class="home-health-clear-mark">Ready</strong><h2>Analyze Library Health</h2><p>Run the first read-only analysis to surface explainable catalog findings.</p>
+        <a class="home-health-button" href="/library-health">Open Library Health <span>&rarr;</span></a>
+      {% endif %}
+    </aside>
+  </section>
+
+  <section class="home-live-task" data-home-live-task hidden aria-live="polite">
+    <span class="home-live-task-dot"></span>
+    <div><small>ACTIVE BACKGROUND WORK</small><strong data-home-task-label>Working</strong><span data-home-task-detail>Preparing task...</span></div>
+    <div class="home-live-task-progress"><i data-home-task-fill></i></div>
+    <b data-home-task-percent></b>
+  </section>
+
+  <section class="home-ops-metrics" aria-label="Library totals">
+    <a href="/movies"><span>Movies</span><strong data-live-metric="movies" data-value="{{ counts.movies }}">{{ '{:,}'.format(counts.movies) }}</strong><small>cataloged films</small></a>
+    <a href="/shows"><span>TV Shows</span><strong data-live-metric="shows" data-value="{{ counts.shows }}">{{ '{:,}'.format(counts.shows) }}</strong><small><span data-live-copy="episodes">{{ '{:,}'.format(counts.episodes) }}</span> episodes</small></a>
+    <a href="/library-health?category=completeness"><span>Known gaps</span><strong data-live-metric="missing" data-value="{{ counts.missing }}">{{ '{:,}'.format(counts.missing) }}</strong><small>episodes to review</small></a>
+    <div><span>On disk</span><strong data-live-metric="bytes" data-value="{{ counts.bytes }}">{{ format_bytes(counts.bytes) }}</strong><small>indexed media</small></div>
+  </section>
+
+  {% if not roots %}
+  <section class="panel empty-library-start">
+    <span class="empty-library-icon" aria-hidden="true">+</span>
+    <div><p class="eyebrow">FIRST SOURCE</p><h2>Your library is ready for media</h2><p>Choose a server folder containing Movies or TV Shows. InfoMancer previews what it finds before adding anything.</p></div>
+    <div class="actions"><a class="button primary" href="/sources">Add first source</a>{% if current_user.id > 0 %}<form method="post" action="/getting-started/restart"><button class="button">Open Setup Assistant</button></form>{% endif %}</div>
+  </section>
+  {% elif not counts.movies and not counts.shows %}
+  <section class="panel empty-library-start compact"><div><p class="eyebrow">SOURCES READY</p><h2>Your first scan is the next step</h2><p>Your folders are configured, but no titles have been cataloged yet.</p></div><a class="button primary" href="/sources">Review sources and scan</a></section>
+  {% endif %}
+
+  <section class="home-ops-workspace">
+    <section class="home-ops-panel home-recent-changes">
+      <div class="home-ops-panel-head"><div><p class="eyebrow">RECENTLY CHANGED</p><h2>Latest library updates</h2></div><a href="/library">Open Library &rarr;</a></div>
+      {% if recent %}
+      <div class="home-change-grid">
+        {% for title in recent[:4] %}
+        <a class="home-change-card" href="/titles/{{ title.id }}">
+          <span class="home-change-poster">{% if title.poster_url %}<img src="{{ title.poster_url }}" alt="" loading="lazy">{% else %}<i>{{ title_initial(title) }}</i>{% endif %}</span>
+          <span class="home-change-copy"><small>{{ 'TV SHOW' if title.kind == 'tv' else 'MOVIE' }}</small><strong>{{ title.metadata_title or title.title }}</strong><em>{% if title.metadata_year or title.year %}{{ title.metadata_year or title.year }}{% else %}Year unknown{% endif %} &middot; Updated {{ local_time(title.updated_at) }}</em></span>
+          <b>&rarr;</b>
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}<p class="home-ops-empty">Library changes will appear here after your first scan.</p>{% endif %}
+    </section>
+
+    <aside class="home-ops-panel home-attention">
+      <div class="home-ops-panel-head"><div><p class="eyebrow">NEEDS ATTENTION</p><h2>Useful next steps</h2></div></div>
+      <div class="home-attention-list">
+        <a href="/library-health"><span><b class="danger">{{ '{:,}'.format(mie_summary.critical) }}</b><strong>Critical findings</strong><small>Highest-priority Library Health findings</small></span><i>&rarr;</i></a>
+        <a href="/library-health"><span><b>{{ '{:,}'.format(mie_summary.warning) }}</b><strong>Warnings</strong><small>Reviewable health conditions</small></span><i>&rarr;</i></a>
+        <a href="/library-health?category=completeness"><span><b>{{ '{:,}'.format(counts.missing) }}</b><strong>Known gaps</strong><small>Episodes InfoMancer expects but cannot account for</small></span><i>&rarr;</i></a>
+        <a href="/activity"><span><b>{{ activity_unread_display }}</b><strong>Unread activity</strong><small>Changes since you last cleared Activity</small></span><i>&rarr;</i></a>
+      </div>
+    </aside>
+  </section>
+
+  {% if saved_views %}
+  <section class="home-ops-saved">
+    <div class="home-ops-panel-head"><div><p class="eyebrow">PINNED VIEWS</p><h2>Your shortcuts</h2></div><a href="/library">Manage in Library &rarr;</a></div>
+    <div>{% for view in saved_views %}<a href="{{ view.href }}"><small>{{ 'MOVIES' if view.path == '/movies' else 'TV SHOWS' if view.path == '/shows' else 'ALL MEDIA' }}</small><strong>{{ view.name }}</strong></a>{% endfor %}</div>
+  </section>
+  {% endif %}
+
+  <section class="home-ops-favorites">
+    <div class="home-ops-panel-head"><div><p class="eyebrow">FAVORITES</p><h2>Kept close at hand</h2></div><a href="/favorites">View all &rarr;</a></div>
+    {% if favorites %}
+    <div class="home-favorite-strip">
+      {% for title in favorites[:6] %}
+      <a href="/titles/{{ title.id }}"><span>{% if title.poster_url %}<img src="{{ title.poster_url }}" alt="" loading="lazy">{% else %}<i>{{ title_initial(title) }}</i>{% endif %}</span><strong>{{ title.metadata_title or title.title }}</strong><small>{% if title.metadata_year or title.year %}{{ title.metadata_year or title.year }}{% endif %}</small></a>
+      {% endfor %}
+    </div>
+    {% else %}<a class="home-ops-favorite-empty" href="/library">Star titles in the Library and they will wait here for you.</a>{% endif %}
+  </section>
+</main>
+<script>
+(() => {
+  const taskHost = document.querySelector('[data-home-live-task]');
+  const taskLabel = taskHost?.querySelector('[data-home-task-label]');
+  const taskDetail = taskHost?.querySelector('[data-home-task-detail]');
+  const taskFill = taskHost?.querySelector('[data-home-task-fill]');
+  const taskPercent = taskHost?.querySelector('[data-home-task-percent]');
+
+  const renderTask = (tasks) => {
+    if (!taskHost) return;
+    const active = (Array.isArray(tasks) ? tasks : []).filter(task => task?.id && task.id !== 'media-fingerprints-queued');
+    if (!active.length) { taskHost.hidden = true; return; }
+    const task = active[0];
+    taskHost.hidden = false;
+    taskLabel.textContent = active.length > 1 ? `${active.length} background tasks running` : task.label;
+    taskDetail.textContent = task.detail || 'Working in the background';
+    const match = String(task.detail || '').match(/([\d,]+)\s+of\s+([\d,]+)/i);
+    if (match) {
+      const current = Number(match[1].replaceAll(',', ''));
+      const total = Number(match[2].replaceAll(',', ''));
+      const percent = total > 0 ? Math.max(0, Math.min(100, current / total * 100)) : 0;
+      taskFill.style.width = `${percent}%`;
+      taskHost.classList.add('determinate');
+      taskPercent.textContent = `${percent.toFixed(percent >= 10 ? 0 : 1)}%`;
+    } else {
+      taskFill.style.width = '';
+      taskHost.classList.remove('determinate');
+      taskPercent.textContent = '';
+    }
+  };
+
+  document.addEventListener('infomancer:tasks', event => renderTask(event.detail?.tasks || []));
+  fetch('/api/tasks', {cache: 'no-store'}).then(response => response.ok ? response.json() : null).then(data => { if (data) renderTask(data.tasks || []); }).catch(() => {});
+
+  const metricElements = new Map([...document.querySelectorAll('[data-live-metric]')].map(element => [element.dataset.liveMetric, element]));
+  const refreshMetrics = async () => {
+    try {
+      const response = await fetch('/api/dashboard-metrics', {cache: 'no-store'});
+      if (!response.ok) return;
+      const metrics = await response.json();
+      metricElements.forEach((element, key) => {
+        if (!metrics[key]) return;
+        element.dataset.value = String(metrics[key].value || 0);
+        element.textContent = metrics[key].display;
+      });
+      document.querySelectorAll('[data-live-copy]').forEach(element => {
+        const metric = metrics[element.dataset.liveCopy];
+        if (metric) element.textContent = metric.display;
+      });
+    } catch (_error) {}
+  };
+  document.addEventListener('infomancer:tasks', event => { if (!event.detail?.active) refreshMetrics(); });
+})();
+</script>
+{% endblock %}
