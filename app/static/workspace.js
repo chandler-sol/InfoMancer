@@ -1,9 +1,20 @@
 (() => {
+  const workspaceScript = document.currentScript;
+  const workspaceAssetVersion = (() => {
+    if (!workspaceScript?.src) return "";
+    try {
+      return new URL(workspaceScript.src, window.location.href).searchParams.get("v") || "";
+    } catch (_error) {
+      return "";
+    }
+  })();
+
   const ensureWorkspacePolishStyles = () => {
     if (document.querySelector('link[data-workspace-detail-polish]')) return;
     const link = document.createElement("link");
     link.rel = "stylesheet";
-    link.href = "/static/workspace-detail-polish.css";
+    const version = workspaceAssetVersion ? `?v=${encodeURIComponent(workspaceAssetVersion)}` : "";
+    link.href = `/static/workspace-detail-polish.css${version}`;
     link.dataset.workspaceDetailPolish = "1";
     document.head.append(link);
   };
