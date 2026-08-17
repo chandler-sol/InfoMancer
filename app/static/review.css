@@ -1,3 +1,5 @@
+@import url("workspace-detail-polish.css?v=1");
+
 /* W3 unified Review Queue */
 .review-workspace {
   width: min(100%, 1480px);
