@@ -1,38 +1,71 @@
 /* 0.8 detail/inspector containment fixes.
-   Kept separate from library.css so these late layout corrections stay easy to audit. */
+   Kept separate from the primary workspace styles so these late layout corrections
+   stay easy to audit while alpha UI testing is active. */
 
-/* The technical rail should wrap into the available width instead of creating a
-   page-level horizontal scroller when a value such as Source is long. */
+/* Technical facts are compact responsive cards. Keeping the label above the value
+   gives every fact the same visual anchor, avoids baseline shifts around values
+   such as 1080p, and lets long Source labels use more room without a scrollbar. */
 body.has-app-sidebar .media-dossier .detail-technical-rail {
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
 }
 body.has-app-sidebar .media-dossier .detail-technical-rail dl {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px;
   width: 100%;
   min-width: 0;
+  margin: 0;
   overflow: visible;
   scrollbar-width: auto;
 }
 body.has-app-sidebar .media-dossier .detail-technical-rail dl > div {
-  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  flex: 1 1 128px;
   width: auto;
+  min-width: 118px;
   max-width: 100%;
+  min-height: 58px;
+  padding: 10px 13px;
+  border: 1px solid #273542;
+  border-radius: var(--im-radius-sm);
+  background: rgba(16, 22, 29, .72);
+}
+body.has-app-sidebar .media-dossier .detail-technical-rail dl > div:last-child {
+  flex-grow: 1.6;
+  flex-basis: 190px;
+}
+body.has-app-sidebar .media-dossier .detail-technical-rail dt {
+  margin: 0;
+  color: #98a6b6;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: .09em;
+  text-transform: uppercase;
 }
 body.has-app-sidebar .media-dossier .detail-technical-rail dd {
   min-width: 0;
+  margin: 0;
   overflow: hidden;
+  color: #f7f9fa;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+  line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 /* Expanded TV rows contain long filesystem paths. Grid children default to an
-   intrinsic min-width, which allowed one path to widen the entire On Disk panel
-   and push the season heading beyond its border. Explicit zero minimums keep the
-   grid bounded and let the path wrap instead. */
+   intrinsic min-width, which can widen the On Disk file grid and make a season
+   heading appear outside the panel. Explicit zero minimums keep every row and
+   heading bounded without clipping episode action menus. */
 body.has-app-sidebar .media-dossier .dossier-on-disk,
 body.has-app-sidebar .media-dossier .dossier-on-disk .file-list,
 body.has-app-sidebar .media-dossier .dossier-on-disk .file-list > article,
@@ -42,22 +75,51 @@ body.has-app-sidebar .media-dossier .dossier-on-disk .season-heading {
   min-width: 0;
   max-width: 100%;
 }
-body.has-app-sidebar .media-dossier .dossier-on-disk {
-  width: 100%;
-}
-body.has-app-sidebar .media-dossier .dossier-on-disk .file-list {
-  width: 100%;
-  overflow: hidden;
-}
+body.has-app-sidebar .media-dossier .dossier-on-disk,
+body.has-app-sidebar .media-dossier .dossier-on-disk .file-list,
+body.has-app-sidebar .media-dossier .dossier-on-disk .file-list > article,
 body.has-app-sidebar .media-dossier .dossier-on-disk .season-heading {
   width: 100%;
 }
+body.has-app-sidebar .media-dossier .dossier-on-disk .season-heading {
+  margin-inline: 0;
+}
+body.has-app-sidebar .media-dossier .dossier-on-disk .season-heading > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body.has-app-sidebar .media-dossier .dossier-on-disk .season-heading-meta {
+  flex: 0 0 auto;
+}
 body.has-app-sidebar .media-dossier .dossier-on-disk .file-path,
 body.has-app-sidebar .media-dossier .dossier-on-disk .file-list > article > .grow > small {
+  display: block;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Give the season filters and bulk collapse controls a little more separation.
+   They should read as distinct controls rather than one continuous button strip. */
+body.has-app-sidebar .media-dossier .season-nav {
+  gap: 7px;
+  margin: 20px 0 11px;
+}
+body.has-app-sidebar .media-dossier .season-collapse-toolbar {
+  flex-wrap: wrap;
+  gap: 9px;
+  margin: 6px 0 14px;
+}
+body.has-app-sidebar .media-dossier .season-collapse-toolbar > span {
+  margin-right: 4px;
+}
+body.has-app-sidebar .media-dossier .season-collapse-toolbar button {
+  padding: 6px 10px;
 }
 
 /* TV inspector season accordion. Season shells arrive with the inspector;
@@ -175,8 +237,21 @@ body.has-app-sidebar .media-dossier .dossier-on-disk .file-list > article > .gro
 }
 
 @media (max-width: 720px) {
-  body.has-app-sidebar .media-dossier .detail-technical-rail dl {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  body.has-app-sidebar .media-dossier .detail-technical-rail dl > div {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+  }
+  body.has-app-sidebar .media-dossier .detail-technical-rail dl > div:last-child {
+    flex-basis: 100%;
+  }
+  body.has-app-sidebar .media-dossier .season-collapse-toolbar {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 430px) {
+  body.has-app-sidebar .media-dossier .detail-technical-rail dl > div {
+    flex-basis: 100%;
   }
 }
 
