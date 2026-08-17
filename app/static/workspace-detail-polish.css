@@ -2,6 +2,153 @@
    Kept separate from the primary workspace styles so these late layout corrections
    stay easy to audit while alpha UI testing is active. */
 
+/* Readability pass for the 0.8 alpha. The interface was visually crisp at 100%
+   zoom, but several high-frequency labels, list rows, cover captions, and inspector
+   facts were too small for comfortable scanning. Keep the increase deliberately
+   modest while raising contrast and using more of wide desktop viewports. */
+:root {
+  --text: #f5f7fa;
+  --muted: #9ba9b8;
+}
+body {
+  font-size: 16px;
+}
+.button,
+button {
+  font-size: 14px;
+}
+summary {
+  font-size: 13px;
+}
+th {
+  color: #a7b2bf;
+  font-size: 11px;
+}
+.kind {
+  font-size: 11px;
+}
+.matched {
+  font-size: 13px;
+}
+
+/* Library is the densest screen in InfoMancer and benefits from a little more
+   horizontal room than form/detail pages. The inspector-open width preserves
+   enough canvas for four large covers on common wide desktop displays. */
+body.has-app-sidebar main.shell:has(> .catalog-tabs) {
+  max-width: 1700px;
+}
+.cover-library {
+  justify-content: start;
+  gap: 30px clamp(18px, 1.6vw, 28px);
+}
+.cover-card-link > strong {
+  margin-top: 11px;
+  color: #f7f9fb;
+  font-size: 15px;
+  line-height: 1.35;
+}
+.cover-card-meta {
+  gap: 6px 10px;
+  margin-top: 6px;
+  color: #a6b2bf;
+  font-size: 12.5px;
+}
+.cover-rating {
+  font-size: 1.04em;
+}
+.title-organization {
+  color: #a2afbc;
+  font-size: 11.5px;
+}
+.alphabet a {
+  min-width: 32px;
+  height: 32px;
+  font-size: 13px;
+}
+.library-table .title-link {
+  color: #f7f9fb;
+  font-size: 16px;
+  line-height: 1.35;
+}
+.library-table td small {
+  color: #a6b3c0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.library-table .poster-thumb,
+.library-table .poster-placeholder {
+  width: 42px;
+  height: 63px;
+}
+.library-table .matched {
+  font-weight: 650;
+}
+
+@media (min-width: 1180px) {
+  body.workspace-inspector-open.has-app-sidebar main.shell:has(> .catalog-tabs) {
+    max-width: 1840px;
+  }
+}
+
+/* Inspector should remain compact, but its primary facts should not require browser
+   zoom. Increase the smallest labels by roughly one step while leaving the drawer
+   footprint and information hierarchy intact. */
+.workspace-inspector-identity .workspace-inspector-title {
+  font-size: 28px;
+}
+.workspace-inspector-subtitle {
+  color: #a5b2bf;
+  font-size: 13px;
+}
+.workspace-inspector-panel .workspace-inspector-details-shortcut {
+  font-size: 12px !important;
+}
+.workspace-inspector-section-head small {
+  font-size: 9px;
+}
+.workspace-inspector-section-head strong {
+  font-size: 15px;
+}
+.workspace-inspector-section-head a,
+.workspace-inspector-section-head em {
+  color: #a0adba;
+  font-size: 11px;
+}
+.workspace-inspector-stat-grid strong {
+  font-size: 22px;
+}
+.workspace-inspector-stat-grid span,
+.workspace-inspector-media-grid small {
+  color: #a0adba;
+  font-size: 10px;
+}
+.workspace-inspector-media-grid strong {
+  font-size: 12px;
+}
+.workspace-inspector-files strong {
+  font-size: 11px;
+}
+.workspace-inspector-files small {
+  color: #a0adba;
+  font-size: 10px;
+}
+.workspace-file-version,
+.workspace-inspector-more {
+  font-size: 9px;
+}
+.workspace-inspector-meta.compact dt {
+  color: #9eabb8;
+  font-size: 10px;
+}
+.workspace-inspector-meta.compact dd {
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.workspace-inspector-empty-state,
+.workspace-inspector-hint {
+  color: #9eabb8;
+}
+
 /* Technical facts are compact responsive cards. Keeping the label above the value
    gives every fact the same visual anchor, avoids baseline shifts around values
    such as 1080p, and lets long Source labels use more room without a scrollbar. */
