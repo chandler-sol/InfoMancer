@@ -1,6 +1,5 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from ..access import require_librarian
 from .context import RouteContext
 
 
@@ -16,16 +15,6 @@ def build_router(ctx: RouteContext):
     event_log = ctx.live("event_log")
     redirect = ctx.live("redirect")
     templates = ctx.live("templates")
-
-    def librarian_get(path: str, **kwargs):
-        dependencies = list(kwargs.pop("dependencies", ()))
-        dependencies.append(Depends(require_librarian))
-        return router.get(path, dependencies=dependencies, **kwargs)
-
-    def librarian_post(path: str, **kwargs):
-        dependencies = list(kwargs.pop("dependencies", ()))
-        dependencies.append(Depends(require_librarian))
-        return router.post(path, dependencies=dependencies, **kwargs)
 
     @router.post("/engagement/announcements/{announcement_id}/seen")
     def mark_announcement_seen(request: Request, announcement_id: int):
@@ -71,10 +60,12 @@ def build_router(ctx: RouteContext):
             "message": request.query_params.get("message", ""),
         })
 
-    @librarian_post("/activity/read")
+    @router.post("/activity/read")
     def mark_activity_read(
         request: Request, event_ids: list[int] = Form(default=[]), all_events: str = Form(""),
     ):
+        # Read state is account-local and EventLog intersects requested IDs with
+        # notifications visible to this user, so members can safely manage their own inbox.
         changed = event_log.mark_read(
             request.state.user.id, None if all_events == "1" else event_ids,
         )
