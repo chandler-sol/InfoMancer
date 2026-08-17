@@ -13,9 +13,11 @@
         <span class="workspace-status{% if title.source_health == 'healthy' %} good{% elif title.source_health in ['degraded','offline'] %} warning{% endif %}">Source {{ (title.source_health or 'unknown')|title }}</span>
         {% if title.metadata_status %}<span class="workspace-status">{{ title.metadata_status|replace('_',' ')|title }}</span>{% endif %}
       </div>
-      <div class="workspace-inspector-quick-action"><a class="button primary" href="/titles/{{ title.id }}">Open full details</a></div>
     </div>
-    {% if current_user.id > 0 %}<button type="button" class="workspace-inspector-favorite{% if title.favorite %} active{% endif %}" data-workspace-favorite aria-pressed="{{ 'true' if title.favorite else 'false' }}" title="{{ 'Remove from favorites' if title.favorite else 'Add to favorites' }}"><span>★</span><small>{{ 'Favorite' if title.favorite else 'Favorite' }}</small></button>{% endif %}
+    <div class="workspace-inspector-summary-actions">
+      {% if current_user.id > 0 %}<button type="button" class="workspace-inspector-favorite{% if title.favorite %} active{% endif %}" data-workspace-favorite aria-pressed="{{ 'true' if title.favorite else 'false' }}" title="{{ 'Remove from favorites' if title.favorite else 'Add to favorites' }}"><span>★</span><small>{{ 'Favorite' if title.favorite else 'Favorite' }}</small></button>{% endif %}
+      <a class="workspace-inspector-details-shortcut" href="/titles/{{ title.id }}" aria-label="Open full details"><span aria-hidden="true">↗</span><small>Details</small></a>
+    </div>
   </div>
 
   {% if title.overview %}<p class="workspace-inspector-overview">{{ title.overview }}</p>{% endif %}
