@@ -13,12 +13,8 @@ def build_router(ctx: RouteContext):
     Request = ctx.get("Request")
     announcement_page_context = ctx.live("announcement_page_context")
     engagement = ctx.live("engagement")
-    errors = ctx.live("errors")
     event_log = ctx.live("event_log")
-    protected = ctx.live("protected")
-    record_event = ctx.live("record_event")
     redirect = ctx.live("redirect")
-    roots = ctx.live("roots")
     templates = ctx.live("templates")
 
     def librarian_get(path: str, **kwargs):
@@ -83,12 +79,6 @@ def build_router(ctx: RouteContext):
             request.state.user.id, None if all_events == "1" else event_ids,
         )
         return redirect("/activity", f"Marked {changed:,} notification{'s' if changed != 1 else ''} as read.")
-        record_event(
-            "scan",
-            f"Scan all finished: {len(roots) - errors:,} sources completed, {errors:,} failed, and {protected:,} protected by Source Guard.",
-            level="warning" if errors or protected else "info",
-            context={"sources": len(roots), "errors": errors, "protected": protected},
-        )
 
     @router.get("/health")
     def health() -> dict:
