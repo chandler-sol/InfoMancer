@@ -362,6 +362,10 @@
       if (titleLink || !interactive(event.target)) {
         event.preventDefault();
         rangeAnchorId = titleId;
+        if (String(titleId) === selectedTitleId) {
+          closeInspector({historyMode: history.state?.workspaceInspectorTitleId ? "back" : "replace"});
+          return;
+        }
         inspectTitle(titleId, item, selectedTitleId ? "replace" : "push");
       }
     });
@@ -568,6 +572,9 @@
   };
 
   const initialize = () => {
+    if (document.querySelector(".library-table, #cover-library")) {
+      document.documentElement.classList.add("library-view-ready");
+    }
     ensureWorkspacePolishStyles();
     enhanceWorkspaceNavigation();
     enhanceLibraryInspector();
