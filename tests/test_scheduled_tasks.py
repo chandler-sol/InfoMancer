@@ -13,20 +13,24 @@ class ScheduledTaskWorkspaceContracts(unittest.TestCase):
         nav = (ROOT / "app/templates/_settings_nav.html").read_text(encoding="utf-8")
 
         self.assertIn("build_scheduled_tasks_router", routes_init)
-        self.assertIn('@librarian_get("/scheduled-tasks"', routes)
-        self.assertIn('@librarian_post("/scheduled-tasks/fingerprints"', routes)
-        self.assertIn('@librarian_post("/scheduled-tasks/trash-retention"', routes)
+        self.assertLess(
+            routes_init.index("build_scheduled_tasks_router,"),
+            routes_init.index("build_settings_router,"),
+        )
+        self.assertIn('@librarian_get("/settings/scheduled-tasks"', routes)
+        self.assertIn('@librarian_post("/settings/scheduled-tasks/fingerprints"', routes)
+        self.assertIn('@librarian_post("/settings/scheduled-tasks/trash-retention"', routes)
         self.assertIn("dependencies.append(Depends(require_librarian))", routes)
         self.assertIn("Scheduled Tasks", template)
         self.assertIn("scheduled-tasks.css", template)
         self.assertIn("Next run", template)
         self.assertIn("Last scheduled run", template)
         self.assertIn("MANAGED TRASH", template)
-        self.assertIn('href="/scheduled-tasks"', nav)
+        self.assertIn('href="/settings/scheduled-tasks"', nav)
 
     def test_task_widget_links_to_schedule_center_without_showing_backlog(self):
         script = (ROOT / "app/static/task-widget.js").read_text(encoding="utf-8")
-        self.assertIn('link.href = "/scheduled-tasks"', script)
+        self.assertIn('link.href = "/settings/scheduled-tasks"', script)
         self.assertIn('task.id !== "media-fingerprints-queued"', script)
         self.assertIn("No Tasks Currently Active", script)
 
