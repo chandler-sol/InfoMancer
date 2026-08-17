@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class TaskWidgetStateContracts(unittest.TestCase):
     def test_task_widget_only_surfaces_live_work_and_recent_results(self):
         script = (ROOT / "app/static/task-widget.js").read_text(encoding="utf-8")
-        styles = (ROOT / "app/static/progress.css").read_text(encoding="utf-8")
+        styles = (ROOT / "app/static/task-widget.css").read_text(encoding="utf-8")
         routes = (ROOT / "app/routes/system.py").read_text(encoding="utf-8")
         loader = (ROOT / "app/static/workspace-ui.js").read_text(encoding="utf-8")
 
