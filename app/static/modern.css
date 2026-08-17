@@ -331,10 +331,27 @@ html.library-view-ready .library-view-toolbar {
   body.has-app-sidebar .profile-icon-fieldset {
     margin-top: 20px !important;
     padding-top: 16px !important;
+    border: 0 !important;
+    border-top: 1px solid var(--line) !important;
+  }
+
+  body.has-app-sidebar .profile-custom-choice {
+    grid-column: span 2;
+    min-width: 200px;
   }
 
   body.has-app-sidebar .profile-preview-inner {
     min-height: 350px;
     padding: 30px;
+  }
+
+  /* These tiny affordance rules also live in the operational dashboard stylesheet.
+     Keeping them here makes alpha builds resilient if that page-specific CSS is cached. */
+  body.has-app-sidebar .home-ops-panel-head > a {
+    font-weight: 800;
+  }
+
+  body.has-app-sidebar .home-change-card > b {
+    font-weight: 900;
   }
 }
