@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,12 +22,23 @@ class EventLogTests(unittest.TestCase):
             "metadata", "Lookup paused because the provider rate limit was reached.",
             level="warning", detail="HTTP 429", context={
                 "title_id": 12, "api_key": "never-store-this",
+                "provider": {
+                    "access_token": "nested-token-must-not-survive",
+                    "name": "TVDB",
+                },
+                "session_cookie": "cookie-must-not-survive",
             },
         )
         rows = self.logs.query(level="warning", category="metadata")
         self.assertEqual(len(rows), 1)
         self.assertIn("rate limit", rows[0]["message"])
         self.assertNotIn("never-store-this", rows[0]["context_json"])
+        self.assertNotIn("nested-token-must-not-survive", rows[0]["context_json"])
+        self.assertNotIn("cookie-must-not-survive", rows[0]["context_json"])
+        context = json.loads(rows[0]["context_json"])
+        self.assertEqual(context["api_key"], "[redacted]")
+        self.assertEqual(context["provider"]["access_token"], "[redacted]")
+        self.assertEqual(context["provider"]["name"], "TVDB")
 
     def test_new_schema_supports_media_and_personal_organization(self):
         with self.database.connect() as conn:
