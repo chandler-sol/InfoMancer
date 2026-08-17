@@ -1,3 +1,33 @@
+<style data-workspace-inspector-inline-polish>
+  .workspace-inspector-panel .workspace-inspector-details-shortcut {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: fit-content;
+    min-height: 30px;
+    margin-top: 9px;
+    padding: 6px 11px;
+    border: 1px solid #33414f;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted) !important;
+    font-size: 11px;
+    font-weight: 650;
+    line-height: 1;
+    text-decoration: none !important;
+    transition: border-color .14s ease, background .14s ease, color .14s ease;
+  }
+  .workspace-inspector-panel .workspace-inspector-details-shortcut:visited {
+    color: var(--muted) !important;
+  }
+  .workspace-inspector-panel .workspace-inspector-details-shortcut:hover,
+  .workspace-inspector-panel .workspace-inspector-details-shortcut:focus-visible {
+    border-color: var(--lime);
+    background: var(--lime);
+    color: #0b1009 !important;
+    text-decoration: none !important;
+  }
+</style>
 <div class="workspace-inspector-panel" data-workspace-inspector-panel data-title-id="{{ title.id }}" data-detail-href="/titles/{{ title.id }}">
   <input type="hidden" data-workspace-csrf value="{{ csrf_token }}">
   <div class="workspace-inspector-summary">
@@ -13,7 +43,7 @@
         <span class="workspace-status{% if title.source_health == 'healthy' %} good{% elif title.source_health in ['degraded','offline'] %} warning{% endif %}">Source {{ (title.source_health or 'unknown')|title }}</span>
         {% if title.metadata_status %}<span class="workspace-status">{{ title.metadata_status|replace('_',' ')|title }}</span>{% endif %}
       </div>
-      <a class="workspace-inspector-details-shortcut" href="/titles/{{ title.id }}">Open full details</a>
+      <a class="button workspace-inspector-details-shortcut" href="/titles/{{ title.id }}">Open full details</a>
     </div>
     {% if current_user.id > 0 %}<button type="button" class="workspace-inspector-favorite{% if title.favorite %} active{% endif %}" data-workspace-favorite aria-pressed="{{ 'true' if title.favorite else 'false' }}" title="{{ 'Remove from favorites' if title.favorite else 'Add to favorites' }}"><span>★</span><small>{{ 'Favorite' if title.favorite else 'Favorite' }}</small></button>{% endif %}
   </div>
