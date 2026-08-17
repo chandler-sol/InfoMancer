@@ -174,16 +174,18 @@ def build_router(ctx: RouteContext):
     @router.get("/account/avatar/current")
     def current_profile_avatar(request: Request):
         user = getattr(request.state, "user", None)
-        if not user or int(getattr(user, "id", 0) or 0) <= 0:
+        if not user:
             return Response(status_code=404)
-        custom_path = _avatar_path(settings, user.id)
-        preview = request.query_params.get("preview") == "1"
-        if custom_path.is_file() and (preview or user.profile_icon == "custom"):
-            return FileResponse(
-                custom_path,
-                media_type="image/png",
-                headers={"Cache-Control": "private, no-store"},
-            )
+        user_id = int(getattr(user, "id", 0) or 0)
+        if user_id > 0:
+            custom_path = _avatar_path(settings, user_id)
+            preview = request.query_params.get("preview") == "1"
+            if custom_path.is_file() and (preview or user.profile_icon == "custom"):
+                return FileResponse(
+                    custom_path,
+                    media_type="image/png",
+                    headers={"Cache-Control": "private, no-store"},
+                )
         return Response(
             _svg_avatar(user),
             media_type="image/svg+xml",
