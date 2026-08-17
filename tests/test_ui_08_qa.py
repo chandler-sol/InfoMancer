@@ -40,6 +40,23 @@ class Ui08QaContracts(unittest.TestCase):
         self.assertIn(".cover-card:hover .cover-art", css)
         self.assertIn("transform: none", css)
 
+    def test_library_readability_pass_uses_wider_canvas_and_larger_type(self):
+        css = (ROOT / "app/static/workspace-detail-polish.css").read_text(encoding="utf-8")
+        self.assertIn("--text: #f5f7fa", css)
+        self.assertIn("--muted: #9ba9b8", css)
+        self.assertIn("font-size: 16px", css)
+        self.assertIn("main.shell:has(> .catalog-tabs)", css)
+        self.assertIn("max-width: 1700px", css)
+        self.assertIn("max-width: 1840px", css)
+        self.assertIn(".cover-card-link > strong", css)
+        self.assertIn("font-size: 15px", css)
+        self.assertIn(".cover-card-meta", css)
+        self.assertIn("font-size: 12.5px", css)
+        self.assertIn(".library-table .title-link", css)
+        self.assertIn(".library-table td small", css)
+        self.assertIn(".workspace-inspector-meta.compact dd", css)
+        self.assertIn("font-size: 11.5px", css)
+
     def test_inspector_quick_details_and_media_spacing_are_preserved(self):
         template = (ROOT / "app/templates/_workspace_inspector.html").read_text(encoding="utf-8")
         css = (ROOT / "app/static/workspace-detail-polish.css").read_text(encoding="utf-8")
