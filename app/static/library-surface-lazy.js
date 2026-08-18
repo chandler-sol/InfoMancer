@@ -12,7 +12,6 @@
   };
 
   const currentView = () => coverSurface.hidden ? 'list' : 'covers';
-  setViewCookie(currentView());
 
   const rememberTitleReturn = (surface) => {
     surface.querySelectorAll('a[href^="/titles/"]').forEach((link) => {
@@ -74,13 +73,13 @@
   };
 
   const hydrateSurface = async (view) => {
+    setViewCookie(view);
     const surface = view === 'covers' ? coverSurface : listSurface;
     if (surface.dataset.librarySurfacePlaceholder !== view) return;
     if (surface.dataset.librarySurfaceLoading === '1') return;
 
     surface.dataset.librarySurfaceLoading = '1';
     markLoading(view);
-    setViewCookie(view);
     try {
       const response = await fetch(window.location.pathname + window.location.search, {
         credentials: 'same-origin',
@@ -154,4 +153,9 @@
       coverSurface.dataset.librarySurfacePlaceholder = 'covers';
     }
   });
+
+  /* If the saved browser preference changed before this response arrived, the
+     server can legitimately send the opposite surface. Hydrate the visible choice
+     immediately rather than leaving a lightweight placeholder on screen. */
+  hydrateSurface(currentView());
 })();
