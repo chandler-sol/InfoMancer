@@ -94,9 +94,10 @@ body.has-app-sidebar main.shell > .missing-panel {
 }
 
 /* The series menu had grown into one tall command list. Keep the frequent actions
-   at the first level and let maintenance/file/matching tools fan out to the left. */
+   at the first level and let maintenance/file/matching tools fan out to the left.
+   Width and chrome now follow the shared item-action menu treatment. */
 .series-menu > .series-menu-popover.detail-condensed-menu {
-  width: 255px;
+  width: 285px;
 }
 .detail-condensed-menu > hr {
   display: none;
@@ -143,9 +144,10 @@ body.has-app-sidebar main.shell > .missing-panel {
   right: calc(100% - 1px);
   z-index: 12;
   display: none;
-  width: 255px;
+  width: 285px;
   padding: 8px;
   border: 1px solid var(--line);
+  border-radius: 3px;
   background: #121820;
   box-shadow: 0 18px 40px rgba(0, 0, 0, .45);
 }
