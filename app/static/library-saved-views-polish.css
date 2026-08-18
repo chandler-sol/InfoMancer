@@ -1,0 +1,117 @@
+/* Saved Views belongs with the Library scope tabs, not in a persistent banner. */
+.catalog-tabs {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.saved-view-bar.saved-view-integrated {
+  display: none !important;
+}
+
+.catalog-tabs .catalog-saved-views {
+  position: relative;
+  margin: 0;
+}
+
+.catalog-tabs .catalog-saved-views > summary {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 13px;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #0c1117;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.catalog-tabs .catalog-saved-views > summary::-webkit-details-marker {
+  display: none;
+}
+
+.catalog-tabs .catalog-saved-views > summary::after {
+  content: "⌄";
+  color: currentColor;
+  font-size: 11px;
+  transform: translateY(-1px);
+}
+
+.catalog-tabs .catalog-saved-views > summary:hover,
+.catalog-tabs .catalog-saved-views > summary:focus-visible,
+.catalog-tabs .catalog-saved-views[open] > summary {
+  border-color: var(--lime);
+  background: rgba(185, 245, 66, .08);
+  color: var(--text);
+}
+
+.catalog-saved-view-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.065);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.catalog-tabs .catalog-saved-views > .saved-view-panel {
+  position: absolute;
+  z-index: 36;
+  top: calc(100% + 8px);
+  left: 0;
+  right: auto;
+  box-sizing: border-box;
+  width: min(430px, calc(100vw - 32px));
+  max-height: min(72vh, 620px);
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #121820;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .46);
+}
+
+.saved-view-inline-empty {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 11px 12px;
+  border: 1px solid rgba(255,255,255,.055);
+  border-radius: 4px;
+  background: rgba(255,255,255,.022);
+}
+
+.saved-view-inline-empty strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.saved-view-inline-empty span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+@media (max-width: 620px) {
+  .catalog-tabs .catalog-saved-views {
+    position: static;
+  }
+
+  .catalog-tabs .catalog-saved-views > .saved-view-panel {
+    top: auto;
+    left: 16px;
+    right: 16px;
+    width: auto;
+    margin-top: 8px;
+  }
+}
