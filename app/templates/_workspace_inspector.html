@@ -67,6 +67,7 @@
     {% if primary_file %}<div class="workspace-inspector-media-grid">
       <div><small>Resolution</small><strong>{{ primary_file.resolution_display or 'Unknown' }}</strong></div>
       <div><small>Video</small><strong>{{ primary_file.video_codec or 'Unknown' }}</strong></div>
+      {% if primary_file.bitrate %}<div><small>Bitrate</small><strong>{% if primary_file.bitrate >= 1000000 %}{{ '%.1f'|format(primary_file.bitrate / 1000000) }} Mbps{% else %}{{ (primary_file.bitrate / 1000)|round|int }} kbps{% endif %}</strong></div>{% endif %}
       <div><small>Audio</small><strong>{{ primary_file.audio_codec or 'Unknown' }}{% if primary_file.audio_channels %} · {{ primary_file.audio_channels }}ch{% endif %}</strong></div>
       <div><small>Range</small><strong>{{ primary_file.dynamic_range or 'Unknown' }}</strong></div>
       <div><small>Container</small><strong>{{ primary_file.container or primary_file.extension or 'Unknown' }}</strong></div>
