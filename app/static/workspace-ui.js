@@ -15,5 +15,9 @@
   tasks.src = `/static/task-widget.js${version}`;
   tasks.async = false;
 
-  document.head.append(core, tasks);
+  const navigation = document.createElement("script");
+  navigation.src = `/static/app-navigation.js${version}`;
+  navigation.async = false;
+
+  document.head.append(core, tasks, navigation);
 })();
