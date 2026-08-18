@@ -20,6 +20,13 @@ body.has-app-sidebar .media-dossier .season-tools-row .season-collapse-toolbar {
   margin-left: auto !important;
 }
 
+/* Episode ordinals need the same visual inset as the surrounding dossier content.
+   Keep the title column where it is while moving only the compact episode number. */
+body.has-app-sidebar .media-dossier .episode-code {
+  box-sizing: border-box;
+  padding-left: 14px;
+}
+
 /* The missing-episode state is supplemental information, not a full-width hero.
    Keep it centered and closer to the width of the rest of the title dossier. */
 body.has-app-sidebar main.shell > .missing-panel {
