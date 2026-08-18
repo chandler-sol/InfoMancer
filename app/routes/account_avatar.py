@@ -146,11 +146,24 @@ def _validate_canvas_png(payload: bytes) -> str:
 
     channels = 4 if color_type == 6 else 3
     expected_length = height * (1 + width * channels)
+    compressed = b"".join(idat_parts)
     try:
-        decoded = zlib.decompress(b"".join(idat_parts))
+        inflater = zlib.decompressobj()
+        # Never allow a small compressed upload to allocate more than the exact
+        # 256x256 canvas payload plus one byte used to detect over-expansion.
+        decoded = inflater.decompress(compressed, expected_length + 1)
+        if len(decoded) > expected_length or inflater.unconsumed_tail:
+            return "The processed profile image contains an unexpected amount of pixel data."
+        remaining = expected_length + 1 - len(decoded)
+        decoded += inflater.flush(remaining)
     except zlib.error:
         return "The processed profile image could not be decoded."
-    if len(decoded) != expected_length:
+    if (
+        len(decoded) != expected_length
+        or not inflater.eof
+        or inflater.unused_data
+        or inflater.unconsumed_tail
+    ):
         return "The processed profile image contains an unexpected amount of pixel data."
     return ""
 
