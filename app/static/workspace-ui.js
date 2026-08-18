@@ -60,4 +60,11 @@
 
     document.head.append(detailStyles, detailPolish);
   }
+
+  if (document.querySelector('.review-workspace')) {
+    const reviewQueueStyles = document.createElement('link');
+    reviewQueueStyles.rel = 'stylesheet';
+    reviewQueueStyles.href = `/static/review-queue-polish.css${version}`;
+    document.head.append(reviewQueueStyles);
+  }
 })();
