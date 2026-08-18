@@ -12,6 +12,7 @@ from .settings import build_router as build_settings_router
 from .account_avatar import build_router as build_account_avatar_router
 from .collections import build_router as build_collections_router
 from .title_media_info import build_router as build_title_media_info_router
+from .title_metadata_async import build_router as build_title_metadata_async_router
 from .titles import build_router as build_titles_router
 
 ROUTER_BUILDERS = (
@@ -26,8 +27,9 @@ ROUTER_BUILDERS = (
     build_settings_router,
     build_account_avatar_router,
     build_collections_router,
-    # Keep the corrected media-info POST before the legacy titles bundle so
-    # Starlette resolves this route first while the titles route split continues.
+    # Keep corrected title actions before the legacy titles bundle while the
+    # route split continues so Starlette resolves the no-reload handlers first.
     build_title_media_info_router,
+    build_title_metadata_async_router,
     build_titles_router,
 )
