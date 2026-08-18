@@ -273,8 +273,7 @@ def build_router(ctx: RouteContext):
         )
 
     @router.get("/api/titles/{title_id}/media-info-state")
-    def title_media_info_state(title_id: int):
-        snapshot = media_snapshot(title_id)
+    def title_media_info_state(title_id: int, snapshot: str = "1"):
         with media_info_lock:
             task = {
                 key: media_info_job.get(key)
@@ -285,7 +284,10 @@ def build_router(ctx: RouteContext):
                 if key in media_info_job
             }
         task.setdefault("status", "idle")
-        return {"task": task, "snapshot": snapshot}
+        result = {"task": task}
+        if snapshot != "0":
+            result["snapshot"] = media_snapshot(title_id)
+        return result
 
     return router, {
         "inspect_title_media_action": inspect_title_media_action,
