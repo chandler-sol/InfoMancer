@@ -261,8 +261,8 @@
         const data = await fetchState(false);
         const status = data.task?.status || "idle";
         if (["complete", "error", "failed", "cancelled"].includes(status)) {
-          stopPolling();
           const finalState = await fetchState(true);
+          stopPolling();
           renderSnapshot(finalState.snapshot, true);
           setButtonsRunning(false);
           if (status === "error" || status === "failed") {
