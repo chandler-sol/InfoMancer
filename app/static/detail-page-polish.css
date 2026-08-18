@@ -1,0 +1,191 @@
+/* 0.8 detail-page interaction/layout pass.
+   Scoped to title detail surfaces so alpha iteration can stay isolated. */
+
+body.has-app-sidebar .media-dossier .season-tools-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 20px 14px 14px;
+}
+body.has-app-sidebar .media-dossier .season-tools-row .season-nav,
+body.has-app-sidebar .media-dossier .season-tools-row .season-collapse-toolbar {
+  margin: 0 !important;
+}
+body.has-app-sidebar .media-dossier .season-tools-row .season-nav {
+  min-width: 0;
+}
+body.has-app-sidebar .media-dossier .season-tools-row .season-collapse-toolbar {
+  flex: 0 0 auto;
+  margin-left: auto !important;
+}
+
+/* The missing-episode state is supplemental information, not a full-width hero.
+   Keep it centered and closer to the width of the rest of the title dossier. */
+body.has-app-sidebar main.shell > .missing-panel {
+  box-sizing: border-box;
+  width: min(100%, 1280px);
+  margin: 32px auto 0;
+}
+
+/* Cast overflow follows the overview pattern: show a useful amount inline and
+   move unusually long credit lists into a dedicated dialog. */
+.movie-credits .credit-more {
+  margin-left: 4px;
+}
+.cast-dialog .workspace-dialog-card {
+  width: min(620px, calc(100vw - 34px));
+}
+.cast-dialog-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 18px;
+  margin: 16px 0 20px;
+}
+.cast-dialog-list a {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cyan);
+  font-size: 13px;
+  line-height: 1.4;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cast-dialog-list a:hover,
+.cast-dialog-list a:focus-visible {
+  color: var(--lime);
+  text-decoration: underline;
+}
+
+/* The series menu had grown into one tall command list. Keep the frequent actions
+   at the first level and let maintenance/file/matching tools fan out to the left. */
+.series-menu > .series-menu-popover.detail-condensed-menu {
+  width: 255px;
+}
+.detail-condensed-menu > hr {
+  display: none;
+}
+.detail-condensed-menu .series-submenu {
+  position: relative;
+}
+.detail-condensed-menu .series-submenu-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 37px;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.detail-condensed-menu .series-submenu-trigger:hover,
+.detail-condensed-menu .series-submenu-trigger:focus-visible,
+.detail-condensed-menu .series-submenu.open > .series-submenu-trigger {
+  color: #10140b;
+  background: var(--lime);
+}
+.detail-condensed-menu .series-submenu-arrow {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+}
+.detail-condensed-menu .series-submenu-trigger:hover .series-submenu-arrow,
+.detail-condensed-menu .series-submenu-trigger:focus-visible .series-submenu-arrow,
+.detail-condensed-menu .series-submenu.open > .series-submenu-trigger .series-submenu-arrow {
+  color: #10140b;
+}
+.detail-condensed-menu .series-submenu-popover {
+  position: absolute;
+  top: -8px;
+  right: calc(100% - 1px);
+  z-index: 12;
+  display: none;
+  width: 255px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: #121820;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, .45);
+}
+.detail-condensed-menu .series-submenu:hover > .series-submenu-popover,
+.detail-condensed-menu .series-submenu:focus-within > .series-submenu-popover,
+.detail-condensed-menu .series-submenu.open > .series-submenu-popover {
+  display: block;
+}
+.detail-condensed-menu .series-submenu-popover > a,
+.detail-condensed-menu .series-submenu-popover > span,
+.detail-condensed-menu .series-submenu-popover > div,
+.detail-condensed-menu .series-submenu-popover form > button {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 35px;
+  padding: 7px 9px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.detail-condensed-menu .series-submenu-popover > a,
+.detail-condensed-menu .series-submenu-popover > span,
+.detail-condensed-menu .series-submenu-popover form > button {
+  display: flex;
+  align-items: center;
+}
+.detail-condensed-menu .series-submenu-popover > a:hover,
+.detail-condensed-menu .series-submenu-popover form > button:hover {
+  color: #10140b;
+  background: var(--lime);
+}
+.detail-condensed-menu .series-submenu-popover form {
+  margin: 0;
+}
+.detail-condensed-menu .series-submenu-popover .menu-status {
+  min-height: 0;
+  padding: 8px 9px 10px;
+}
+.detail-condensed-menu .series-submenu-popover .menu-disabled {
+  color: var(--muted);
+  opacity: .65;
+}
+.detail-condensed-menu .series-submenu-popover .menu-danger {
+  color: var(--danger);
+}
+
+@media (max-width: 760px) {
+  body.has-app-sidebar .media-dossier .season-tools-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+  body.has-app-sidebar .media-dossier .season-tools-row .season-collapse-toolbar {
+    justify-content: flex-start;
+    margin-left: 0 !important;
+  }
+  body.has-app-sidebar main.shell > .missing-panel {
+    width: 100%;
+  }
+  .cast-dialog-list {
+    grid-template-columns: 1fr;
+  }
+  .detail-condensed-menu .series-submenu-popover {
+    position: static;
+    width: auto;
+    margin: 3px 0 3px 9px;
+    border-right: 0;
+    box-shadow: none;
+  }
+  .detail-condensed-menu .series-submenu:hover > .series-submenu-popover {
+    display: none;
+  }
+  .detail-condensed-menu .series-submenu.open > .series-submenu-popover,
+  .detail-condensed-menu .series-submenu:focus-within > .series-submenu-popover {
+    display: block;
+  }
+}
