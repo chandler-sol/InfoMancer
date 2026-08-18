@@ -36,8 +36,8 @@
 
       <fieldset class="profile-icon-fieldset">
         <legend>Profile icon</legend>
-        <p>Pick a built-in mark or use your own image. The preview updates immediately.</p>
-        <div class="profile-icon-options">
+        <p>Choose a library mark or upload your own. The preview updates immediately.</p>
+        <div class="profile-icon-builtins">
           {% for icon in profile_icons|sort if icon != 'custom' %}
           <label class="profile-icon-choice" data-profile-icon-choice="{{ icon }}">
             <input type="radio" name="profile_icon" value="{{ icon }}" {% if current_user.profile_icon == icon %}checked{% endif %}>
@@ -45,15 +45,15 @@
             <strong>{{ icon_labels.get(icon, icon|replace('_', ' ')|title) }}</strong>
           </label>
           {% endfor %}
-          <div class="profile-icon-choice profile-custom-choice" data-profile-icon-choice="custom">
-            <label class="profile-custom-select">
-              <input type="radio" name="profile_icon" value="custom" {% if current_user.profile_icon == 'custom' %}checked{% endif %}>
-              <span class="profile-icon-glyph" data-profile-custom-choice-glyph {% if current_user.profile_icon == 'custom' %}hidden{% endif %}>+</span>
-              <img class="profile-icon-glyph" data-profile-custom-choice-image {% if current_user.profile_icon != 'custom' %}hidden{% endif %} src="/account/avatar/current" alt="">
-              <span class="profile-custom-copy"><strong>Custom</strong><small>Upload your own square image</small></span>
-            </label>
-            <button class="button small profile-custom-upload" type="button" data-profile-avatar-open>{{ 'Change custom icon' if current_user.profile_icon == 'custom' else 'Upload custom icon' }}</button>
-          </div>
+        </div>
+        <div class="profile-custom-panel" data-profile-icon-choice="custom">
+          <label class="profile-custom-select">
+            <input type="radio" name="profile_icon" value="custom" {% if current_user.profile_icon == 'custom' %}checked{% endif %}>
+            <span class="profile-icon-glyph" data-profile-custom-choice-glyph {% if current_user.profile_icon == 'custom' %}hidden{% endif %}>+</span>
+            <img class="profile-icon-glyph" data-profile-custom-choice-image {% if current_user.profile_icon != 'custom' %}hidden{% endif %} src="/account/avatar/current" alt="">
+            <span class="profile-custom-copy"><strong>Custom icon</strong><small>Use your own square image. InfoMancer stores only the processed 256 × 256 result.</small></span>
+          </label>
+          <button class="button small profile-custom-upload" type="button" data-profile-avatar-open>{{ 'Change image' if current_user.profile_icon == 'custom' else 'Upload image' }}</button>
         </div>
       </fieldset>
     </section>
@@ -68,6 +68,13 @@
         </div>
         <div class="profile-preview-identity"><strong data-profile-preview-name>{{ current_user.display_name }}</strong><span>@{{ current_user.username }}</span><b class="profile-preview-role">{{ current_user.role|title }}</b></div>
         <p class="profile-preview-note">This is how your identity will read in account menus and user-facing surfaces.</p>
+      </div>
+      <div class="profile-preview-actions" data-profile-save-area data-state="clean">
+        <div class="profile-save-status" data-profile-save-status aria-live="polite">Profile is up to date</div>
+        <div class="profile-save-buttons">
+          <button class="button small" type="button" data-profile-discard hidden>Discard</button>
+          <button class="button primary small" type="submit" data-profile-save disabled>Save Profile</button>
+        </div>
       </div>
     </aside>
   </div>
@@ -87,7 +94,10 @@
     </section>
   </div>
 
-  <div class="profile-save-bar"><span>Icon and display-name changes preview live. Save Profile to make them permanent.</span><button class="button primary">Save Profile</button></div>
+  <div class="profile-mobile-save" data-profile-mobile-save hidden>
+    <div class="profile-save-status" data-profile-mobile-status>Unsaved changes</div>
+    <button class="button primary" type="submit" data-profile-save>Save Profile</button>
+  </div>
 </form>
 
 <section class="panel profile-tour-card"><p class="eyebrow">GETTING STARTED</p><h2>Want the guided walkthrough again?</h2><p>Restarting the tour only changes your onboarding progress. It does not modify your libraries, metadata, account details, or files.</p><div class="actions"><a class="button" href="/tour">Open Tour</a>{% if current_user.id > 0 %}<form method="post" action="/getting-started/restart"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button">Restart from the beginning</button></form>{% endif %}</div></section>
