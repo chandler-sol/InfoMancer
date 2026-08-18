@@ -39,7 +39,7 @@
     dialog.classList.add("closing");
     window.setTimeout(() => {
       dialog.close();
-      dialog.classList.remove("closing", "loading");
+      dialog.classList.remove("closing", "loading", "title-workflow-dialog");
       body.replaceChildren();
       opener?.focus();
     }, 350);
@@ -67,6 +67,7 @@
 
   const openDialog = async (url, trigger) => {
     opener = trigger;
+    dialog.classList.remove("title-workflow-dialog");
     dialog.classList.add("loading");
     if (!dialog.open) dialog.showModal();
     try {
