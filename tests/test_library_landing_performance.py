@@ -2,7 +2,10 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from fastapi import APIRouter
+
 from app.db import Database
+from app.routes import library_optimized
 from app.routes.library_cached import (
     _cacheable_landing, _library_signature, _trim_library_surface,
 )
@@ -66,14 +69,47 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
         self.assertIn('X-InfoMancer-Library-Query', cache)
         self.assertIn('"scoped"', cache)
 
+    def test_optimized_library_preserves_router_handler_bundle_contract(self):
+        base_router = APIRouter()
+
+        @base_router.get("/library")
+        def original_library():
+            return "ok"
+
+        original_builder = library_optimized.build_base_router
+        library_optimized.build_base_router = lambda _ctx: (
+            base_router,
+            {"library": original_library, "sentinel": object()},
+        )
+
+        class Context:
+            def live(self, name):
+                if name == "display_title_type":
+                    return lambda value: value
+                return object()
+
+        try:
+            router, handlers = library_optimized.build_router(Context())
+        finally:
+            library_optimized.build_base_router = original_builder
+
+        self.assertIs(router, base_router)
+        self.assertIn("library", handlers)
+        self.assertIn("sentinel", handlers)
+        self.assertIsNot(handlers["library"], original_library)
+        self.assertTrue(any(getattr(route, "path", "") == "/library" for route in router.routes))
+
     def test_library_router_and_navigation_use_warm_render_path(self):
         routes = (ROOT / "app/routes/__init__.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "app/routes/library_optimized.py").read_text(encoding="utf-8")
         loader = (ROOT / "app/static/workspace-ui.js").read_text(encoding="utf-8")
         navigation = (ROOT / "app/static/app-navigation.js").read_text(encoding="utf-8")
         lazy = (ROOT / "app/static/library-surface-lazy.js").read_text(encoding="utf-8")
         cache = (ROOT / "app/routes/library_cached.py").read_text(encoding="utf-8")
 
-        self.assertIn(".library_cached import build_router", routes)
+        self.assertIn(".library_optimized import build_router", routes)
+        self.assertIn("router, handlers = build_base_router(ctx)", adapter)
+        self.assertIn("return router, updated_handlers", adapter)
         self.assertIn('fetch("/library"', navigation)
         self.assertIn("navigator.connection?.saveData", navigation)
         self.assertIn('infomancer_library_view', navigation)
@@ -86,7 +122,7 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
         self.assertIn('hydrateSurface(currentView());', lazy)
         self.assertIn('X-InfoMancer-Library-Render', cache)
         self.assertIn('X-InfoMancer-Library-Surface', cache)
-        self.assertIn('name="library"', cache)
+        self.assertIn('name="library"', adapter)
 
 
 if __name__ == "__main__":
