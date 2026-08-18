@@ -1,0 +1,27 @@
+html.app-navigation-pending::after {
+  content:"";
+  position:fixed;
+  z-index:10000;
+  top:0;
+  left:0;
+  width:100%;
+  height:2px;
+  pointer-events:none;
+  transform-origin:left center;
+  background:var(--lime);
+  box-shadow:0 0 12px rgba(185,245,66,.28);
+  animation:infomancer-navigation-progress 1.2s cubic-bezier(.2,.7,.25,1) both;
+}
+
+@keyframes infomancer-navigation-progress {
+  from { transform:scaleX(.06); opacity:.72; }
+  45% { transform:scaleX(.48); opacity:1; }
+  to { transform:scaleX(.82); opacity:1; }
+}
+
+@media(prefers-reduced-motion:reduce) {
+  html.app-navigation-pending::after {
+    animation:none;
+    transform:scaleX(.72);
+  }
+}
