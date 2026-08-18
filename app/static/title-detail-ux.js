@@ -16,6 +16,7 @@
     const workflowDialog = document.getElementById("organize-dialog");
     const workflowBody = document.getElementById("organize-dialog-body");
     let workflowKind = "";
+    let workflowUrl = window.location.href;
     let workflowOpener = null;
     let metadataPoll = 0;
 
@@ -51,23 +52,24 @@
       return "workflow";
     };
 
+    const titleMenu = (root = dossier) => root?.querySelector(
+      ".workspace-detail-title-actions .item-action-menu, .movie-detail-menu, "
+      + ".dossier-on-disk > .panel-head .series-controls > .series-menu.item-action-menu"
+    );
+
     const cleanMenuSeparators = (popover) => {
       if (!popover) return;
-      const children = [...popover.children];
-      children.forEach((child, index) => {
-        if (child.tagName !== "HR") return;
-        const previous = children[index - 1];
-        const next = children[index + 1];
-        if (!previous || !next || previous.tagName === "HR" || next.tagName === "HR") child.remove();
+      [...popover.querySelectorAll(":scope > hr")].forEach((rule) => {
+        const previous = rule.previousElementSibling;
+        const next = rule.nextElementSibling;
+        if (!previous || !next || previous.tagName === "HR" || next.tagName === "HR") rule.remove();
       });
     };
 
     const decorateTitleActions = () => {
       const detailCopy = dossier.querySelector(".detail-page-head .detail-copy");
       const posterColumn = dossier.querySelector(".detail-poster-column");
-      const menu = dossier.querySelector(
-        ".workspace-detail-title-actions .item-action-menu, .movie-detail-menu, .dossier-on-disk > .panel-head .series-controls > .series-menu.item-action-menu"
-      );
+      const menu = titleMenu();
       if (!detailCopy || !menu) return false;
 
       const isMovie = menu.classList.contains("movie-detail-menu");
@@ -84,12 +86,9 @@
 
       const popover = menu.querySelector(".series-menu-popover") || menu.querySelector(":scope > div");
       const favoriteForm = popover?.querySelector(`form[action="/titles/${titleId}/favorite"]`);
-      if (favoriteForm && !quick.contains(favoriteForm)) {
-        quick.append(favoriteForm);
-      }
+      if (favoriteForm && !quick.contains(favoriteForm)) quick.append(favoriteForm);
 
-      const existingFavoriteSummary = detailCopy.querySelector(".hero-organization form .favorite-summary")?.closest("form");
-      existingFavoriteSummary?.remove();
+      detailCopy.querySelector(".hero-organization form .favorite-summary")?.closest("form")?.remove();
 
       const collectionLink = popover?.querySelector(`a[href="/titles/${titleId}/collections"]`);
       if (collectionLink && !quick.contains(collectionLink)) {
@@ -120,8 +119,6 @@
       return true;
     };
 
-    // workspace.js moves the title menu into the hero. Give it one frame to do so,
-    // then retry briefly if this enhancement loaded first from cache.
     if (!decorateTitleActions()) {
       let retries = 0;
       const retry = () => {
@@ -162,6 +159,24 @@
     };
     wireAsideControls();
 
+    const refreshHeroMenu = (freshDossier, currentHost) => {
+      const currentMenu = titleMenu();
+      const freshMenu = titleMenu(freshDossier);
+      if (!currentHost || !freshMenu) return;
+
+      const currentMediaForm = currentMenu?.querySelector(`form[action="/titles/${titleId}/media-info"]`);
+      const importedMenu = document.importNode(freshMenu, true);
+      importedMenu.open = false;
+      importedMenu.classList.add("workspace-title-action-menu");
+
+      // Media inspection is wired directly by workspace.js. Preserve that exact
+      // form node when refreshing the title menu so its no-reload handler survives.
+      const importedMediaForm = importedMenu.querySelector(`form[action="/titles/${titleId}/media-info"]`);
+      if (currentMediaForm && importedMediaForm) importedMediaForm.replaceWith(currentMediaForm);
+
+      currentHost.replaceChildren(importedMenu);
+    };
+
     const patchDetailFromDocument = (parsed, {hero = true, onDisk = false} = {}) => {
       const freshDossier = parsed.querySelector(".media-dossier");
       if (!freshDossier) return false;
@@ -172,23 +187,23 @@
         if (oldHead && newHead) {
           const oldPoster = oldHead.querySelector(".detail-poster-column");
           const newPoster = newHead.querySelector(".detail-poster-column");
-          const currentCoverAction = oldPoster?.querySelector(".detail-cover-action");
+          oldPoster?.querySelector(".detail-cover-action")?.remove();
           const oldPosterMedia = oldPoster?.querySelector(".detail-poster, .detail-poster-placeholder");
           const newPosterMedia = newPoster?.querySelector(".detail-poster, .detail-poster-placeholder");
           if (oldPosterMedia && newPosterMedia) {
             oldPosterMedia.replaceWith(document.importNode(newPosterMedia, true));
           }
-          if (currentCoverAction && !oldPoster?.contains(currentCoverAction)) oldPoster?.append(currentCoverAction);
 
           const oldCopy = oldHead.querySelector(".detail-copy");
           const newCopy = newHead.querySelector(".detail-copy");
           if (oldCopy && newCopy) {
             const menuHost = oldCopy.querySelector(".workspace-detail-title-actions");
-            const quick = oldCopy.querySelector(".title-quick-actions");
-            const imported = document.importNode(newCopy, true);
-            oldCopy.replaceChildren(...imported.childNodes);
-            if (quick) oldCopy.append(quick);
-            if (menuHost) oldCopy.append(menuHost);
+            const importedCopy = document.importNode(newCopy, true);
+            oldCopy.replaceChildren(...importedCopy.childNodes);
+            if (menuHost) {
+              refreshHeroMenu(freshDossier, menuHost);
+              oldCopy.append(menuHost);
+            }
           }
 
           const oldAside = oldHead.querySelector(".title-hero-aside");
@@ -199,11 +214,12 @@
 
       if (onDisk) {
         const oldOnDisk = dossier.querySelector(".dossier-on-disk");
-        const newOnDisk = freshDossier.querySelector(".dossier-on-disk");
-        if (oldOnDisk && newOnDisk) {
-          newOnDisk.querySelector(".movie-detail-menu")?.remove();
-          newOnDisk.querySelector(":scope > .panel-head .series-controls > .series-menu.item-action-menu")?.remove();
-          oldOnDisk.replaceWith(document.importNode(newOnDisk, true));
+        const freshOnDisk = freshDossier.querySelector(".dossier-on-disk");
+        if (oldOnDisk && freshOnDisk) {
+          const importedOnDisk = document.importNode(freshOnDisk, true);
+          importedOnDisk.querySelector(".movie-detail-menu")?.remove();
+          importedOnDisk.querySelector(":scope > .panel-head .series-controls > .series-menu.item-action-menu")?.remove();
+          oldOnDisk.replaceWith(importedOnDisk);
         }
       }
 
@@ -251,8 +267,6 @@
       }
     });
 
-    const metadataForm = () => dossier.querySelector(`form[action="/titles/${titleId}/imdb-refresh"]`);
-
     const stopMetadataPoll = () => {
       window.clearTimeout(metadataPoll);
       metadataPoll = 0;
@@ -283,7 +297,7 @@
           return;
         }
       } catch (_error) {
-        // Keep the task widget authoritative and retry a transient state request.
+        // The task widget remains authoritative. Retry a transient state failure.
       }
       metadataPoll = window.setTimeout(() => pollMetadata(button, originalLabel), 900);
     };
@@ -319,15 +333,31 @@
       }
     });
 
-    const closeWorkflow = () => {
-      if (!workflowDialog?.open) return;
-      workflowDialog.close();
-      workflowDialog.classList.remove("title-workflow-dialog", "loading");
+    const resetWorkflowState = () => {
+      workflowDialog?.classList.remove("title-workflow-dialog", "loading");
       workflowBody?.replaceChildren();
-      workflowOpener?.focus?.();
-      workflowOpener = null;
       workflowKind = "";
+      workflowUrl = window.location.href;
     };
+
+    const closeWorkflow = () => {
+      if (!workflowDialog?.open) {
+        resetWorkflowState();
+        return;
+      }
+      const opener = workflowOpener;
+      workflowDialog.close();
+      resetWorkflowState();
+      workflowOpener = null;
+      opener?.focus?.();
+    };
+
+    workflowDialog?.addEventListener("close", () => {
+      if (workflowDialog.classList.contains("title-workflow-dialog")) {
+        resetWorkflowState();
+        workflowOpener = null;
+      }
+    });
 
     const normalizeWorkflowContent = () => {
       if (!workflowBody) return;
@@ -338,18 +368,21 @@
     };
 
     const renderWorkflowResponse = async (response) => {
+      workflowUrl = response.url || workflowUrl;
       const html = await response.text();
       const parsed = new DOMParser().parseFromString(html, "text/html");
-      if (parsed.querySelector(".media-dossier") || new URL(response.url, window.location.href).pathname === `/titles/${titleId}`) {
-        const options = workflowKind === "rename"
+      const responsePath = new URL(workflowUrl, window.location.href).pathname;
+      if (parsed.querySelector(".media-dossier") || responsePath === `/titles/${titleId}`) {
+        const completedKind = workflowKind;
+        const options = completedKind === "rename"
           ? {hero: false, onDisk: true}
-          : {hero: workflowKind !== "collections", onDisk: false};
+          : {hero: completedKind !== "collections", onDisk: false};
         await refreshDetail(options);
         closeWorkflow();
         showToast(
-          workflowKind === "cover" ? "Cover updated."
-            : workflowKind === "match" ? "Match updated."
-            : workflowKind === "rename" ? "File information updated."
+          completedKind === "cover" ? "Cover updated."
+            : completedKind === "match" ? "Match updated."
+            : completedKind === "rename" ? "File information updated."
             : "Collection membership updated.",
         );
         return true;
@@ -371,6 +404,7 @@
       }
       const parsedUrl = new URL(url, window.location.href);
       workflowKind = workflowKindFor(parsedUrl.pathname);
+      workflowUrl = parsedUrl.href;
       workflowOpener = trigger;
       workflowDialog.classList.add("title-workflow-dialog", "loading");
       workflowBody.innerHTML = '<div class="empty">Loading…</div>';
@@ -393,7 +427,12 @@
       if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       if (!dossier.contains(link) && !workflowBody?.contains(link)) return;
       let url;
-      try { url = new URL(link.href, window.location.href); } catch (_error) { return; }
+      try {
+        const base = workflowBody?.contains(link) ? workflowUrl : window.location.href;
+        url = new URL(link.getAttribute("href") || link.href, base);
+      } catch (_error) {
+        return;
+      }
       if (url.origin !== window.location.origin || !workflowPath(url.pathname)) return;
       event.preventDefault();
       link.closest("details")?.removeAttribute("open");
@@ -409,7 +448,8 @@
       workflowDialog?.classList.add("loading");
       try {
         const method = (form.method || "get").toUpperCase();
-        const action = new URL(form.action || window.location.href, window.location.href);
+        const rawAction = form.getAttribute("action") || workflowUrl;
+        const action = new URL(rawAction, workflowUrl);
         let response;
         if (method === "GET") {
           const query = new URLSearchParams(new FormData(form));
@@ -429,10 +469,16 @@
         }
         if (!response.ok || !(await renderWorkflowResponse(response))) throw new Error(`HTTP ${response.status}`);
       } catch (_error) {
+        const fallback = (() => {
+          try {
+            return new URL(form.getAttribute("action") || workflowUrl, workflowUrl).href;
+          } catch (_inner) {
+            return workflowUrl;
+          }
+        })();
         showToast("That workflow could not finish in the overlay. Opening the full page instead.", "error");
-        const action = form.action;
         closeWorkflow();
-        window.location.assign(action);
+        window.location.assign(fallback);
       } finally {
         submitter?.removeAttribute("disabled");
       }
