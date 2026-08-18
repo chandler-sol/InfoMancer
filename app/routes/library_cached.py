@@ -20,6 +20,7 @@ class _CachedLibrary:
 _CACHE: OrderedDict[tuple, _CachedLibrary] = OrderedDict()
 _CACHE_LOCK = RLock()
 _CACHE_LIMIT = 24
+_LIBRARY_VIEW_COOKIE = "infomancer_library_view"
 
 
 def _session_key(request: Request) -> str:
@@ -29,12 +30,61 @@ def _session_key(request: Request) -> str:
     return f"local:{getattr(request.state, 'local_csrf_token', '')}"
 
 
+def _requested_view(request: Request) -> str:
+    explicit = request.headers.get("x-infomancer-library-view", "").strip().casefold()
+    if explicit in {"list", "covers"}:
+        return explicit
+    saved = request.cookies.get(_LIBRARY_VIEW_COOKIE, "").strip().casefold()
+    return saved if saved in {"list", "covers"} else ""
+
+
+def _trim_library_surface(body: bytes, view: str) -> bytes:
+    """Remove the inactive large Library surface while preserving JS anchor nodes.
+
+    library.html historically renders every title twice: once as cover cards and once
+    as table rows. Once the browser has told us its preferred view, only that surface
+    needs to cross the wire. Lightweight placeholders keep the existing Library script
+    compatible and can be filled on demand when the user switches views.
+    """
+    if view not in {"list", "covers"}:
+        return body
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError:
+        return body
+
+    cover_start = text.find('<section class="cover-library" id="cover-library"')
+    bulk_id = text.find('id="library-bulk-form"', cover_start)
+    bulk_start = text.rfind("<form", cover_start, bulk_id) if bulk_id >= 0 else -1
+    list_start = text.find('<section class="panel table-wrap library-table"', bulk_id)
+    list_end = text.find("</section>", list_start)
+    if min(cover_start, bulk_start, list_start, list_end) < 0:
+        return body
+    list_end += len("</section>")
+
+    if view == "list":
+        placeholder = (
+            '<section class="cover-library" id="cover-library" '
+            'aria-label="Library covers" hidden '
+            'data-library-surface-placeholder="covers"></section>\n'
+        )
+        text = text[:cover_start] + placeholder + text[bulk_start:]
+    else:
+        placeholder = (
+            '<section class="panel table-wrap library-table" data-library-kind="all" '
+            'hidden data-library-surface-placeholder="list">'
+            '<table><thead></thead><tbody></tbody></table></section>'
+        )
+        text = text[:list_start] + placeholder + text[list_end:]
+    return text.encode("utf-8")
+
+
 def _library_signature(db, user_id: int) -> tuple:
     """Cheaply fingerprint state that changes the default Library document.
 
     The normal Library query computes file and missing-episode aggregates and then
-    renders both List and Cover DOM. This signature intentionally does much less
-    work, so an unchanged landing page can reuse its already-rendered HTML safely.
+    renders large title surfaces. This signature intentionally does much less work,
+    so an unchanged landing page can reuse its already-rendered HTML safely.
     Activity/announcement state is included because the shared application chrome is
     part of the cached document. A minute bucket bounds time-based announcement drift.
     """
@@ -92,6 +142,23 @@ def _cache_put(key: tuple, signature: tuple, body: bytes) -> None:
             _CACHE.popitem(last=False)
 
 
+def _trimmed_response(response, body: bytes, view: str, render_state: str = ""):
+    trimmed = _trim_library_surface(body, view)
+    if trimmed == body:
+        if render_state:
+            response.headers["X-InfoMancer-Library-Render"] = render_state
+        return response
+    headers = {
+        key: value for key, value in response.headers.items()
+        if key.lower() != "content-length"
+    }
+    headers["Cache-Control"] = "private, no-store"
+    headers["X-InfoMancer-Library-Surface"] = view
+    if render_state:
+        headers["X-InfoMancer-Library-Render"] = render_state
+    return Response(content=trimmed, status_code=response.status_code, headers=headers)
+
+
 def build_router(ctx):
     router = build_base_router(ctx)
     db = ctx.live("db")
@@ -118,6 +185,7 @@ def build_router(ctx):
         match: str = "", gaps: str = "", favorite: str = "", tag: str = "",
         sort: str = "title", record_search: str = "",
     ):
+        view = _requested_view(request)
         cacheable = _cacheable_landing(
             q=q, kind=kind, letter=letter, genre=genre, title_type=title_type,
             root=root, person=person, person_name=person_name,
@@ -125,35 +193,44 @@ def build_router(ctx):
             tag=tag, sort=sort, record_search=record_search,
         ) and "message" not in request.query_params and "tour" not in request.query_params
 
-        if not cacheable:
-            return original_library(
-                request, q, kind, letter, genre, title_type, root, person,
-                person_name, credit_role, match, gaps, favorite, tag, sort,
-                record_search,
-            )
-
-        user_id = int(getattr(request.state.user, "id", 0) or 0)
-        signature = _library_signature(db, user_id)
-        key = (_session_key(request), request.url.path)
-        cached = _cache_get(key, signature)
-        if cached is not None:
-            return Response(
-                content=cached,
-                media_type="text/html",
-                headers={
-                    "Cache-Control": "private, no-store",
-                    "X-InfoMancer-Library-Render": "hit",
-                },
-            )
-
-        response = original_library(
+        arguments = (
             request, q, kind, letter, genre, title_type, root, person,
             person_name, credit_role, match, gaps, favorite, tag, sort,
             record_search,
         )
+
+        if not cacheable:
+            response = original_library(*arguments)
+            return _trimmed_response(response, getattr(response, "body", b""), view)
+
+        user_id = int(getattr(request.state.user, "id", 0) or 0)
+        signature = _library_signature(db, user_id)
+        key = (_session_key(request), request.url.path, view or "full")
+        cached = _cache_get(key, signature)
+        if cached is not None:
+            headers = {
+                "Cache-Control": "private, no-store",
+                "X-InfoMancer-Library-Render": "hit",
+            }
+            if view:
+                headers["X-InfoMancer-Library-Surface"] = view
+            return Response(content=cached, media_type="text/html", headers=headers)
+
+        response = original_library(*arguments)
         body = getattr(response, "body", b"")
+        served_body = _trim_library_surface(body, view)
+        if response.status_code == 200 and served_body:
+            _cache_put(key, signature, served_body)
+        if served_body != body:
+            headers = {
+                key: value for key, value in response.headers.items()
+                if key.lower() != "content-length"
+            }
+            headers["Cache-Control"] = "private, no-store"
+            headers["X-InfoMancer-Library-Render"] = "miss"
+            headers["X-InfoMancer-Library-Surface"] = view
+            return Response(content=served_body, status_code=response.status_code, headers=headers)
         if response.status_code == 200 and body:
-            _cache_put(key, signature, body)
             response.headers["X-InfoMancer-Library-Render"] = "miss"
             response.headers.setdefault("Cache-Control", "private, no-store")
         return response
