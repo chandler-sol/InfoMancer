@@ -54,6 +54,18 @@
     document.head.append(savedViewStyles, savedViewPolish);
   }
 
+  if (document.querySelector('.library-display-toolbar .alphabet')) {
+    const letterJumpStyles = document.createElement('link');
+    letterJumpStyles.rel = 'stylesheet';
+    letterJumpStyles.href = `/static/library-letter-jump.css${version}`;
+
+    const letterJump = document.createElement('script');
+    letterJump.src = `/static/library-letter-jump.js${version}`;
+    letterJump.async = false;
+
+    document.head.append(letterJumpStyles, letterJump);
+  }
+
   if (document.querySelector('.library-table') && document.getElementById('cover-library')) {
     const libraryStyles = document.createElement('link');
     libraryStyles.rel = 'stylesheet';
