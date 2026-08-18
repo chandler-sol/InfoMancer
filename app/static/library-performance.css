@@ -36,6 +36,14 @@
   to { transform: rotate(360deg); }
 }
 
+/* Keep fixed-size cover columns centered instead of stretching the leftover
+   viewport width into uneven outer space. The cover-size slider still controls
+   card width; only the row's placement and inter-card rhythm change. */
+#cover-library.cover-library {
+  justify-content: center;
+  column-gap: clamp(18px, 2vw, 32px);
+}
+
 /* Cover cards are independent visual units. Off-screen cards do not need layout or
    paint work until the viewport approaches them. */
 .cover-card {
