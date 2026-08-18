@@ -14,6 +14,34 @@ body.has-app-sidebar .media-dossier .season-tools-row .season-collapse-toolbar {
 }
 body.has-app-sidebar .media-dossier .season-tools-row .season-nav {
   min-width: 0;
+  gap: 5px;
+  padding-bottom: 6px;
+  overflow-x: auto;
+}
+body.has-app-sidebar .media-dossier .season-tools-row .season-nav button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+body.has-app-sidebar .media-dossier .season-tools-row .season-nav button:hover {
+  border-color: transparent;
+  background: rgba(255,255,255,.035);
+  color: var(--text);
+}
+body.has-app-sidebar .media-dossier .season-tools-row .season-nav button.active {
+  border-color: transparent;
+  background: rgba(185,245,66,.08);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--lime);
 }
 body.has-app-sidebar .media-dossier .season-tools-row .season-collapse-toolbar {
   flex: 0 0 auto;
