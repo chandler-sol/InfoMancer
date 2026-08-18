@@ -4,7 +4,7 @@ from .system import build_router as build_system_router
 from .operations import build_router as build_operations_router
 from .dashboard import build_router as build_dashboard_router
 from .review import build_router as build_review_router
-from .library_cached import build_router as build_library_router
+from .library_optimized import build_router as build_library_router
 from .inspector_media import build_router as build_inspector_media_router
 from .recovery import build_router as build_recovery_router
 from .scheduled_tasks import build_router as build_scheduled_tasks_router
