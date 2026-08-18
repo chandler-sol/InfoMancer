@@ -28,17 +28,22 @@
 
   const selectedChoice = () => iconChoices.find(choice => choice.checked) || iconChoices[0];
   const choiceLabel = (choice) => choice?.closest(".profile-icon-choice");
-  const symbolFor = (choice) => {
-    if (!choice) return "?";
-    if (choice.value === "initials") return (displayName?.value.trim().slice(0, 1) || "?").toUpperCase();
-    return choiceLabel(choice)?.dataset.symbol || "?";
-  };
+  const initialFor = () => (displayName?.value.trim().slice(0, 1) || "?").toUpperCase();
+  const choiceSvg = (choice) => choiceLabel(choice)?.querySelector(".profile-icon-glyph svg") || null;
 
-  const avatarSvg = (symbol) => {
-    const safe = String(symbol).replace(/[&<>"']/g, character => ({
-      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-    }[character]));
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><rect width="256" height="256" rx="128" fill="#b9f542"/><text x="128" y="139" text-anchor="middle" dominant-baseline="middle" font-family="Inter,Segoe UI,sans-serif" font-size="112" font-weight="800" fill="#0b1009">${safe}</text></svg>`;
+  const avatarSvg = (choice) => {
+    const selectedIcon = choice?.value || "initials";
+    const icon = selectedIcon !== "initials" && selectedIcon !== "custom" ? choiceSvg(choice) : null;
+    let mark;
+    if (icon) {
+      mark = `<svg x="52" y="52" width="152" height="152" viewBox="0 0 24 24" fill="none" stroke="#0b1009" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${icon.innerHTML}</svg>`;
+    } else {
+      const safe = String(initialFor()).replace(/[&<>"']/g, character => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[character]));
+      mark = `<text x="128" y="139" text-anchor="middle" dominant-baseline="middle" font-family="Inter,Segoe UI,sans-serif" font-size="112" font-weight="800" fill="#0b1009">${safe}</text>`;
+    }
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><rect width="256" height="256" rx="128" fill="#b9f542"/>${mark}</svg>`;
     return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
   };
 
@@ -49,9 +54,18 @@
     previewGlyph.hidden = true;
   };
 
-  const setPreviewGlyph = (symbol) => {
+  const setPreviewMark = (choice) => {
     if (!previewImage || !previewGlyph) return;
-    previewGlyph.textContent = symbol;
+    previewGlyph.replaceChildren();
+    const selectedIcon = choice?.value || "initials";
+    const icon = selectedIcon !== "initials" && selectedIcon !== "custom" ? choiceSvg(choice) : null;
+    if (icon) {
+      previewGlyph.append(icon.cloneNode(true));
+      previewGlyph.dataset.profileIcon = selectedIcon;
+    } else {
+      previewGlyph.textContent = initialFor();
+      previewGlyph.dataset.profileIcon = "initials";
+    }
     previewGlyph.hidden = false;
     previewImage.hidden = true;
     previewImage.removeAttribute("src");
@@ -65,9 +79,8 @@
       setPreviewImage(customAvatarUrl);
       if (accountAvatar) accountAvatar.style.backgroundImage = `url("${customAvatarUrl}")`;
     } else {
-      const symbol = symbolFor(choice);
-      setPreviewGlyph(symbol);
-      if (accountAvatar) accountAvatar.style.backgroundImage = avatarSvg(symbol);
+      setPreviewMark(choice);
+      if (accountAvatar) accountAvatar.style.backgroundImage = avatarSvg(choice);
     }
   };
 
