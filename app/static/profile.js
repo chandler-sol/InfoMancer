@@ -3,6 +3,9 @@
   if (!form) return;
 
   const displayName = document.getElementById("profile-display-name");
+  const email = form.querySelector('input[name="email"]');
+  const showHomeHero = form.querySelector('input[name="show_home_hero"]');
+  const highContrast = form.querySelector('input[name="high_contrast"]');
   const previewName = document.querySelector("[data-profile-preview-name]");
   const previewGlyph = document.querySelector("[data-profile-preview-glyph]");
   const previewImage = document.querySelector("[data-profile-preview-image]");
@@ -11,6 +14,12 @@
   const customChoiceImage = document.querySelector("[data-profile-custom-choice-image]");
   const customChoiceGlyph = document.querySelector("[data-profile-custom-choice-glyph]");
   const accountAvatar = document.querySelector(".account-avatar");
+  const saveArea = document.querySelector("[data-profile-save-area]");
+  const saveStatus = document.querySelector("[data-profile-save-status]");
+  const discardButton = document.querySelector("[data-profile-discard]");
+  const saveButtons = [...document.querySelectorAll("[data-profile-save]")];
+  const mobileSave = document.querySelector("[data-profile-mobile-save]");
+  const mobileStatus = document.querySelector("[data-profile-mobile-status]");
   const dialog = document.getElementById("profile-avatar-dialog");
   const openAvatar = document.querySelector("[data-profile-avatar-open]");
   const closeAvatarButtons = [...document.querySelectorAll("[data-profile-avatar-close]")];
@@ -25,11 +34,51 @@
     ? `/account/avatar/current?v=${Date.now()}`
     : "";
   let prepared = false;
+  let initialState = null;
 
   const selectedChoice = () => iconChoices.find(choice => choice.checked) || iconChoices[0];
   const choiceLabel = (choice) => choice?.closest(".profile-icon-choice");
   const initialFor = () => (displayName?.value.trim().slice(0, 1) || "?").toUpperCase();
   const choiceSvg = (choice) => choiceLabel(choice)?.querySelector(".profile-icon-glyph svg") || null;
+
+  const profileState = () => ({
+    displayName: displayName?.value ?? "",
+    email: email?.value ?? "",
+    profileIcon: selectedChoice()?.value || "initials",
+    showHomeHero: Boolean(showHomeHero?.checked),
+    highContrast: Boolean(highContrast?.checked),
+  });
+
+  const sameState = (left, right) => (
+    left.displayName === right.displayName
+    && left.email === right.email
+    && left.profileIcon === right.profileIcon
+    && left.showHomeHero === right.showHomeHero
+    && left.highContrast === right.highContrast
+  );
+
+  const setSaveState = (state) => {
+    const dirty = state === "dirty";
+    const saved = state === "saved";
+    if (saveArea) saveArea.dataset.state = state;
+    if (saveStatus) {
+      saveStatus.textContent = dirty
+        ? "Unsaved changes"
+        : saved ? "Changes saved" : "Profile is up to date";
+    }
+    if (mobileStatus) mobileStatus.textContent = dirty ? "Unsaved changes" : "Profile is up to date";
+    if (discardButton) discardButton.hidden = !dirty;
+    saveButtons.forEach(button => {
+      button.disabled = !dirty;
+      if (!dirty) button.textContent = "Save Profile";
+    });
+    if (mobileSave) mobileSave.hidden = !dirty;
+  };
+
+  const syncDirtyState = () => {
+    if (!initialState) return;
+    setSaveState(sameState(profileState(), initialState) ? "clean" : "dirty");
+  };
 
   const avatarSvg = (choice) => {
     const selectedIcon = choice?.value || "initials";
@@ -179,8 +228,10 @@
         customChoiceImage.hidden = false;
         customChoiceGlyph.hidden = true;
       }
+      if (openAvatar) openAvatar.textContent = "Change image";
       updatePreview();
-      status("Custom icon ready. Save Profile to make it your account icon.");
+      syncDirtyState();
+      status("Custom icon ready. Save Profile to use it for this account.");
       window.setTimeout(closeDialog, 450);
     } catch (error) {
       status(error.message || "The custom icon could not be saved.", true);
@@ -188,8 +239,30 @@
     }
   };
 
-  iconChoices.forEach(choice => choice.addEventListener("change", updatePreview));
-  displayName?.addEventListener("input", updatePreview);
+  const restoreInitialState = () => {
+    if (!initialState) return;
+    if (displayName) displayName.value = initialState.displayName;
+    if (email) email.value = initialState.email;
+    if (showHomeHero) showHomeHero.checked = initialState.showHomeHero;
+    if (highContrast) highContrast.checked = initialState.highContrast;
+    const originalChoice = iconChoices.find(choice => choice.value === initialState.profileIcon);
+    if (originalChoice) originalChoice.checked = true;
+    updatePreview();
+    syncDirtyState();
+  };
+
+  iconChoices.forEach(choice => choice.addEventListener("change", () => {
+    updatePreview();
+    syncDirtyState();
+  }));
+  displayName?.addEventListener("input", () => {
+    updatePreview();
+    syncDirtyState();
+  });
+  email?.addEventListener("input", syncDirtyState);
+  showHomeHero?.addEventListener("change", syncDirtyState);
+  highContrast?.addEventListener("change", syncDirtyState);
+  discardButton?.addEventListener("click", restoreInitialState);
   openAvatar?.addEventListener("click", openDialog);
   closeAvatarButtons.forEach(button => button.addEventListener("click", closeDialog));
   fileInput?.addEventListener("change", () => prepareFile(fileInput.files?.[0]));
@@ -213,6 +286,22 @@
   dialog?.addEventListener("click", event => {
     if (event.target === dialog) closeDialog();
   });
+  form.addEventListener("submit", () => {
+    if (saveStatus) saveStatus.textContent = "Saving changes…";
+    if (mobileStatus) mobileStatus.textContent = "Saving changes…";
+    saveButtons.forEach(button => {
+      button.disabled = true;
+      button.textContent = "Saving…";
+    });
+  });
 
   updatePreview();
+  initialState = profileState();
+  setSaveState("clean");
+
+  const savedMessage = new URLSearchParams(window.location.search).get("message") || "";
+  if (!form.querySelector(".form-error") && savedMessage.toLowerCase() === "profile saved") {
+    setSaveState("saved");
+    window.setTimeout(() => setSaveState("clean"), 1800);
+  }
 })();
