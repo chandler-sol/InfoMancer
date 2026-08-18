@@ -9,6 +9,17 @@
     root.classList.remove("app-navigation-pending");
   };
 
+  const savedLibraryView = (() => {
+    try {
+      const saved = window.localStorage.getItem("infomancer-library-view") || "";
+      if (["list", "covers"].includes(saved)) {
+        document.cookie = `infomancer_library_view=${saved}; Path=/; SameSite=Lax; Max-Age=31536000`;
+        return saved;
+      }
+    } catch (_error) {}
+    return "";
+  })();
+
   const sameDocumentHashOnly = (url) => (
     url.pathname === window.location.pathname
     && url.search === window.location.search
@@ -26,11 +37,13 @@
     if (!canWarmLibrary()) return libraryWarmPromise;
     if (libraryWarmPromise) return libraryWarmPromise;
     lastLibraryWarm = Date.now();
+    const headers = {"X-InfoMancer-Prefetch": "library"};
+    if (savedLibraryView) headers["X-InfoMancer-Library-View"] = savedLibraryView;
     libraryWarmPromise = fetch("/library", {
       method: "GET",
       credentials: "same-origin",
       cache: "no-store",
-      headers: {"X-InfoMancer-Prefetch": "library"},
+      headers,
     }).then((response) => response.arrayBuffer())
       .catch(() => null)
       .finally(() => { libraryWarmPromise = null; });
