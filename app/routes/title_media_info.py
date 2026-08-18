@@ -21,6 +21,17 @@ def _size_gb(value: int | None) -> str:
     return f"{size:.2f}".rstrip("0").rstrip(".")
 
 
+def _bitrate_display(value: int | None) -> str:
+    bitrate = int(value or 0)
+    if bitrate <= 0:
+        return ""
+    if bitrate >= 1_000_000:
+        mbps = bitrate / 1_000_000
+        precision = 1 if mbps < 100 else 0
+        return f"{mbps:.{precision}f} Mbps"
+    return f"{round(bitrate / 1000):,} kbps"
+
+
 def _resolution_label(width: int | None, height: int | None) -> str:
     if not width or not height:
         return ""
@@ -129,6 +140,9 @@ def build_router(ctx: RouteContext):
                 facts.append({
                     "label": "Video", "value": str(technical_file["video_codec"]).upper(),
                 })
+            bitrate = _bitrate_display(technical_file["bitrate"])
+            if bitrate:
+                facts.append({"label": "Bitrate", "value": bitrate})
             if technical_file["audio_codec"]:
                 audio = str(technical_file["audio_codec"]).upper()
                 if technical_file["audio_channels"]:
@@ -159,6 +173,7 @@ def build_router(ctx: RouteContext):
             )
             video = str(row["video_codec"] or "").upper()
             audio = str(row["audio_codec"] or "").upper()
+            bitrate = _bitrate_display(row["bitrate"])
             detail_parts = [size]
             if runtime:
                 detail_parts.append(runtime)
@@ -166,6 +181,8 @@ def build_router(ctx: RouteContext):
                 detail_parts.append(resolution)
             if video:
                 detail_parts.append(video)
+            if bitrate:
+                detail_parts.append(bitrate)
             if audio:
                 detail_parts.append(f"/ {audio}")
             if row["dynamic_range"]:
@@ -173,12 +190,17 @@ def build_router(ctx: RouteContext):
             if container:
                 detail_parts.append(container)
             detail_parts.append(str(row["path"]))
+            summary_parts = [size, container or "FILE"]
+            if bitrate:
+                summary_parts.append(bitrate)
+            if title["kind"] == "movie":
+                summary_parts.append("Main feature")
             file_views.append({
                 "id": int(row["id"]),
                 "filename": str(row["filename"]),
                 "path": str(row["path"]),
                 "kind": str(title["kind"]),
-                "summary": f"{size} · {container or 'FILE'} · Main feature",
+                "summary": " · ".join(summary_parts),
                 "detail": " · ".join(detail_parts),
                 "media_info_error": str(row["media_info_error"] or ""),
                 "media_info_at": str(row["media_info_at"] or ""),
@@ -208,19 +230,51 @@ def build_router(ctx: RouteContext):
                     "Media inspection could not start because that title no longer exists.",
                     status_code=404, library=True,
                 )
-            file_ids = [
-                row["id"]
-                for row in conn.execute(
-                    "SELECT id FROM files WHERE title_id=? ORDER BY id", (title_id,)
-                ).fetchall()
-            ]
+            file_rows = conn.execute(
+                """SELECT id,modified_at,media_info_at,media_info_error
+                   FROM files WHERE title_id=? ORDER BY id""",
+                (title_id,),
+            ).fetchall()
 
-        if not file_ids:
+        if not file_rows:
             return action_error(
                 request, title_id,
                 "Media inspection found no files for this title. Rescan its source, then try again.",
                 status_code=409,
             )
+
+        # A normal Inspect action only touches files whose cataloged mtime is newer
+        # than the last successful probe, have never been inspected, or previously
+        # failed inspection. This makes a repeated click a cheap freshness check.
+        with db.connect() as conn:
+            stale_ids = [
+                int(row["id"])
+                for row in conn.execute(
+                    """SELECT id FROM files
+                       WHERE title_id=? AND (
+                         media_info_at IS NULL
+                         OR COALESCE(media_info_error,'') <> ''
+                         OR (
+                           modified_at IS NOT NULL
+                           AND datetime(media_info_at) < datetime(modified_at, 'unixepoch')
+                         )
+                       )
+                       ORDER BY id""",
+                    (title_id,),
+                ).fetchall()
+            ]
+
+        if not stale_ids:
+            detail = "Media information is up to date."
+            if async_request(request):
+                return JSONResponse({
+                    "started": False,
+                    "up_to_date": True,
+                    "title_id": title_id,
+                    "total": 0,
+                    "detail": detail,
+                })
+            return redirect(f"/titles/{title_id}", detail)
 
         with media_info_lock:
             if media_info_job.get("status") in {"starting", "running"}:
@@ -234,7 +288,7 @@ def build_router(ctx: RouteContext):
                 {
                     "status": "starting",
                     "processed": 0,
-                    "total": len(file_ids),
+                    "total": len(stale_ids),
                     "updated": 0,
                     "errors": 0,
                     "current": "",
@@ -243,7 +297,7 @@ def build_router(ctx: RouteContext):
             )
 
         def run_scoped_inspection() -> None:
-            run_media_inspection(file_ids)
+            run_media_inspection(stale_ids)
             # run_media_inspection owns and clears the shared job dictionary. Restore
             # the title scope when it finishes so the detail page can identify the
             # completed request without changing the legacy worker contract.
@@ -254,17 +308,17 @@ def build_router(ctx: RouteContext):
         record_event(
             "media",
             f"Media inspection requested for {title['metadata_title'] or title['title']}.",
-            context={"title_id": title_id, "files": len(file_ids)},
+            context={"title_id": title_id, "files": len(stale_ids)},
         )
         message = (
-            f"Media inspection started for {len(file_ids)} "
-            f"file{'s' if len(file_ids) != 1 else ''}."
+            f"Media inspection started for {len(stale_ids)} changed "
+            f"file{'s' if len(stale_ids) != 1 else ''}."
         )
         if async_request(request):
             return JSONResponse({
                 "started": True,
                 "title_id": title_id,
-                "total": len(file_ids),
+                "total": len(stale_ids),
                 "detail": message,
             })
         return redirect(
