@@ -25,8 +25,6 @@
     return [...entries.values()];
   };
 
-  const selectedIds = () => new Set(selectedEntries().map(entry => entry.id));
-
   const setTitleChecked = (titleId, checked) => {
     const choices = [...document.querySelectorAll(`.library-title-choice[value="${CSS.escape(String(titleId))}"]`)];
     if (!choices.length) return;
@@ -42,20 +40,19 @@
   };
 
   let syntheticInspect = false;
-  const inspectTitle = (titleId) => {
+  let inspectorDismissed = false;
+
+  const inspectTitle = (titleId, {explicit = true} = {}) => {
+    if (!explicit && inspectorDismissed) return;
     const item = itemForTitle(titleId);
     if (!item) return;
+    if (explicit) inspectorDismissed = false;
     if (titleIdFor(item) === inspectedTitleId() && document.body.classList.contains('workspace-inspector-open')) return;
     const link = item.querySelector('.cover-card-link, .title-link');
     if (!link) return;
     syntheticInspect = true;
     link.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window}));
     syntheticInspect = false;
-  };
-
-  const closeInspector = () => {
-    if (!inspector || !document.body.classList.contains('workspace-inspector-open')) return;
-    inspector.querySelector('.workspace-inspector-close')?.click();
   };
 
   const ensureInspectorSelectionBar = () => {
@@ -84,7 +81,7 @@
     compare.className = 'button library-selection-compare';
     compare.textContent = 'Compare';
 
-    select.addEventListener('change', () => inspectTitle(select.value));
+    select.addEventListener('change', () => inspectTitle(select.value, {explicit: true}));
     compare.addEventListener('click', () => openCompareDialog());
 
     bar.append(meta, chooser, compare);
@@ -264,6 +261,7 @@
 
     const current = inspectedTitleId();
     if (entries.length === 0) {
+      inspectorDismissed = false;
       const bar = inspector?.querySelector('.library-inspector-selection-bar');
       if (bar) bar.hidden = true;
       const dialog = document.getElementById('library-selection-compare-dialog');
@@ -271,7 +269,9 @@
       return;
     }
 
-    if (!current || !ids.has(current)) inspectTitle(entries[0].id);
+    if ((!current || !ids.has(current)) && !inspectorDismissed) {
+      inspectTitle(entries[0].id, {explicit: false});
+    }
 
     const bar = ensureInspectorSelectionBar();
     if (!bar) return;
@@ -329,6 +329,10 @@
       return;
     }
 
+    /* A direct click on a title is an explicit request to inspect it. This is what
+       reopens a drawer the user previously dismissed. */
+    inspectorDismissed = false;
+
     if (isSelected && isCurrent) {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -358,9 +362,13 @@
     queueSync();
   });
 
-  /* Closing the Inspector is still allowed. Selection stays intact, and clicking any
-     selected title reopens it without moving the Library layout. */
-  inspector?.querySelector('.workspace-inspector-close')?.addEventListener('click', queueSync);
+  /* Closing the Inspector is an explicit user preference for the current selection.
+     Keep the selection checked, but do not auto-open the drawer again until a title
+     is deliberately clicked or chosen from the Inspector selector. */
+  inspector?.querySelector('.workspace-inspector-close')?.addEventListener('click', () => {
+    inspectorDismissed = true;
+    queueSync();
+  }, true);
 
   queueSync();
 })();
