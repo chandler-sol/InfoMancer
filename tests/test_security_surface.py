@@ -1,11 +1,35 @@
+import struct
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
 from types import SimpleNamespace
 
 import app.main as main
 from app.db import Database
 from app.event_log import EventLog
+from app.routes.account_avatar import PNG_SIGNATURE, _validate_canvas_png
+
+
+def png_chunk(chunk_type: bytes, payload: bytes) -> bytes:
+    checksum = zlib.crc32(chunk_type)
+    checksum = zlib.crc32(payload, checksum) & 0xFFFFFFFF
+    return (
+        len(payload).to_bytes(4, "big")
+        + chunk_type
+        + payload
+        + checksum.to_bytes(4, "big")
+    )
+
+
+def canvas_png(pixel_payload: bytes) -> bytes:
+    ihdr = struct.pack(">IIBBBBB", 256, 256, 8, 6, 0, 0, 0)
+    return (
+        PNG_SIGNATURE
+        + png_chunk(b"IHDR", ihdr)
+        + png_chunk(b"IDAT", zlib.compress(pixel_payload, level=9))
+        + png_chunk(b"IEND", b"")
+    )
 
 
 class SecuritySurfaceTests(unittest.TestCase):
@@ -22,6 +46,31 @@ class SecuritySurfaceTests(unittest.TestCase):
         self.assertIn("actionUrl.origin !== window.location.origin", script)
         self.assertIn("responseUrl.origin !== window.location.origin", script)
         self.assertIn('headers: {"X-CSRF-Token": csrfToken}', script)
+
+    def test_title_detail_async_actions_preserve_csrf_and_same_origin_boundary(self):
+        script = (Path(__file__).resolve().parents[1] / "app/static/title-detail-ux.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('headers.set("X-CSRF-Token", token)', script)
+        self.assertIn("const sameOriginUrl =", script)
+        self.assertIn("const requireSameOriginResponse =", script)
+        self.assertIn("sameOriginUrl(response.url || window.location.href)", script)
+        self.assertIn('csrfHeaders(form, {"X-InfoMancer-Async": "1"})', script)
+        self.assertIn('csrfHeaders(form, {"X-Requested-With": "InfoMancerDialog"})', script)
+
+    def test_avatar_png_validation_bounds_decompression_and_accepts_canvas_shape(self):
+        expected_length = 256 * (1 + 256 * 4)
+        valid = canvas_png(b"\x00" * expected_length)
+        self.assertEqual(_validate_canvas_png(valid), "")
+
+        oversized = canvas_png(b"\x00" * (expected_length + 1))
+        self.assertIn("unexpected amount of pixel data", _validate_canvas_png(oversized))
+
+        source = (Path(__file__).resolve().parents[1] / "app/routes/account_avatar.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("zlib.decompressobj()", source)
+        self.assertIn("inflater.decompress(compressed, expected_length + 1)", source)
 
     def test_task_status_get_does_not_start_background_maintenance(self):
         operations = (Path(__file__).resolve().parents[1] / "app/routes/operations.py").read_text(
