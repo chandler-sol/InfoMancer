@@ -402,3 +402,65 @@ html.library-view-ready .library-view-toolbar {
     font-weight: 900;
   }
 }
+
+/* Same-origin document navigation keeps the application chrome visually anchored
+   while the page body makes a very short transition. Browsers without cross-document
+   View Transitions simply ignore this block and retain normal navigation behavior. */
+@view-transition {
+  navigation: auto;
+}
+
+.topbar {
+  view-transition-name: infomancer-chrome;
+}
+
+main.shell {
+  view-transition-name: infomancer-content;
+}
+
+footer {
+  view-transition-name: infomancer-footer;
+}
+
+::view-transition-old(infomancer-chrome),
+::view-transition-new(infomancer-chrome) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(infomancer-content) {
+  animation: infomancer-page-out .08s ease-out both;
+}
+
+::view-transition-new(infomancer-content) {
+  animation: infomancer-page-in .14s ease-out both;
+}
+
+::view-transition-old(infomancer-footer),
+::view-transition-new(infomancer-footer) {
+  animation-duration: .1s;
+}
+
+@keyframes infomancer-page-out {
+  to { opacity: .94; transform: translateY(-2px); }
+}
+
+@keyframes infomancer-page-in {
+  from { opacity: .94; transform: translateY(3px); }
+}
+
+/* Cover libraries can contain hundreds of cards. Let the browser skip layout/paint
+   work for cards that are well outside the viewport while preserving their footprint. */
+.cover-card {
+  content-visibility: auto;
+  contain-intrinsic-size: 280px 420px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(infomancer-content),
+  ::view-transition-new(infomancer-content),
+  ::view-transition-old(infomancer-footer),
+  ::view-transition-new(infomancer-footer) {
+    animation: none;
+  }
+}
