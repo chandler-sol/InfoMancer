@@ -1,66 +1,135 @@
-/* 0.8 title-detail interaction polish. Kept isolated while the alpha settles so
-   the denser detail layout and overlay workflow can be tuned without disturbing
-   general Library geometry. */
+/* 0.8 title detail surface.
+   Title pages, their Inspector counterpart, and title-scoped workflow overlays share
+   this component language so late-alpha polish does not leak into workspace.js. */
+
+.media-dossier .detail-copy {
+  position: relative;
+  padding-inline-end: 58px;
+}
+
+.workspace-detail-title-actions {
+  position: absolute;
+  top: 7px;
+  right: 0;
+  z-index: 15;
+}
+
+.workspace-detail-title-actions .series-menu {
+  position: relative;
+  margin: 0;
+}
+
+.workspace-detail-title-actions .series-menu-popover {
+  left: auto;
+  right: 0;
+}
 
 body.has-app-sidebar .media-dossier.detail-kind-movie .detail-page-head {
   gap: clamp(20px, 2.4vw, 36px);
-  margin-bottom: 10px;
-  padding: clamp(18px, 1.8vw, 26px);
+  margin-bottom: 9px;
+  padding: clamp(17px, 1.7vw, 25px);
 }
 
 body.has-app-sidebar .media-dossier.detail-kind-movie .detail-copy {
-  padding-top: 2px;
+  padding-top: 1px;
 }
 
 body.has-app-sidebar .media-dossier.detail-kind-movie .detail-copy h1 {
-  margin-bottom: 6px;
+  margin-bottom: 5px;
 }
 
 body.has-app-sidebar .media-dossier.detail-kind-movie .detail-date {
-  margin-bottom: 11px;
+  margin-bottom: 10px;
 }
 
 body.has-app-sidebar .media-dossier.detail-kind-movie .imdb-facts,
 body.has-app-sidebar .media-dossier.detail-kind-movie .genre-list {
-  margin-top: 8px;
+  margin-top: 7px;
 }
 
 body.has-app-sidebar .media-dossier.detail-kind-movie .detail-match-badge {
-  margin-top: 13px;
+  margin-top: 12px;
 }
 
 body.has-app-sidebar .media-dossier.detail-kind-movie .title-synopsis,
 body.has-app-sidebar .media-dossier.detail-kind-movie .movie-credits {
-  padding: 13px 15px;
+  padding: 12px 14px;
 }
 
 body.has-app-sidebar .media-dossier.detail-kind-movie .title-hero-aside {
-  gap: 10px;
+  gap: 9px;
 }
 
+/* Technical facts use the same compact module shape as the Inspector. auto-fit lets
+   the row consume its available width rather than leaving a Source-sized dead zone. */
 body.has-app-sidebar .media-dossier .detail-technical-rail {
-  margin-bottom: 10px;
+  margin-bottom: 9px;
 }
 
-body.has-app-sidebar .media-dossier .detail-technical-rail.media-live-facts dl > div,
-body.has-app-sidebar .media-dossier .detail-technical-rail.media-live-facts dl > div:last-child {
-  min-height: 54px;
-  padding-block: 8px;
+.media-dossier .detail-technical-rail.media-live-facts dl {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  align-items: stretch;
+  gap: 7px;
+  overflow: visible;
+}
+
+.media-dossier .detail-technical-rail.media-live-facts dl > div,
+.media-dossier .detail-technical-rail.media-live-facts dl > div:last-child,
+.workspace-inspector-media-grid > div,
+.workspace-inspector-stat-grid > div {
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid #273542;
+  border-radius: var(--im-radius-sm);
+  background: rgba(16, 22, 29, .72);
+}
+
+.media-dossier .detail-technical-rail.media-live-facts dl > div,
+.media-dossier .detail-technical-rail.media-live-facts dl > div:last-child {
+  width: auto;
+  min-height: 52px;
+  padding: 8px 12px;
+}
+
+.media-dossier .detail-technical-rail.media-live-facts .media-fact-muted dd {
+  color: var(--muted);
+}
+
+.media-dossier .detail-technical-rail.media-live-facts .media-fact-warning dd {
+  color: #f5c451;
+}
+
+.media-dossier .detail-technical-rail.media-live-facts.media-facts-updated dl > div {
+  animation: media-fact-refresh 720ms ease-out;
+}
+
+@keyframes media-fact-refresh {
+  0% {
+    border-color: rgba(185, 245, 66, .78);
+    background: rgba(185, 245, 66, .11);
+  }
+  100% {
+    border-color: #273542;
+    background: rgba(16, 22, 29, .72);
+  }
 }
 
 body.has-app-sidebar .media-dossier.detail-kind-movie .dossier-on-disk {
-  padding: 0 12px 10px;
+  padding: 0 12px 9px;
 }
 
 body.has-app-sidebar .media-dossier.detail-kind-movie .dossier-on-disk .panel-head {
   margin-inline: -12px;
-  padding: 11px 18px;
+  padding: 10px 18px;
 }
 
 body.has-app-sidebar .media-dossier.detail-kind-movie .file-list > article {
   min-height: 0;
   margin-top: 0;
-  padding: 9px 0;
+  padding: 8px 0;
   align-items: center;
 }
 
@@ -74,7 +143,7 @@ body.has-app-sidebar .media-dossier.detail-kind-movie .file-list > article > .gr
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-top: 18px;
+  margin-top: 17px;
 }
 
 .title-quick-actions form {
@@ -94,6 +163,7 @@ body.has-app-sidebar .media-dossier.detail-kind-movie .file-list > article > .gr
   color: var(--text);
   font-size: 11px;
   font-weight: 750;
+  line-height: 1;
   text-decoration: none;
   transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
 }
@@ -151,15 +221,6 @@ body.has-app-sidebar .media-dossier.detail-kind-movie .file-list > article > .gr
   color: var(--lime);
 }
 
-/* Bring the Inspector's fact modules into the same component language as the full
-   detail page without making the drawer any wider. */
-.workspace-inspector-media-grid > div,
-.workspace-inspector-stat-grid > div {
-  border: 1px solid #273542;
-  border-radius: var(--im-radius-sm);
-  background: rgba(16, 22, 29, .72);
-}
-
 /* Lightweight title-page status message used by no-reload actions. */
 .title-action-toast {
   position: fixed;
@@ -207,6 +268,35 @@ body.has-app-sidebar .media-dossier.detail-kind-movie .file-list > article > .gr
   max-height: calc(100vh - 82px);
   overflow: auto;
   padding: 24px;
+  overscroll-behavior: contain;
+}
+
+.organize-dialog.title-workflow-dialog.loading .organize-dialog-body {
+  cursor: progress;
+}
+
+.title-workflow-loading {
+  display: grid;
+  place-items: center;
+  min-height: min(360px, 45vh);
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: .04em;
+}
+
+.title-workflow-loading::before {
+  content: "";
+  width: 28px;
+  height: 28px;
+  margin-bottom: 12px;
+  border: 2px solid rgba(185, 245, 66, .18);
+  border-top-color: var(--lime);
+  border-radius: 50%;
+  animation: title-workflow-spin 760ms linear infinite;
+}
+
+@keyframes title-workflow-spin {
+  to { transform: rotate(360deg); }
 }
 
 .organize-dialog.title-workflow-dialog .organize-dialog-body > .page-head:first-child,
@@ -230,8 +320,20 @@ body.has-app-sidebar .media-dossier.detail-kind-movie .file-list > article > .gr
 }
 
 @media (max-width: 760px) {
+  .media-dossier .detail-copy {
+    padding-inline-end: 52px;
+  }
+
+  .workspace-detail-title-actions {
+    top: 2px;
+  }
+
   body.has-app-sidebar .media-dossier.detail-kind-movie .detail-page-head {
-    padding: 16px;
+    padding: 15px;
+  }
+
+  .media-dossier .detail-technical-rail.media-live-facts dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .title-quick-actions {
@@ -254,9 +356,23 @@ body.has-app-sidebar .media-dossier.detail-kind-movie .file-list > article > .gr
   }
 }
 
+@media (max-width: 420px) {
+  .media-dossier .detail-technical-rail.media-live-facts dl {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .detail-cover-action,
   .title-action-toast {
     transition: none;
+  }
+
+  .media-dossier .detail-technical-rail.media-live-facts.media-facts-updated dl > div {
+    animation: none;
+  }
+
+  .title-workflow-loading::before {
+    animation: none;
   }
 }
