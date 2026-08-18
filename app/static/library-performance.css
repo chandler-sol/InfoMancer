@@ -1,0 +1,48 @@
+.library-surface-loading,
+.library-surface-error {
+  grid-column: 1 / -1;
+  min-height: 140px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: #0d1319;
+}
+
+.library-surface-loading::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  margin-right: 10px;
+  border: 2px solid #3b4855;
+  border-top-color: var(--lime);
+  border-radius: 50%;
+  animation: library-surface-spin .7s linear infinite;
+}
+
+.library-surface-loading {
+  grid-template-columns: auto auto;
+  justify-content: center;
+}
+
+.library-surface-loading-row td {
+  height: 110px;
+  color: var(--muted);
+  text-align: center;
+}
+
+@keyframes library-surface-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Cover cards are independent visual units. Off-screen cards do not need layout or
+   paint work until the viewport approaches them. */
+.cover-card {
+  content-visibility: auto;
+  contain-intrinsic-size: 280px 420px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-surface-loading::before { animation: none; }
+}
