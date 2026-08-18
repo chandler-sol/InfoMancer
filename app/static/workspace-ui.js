@@ -48,4 +48,16 @@
     librarySurface.async = false;
     document.head.append(libraryStyles, librarySurface);
   }
+
+  if (document.querySelector('.media-dossier')) {
+    const detailStyles = document.createElement('link');
+    detailStyles.rel = 'stylesheet';
+    detailStyles.href = `/static/detail-page-polish.css${version}`;
+
+    const detailPolish = document.createElement('script');
+    detailPolish.src = `/static/detail-page-polish.js${version}`;
+    detailPolish.async = false;
+
+    document.head.append(detailStyles, detailPolish);
+  }
 })();
