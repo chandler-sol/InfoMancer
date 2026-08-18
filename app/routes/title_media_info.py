@@ -94,14 +94,14 @@ def build_router(ctx: RouteContext):
         if title["source_label"]:
             facts.append({"label": "Source", "value": str(title["source_label"])})
 
-        if files and inspected_count == 0:
-            facts.append({"label": "Media", "value": "Not inspected yet", "tone": "muted"})
-        elif error_count:
+        if error_count:
             facts.append({
                 "label": "Media",
                 "value": f"{error_count} need{'s' if error_count == 1 else ''} attention",
                 "tone": "warning",
             })
+        elif files and inspected_count == 0:
+            facts.append({"label": "Media", "value": "Not inspected yet", "tone": "muted"})
 
         if title["metadata_status"]:
             facts.append({"label": "Status", "value": str(title["metadata_status"])})
