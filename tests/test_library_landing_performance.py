@@ -82,6 +82,8 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
         self.assertIn('library-performance.css', loader)
         self.assertIn('X-InfoMancer-Library-View', lazy)
         self.assertIn('librarySurfacePlaceholder', lazy)
+        self.assertIn('setViewCookie(view);', lazy)
+        self.assertIn('hydrateSurface(currentView());', lazy)
         self.assertIn('X-InfoMancer-Library-Render', cache)
         self.assertIn('X-InfoMancer-Library-Surface', cache)
         self.assertIn('name="library"', cache)
