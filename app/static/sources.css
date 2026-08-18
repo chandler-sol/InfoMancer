@@ -56,6 +56,43 @@
 .source-final-form label { flex:1; color:var(--muted); font-size:12px; }
 .source-final-form button { align-self:flex-end; padding:11px 18px; }
 
+/* Scan and connection actions stay on the Sources screen instead of causing a
+   browser navigation. The compact live region gives immediate feedback while the
+   normal form submission remains available as the no-JavaScript fallback. */
+.source-live-status {
+  display:flex;
+  align-items:center;
+  gap:9px;
+  margin:-2px 0 16px;
+  padding:10px 12px;
+  border:1px solid #354451;
+  border-radius:8px;
+  background:#101820;
+  color:#c8d2da;
+  font-size:12px;
+  line-height:1.4;
+  animation:source-status-in .18s ease-out;
+}
+.source-live-status[hidden] { display:none; }
+.source-live-status::before {
+  content:"";
+  flex:0 0 auto;
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:var(--cyan);
+  box-shadow:0 0 0 4px rgba(71,190,221,.08);
+}
+.source-live-status[data-state="working"]::before { background:var(--lime); animation:source-action-pulse 1.2s ease-in-out infinite; }
+.source-live-status[data-state="success"] { border-color:#3d5735; background:#111b15; color:#d8e8d2; }
+.source-live-status[data-state="success"]::before { background:var(--lime); box-shadow:0 0 0 4px rgba(185,245,66,.08); }
+.source-live-status[data-state="error"] { border-color:#75423f; background:#211516; color:#ffb4b0; }
+.source-live-status[data-state="error"]::before { background:#ff716c; box-shadow:0 0 0 4px rgba(255,113,108,.09); }
+.source-action-busy { cursor:progress!important; }
+.root-row.source-row-working { box-shadow:inset 2px 0 rgba(185,245,66,.7); }
+@keyframes source-status-in { from { opacity:0; transform:translateY(-5px); } to { opacity:1; transform:translateY(0); } }
+@keyframes source-action-pulse { 50% { opacity:.38; transform:scale(.72); } }
+
 @media(max-width:760px) {
   .source-browser-shell { padding:17px; }
   .source-current,.source-final-form { align-items:stretch; flex-direction:column; }
@@ -64,4 +101,10 @@
   .source-folder { grid-template-columns:30px minmax(0,1fr); }
   .source-folder > span:last-child { display:none; }
   .root-name-form { position:fixed; top:50%; left:15px; right:15px; width:auto; transform:translateY(-50%); }
+  .source-live-status { margin-bottom:13px; }
+}
+
+@media(prefers-reduced-motion:reduce) {
+  .source-live-status { animation:none; }
+  .source-live-status[data-state="working"]::before { animation:none; }
 }
