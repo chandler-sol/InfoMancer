@@ -1,0 +1,105 @@
+/* Canonical InfoMancer item-action menu treatment.
+   All per-item three-dot menus should inherit from this surface instead of
+   defining their own trigger geometry, glyph, hover state, or popover chrome. */
+
+body.has-app-sidebar .item-action-menu > summary,
+body.has-app-sidebar .workspace-context-toggle {
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #0c1117;
+  color: var(--text);
+  font-size: 0;
+  line-height: 1;
+  list-style: none;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+body.has-app-sidebar .item-action-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+body.has-app-sidebar .item-action-menu > summary::before,
+body.has-app-sidebar .workspace-context-toggle::before {
+  content: "⋮";
+  display: block;
+  color: currentColor;
+  font-size: 24px;
+  font-weight: 750;
+  line-height: 1;
+  transform: translateY(-1px);
+}
+
+body.has-app-sidebar .item-action-menu > summary:hover,
+body.has-app-sidebar .item-action-menu > summary:focus-visible,
+body.has-app-sidebar .item-action-menu[open] > summary,
+body.has-app-sidebar .workspace-context-toggle:hover,
+body.has-app-sidebar .workspace-context-toggle:focus-visible,
+body.has-app-sidebar .workspace-context-menu.open > .workspace-context-toggle {
+  border-color: var(--lime);
+  background: #111820;
+  color: var(--lime);
+}
+
+body.has-app-sidebar .item-action-menu > summary:focus-visible,
+body.has-app-sidebar .workspace-context-toggle:focus-visible {
+  outline: 2px solid rgba(185, 245, 66, .28);
+  outline-offset: 2px;
+}
+
+/* Keep the popover itself visually consistent too. Existing positioning rules
+   remain owned by the page-specific menu classes. */
+body.has-app-sidebar .item-action-menu > div,
+body.has-app-sidebar .item-action-menu > .series-menu-popover,
+body.has-app-sidebar .workspace-context-popover {
+  box-sizing: border-box;
+  width: min(285px, calc(100vw - 24px));
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #121820;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, .45);
+}
+
+body.has-app-sidebar .workspace-context-popover a,
+body.has-app-sidebar .workspace-context-popover button {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 37px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+body.has-app-sidebar .workspace-context-popover a:hover,
+body.has-app-sidebar .workspace-context-popover a:focus-visible,
+body.has-app-sidebar .workspace-context-popover button:hover,
+body.has-app-sidebar .workspace-context-popover button:focus-visible {
+  background: var(--lime);
+  color: #10140b;
+  outline: 0;
+}
+
+@media (max-width: 520px) {
+  body.has-app-sidebar .item-action-menu > div,
+  body.has-app-sidebar .item-action-menu > .series-menu-popover,
+  body.has-app-sidebar .workspace-context-popover {
+    width: min(285px, calc(100vw - 16px));
+  }
+}
