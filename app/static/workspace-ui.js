@@ -5,7 +5,12 @@
   const styles = document.createElement("link");
   styles.rel = "stylesheet";
   styles.href = `/static/task-widget.css${version}`;
-  document.head.append(styles);
+
+  const navigationStyles = document.createElement("link");
+  navigationStyles.rel = "stylesheet";
+  navigationStyles.href = `/static/app-navigation.css${version}`;
+
+  document.head.append(styles, navigationStyles);
 
   const core = document.createElement("script");
   core.src = `/static/workspace-ui-core.js${version}`;
