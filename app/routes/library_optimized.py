@@ -1,0 +1,109 @@
+from __future__ import annotations
+
+from fastapi import Request
+from fastapi.responses import HTMLResponse, Response
+
+from .library import build_router as build_base_router
+from .library_cached import (
+    _cache_get,
+    _cache_put,
+    _cacheable_landing,
+    _fast_landing_response,
+    _library_signature,
+    _requested_view,
+    _session_key,
+    _trim_library_surface,
+    _trimmed_response,
+)
+
+
+def build_router(ctx):
+    """Wrap the normal Library router with the optimized landing-page path.
+
+    app.routes.library.build_router returns the repository-wide ``(router, handlers)``
+    bundle used by app.main. Keep that contract intact while replacing only the GET
+    /library endpoint with the cached/scoped implementation.
+    """
+    router, handlers = build_base_router(ctx)
+    db = ctx.live("db")
+    templates = ctx.live("templates")
+    display_title_type = ctx.live("display_title_type")
+
+    original_route = next(
+        (
+            route for route in list(router.routes)
+            if getattr(route, "path", None) == "/library"
+            and "GET" in (getattr(route, "methods", set()) or set())
+        ),
+        None,
+    )
+    if original_route is None:
+        return router, handlers
+
+    original_library = original_route.endpoint
+    router.routes.remove(original_route)
+
+    @router.get("/library", response_class=HTMLResponse, name="library")
+    def cached_library(
+        request: Request, q: str = "", kind: str = "all", letter: str = "",
+        genre: str = "", title_type: str = "", root: str = "",
+        person: str = "", person_name: str = "", credit_role: str = "",
+        match: str = "", gaps: str = "", favorite: str = "", tag: str = "",
+        sort: str = "title", record_search: str = "",
+    ):
+        view = _requested_view(request)
+        cacheable = _cacheable_landing(
+            q=q, kind=kind, letter=letter, genre=genre, title_type=title_type,
+            root=root, person=person, person_name=person_name,
+            credit_role=credit_role, match=match, gaps=gaps, favorite=favorite,
+            tag=tag, sort=sort, record_search=record_search,
+        ) and "message" not in request.query_params and "tour" not in request.query_params
+
+        arguments = (
+            request, q, kind, letter, genre, title_type, root, person,
+            person_name, credit_role, match, gaps, favorite, tag, sort,
+            record_search,
+        )
+
+        if not cacheable:
+            response = original_library(*arguments)
+            return _trimmed_response(response, getattr(response, "body", b""), view)
+
+        user_id = int(getattr(request.state.user, "id", 0) or 0)
+        signature = _library_signature(db, user_id)
+        key = (_session_key(request), request.url.path, view or "full")
+        cached = _cache_get(key, signature)
+        if cached is not None:
+            headers = {
+                "Cache-Control": "private, no-store",
+                "X-InfoMancer-Library-Render": "hit",
+                "X-InfoMancer-Library-Query": "scoped",
+            }
+            if view:
+                headers["X-InfoMancer-Library-Surface"] = view
+            return Response(content=cached, media_type="text/html", headers=headers)
+
+        response = _fast_landing_response(db, templates, display_title_type, request)
+        body = getattr(response, "body", b"")
+        served_body = _trim_library_surface(body, view)
+        if response.status_code == 200 and served_body:
+            _cache_put(key, signature, served_body)
+        if served_body != body:
+            headers = {
+                key: value for key, value in response.headers.items()
+                if key.lower() != "content-length"
+            }
+            headers["Cache-Control"] = "private, no-store"
+            headers["X-InfoMancer-Library-Render"] = "miss"
+            headers["X-InfoMancer-Library-Surface"] = view
+            headers["X-InfoMancer-Library-Query"] = "scoped"
+            return Response(content=served_body, status_code=response.status_code, headers=headers)
+        if response.status_code == 200 and body:
+            response.headers["X-InfoMancer-Library-Render"] = "miss"
+            response.headers["X-InfoMancer-Library-Query"] = "scoped"
+            response.headers.setdefault("Cache-Control", "private, no-store")
+        return response
+
+    updated_handlers = dict(handlers)
+    updated_handlers["library"] = cached_library
+    return router, updated_handlers
