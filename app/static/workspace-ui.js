@@ -10,7 +10,11 @@
   navigationStyles.rel = "stylesheet";
   navigationStyles.href = `/static/app-navigation.css${version}`;
 
-  document.head.append(styles, navigationStyles);
+  const actionMenuStyles = document.createElement("link");
+  actionMenuStyles.rel = "stylesheet";
+  actionMenuStyles.href = `/static/action-menu.css${version}`;
+
+  document.head.append(styles, navigationStyles, actionMenuStyles);
 
   const core = document.createElement("script");
   core.src = `/static/workspace-ui-core.js${version}`;
