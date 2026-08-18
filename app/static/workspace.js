@@ -178,6 +178,7 @@
       if (!facts.length) return;
       const rail = ensureTechnicalRail();
       rail.classList.add("media-live-facts");
+      rail.setAttribute("aria-live", "polite");
       const list = rail.querySelector("dl") || rail.appendChild(document.createElement("dl"));
       list.replaceChildren();
       facts.forEach((fact) => {
@@ -237,8 +238,9 @@
       renderFiles(snapshot);
     };
 
-    const fetchState = async () => {
-      const response = await fetch(stateUrl, {
+    const fetchState = async (includeSnapshot = true) => {
+      const url = includeSnapshot ? stateUrl : `${stateUrl}?snapshot=0`;
+      const response = await fetch(url, {
         credentials: "same-origin",
         cache: "no-store",
         headers: {"Accept": "application/json"},
@@ -256,11 +258,12 @@
     const pollUntilFinished = async () => {
       if (!polling) return;
       try {
-        const data = await fetchState();
+        const data = await fetchState(false);
         const status = data.task?.status || "idle";
         if (["complete", "error", "failed", "cancelled"].includes(status)) {
           stopPolling();
-          renderSnapshot(data.snapshot, true);
+          const finalState = await fetchState(true);
+          renderSnapshot(finalState.snapshot, true);
           setButtonsRunning(false);
           if (status === "error" || status === "failed") {
             restoreButtonLabelsSoon("Inspection stopped");
@@ -311,7 +314,7 @@
     // Normalize the pre-inspection Source-only rail as soon as the detail page is
     // ready. This also means media information completed in another tab appears
     // without requiring a manual refresh here.
-    fetchState()
+    fetchState(true)
       .then((data) => renderSnapshot(data.snapshot, false))
       .catch(() => {});
   };
