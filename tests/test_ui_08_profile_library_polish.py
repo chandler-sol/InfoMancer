@@ -36,6 +36,19 @@ class ProfileLibraryPolishContracts(unittest.TestCase):
         self.assertIn("library-first-paint-fallback", css)
         self.assertIn('classList.add("library-view-ready")', script)
 
+    def test_cross_document_navigation_keeps_app_chrome_stable(self):
+        css = (ROOT / "app/static/modern.css").read_text(encoding="utf-8")
+
+        self.assertIn("@view-transition", css)
+        self.assertIn("navigation: auto", css)
+        self.assertIn("view-transition-name: infomancer-chrome", css)
+        self.assertIn("view-transition-name: infomancer-content", css)
+        self.assertIn("infomancer-page-in", css)
+        self.assertIn("infomancer-page-out", css)
+        self.assertIn("content-visibility: auto", css)
+        self.assertIn("contain-intrinsic-size: 280px 420px", css)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", css)
+
     def test_desktop_density_pass_reclaims_vertical_space(self):
         css = (ROOT / "app/static/modern.css").read_text(encoding="utf-8")
 
