@@ -88,7 +88,7 @@
       const letter = row.querySelector('[name="sequence_letter"]')?.value || "";
       const output = row.querySelector("output");
       const formatted = padded
-        ? String(rawNumber).padStart(Math.max(2, String(Math.max(rows.length, rawNumber)).length), "0")
+        ? String(rawNumber).padStart(Math.max(2, String(Math.max(rows.length, rawNumber)).length, "0")
         : String(rawNumber);
       if (output) output.textContent = `${prefix} ${formatted}${letter}`;
       row.querySelector('[data-sort-move="up"]')?.toggleAttribute("disabled", index === 0);
@@ -162,6 +162,9 @@
   });
 
   body.addEventListener("submit", async (event) => {
+    // title-detail-ux.js owns submissions while this shared shell is hosting a
+    // title workflow. Without this boundary a Collections form would POST twice.
+    if (dialog.classList.contains("title-workflow-dialog")) return;
     const form = event.target.closest("form.organize-title-form");
     if (!form) return;
     event.preventDefault();
