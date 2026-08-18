@@ -15,6 +15,19 @@
   core.async = false;
   document.head.append(core);
 
+  // Late-alpha title detail behavior lives outside the already-large workspace
+  // runtime, but is versioned with the same static cache key.
+  const titleDetailStyles = document.createElement("link");
+  titleDetailStyles.rel = "stylesheet";
+  titleDetailStyles.href = `/static/title-detail-ux.css${assetQuery}`;
+  titleDetailStyles.dataset.titleDetailUx = "1";
+  document.head.append(titleDetailStyles);
+
+  const titleDetailScript = document.createElement("script");
+  titleDetailScript.src = `/static/title-detail-ux.js${assetQuery}`;
+  titleDetailScript.async = false;
+  document.head.append(titleDetailScript);
+
   const ensureDetailActionStyles = () => {
     if (document.querySelector("style[data-workspace-title-actions]")) return;
     const style = document.createElement("style");
@@ -298,6 +311,13 @@
           });
           let data = null;
           try { data = await response.json(); } catch (_error) {}
+          if (response.ok && data?.up_to_date) {
+            restoreButtonLabelsSoon("Media up to date ✓");
+            window.dispatchEvent(new CustomEvent("infomancer:title-toast", {
+              detail: {message: data.detail || "Media information is up to date.", tone: "good"},
+            }));
+            return;
+          }
           if (!response.ok || !data?.started) {
             throw new Error(data?.detail || `HTTP ${response.status}`);
           }
@@ -307,6 +327,9 @@
         } catch (error) {
           console.warn("Media inspection could not start", error);
           restoreButtonLabelsSoon("Could not start");
+          window.dispatchEvent(new CustomEvent("infomancer:title-toast", {
+            detail: {message: error.message || "Media inspection could not start.", tone: "error"},
+          }));
         }
       });
     });
