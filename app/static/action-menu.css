@@ -27,15 +27,18 @@ body.has-app-sidebar .item-action-menu > summary::-webkit-details-marker {
   display: none;
 }
 
+/* Draw the overflow mark instead of relying on the font's vertical metrics for ⋮.
+   The three dots now sit mathematically in the middle of every canonical trigger. */
 body.has-app-sidebar .item-action-menu > summary::before,
 body.has-app-sidebar .workspace-context-toggle::before {
-  content: "⋮";
+  content: "";
   display: block;
-  color: currentColor;
-  font-size: 24px;
-  font-weight: 750;
-  line-height: 1;
-  transform: translateY(-1px);
+  width: 4px;
+  height: 20px;
+  background:
+    radial-gradient(circle at 50% 2px, currentColor 0 2px, transparent 2.2px),
+    radial-gradient(circle at 50% 10px, currentColor 0 2px, transparent 2.2px),
+    radial-gradient(circle at 50% 18px, currentColor 0 2px, transparent 2.2px);
 }
 
 body.has-app-sidebar .item-action-menu > summary:hover,
