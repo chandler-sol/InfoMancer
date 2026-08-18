@@ -14,6 +14,46 @@
   const currentView = () => coverSurface.hidden ? 'list' : 'covers';
   setViewCookie(currentView());
 
+  const rememberTitleReturn = (surface) => {
+    surface.querySelectorAll('a[href^="/titles/"]').forEach((link) => {
+      if (link.dataset.libraryReturnReady === '1') return;
+      link.dataset.libraryReturnReady = '1';
+      link.addEventListener('click', () => {
+        const row = link.closest("[id^='title-']");
+        const anchor = row?.id ? `#${row.id}` : '';
+        try {
+          sessionStorage.setItem(
+            'infomancerLibraryReturn',
+            window.location.pathname + window.location.search + anchor,
+          );
+        } catch (_error) {}
+      });
+    });
+  };
+
+  const bindHydratedListControls = () => {
+    const selectAll = listSurface.querySelector('#select-all-titles');
+    if (!selectAll || selectAll.dataset.lazyBound === '1') return;
+    selectAll.dataset.lazyBound = '1';
+    selectAll.addEventListener('change', () => {
+      const unique = new Map();
+      listSurface.querySelectorAll('.library-title-choice').forEach((choice) => unique.set(choice.value, choice));
+      unique.forEach((choice) => {
+        if (choice.checked === selectAll.checked) return;
+        choice.checked = selectAll.checked;
+        choice.dispatchEvent(new Event('change', {bubbles: true}));
+      });
+    });
+    listSurface.addEventListener('change', (event) => {
+      if (!event.target.matches('.library-title-choice, .letter-title-choice')) return;
+      queueMicrotask(() => {
+        const choices = [...listSurface.querySelectorAll('.library-title-choice')];
+        selectAll.checked = choices.length > 0 && choices.every((choice) => choice.checked);
+        selectAll.indeterminate = choices.some((choice) => choice.checked) && !selectAll.checked;
+      });
+    });
+  };
+
   const markLoading = (view) => {
     if (view === 'covers') {
       if (!coverSurface.querySelector('.library-surface-loading')) {
@@ -59,6 +99,7 @@
           throw new Error('Cover surface was not returned');
         }
         coverSurface.replaceChildren(...replacement.childNodes);
+        rememberTitleReturn(coverSurface);
       } else {
         const replacement = fresh.querySelector('.library-table');
         const replacementTable = replacement?.querySelector('table');
@@ -76,6 +117,8 @@
         }
         currentBody.replaceChildren(...replacementBody.childNodes);
         if (replacement.dataset.libraryKind) listSurface.dataset.libraryKind = replacement.dataset.libraryKind;
+        bindHydratedListControls();
+        rememberTitleReturn(listSurface);
       }
 
       delete surface.dataset.librarySurfacePlaceholder;
