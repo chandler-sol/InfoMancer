@@ -103,7 +103,7 @@ def build_router(ctx):
     original_library = original_route.endpoint
     router.routes.remove(original_route)
 
-    @router.get("/library", response_class=HTMLResponse)
+    @router.get("/library", response_class=HTMLResponse, name="library")
     def cached_library(
         request: Request, q: str = "", kind: str = "all", letter: str = "",
         genre: str = "", title_type: str = "", root: str = "",
