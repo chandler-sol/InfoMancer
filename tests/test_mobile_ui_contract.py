@@ -50,16 +50,18 @@ class MobileUiContractTests(unittest.TestCase):
         self.assertIn(".task-widget-toggle .task-card-copy", progress)
         self.assertIn("footer a:hover", header)
 
-    def test_announcement_control_uses_small_screen_bell_icon(self):
+    def test_header_uses_megaphone_for_announcements_and_bell_for_notifications(self):
         base = Path("app/templates/base.html").read_text(encoding="utf-8")
-        modern = Path("app/static/modern.css").read_text(encoding="utf-8")
+        task_styles = Path("app/static/task-widget.css").read_text(encoding="utf-8")
 
         self.assertIn('class="announcement-button"', base)
-        self.assertIn(".announcement-button > svg", modern)
-        self.assertIn(".announcement-button::before", modern)
-        self.assertIn("-webkit-mask:", modern)
-        self.assertIn("width: 20px", modern)
-        self.assertIn("height: 20px", modern)
+        self.assertIn('M4 13h3l9 5V6l-9 5H4z', base)
+        self.assertIn('.announcement-button>svg{display:block}', task_styles)
+        self.assertIn('.announcement-button::before{content:none!important;display:none!important}', task_styles)
+        self.assertIn('.topbar .task-widget-toggle::before', task_styles)
+        self.assertIn('-webkit-mask:url(', task_styles)
+        self.assertIn('.topbar .task-widget .task-dot{position:absolute', task_styles)
+        self.assertIn('@media(max-width:760px)', task_styles)
 
     def test_installation_name_is_hidden_but_compatibility_key_remains(self):
         settings = Path("app/templates/settings.html").read_text(encoding="utf-8")
