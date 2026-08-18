@@ -1,0 +1,83 @@
+/* Library selection-state pass.
+   Inspection and bulk selection are different modes and should never look interchangeable. */
+
+/* A single-click inspection uses cyan and an explicit poster badge. Keep it visible,
+   but quieter than the lime bulk-selection state. */
+.cover-card.workspace-selected::after {
+  inset: -1px;
+  border: 1px solid rgba(81, 214, 230, .72);
+  box-shadow: 0 0 0 1px rgba(81, 214, 230, .08), 0 10px 30px rgba(0, 0, 0, .2);
+}
+.cover-card.workspace-selected .cover-art {
+  position: relative;
+}
+.cover-card.workspace-selected .cover-art::after {
+  content: "INSPECTING";
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 3;
+  padding: 4px 7px;
+  border: 1px solid rgba(81, 214, 230, .48);
+  border-radius: 999px;
+  background: rgba(7, 13, 18, .9);
+  color: var(--cyan);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: .1em;
+  line-height: 1;
+}
+
+/* Bulk selection is the strong lime state. The whole card participates, and the
+   checkbox becomes an unmistakable filled check rather than a subtle dark box. */
+.cover-card:has(.library-cover-choice:checked) {
+  background: rgba(185, 245, 66, .045);
+  box-shadow: 0 0 0 2px rgba(185, 245, 66, .78), 0 12px 32px rgba(0, 0, 0, .26);
+}
+.cover-card:has(.library-cover-choice:checked) .cover-art {
+  border-color: rgba(185, 245, 66, .78);
+}
+.cover-card:has(.library-cover-choice:checked) .cover-card-link > strong {
+  color: var(--lime);
+}
+.cover-card:has(.library-cover-choice:checked) .cover-art::after {
+  display: none;
+}
+.cover-card:has(.library-cover-choice:checked).workspace-selected::after {
+  border-color: var(--lime);
+  box-shadow: none;
+}
+.cover-select-control:has(input:checked) {
+  opacity: 1;
+  transform: scale(1);
+}
+.cover-select-control input:checked + span {
+  color: #0b1008;
+  border-color: var(--lime);
+  background: var(--lime);
+  box-shadow: 0 4px 14px rgba(0,0,0,.38), 0 0 0 2px rgba(185,245,66,.16);
+}
+
+/* List mode follows the same language so switching views does not change what
+   selection means. */
+.library-title-row:has(.library-title-choice:checked) > td {
+  background: rgba(185, 245, 66, .055);
+}
+.library-title-row:has(.library-title-choice:checked) > td:first-child {
+  box-shadow: inset 3px 0 0 var(--lime);
+}
+.library-title-row.workspace-selected:not(:has(.library-title-choice:checked)) > td {
+  background: rgba(81, 214, 230, .035);
+}
+.library-title-row.workspace-selected:not(:has(.library-title-choice:checked)) > td:first-child {
+  box-shadow: inset 2px 0 0 rgba(81, 214, 230, .65);
+}
+
+@media (hover: none), (pointer: coarse) {
+  .cover-select-control {
+    opacity: .78;
+  }
+  .cover-select-control:has(input:checked) {
+    opacity: 1;
+  }
+}
