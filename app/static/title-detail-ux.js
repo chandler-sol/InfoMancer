@@ -160,11 +160,10 @@
     wireAsideControls();
 
     const refreshHeroMenu = (freshDossier, currentHost) => {
-      const currentMenu = titleMenu();
       const freshMenu = titleMenu(freshDossier);
       if (!currentHost || !freshMenu) return;
 
-      const currentMediaForm = currentMenu?.querySelector(`form[action="/titles/${titleId}/media-info"]`);
+      const currentMediaForm = currentHost.querySelector(`form[action="/titles/${titleId}/media-info"]`);
       const importedMenu = document.importNode(freshMenu, true);
       importedMenu.open = false;
       importedMenu.classList.add("workspace-title-action-menu");
