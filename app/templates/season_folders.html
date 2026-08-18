@@ -6,8 +6,8 @@
 
 {% set needs_attention = (ready|length) + (blocked|length) + skipped_unparsed %}
 {% if needs_attention == 0 %}
-<section class="panel empty good season-folder-all-good">
-  <h2>Everything is already organized</h2>
+<section class="panel empty season-folder-all-good">
+  <h2><span class="status-icon good" aria-hidden="true">✓</span> Everything is already organized</h2>
   <p>All {{ organized|length }} parsed episode file{% if organized|length != 1 %}s{% endif %} are already in the expected season folders. No changes are needed.</p>
 </section>
 {% else %}
