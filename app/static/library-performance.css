@@ -51,6 +51,27 @@
   contain-intrinsic-size: 280px 420px;
 }
 
+/* content-visibility:auto gives each cover paint containment. That is useful for
+   the large Library grid, but an open action menu must be allowed to escape the
+   poster/card bounds. Temporarily opt the active card out of containment and raise
+   its stacking context so the shared action menu can draw above neighboring covers.
+   The Inspector remains above it because its drawer uses the higher app-level layer. */
+.cover-card:has(.item-action-menu[open]) {
+  z-index: 60;
+  content-visibility: visible;
+}
+.cover-card:has(.item-action-menu[open]) .cover-card-actions {
+  z-index: 61;
+  overflow: visible;
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+.cover-card:has(.item-action-menu[open]) .item-action-menu,
+.cover-card:has(.item-action-menu[open]) .item-action-menu > div {
+  z-index: 62;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .library-surface-loading::before { animation: none; }
 }
