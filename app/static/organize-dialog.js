@@ -88,7 +88,7 @@
       const letter = row.querySelector('[name="sequence_letter"]')?.value || "";
       const output = row.querySelector("output");
       const formatted = padded
-        ? String(rawNumber).padStart(Math.max(2, String(Math.max(rows.length, rawNumber)).length, "0")
+        ? String(rawNumber).padStart(Math.max(2, String(Math.max(rows.length, rawNumber)).length), "0")
         : String(rawNumber);
       if (output) output.textContent = `${prefix} ${formatted}${letter}`;
       row.querySelector('[data-sort-move="up"]')?.toggleAttribute("disabled", index === 0);
