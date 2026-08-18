@@ -39,9 +39,13 @@
   }
 
   if (document.querySelector('.library-table') && document.getElementById('cover-library')) {
+    const libraryStyles = document.createElement('link');
+    libraryStyles.rel = 'stylesheet';
+    libraryStyles.href = `/static/library-performance.css${version}`;
+
     const librarySurface = document.createElement('script');
     librarySurface.src = `/static/library-surface-lazy.js${version}`;
     librarySurface.async = false;
-    document.head.append(librarySurface);
+    document.head.append(libraryStyles, librarySurface);
   }
 })();
