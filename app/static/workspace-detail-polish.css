@@ -252,18 +252,19 @@ body.has-app-sidebar .media-dossier .dossier-on-disk .file-list > article > .gro
 }
 
 /* Give the season filters and bulk collapse controls a little more separation.
-   They should read as distinct controls rather than one continuous button strip. */
+   Inset them from the panel edges so the controls line up with the rest of the
+   On Disk content rather than touching the container boundary. */
 body.has-app-sidebar .media-dossier .season-nav {
   gap: 7px;
-  margin: 20px 0 11px;
+  margin: 20px 14px 11px;
 }
 body.has-app-sidebar .media-dossier .season-collapse-toolbar {
   flex-wrap: wrap;
   gap: 9px;
-  margin: 6px 0 14px;
+  margin: 6px 14px 14px;
 }
 body.has-app-sidebar .media-dossier .season-collapse-toolbar > span {
-  margin-right: 4px;
+  display: none;
 }
 body.has-app-sidebar .media-dossier .season-collapse-toolbar button {
   padding: 6px 10px;
