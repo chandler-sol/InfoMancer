@@ -25,4 +25,16 @@
   navigation.async = false;
 
   document.head.append(core, tasks, navigation);
+
+  if (document.querySelector('.settings-section-nav')) {
+    const settingsStyles = document.createElement('link');
+    settingsStyles.rel = 'stylesheet';
+    settingsStyles.href = `/static/settings-polish.css${version}`;
+
+    const settingsPolish = document.createElement('script');
+    settingsPolish.src = `/static/settings-polish.js${version}`;
+    settingsPolish.async = false;
+
+    document.head.append(settingsStyles, settingsPolish);
+  }
 })();
