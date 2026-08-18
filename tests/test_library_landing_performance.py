@@ -56,6 +56,16 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
         self.assertNotIn("LIST", cover_html)
         self.assertIn('data-library-surface-placeholder="list"', cover_html)
 
+    def test_default_landing_scopes_expensive_aggregates_to_visible_candidates(self):
+        cache = (ROOT / "app/routes/library_cached.py").read_text(encoding="utf-8")
+
+        self.assertIn("WITH candidates AS", cache)
+        self.assertIn("LIMIT 1000", cache)
+        self.assertIn("FROM files f JOIN candidates c ON c.id=f.title_id", cache)
+        self.assertIn("FROM expected_episodes e JOIN candidates c ON c.id=e.title_id", cache)
+        self.assertIn('X-InfoMancer-Library-Query', cache)
+        self.assertIn('"scoped"', cache)
+
     def test_library_router_and_navigation_use_warm_render_path(self):
         routes = (ROOT / "app/routes/__init__.py").read_text(encoding="utf-8")
         loader = (ROOT / "app/static/workspace-ui.js").read_text(encoding="utf-8")
