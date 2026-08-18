@@ -50,6 +50,17 @@ class MobileUiContractTests(unittest.TestCase):
         self.assertIn(".task-widget-toggle .task-card-copy", progress)
         self.assertIn("footer a:hover", header)
 
+    def test_announcement_control_uses_small_screen_bell_icon(self):
+        base = Path("app/templates/base.html").read_text(encoding="utf-8")
+        modern = Path("app/static/modern.css").read_text(encoding="utf-8")
+
+        self.assertIn('class="announcement-button"', base)
+        self.assertIn(".announcement-button > svg", modern)
+        self.assertIn(".announcement-button::before", modern)
+        self.assertIn("-webkit-mask:", modern)
+        self.assertIn("width: 20px", modern)
+        self.assertIn("height: 20px", modern)
+
     def test_installation_name_is_hidden_but_compatibility_key_remains(self):
         settings = Path("app/templates/settings.html").read_text(encoding="utf-8")
         setup = Path("app/templates/getting_started.html").read_text(encoding="utf-8")
