@@ -37,4 +37,11 @@
 
     document.head.append(settingsStyles, settingsPolish);
   }
+
+  if (document.querySelector('.library-table') && document.getElementById('cover-library')) {
+    const librarySurface = document.createElement('script');
+    librarySurface.src = `/static/library-surface-lazy.js${version}`;
+    librarySurface.async = false;
+    document.head.append(librarySurface);
+  }
 })();
