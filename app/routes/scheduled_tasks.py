@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from ..access import require_librarian
 from .context import RouteContext
@@ -88,7 +88,6 @@ def build_router(ctx: RouteContext):
     AppSettingError = ctx.get("AppSettingError")
     Form = ctx.get("Form")
     HTMLResponse = ctx.get("HTMLResponse")
-    Request = ctx.get("Request")
     app_settings = ctx.live("app_settings")
     media_hash_cancel = ctx.live("media_hash_cancel")
     media_hash_job = ctx.live("media_hash_job")
