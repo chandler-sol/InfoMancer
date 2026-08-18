@@ -42,6 +42,18 @@
     document.head.append(settingsStyles, settingsPolish);
   }
 
+  if (document.querySelector('.saved-view-bar') && document.querySelector('.catalog-tabs')) {
+    const savedViewStyles = document.createElement('link');
+    savedViewStyles.rel = 'stylesheet';
+    savedViewStyles.href = `/static/library-saved-views-polish.css${version}`;
+
+    const savedViewPolish = document.createElement('script');
+    savedViewPolish.src = `/static/library-saved-views-polish.js${version}`;
+    savedViewPolish.async = false;
+
+    document.head.append(savedViewStyles, savedViewPolish);
+  }
+
   if (document.querySelector('.library-table') && document.getElementById('cover-library')) {
     const libraryStyles = document.createElement('link');
     libraryStyles.rel = 'stylesheet';
