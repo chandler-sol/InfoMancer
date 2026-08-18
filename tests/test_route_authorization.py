@@ -37,6 +37,9 @@ class RouteAuthorizationTests(unittest.TestCase):
             ("/settings", "GET"), ("/sources", "GET"), ("/duplicates", "GET"),
             ("/admin/users", "GET"), ("/scan-all", "POST"),
             ("/titles/{title_id}/metadata/enrich", "POST"),
+            ("/titles/{title_id}/media-info", "POST"),
+            ("/titles/{title_id}/imdb-refresh", "POST"),
+            ("/titles/{title_id}/collections", "POST"),
         ):
             with self.subTest(path=path, method=method):
                 self.assertIn(require_librarian, self.dependencies_for(path, method))
