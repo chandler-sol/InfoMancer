@@ -18,6 +18,11 @@
     const terminalStatuses = new Set(["complete", "error", "failed", "cancelled"]);
     const runningStatuses = new Set(["queued", "starting", "running"]);
     const pollers = new Set();
+    const pageCsrfToken = (
+      dossier.querySelector('input[name="csrf_token"]')?.value
+      || document.querySelector('form[method="post" i] input[name="csrf_token"]')?.value
+      || ""
+    );
     let workflowKind = "";
     let workflowUrl = window.location.href;
     let workflowOpener = null;
@@ -46,15 +51,36 @@
       if (event.detail?.message) showToast(event.detail.message, event.detail.tone || "good");
     });
 
+    const sameOriginUrl = (url, base = window.location.href) => {
+      const parsed = new URL(url, base);
+      if (parsed.origin !== window.location.origin) {
+        throw new Error("Cross-origin title action blocked.");
+      }
+      return parsed;
+    };
+
+    const requireSameOriginResponse = (response) => {
+      sameOriginUrl(response.url || window.location.href);
+      return response;
+    };
+
+    const csrfHeaders = (form, initial = {}) => {
+      const headers = new Headers(initial);
+      const token = form?.querySelector('input[name="csrf_token"]')?.value || pageCsrfToken;
+      if (token) headers.set("X-CSRF-Token", token);
+      return headers;
+    };
+
     const fetchJson = async (url, options = {}) => {
+      const requestUrl = sameOriginUrl(url);
       const headers = new Headers(options.headers || {});
       headers.set("Accept", "application/json");
-      const response = await fetch(url, {
+      const response = requireSameOriginResponse(await fetch(requestUrl.href, {
         credentials: "same-origin",
         cache: "no-store",
         ...options,
         headers,
-      });
+      }));
       let data = null;
       try {
         data = await response.json();
@@ -69,11 +95,12 @@
     };
 
     const fetchDocument = async (url, options = {}) => {
-      const response = await fetch(url, {
+      const requestUrl = sameOriginUrl(url);
+      const response = requireSameOriginResponse(await fetch(requestUrl.href, {
         credentials: "same-origin",
         cache: "no-store",
         ...options,
-      });
+      }));
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const html = await response.text();
       return {
@@ -372,11 +399,13 @@
       const wasFavorite = Boolean(button?.classList.contains("active"));
       setButtonBusy(button, true, wasFavorite ? "Removing…" : "Adding…");
       try {
-        const response = await fetch(form.action, {
+        const action = sameOriginUrl(form.action);
+        const response = requireSameOriginResponse(await fetch(action.href, {
           method: "POST",
           credentials: "same-origin",
           body: new FormData(form),
-        });
+          headers: csrfHeaders(form),
+        }));
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const favorite = !wasFavorite;
         if (button) {
@@ -518,7 +547,7 @@
         const data = await fetchJson(form.action, {
           method: "POST",
           body: new FormData(form),
-          headers: {"X-InfoMancer-Async": "1"},
+          headers: csrfHeaders(form, {"X-InfoMancer-Async": "1"}),
         });
         if (data.up_to_date) {
           restoreButtonSoon(button, "Media up to date ✓");
@@ -590,7 +619,7 @@
         const data = await fetchJson(form.action, {
           method: "POST",
           body: new FormData(form),
-          headers: {"X-InfoMancer-Async": "1"},
+          headers: csrfHeaders(form, {"X-InfoMancer-Async": "1"}),
         });
         if (!data.started) throw new Error(data.detail || "Metadata refresh could not start.");
         setButtonBusy(button, true, "Refreshing metadata…");
@@ -635,6 +664,16 @@
       workflowBody.querySelectorAll('input[name="return_to"]').forEach((input) => {
         input.value = `/titles/${titleId}`;
       });
+      if (pageCsrfToken) {
+        workflowBody.querySelectorAll('form[method="post" i]').forEach((form) => {
+          if (form.querySelector('input[name="csrf_token"]')) return;
+          const input = document.createElement("input");
+          input.type = "hidden";
+          input.name = "csrf_token";
+          input.value = pageCsrfToken;
+          form.prepend(input);
+        });
+      }
       const heading = workflowBody.querySelector("h1");
       if (heading) {
         heading.id = "organize-dialog-title";
@@ -662,10 +701,11 @@
     })[kind] || "Title updated.";
 
     const renderWorkflowResponse = async (response) => {
+      requireSameOriginResponse(response);
       workflowUrl = response.url || workflowUrl;
       const html = await response.text();
       const parsed = new DOMParser().parseFromString(html, "text/html");
-      const responsePath = new URL(workflowUrl, window.location.href).pathname;
+      const responsePath = sameOriginUrl(workflowUrl).pathname;
 
       if (parsed.querySelector(".media-dossier") || responsePath === `/titles/${titleId}`) {
         const completedKind = workflowKind;
@@ -693,7 +733,13 @@
         window.location.assign(url);
         return;
       }
-      const parsedUrl = new URL(url, window.location.href);
+      let parsedUrl;
+      try {
+        parsedUrl = sameOriginUrl(url);
+      } catch (_error) {
+        return;
+      }
+      if (!workflowPath(parsedUrl.pathname)) return;
       workflowKind = workflowKindFor(parsedUrl.pathname);
       workflowUrl = parsedUrl.href;
       workflowOpener = trigger;
@@ -705,11 +751,11 @@
       if (!workflowDialog.open) workflowDialog.showModal();
 
       try {
-        const response = await fetch(parsedUrl.href, {
+        const response = requireSameOriginResponse(await fetch(parsedUrl.href, {
           credentials: "same-origin",
           cache: "no-store",
           headers: {"X-Requested-With": "InfoMancerDialog"},
-        });
+        }));
         if (!response.ok || !(await renderWorkflowResponse(response))) {
           throw new Error(`HTTP ${response.status}`);
         }
@@ -759,23 +805,23 @@
       try {
         const method = (form.method || "get").toUpperCase();
         const rawAction = form.getAttribute("action") || workflowUrl;
-        const action = new URL(rawAction, workflowUrl);
+        const action = sameOriginUrl(rawAction, workflowUrl);
         let response;
         if (method === "GET") {
           const query = new URLSearchParams(new FormData(form));
           action.search = query.toString();
-          response = await fetch(action.href, {
+          response = requireSameOriginResponse(await fetch(action.href, {
             credentials: "same-origin",
             cache: "no-store",
             headers: {"X-Requested-With": "InfoMancerDialog"},
-          });
+          }));
         } else {
-          response = await fetch(action.href, {
+          response = requireSameOriginResponse(await fetch(action.href, {
             method,
             credentials: "same-origin",
             body: new FormData(form),
-            headers: {"X-Requested-With": "InfoMancerDialog"},
-          });
+            headers: csrfHeaders(form, {"X-Requested-With": "InfoMancerDialog"}),
+          }));
         }
         if (!response.ok || !(await renderWorkflowResponse(response))) {
           throw new Error(`HTTP ${response.status}`);
@@ -783,7 +829,7 @@
       } catch (_error) {
         const fallback = (() => {
           try {
-            return new URL(form.getAttribute("action") || workflowUrl, workflowUrl).href;
+            return sameOriginUrl(form.getAttribute("action") || workflowUrl, workflowUrl).href;
           } catch (_inner) {
             return workflowUrl;
           }
