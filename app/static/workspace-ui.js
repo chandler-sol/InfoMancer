@@ -71,10 +71,19 @@
     libraryStyles.rel = 'stylesheet';
     libraryStyles.href = `/static/library-performance.css${version}`;
 
+    const librarySelectionStyles = document.createElement('link');
+    librarySelectionStyles.rel = 'stylesheet';
+    librarySelectionStyles.href = `/static/library-selection-polish.css${version}`;
+
     const librarySurface = document.createElement('script');
     librarySurface.src = `/static/library-surface-lazy.js${version}`;
     librarySurface.async = false;
-    document.head.append(libraryStyles, librarySurface);
+
+    const librarySelection = document.createElement('script');
+    librarySelection.src = `/static/library-selection-polish.js${version}`;
+    librarySelection.async = false;
+
+    document.head.append(libraryStyles, librarySelectionStyles, librarySurface, librarySelection);
   }
 
   if (document.querySelector('.media-dossier')) {
