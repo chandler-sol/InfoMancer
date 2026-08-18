@@ -13,8 +13,9 @@ from .. import auth as auth_module
 from .context import RouteContext
 
 
-# Keep the built-in choices lightweight and portable. The same symbolic language is
-# rendered by the profile picker and by the small account avatar used throughout UI.
+# Keep the built-in choices lightweight and portable. Text symbols remain a legacy
+# fallback for old surfaces, while the avatar endpoint now renders literal SVG marks
+# that match the names shown in the profile picker.
 PROFILE_ICON_SYMBOLS = {
     "film": "◆",
     "television": "▣",
@@ -28,7 +29,20 @@ PROFILE_ICON_SYMBOLS = {
     "heart": "♥",
     "clapperboard": "▥",
 }
-PROFILE_ICON_CHOICES = {"initials", "custom", *PROFILE_ICON_SYMBOLS}
+PROFILE_ICON_SVGS = {
+    "camera": '<path d="M4 7h3l2-2h6l2 2h3v12H4z"></path><circle cx="12" cy="13" r="4"></circle>',
+    "clapperboard": '<path d="M4 7h16v12H4zM4 11h16M5 7l3-4m2 4 3-4m2 4 3-4"></path>',
+    "disc": '<circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="2"></circle><path d="M12 4v2m0 12v2M4 12h2m12 0h2"></path>',
+    "film": '<rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M8 5v14m8-14v14M4 9h4m8 0h4M4 15h4m8 0h4"></path>',
+    "folder": '<path d="M3 7h7l2 2h9v9H3z"></path><path d="M3 7V5h7l2 2"></path>',
+    "headphones": '<path d="M4 14v-2a8 8 0 0 1 16 0v2"></path><path d="M4 14h4v5H6a2 2 0 0 1-2-2zm16 0h-4v5h2a2 2 0 0 0 2-2z"></path>',
+    "heart": '<path d="M20.8 5.8a5.1 5.1 0 0 0-7.2 0L12 7.4l-1.6-1.6a5.1 5.1 0 1 0-7.2 7.2L12 21l8.8-8a5.1 5.1 0 0 0 0-7.2z"></path>',
+    "library": '<path d="M5 4h4v16H5zM10 4h4v16h-4zM15 5h4v15h-4z"></path><path d="M6.5 7h1m4 0h1m4 1h1"></path>',
+    "server": '<rect x="4" y="4" width="16" height="6" rx="1.5"></rect><rect x="4" y="14" width="16" height="6" rx="1.5"></rect><path d="M7 7h.01M10 7h6M7 17h.01M10 17h6"></path>',
+    "star": '<path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6-5.4-2.9-5.4 2.9 1-6-4.4-4.3 6.1-.9z"></path>',
+    "television": '<rect x="3" y="7" width="18" height="13" rx="2"></rect><path d="m8 3 4 4 4-4M8 15h8"></path>',
+}
+PROFILE_ICON_CHOICES = {"initials", "custom", *PROFILE_ICON_SVGS}
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
 AVATAR_EDGE = 256
@@ -142,14 +156,26 @@ def _validate_canvas_png(payload: bytes) -> str:
 
 
 def _svg_avatar(user) -> str:
-    symbol = _profile_symbol(user)
-    safe_symbol = html.escape(symbol)
+    icon = user.profile_icon if hasattr(user, "profile_icon") else user["profile_icon"]
+    vector = PROFILE_ICON_SVGS.get(icon)
+    if vector:
+        mark = (
+            '<svg x="52" y="52" width="152" height="152" viewBox="0 0 24 24" '
+            'fill="none" stroke="#0b1009" stroke-width="1.9" stroke-linecap="round" '
+            f'stroke-linejoin="round">{vector}</svg>'
+        )
+    else:
+        symbol = _profile_symbol(user)
+        safe_symbol = html.escape(symbol)
+        mark = (
+            f'<text x="128" y="139" text-anchor="middle" dominant-baseline="middle" '
+            'font-family="Inter,Segoe UI,sans-serif" font-size="112" font-weight="800" fill="#0b1009">'
+            f'{safe_symbol}</text>'
+        )
     return (
         '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">'
         '<rect width="256" height="256" rx="128" fill="#b9f542"/>'
-        f'<text x="128" y="139" text-anchor="middle" dominant-baseline="middle" '
-        'font-family="Inter,Segoe UI,sans-serif" font-size="112" font-weight="800" fill="#0b1009">'
-        f'{safe_symbol}</text></svg>'
+        f'{mark}</svg>'
     )
 
 
