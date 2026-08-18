@@ -7,7 +7,7 @@
     <p class="eyebrow">METADATA</p>
     <h1>Match {{ 'movie' if entity == 'movie' else 'on TVDB' }}</h1>
   </div>
-  <form class="search" method="get">{% if request.query_params.get('from') %}<input type="hidden" name="from" value="{{ request.query_params.get('from') }}">{% endif %}{% if request.query_params.get('library_return') %}<input type="hidden" name="library_return" value="{{ request.query_params.get('library_return') }}">{% endif %}<input name="q" value="{{ q }}" {% if entity != 'movie' %}placeholder="Title, TVDB ID, or TVDB link"{% endif %} required><button class="button primary">Search</button></form>
+  <form class="search" method="get" action="/titles/{{ title.id }}/tvdb">{% if request.query_params.get('from') %}<input type="hidden" name="from" value="{{ request.query_params.get('from') }}">{% endif %}{% if request.query_params.get('library_return') %}<input type="hidden" name="library_return" value="{{ request.query_params.get('library_return') }}">{% endif %}<input name="q" value="{{ q }}" {% if entity != 'movie' %}placeholder="Title, TVDB ID, or TVDB link"{% endif %} required><button class="button primary">Search</button></form>
 </div>
 {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
 <section class="results">
