@@ -1,0 +1,262 @@
+/* 0.8 title-detail interaction polish. Kept isolated while the alpha settles so
+   the denser detail layout and overlay workflow can be tuned without disturbing
+   general Library geometry. */
+
+body.has-app-sidebar .media-dossier.detail-kind-movie .detail-page-head {
+  gap: clamp(20px, 2.4vw, 36px);
+  margin-bottom: 10px;
+  padding: clamp(18px, 1.8vw, 26px);
+}
+
+body.has-app-sidebar .media-dossier.detail-kind-movie .detail-copy {
+  padding-top: 2px;
+}
+
+body.has-app-sidebar .media-dossier.detail-kind-movie .detail-copy h1 {
+  margin-bottom: 6px;
+}
+
+body.has-app-sidebar .media-dossier.detail-kind-movie .detail-date {
+  margin-bottom: 11px;
+}
+
+body.has-app-sidebar .media-dossier.detail-kind-movie .imdb-facts,
+body.has-app-sidebar .media-dossier.detail-kind-movie .genre-list {
+  margin-top: 8px;
+}
+
+body.has-app-sidebar .media-dossier.detail-kind-movie .detail-match-badge {
+  margin-top: 13px;
+}
+
+body.has-app-sidebar .media-dossier.detail-kind-movie .title-synopsis,
+body.has-app-sidebar .media-dossier.detail-kind-movie .movie-credits {
+  padding: 13px 15px;
+}
+
+body.has-app-sidebar .media-dossier.detail-kind-movie .title-hero-aside {
+  gap: 10px;
+}
+
+body.has-app-sidebar .media-dossier .detail-technical-rail {
+  margin-bottom: 10px;
+}
+
+body.has-app-sidebar .media-dossier .detail-technical-rail.media-live-facts dl > div,
+body.has-app-sidebar .media-dossier .detail-technical-rail.media-live-facts dl > div:last-child {
+  min-height: 54px;
+  padding-block: 8px;
+}
+
+body.has-app-sidebar .media-dossier.detail-kind-movie .dossier-on-disk {
+  padding: 0 12px 10px;
+}
+
+body.has-app-sidebar .media-dossier.detail-kind-movie .dossier-on-disk .panel-head {
+  margin-inline: -12px;
+  padding: 11px 18px;
+}
+
+body.has-app-sidebar .media-dossier.detail-kind-movie .file-list > article {
+  min-height: 0;
+  margin-top: 0;
+  padding: 9px 0;
+  align-items: center;
+}
+
+body.has-app-sidebar .media-dossier.detail-kind-movie .file-list > article > .grow {
+  align-self: center;
+}
+
+/* High-frequency title actions live in the otherwise empty center column. */
+.title-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.title-quick-actions form {
+  margin: 0;
+}
+
+.title-quick-actions .favorite-action,
+.title-quick-actions .title-quick-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid #33414f;
+  border-radius: 999px;
+  background: rgba(10, 15, 21, .48);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 750;
+  text-decoration: none;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.title-quick-actions .favorite-action span {
+  margin-right: 5px;
+}
+
+.title-quick-actions .favorite-action.active,
+.title-quick-actions .favorite-action:hover,
+.title-quick-actions .favorite-action:focus-visible,
+.title-quick-actions .title-quick-action:hover,
+.title-quick-actions .title-quick-action:focus-visible {
+  border-color: var(--lime);
+  background: rgba(185, 245, 66, .10);
+  color: var(--lime);
+}
+
+/* The poster itself becomes the artwork affordance. */
+.detail-poster-column {
+  position: relative;
+}
+
+.detail-cover-action {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: 999px;
+  background: rgba(7, 11, 15, .88);
+  color: #f5f7fa;
+  font-size: 10px;
+  font-weight: 800;
+  text-decoration: none;
+  opacity: 0;
+  transform: translateY(5px);
+  transition: opacity 150ms ease, transform 150ms ease, border-color 150ms ease, color 150ms ease;
+  backdrop-filter: blur(10px);
+}
+
+.detail-poster-column:hover .detail-cover-action,
+.detail-poster-column:focus-within .detail-cover-action,
+.detail-cover-action:focus-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.detail-cover-action:hover,
+.detail-cover-action:focus-visible {
+  border-color: var(--lime);
+  color: var(--lime);
+}
+
+/* Bring the Inspector's fact modules into the same component language as the full
+   detail page without making the drawer any wider. */
+.workspace-inspector-media-grid > div,
+.workspace-inspector-stat-grid > div {
+  border: 1px solid #273542;
+  border-radius: var(--im-radius-sm);
+  background: rgba(16, 22, 29, .72);
+}
+
+/* Lightweight title-page status message used by no-reload actions. */
+.title-action-toast {
+  position: fixed;
+  z-index: 180;
+  left: 50%;
+  bottom: 24px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 10px 14px;
+  border: 1px solid #3b4a58;
+  border-radius: var(--im-radius-sm);
+  background: rgba(15, 21, 28, .96);
+  color: var(--text);
+  box-shadow: 0 16px 45px rgba(0, 0, 0, .35);
+  font-size: 12px;
+  font-weight: 650;
+  opacity: 0;
+  transform: translate(-50%, 10px);
+  transition: opacity 150ms ease, transform 150ms ease;
+  pointer-events: none;
+}
+
+.title-action-toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.title-action-toast.good {
+  border-color: rgba(185, 245, 66, .42);
+}
+
+.title-action-toast.error {
+  border-color: rgba(255, 113, 108, .55);
+  color: #ffaaa6;
+}
+
+/* Generic title workflow overlay. It reuses the existing organize dialog shell,
+   but can host cover, collection, rename, and match pages without navigation. */
+.organize-dialog.title-workflow-dialog .organize-dialog-frame {
+  width: min(1120px, calc(100vw - 40px));
+  max-width: 1120px;
+  max-height: min(880px, calc(100vh - 48px));
+}
+
+.organize-dialog.title-workflow-dialog .organize-dialog-body {
+  max-height: calc(100vh - 82px);
+  overflow: auto;
+  padding: 24px;
+}
+
+.organize-dialog.title-workflow-dialog .organize-dialog-body > .page-head:first-child,
+.organize-dialog.title-workflow-dialog .organize-dialog-body > .rename-card:first-child {
+  margin-top: 0;
+}
+
+.organize-dialog.title-workflow-dialog .back,
+.organize-dialog.title-workflow-dialog footer,
+.organize-dialog.title-workflow-dialog .topbar,
+.organize-dialog.title-workflow-dialog .site-menu {
+  display: none !important;
+}
+
+.organize-dialog.title-workflow-dialog .cover-picker {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+.organize-dialog.title-workflow-dialog .rename-card {
+  margin: 0 auto;
+}
+
+@media (max-width: 760px) {
+  body.has-app-sidebar .media-dossier.detail-kind-movie .detail-page-head {
+    padding: 16px;
+  }
+
+  .title-quick-actions {
+    margin-top: 14px;
+  }
+
+  .detail-cover-action {
+    opacity: 1;
+    transform: none;
+  }
+
+  .organize-dialog.title-workflow-dialog .organize-dialog-frame {
+    width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+  }
+
+  .organize-dialog.title-workflow-dialog .organize-dialog-body {
+    max-height: calc(100vh - 52px);
+    padding: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .detail-cover-action,
+  .title-action-toast {
+    transition: none;
+  }
+}
