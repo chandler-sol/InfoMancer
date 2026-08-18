@@ -1,0 +1,322 @@
+/* 0.8 Settings workspace polish.
+   Keep the dense, squared InfoMancer language while making card edges, spacing,
+   and section hierarchy line up predictably across every Settings destination. */
+
+body.settings-workspace-polished .app-settings-heading {
+  max-width: 1120px;
+  margin: 0 0 14px;
+}
+
+body.settings-workspace-polished .app-settings-heading h1 {
+  margin: 4px 0 5px;
+}
+
+body.settings-workspace-polished .app-settings-heading > p:last-child {
+  max-width: 820px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+body.settings-workspace-polished .settings-section-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 16px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #0d1319;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+body.settings-workspace-polished .settings-section-nav a {
+  flex: 0 0 auto;
+  padding: 8px 11px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  line-height: 1.15;
+  text-decoration: none;
+  transition: background-color .14s ease, border-color .14s ease, color .14s ease;
+}
+
+body.settings-workspace-polished .settings-section-nav a:hover {
+  border-color: #2e3b47;
+  background: #121a22;
+  color: var(--text);
+}
+
+body.settings-workspace-polished .settings-section-nav a.active {
+  border-color: #4a672d;
+  background: #162014;
+  color: var(--lime);
+  box-shadow: inset 0 0 0 1px rgba(185,245,66,.04);
+}
+
+body.settings-workspace-polished .settings-page-grid {
+  gap: 16px;
+  align-items: stretch;
+}
+
+body.settings-workspace-polished .settings-card,
+body.settings-workspace-polished .scheduled-task-card,
+body.settings-workspace-polished .source-add-panel,
+body.settings-workspace-polished .settings-handoff {
+  min-width: 0;
+  box-sizing: border-box;
+  border-color: #2d3945;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.015), transparent 42%),
+    #121921;
+  box-shadow: none;
+}
+
+body.settings-workspace-polished .settings-page-grid > .settings-card:not(.full-width) {
+  height: 100%;
+}
+
+body.settings-workspace-polished .settings-card {
+  gap: 14px;
+}
+
+body.settings-workspace-polished .settings-card > :first-child,
+body.settings-workspace-polished .settings-card-head > div {
+  min-width: 0;
+}
+
+body.settings-workspace-polished .settings-card h2,
+body.settings-workspace-polished .scheduled-task-card h2 {
+  margin: 3px 0 4px;
+  line-height: 1.12;
+}
+
+body.settings-workspace-polished .settings-card .muted,
+body.settings-workspace-polished .scheduled-task-card .muted {
+  line-height: 1.48;
+}
+
+body.settings-workspace-polished .settings-card > .actions:last-child,
+body.settings-workspace-polished .settings-card > form:last-child:not(.settings-import-form):not(.settings-restore-upload),
+body.settings-workspace-polished .scheduled-task-card > .actions:last-child {
+  margin-top: auto;
+}
+
+body.settings-workspace-polished .settings-card-head {
+  min-height: 42px;
+}
+
+body.settings-workspace-polished .settings-state {
+  align-self: flex-start;
+}
+
+body.settings-workspace-polished .settings-field-stack {
+  display: grid;
+  gap: 14px;
+  margin-top: 2px;
+}
+
+body.settings-workspace-polished .settings-field-stack > label,
+body.settings-workspace-polished .settings-form > label {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  margin: 0;
+}
+
+body.settings-workspace-polished .settings-field-stack small,
+body.settings-workspace-polished .settings-form label small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+body.settings-workspace-polished .settings-field-stack input:not([type="range"]),
+body.settings-workspace-polished .settings-field-stack select,
+body.settings-workspace-polished .settings-form input:not([type="range"]),
+body.settings-workspace-polished .settings-form select,
+body.settings-workspace-polished .settings-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+body.settings-workspace-polished .setup-assistant-settings {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  align-items: center;
+  gap: 20px;
+  min-height: 0;
+}
+
+body.settings-workspace-polished .setup-assistant-settings .button {
+  align-self: center;
+}
+
+/* General is deliberately two balanced cards: two choices on the left and two on
+   the right. JS only rearranges existing controls; the non-JS form remains valid. */
+body.settings-section-general .settings-general-card {
+  min-height: 286px;
+}
+
+body.settings-section-general .settings-general-card .settings-field-stack {
+  grid-template-rows: repeat(2, minmax(74px, auto));
+}
+
+body.settings-workspace-polished .settings-metrics,
+body.settings-workspace-polished .scheduled-task-summary {
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+body.settings-workspace-polished .settings-metrics > div,
+body.settings-workspace-polished .scheduled-task-summary > div {
+  min-width: 0;
+  background: #0e151c;
+}
+
+body.settings-workspace-polished .settings-save-bar {
+  bottom: 12px;
+  min-height: 54px;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border-color: #4d682b;
+  background: rgba(16,28,17,.97);
+}
+
+body.settings-workspace-polished .settings-preview {
+  border-radius: 7px;
+}
+
+/* System is intentionally a vertical operations page, so only its compact overview
+   cards stretch together. Functional sections size themselves to their content. */
+body.settings-section-system .settings-page-grid {
+  align-items: start;
+}
+
+body.settings-section-system .settings-page-grid > .settings-card {
+  height: auto;
+}
+
+body.settings-section-system .system-overview-grid {
+  gap: 16px;
+}
+
+body.settings-section-system .system-overview-grid > .settings-card {
+  height: 100%;
+}
+
+body.settings-section-system .settings-jump-nav {
+  margin: -2px 0 0;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0d1319;
+}
+
+body.settings-section-system .settings-jump-nav a {
+  border-color: transparent;
+  border-radius: 5px;
+}
+
+/* Scheduled Tasks reads more cleanly as one full-width complex scheduler followed by
+   two equal secondary cards, rather than a tall left card beside two uneven blocks. */
+body.settings-section-scheduled-tasks .scheduled-task-layout {
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+
+body.settings-section-scheduled-tasks .scheduled-fingerprint-card {
+  grid-column: 1 / -1;
+  grid-row: auto;
+}
+
+body.settings-section-scheduled-tasks .scheduled-task-card:not(.scheduled-fingerprint-card) {
+  height: 100%;
+}
+
+body.settings-section-scheduled-tasks .scheduled-task-future {
+  display: grid;
+  align-content: space-between;
+}
+
+/* Sources is part of Settings. Keep its panels on the same visual grid without
+   forcing the shorter Add Source panel to grow to the height of a long root list. */
+body.settings-section-sources .split {
+  gap: 16px;
+  align-items: flex-start;
+}
+
+body.settings-section-sources .sources-page-head {
+  margin-bottom: 16px;
+}
+
+body.settings-section-sources .root-row {
+  border-color: #2c3844;
+}
+
+body.settings-section-sources .settings-handoff {
+  margin-top: 16px;
+}
+
+/* A subtle alignment guide for wide settings layouts. All two-column cards get the
+   same width and grid start/end even when their content density differs. */
+@media (min-width: 901px) {
+  body.settings-workspace-polished .settings-page-grid {
+    grid-template-columns: repeat(2, minmax(0,1fr));
+  }
+
+  body.settings-section-general .settings-page-grid > .settings-general-card {
+    width: 100%;
+  }
+}
+
+@media (max-width: 1050px) {
+  body.settings-section-scheduled-tasks .scheduled-task-layout {
+    grid-template-columns: 1fr;
+  }
+
+  body.settings-section-scheduled-tasks .scheduled-fingerprint-card {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  body.settings-workspace-polished .app-settings-heading {
+    margin-bottom: 12px;
+  }
+
+  body.settings-workspace-polished .settings-section-nav {
+    margin-left: 0;
+    margin-right: 0;
+    padding: 4px;
+  }
+
+  body.settings-workspace-polished .settings-section-nav a {
+    padding: 8px 10px;
+  }
+
+  body.settings-workspace-polished .setup-assistant-settings {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  body.settings-workspace-polished .setup-assistant-settings .button {
+    width: 100%;
+  }
+
+  body.settings-section-general .settings-general-card {
+    min-height: 0;
+  }
+
+  body.settings-section-general .settings-general-card .settings-field-stack {
+    grid-template-rows: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.settings-workspace-polished .settings-section-nav a {
+    transition: none;
+  }
+}
