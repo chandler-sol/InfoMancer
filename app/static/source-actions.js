@@ -120,12 +120,15 @@
       }
 
       try {
+        const csrfToken = form.querySelector('input[name="csrf_token"]')?.value || "";
+        const headers = {"X-Requested-With": "InfoMancerAsync"};
+        if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
         const response = await fetch(form.action, {
           method: "POST",
           body: new FormData(form),
           credentials: "same-origin",
           redirect: "follow",
-          headers: {"X-Requested-With": "InfoMancerAsync"},
+          headers,
         });
         if (!response.ok) {
           throw new Error(`InfoMancer returned HTTP ${response.status}.`);
