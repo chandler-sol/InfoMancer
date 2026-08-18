@@ -1,3 +1,11 @@
+/* Keep the two compact header affordances visually distinct: announcements use
+   their original megaphone, while the background task/notification center uses a
+   bell that remains readable at mobile header sizes. */
+.announcement-button>svg{display:block}
+.announcement-button::before{content:none!important;display:none!important}
+.topbar .task-widget-toggle{position:relative}
+.topbar .task-widget-toggle::before{content:"";display:block;flex:0 0 auto;width:19px;height:19px;background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6v-5a7 7 0 0 0-6-6.92V3a1 1 0 0 0-2 0v1.08A7 7 0 0 0 5 11v5l-2 2v1h18v-1l-2-2Z'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6v-5a7 7 0 0 0-6-6.92V3a1 1 0 0 0-2 0v1.08A7 7 0 0 0 5 11v5l-2 2v1h18v-1l-2-2Z'/%3E%3C/svg%3E") center/contain no-repeat}
+.topbar .task-widget .task-dot{position:absolute;z-index:1;top:6px;left:24px;width:6px;height:6px;border:1.5px solid #151d25}
 .topbar .task-widget.has-failure .task-widget-toggle{border-color:rgba(255,113,108,.72);color:#ff716c;box-shadow:0 0 0 3px rgba(255,113,108,.08)}
 .topbar .task-widget.has-failure .task-dot{background:#ff716c;box-shadow:0 0 0 3px rgba(255,113,108,.14);animation:none}
 .topbar .task-widget.has-attention:not(.has-failure) .task-dot{background:var(--lime);animation:none}
@@ -25,4 +33,5 @@
 .task-widget-footer{display:flex;justify-content:flex-end;padding-top:11px;border-top:1px solid var(--line)}
 .task-scheduled-link{display:inline-flex;align-items:center;justify-content:center;min-height:28px;padding:5px 9px;border:1px solid #334351;border-radius:6px;background:#10171e;color:#aab6c1;font-size:10px;font-weight:750;line-height:1;text-decoration:none}
 .task-scheduled-link:hover,.task-scheduled-link:focus-visible{border-color:#4a632b;color:var(--lime);background:#131c22}
+@media(max-width:760px){.topbar .task-widget-toggle::before{width:20px;height:20px}.topbar .task-widget .task-dot{top:7px;right:7px;left:auto;width:7px;height:7px}}
 @media(prefers-reduced-motion:reduce){.task-track.determinate i{transition:none}.task-track.indeterminate i{animation:none;width:100%}}
