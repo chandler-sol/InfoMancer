@@ -25,6 +25,8 @@ class SourceAsyncActionContracts(unittest.TestCase):
         self.assertIn('await fetch(form.action', script)
         self.assertIn('body: new FormData(form)', script)
         self.assertIn('redirect: "follow"', script)
+        self.assertIn('input[name="csrf_token"]', script)
+        self.assertIn('headers["X-CSRF-Token"] = csrfToken', script)
         self.assertIn('new DOMParser().parseFromString(html, "text/html")', script)
         self.assertIn('refreshConnectionState(freshDocument, form)', script)
         self.assertIn('optimisticTaskWidget(kind, label)', script)
