@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass
 from threading import RLock
+import time
 
 from fastapi import Request
 from fastapi.responses import HTMLResponse, Response
@@ -34,6 +35,8 @@ def _library_signature(db, user_id: int) -> tuple:
     The normal Library query computes file and missing-episode aggregates and then
     renders both List and Cover DOM. This signature intentionally does much less
     work, so an unchanged landing page can reuse its already-rendered HTML safely.
+    Activity/announcement state is included because the shared application chrome is
+    part of the cached document. A minute bucket bounds time-based announcement drift.
     """
     with db.connect() as conn:
         row = conn.execute(
@@ -48,10 +51,14 @@ def _library_signature(db, user_id: int) -> tuple:
                  (SELECT COALESCE(GROUP_CONCAT(id || ':' || name || ':' || color, '|'),'') FROM user_tags WHERE user_id=?) tags,
                  (SELECT COUNT(*) FROM title_tags tt JOIN user_tags ut ON ut.id=tt.tag_id WHERE ut.user_id=?) tag_links,
                  (SELECT COALESCE(MAX(updated_at),'') FROM app_settings) settings_updated,
-                 (SELECT COALESCE(updated_at,'') FROM users WHERE id=?) user_updated""",
-            (user_id, user_id, user_id, user_id, user_id),
+                 (SELECT COALESCE(updated_at,'') FROM users WHERE id=?) user_updated,
+                 (SELECT COALESCE(MAX(id),0) FROM event_logs) event_max,
+                 (SELECT COUNT(*) FROM user_event_reads WHERE user_id=?) event_reads,
+                 (SELECT COALESCE(MAX(updated_at),'') FROM announcements) announcement_updated,
+                 (SELECT COUNT(*) FROM announcement_receipts WHERE user_id=?) announcement_receipts""",
+            (user_id, user_id, user_id, user_id, user_id, user_id, user_id),
         ).fetchone()
-    return tuple(row)
+    return (*tuple(row), int(time.time() // 60))
 
 
 def _cacheable_landing(
