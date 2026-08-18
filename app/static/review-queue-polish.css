@@ -1,0 +1,55 @@
+/* 0.8 review queue density pass.
+   Keep the queue scannable. Full explanation and recommendations live in the drawer. */
+
+.review-workspace .review-results-head {
+  justify-content: flex-start;
+  margin-top: 16px;
+}
+.review-workspace .review-results-head > span {
+  display: none;
+}
+
+.review-workspace .review-queue-item {
+  grid-template-columns: minmax(0, 1fr) 42px;
+}
+.review-workspace .review-item-open {
+  grid-template-columns: 4px minmax(0, 1fr);
+  gap: 14px;
+  min-height: 76px;
+  padding: 12px 8px 12px 0;
+}
+.review-workspace .review-item-copy {
+  gap: 5px;
+  padding-right: 10px;
+}
+.review-workspace .review-item-copy > strong {
+  font-size: 14px;
+  line-height: 1.35;
+}
+.review-workspace .review-item-copy > span:last-child {
+  font-size: 11px;
+}
+
+/* The source is still available in the inspection drawer. In the queue, severity
+   plus bucket is enough context and avoids repeating MEDIA INTELLIGENCE on every row. */
+.review-workspace .review-queue-item .review-item-labels i:last-child {
+  display: none;
+}
+
+/* Recommendations belong with the evidence. Hiding them here turns each row into
+   a concise finding summary instead of a miniature report. */
+.review-workspace .review-queue-item .review-item-recommendation {
+  display: none;
+}
+
+.review-workspace .review-queue-item > .workspace-context-menu {
+  align-self: center;
+}
+
+@media (max-width: 760px) {
+  .review-workspace .review-item-open {
+    grid-template-columns: 4px minmax(0, 1fr);
+    gap: 10px;
+    min-height: 72px;
+  }
+}
