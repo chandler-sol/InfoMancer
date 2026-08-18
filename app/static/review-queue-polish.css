@@ -42,34 +42,11 @@
   display: none;
 }
 
-/* Review originally used the generic borderless workspace context trigger, while
-   the rest of InfoMancer's item menus use the 42px bordered action-menu control.
-   Match that established treatment here and give it a real right inset. */
+/* Geometry belongs to the queue; visual treatment belongs to action-menu.css. */
 .review-workspace .review-queue-item > .workspace-context-menu {
   align-self: center;
   justify-self: end;
   margin-right: 10px;
-}
-.review-workspace .review-queue-item .workspace-context-toggle {
-  display: grid;
-  place-items: center;
-  width: 42px;
-  height: 42px;
-  padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  background: #0c1117;
-  color: var(--text);
-  font-size: 19px;
-  font-weight: 800;
-  line-height: 1;
-}
-.review-workspace .review-queue-item .workspace-context-toggle:hover,
-.review-workspace .review-queue-item .workspace-context-toggle:focus-visible,
-.review-workspace .review-queue-item .workspace-context-menu.open .workspace-context-toggle {
-  border-color: var(--lime);
-  background: #111820;
-  color: var(--lime);
 }
 
 @media (max-width: 760px) {
