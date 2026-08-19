@@ -7,7 +7,7 @@
 <div class="page-head sources-page-head"><div><p class="eyebrow">CONFIGURATION</p><h1>Sources</h1><p class="muted">Manage the folders InfoMancer is allowed to catalog.</p></div></div>
 {% if setup_assistant_active %}<section class="setup-handoff-banner"><div><p class="eyebrow">GUIDED SETUP · SOURCE STEP</p><strong>Add every Movie and TV Shows folder you want InfoMancer to catalog.</strong><span>You can return to the assistant after adding one or several sources.</span></div><a class="button primary" href="/getting-started/sources">Continue guided setup</a></section>{% endif %}
 <div class="split">
-  <section class="panel grow"><div class="panel-head"><div><p class="eyebrow">CONFIGURED</p><h2>Library roots</h2></div><div class="actions sources-global-actions"><a class="button intake-button" href="/intake">Ready to match</a><form method="post" action="/scan-all"><button class="button primary">Scan all sources</button></form></div></div>
+  <section class="panel grow"><div class="panel-head"><div><p class="eyebrow">CONFIGURED</p><h2>Library roots</h2></div><div class="actions sources-global-actions"><form method="post" action="/scan-all"><button class="button primary">Scan all sources</button></form></div></div>
     {% if roots %}<div class="root-list">{% for root in roots %}
       <article class="root-row">
         <span class="kind {{ root.kind }}">{{ root.kind }}</span>
@@ -38,12 +38,13 @@
       <span><b class="kind movie">Movie</b> Movie files, title folders, and A–Z or number buckets</span>
       <span><b class="kind tv">TV</b> Series folders, seasons, and episode files</span>
     </div>
-    <details class="manual-source"><summary>Advanced: enter a path manually</summary>
+    <div class="manual-source">
+      <div class="manual-source-head"><small>ADVANCED</small><strong>Enter a path manually</strong></div>
       <form method="post" action="/roots" class="stack"><label>Path<input name="path" required placeholder="/media/tv or D:\Movies"></label>
         <label>Type<select name="kind"><option value="movie">Movies</option><option value="tv">TV shows</option></select></label>
         <label>Label <span class="muted">optional</span><input name="label" placeholder="Main TV Library"></label>
         <button class="button">Add library root</button></form>
-    </details>
+    </div>
   </section>
 </div>
 <dialog class="source-browser" id="source-browser" aria-labelledby="source-browser-title">
