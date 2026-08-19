@@ -19,6 +19,11 @@ class HttpPerformanceTests(unittest.TestCase):
             "public, max-age=31536000, immutable",
         )
 
+    def test_templates_have_a_real_static_cache_version(self):
+        version = main.templates.env.globals.get("static_version", "")
+        self.assertTrue(version)
+        self.assertNotEqual(version, main.APP_VERSION)
+
     def test_unversioned_static_assets_keep_normal_validation_policy(self):
         client = TestClient(main.app)
         response = client.get("/static/infomancer-icon.svg")
@@ -56,6 +61,8 @@ class HttpPerformanceTests(unittest.TestCase):
         self.assertNotIn("settings-polish.js", workspace)
         self.assertNotIn("settings-workspace-polished", polish)
         self.assertNotIn("settings-section-general", polish)
+        self.assertIn("Cache-proof Settings shell overrides", settings)
+        self.assertIn("body .app-settings-heading", settings)
 
     def test_library_surface_switch_parses_only_requested_fragment(self):
         source = (Path(__file__).resolve().parents[1] / "app/static/library-surface-lazy.js").read_text(
