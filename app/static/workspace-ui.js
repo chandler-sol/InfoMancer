@@ -89,6 +89,10 @@
     librarySelectionStyles.rel = 'stylesheet';
     librarySelectionStyles.href = `/static/library-selection-polish.css${version}`;
 
+    const librarySelectionToolbarStyles = document.createElement('link');
+    librarySelectionToolbarStyles.rel = 'stylesheet';
+    librarySelectionToolbarStyles.href = `/static/library-selection-toolbar.css${version}`;
+
     const librarySurface = document.createElement('script');
     librarySurface.src = `/static/library-surface-lazy.js${version}`;
     librarySurface.async = false;
@@ -97,7 +101,18 @@
     librarySelection.src = `/static/library-selection-polish.js${version}`;
     librarySelection.async = false;
 
-    document.head.append(libraryStyles, librarySelectionStyles, librarySurface, librarySelection);
+    const librarySelectionToolbar = document.createElement('script');
+    librarySelectionToolbar.src = `/static/library-selection-toolbar.js${version}`;
+    librarySelectionToolbar.async = false;
+
+    document.head.append(
+      libraryStyles,
+      librarySelectionStyles,
+      librarySelectionToolbarStyles,
+      librarySurface,
+      librarySelection,
+      librarySelectionToolbar,
+    );
   }
 
   if (document.querySelector('.media-dossier')) {
