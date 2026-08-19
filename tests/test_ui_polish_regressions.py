@@ -82,6 +82,14 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn("sidebarSymbols[selectedIcon] || initialFor()", source)
         self.assertIn('accountAvatar.dataset.profileAvatarKind = "image"', source)
 
+    def test_account_rail_uses_canonical_avatar_endpoint_as_real_image(self):
+        source = (STATIC / "workspace-ui.js").read_text(encoding="utf-8")
+        self.assertIn('document.querySelector(".account-avatar")', source)
+        self.assertIn('avatarImage.src = `/account/avatar/current?v=${Date.now()}`', source)
+        self.assertIn("accountAvatar.replaceChildren(avatarImage)", source)
+        self.assertIn('accountAvatar.dataset.profileAvatarPreview === "1"', source)
+        self.assertIn('avatarImage.style.objectFit = "cover"', source)
+
     def test_review_overflow_button_uses_canonical_centered_menu_control(self):
         action_menu = (STATIC / "action-menu.css").read_text(encoding="utf-8")
         review = (TEMPLATES / "review.html").read_text(encoding="utf-8")
