@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app import main
+from app.http_performance import LibrarySurfacePartialMiddleware
 
 
 class HttpPerformanceTests(unittest.TestCase):
@@ -42,6 +43,34 @@ class HttpPerformanceTests(unittest.TestCase):
         self.assertNotIn("new DOMParser().parseFromString(await response.text(), 'text/html')", source)
         self.assertIn("pointerenter", source)
         self.assertIn("announce: false", source)
+
+    def test_library_partial_middleware_extracts_only_requested_surface(self):
+        body = (
+            b"<html><main>before"
+            b'<section class="cover-library" id="cover-library"><article>A</article></section>'
+            b'<section class="panel table-wrap library-table"><table><tbody><tr><td>B</td></tr></tbody></table></section>'
+            b"after</main></html>"
+        )
+        covers = LibrarySurfacePartialMiddleware._extract(body, "covers")
+        listing = LibrarySurfacePartialMiddleware._extract(body, "list")
+        self.assertEqual(
+            covers,
+            b'<section class="cover-library" id="cover-library"><article>A</article></section>',
+        )
+        self.assertEqual(
+            listing,
+            b'<section class="panel table-wrap library-table"><table><tbody><tr><td>B</td></tr></tbody></table></section>',
+        )
+        self.assertNotIn(b"<html>", covers)
+        self.assertNotIn(b"before", listing)
+
+    def test_task_failure_checks_back_off_when_idle_or_hidden(self):
+        source = (Path(__file__).resolve().parents[1] / "app/static/task-widget.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("window.setTimeout(pollFailures, 30000)", source)
+        self.assertIn("window.setTimeout(pollFailures, 60000)", source)
+        self.assertIn("if (failureRequest) return failureRequest", source)
 
 
 if __name__ == "__main__":
