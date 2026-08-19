@@ -2,7 +2,15 @@
    Cyan means the title currently being inspected. Lime means selected for work. */
 
 /* The Inspector is a true overlay on Library. Opening it must never resize or
-   recenter the cover grid underneath it. */
+   recenter the cover grid underneath it. Its surface is deliberately opaque: the
+   earlier near-transparent background let poster/text shapes show through large
+   empty summary areas and also forced an unnecessary compositing blur. */
+.workspace-inspector {
+  background: #0d1218;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 @media (min-width: 1180px) {
   body.has-app-sidebar.workspace-inspector-open main.shell:has(> .catalog-tabs) {
     max-width: 1700px !important;
@@ -95,8 +103,9 @@ body:not(.library-multi-selection) .library-title-row.workspace-selected:has(.li
   gap: 10px;
   padding: 10px 12px;
   border-bottom: 1px solid #33404d;
-  background: rgba(13, 18, 24, .97);
-  backdrop-filter: blur(12px);
+  background: #0d1218;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 .library-inspector-selection-bar[hidden] {
   display: none;
