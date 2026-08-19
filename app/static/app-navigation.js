@@ -11,6 +11,15 @@
     pendingDelayTimer = 0;
     pendingTimer = 0;
     root.classList.remove("app-navigation-pending");
+    delete root.dataset.navigationTarget;
+  };
+
+  const announceNavigation = (url = null) => {
+    const href = url ? String(url) : "";
+    if (href) root.dataset.navigationTarget = href;
+    document.dispatchEvent(new CustomEvent("infomancer:before-navigate", {
+      detail: {url: href},
+    }));
   };
 
   const showPendingSoon = () => {
@@ -21,6 +30,11 @@
       root.classList.add("app-navigation-pending");
       pendingTimer = window.setTimeout(clearPending, 5000);
     }, 120);
+  };
+
+  const beginNavigation = (url = null) => {
+    announceNavigation(url);
+    showPendingSoon();
   };
 
   const savedLibraryView = (() => {
@@ -44,6 +58,7 @@
     if (window.location.pathname === "/library") return false;
     if (document.visibilityState !== "visible") return false;
     if (navigator.connection?.saveData) return false;
+    if (["slow-2g", "2g"].includes(navigator.connection?.effectiveType)) return false;
     return Date.now() - lastLibraryWarm > 2500;
   };
 
@@ -100,12 +115,28 @@
     if (url.origin !== window.location.origin || !["http:", "https:"].includes(url.protocol)) return;
     if (sameDocumentHashOnly(url)) return;
 
-    showPendingSoon();
+    beginNavigation(url.pathname + url.search + url.hash);
+  });
+
+  /* Full-page form navigations should clear transient UI and receive the same
+     delayed progress treatment as links. AJAX/dialog handlers register earlier and
+     preventDefault before this listener runs, so they remain entirely in-place. */
+  document.addEventListener("submit", (event) => {
+    if (event.defaultPrevented) return;
+    const form = event.target.closest("form");
+    if (!form || form.target && form.target !== "_self") return;
+    if (form.matches("[data-workspace-ajax], [data-dialog-form]") || form.closest("dialog[open]")) return;
+    const action = new URL(form.action || window.location.href, window.location.href);
+    if (action.origin !== window.location.origin) return;
+    beginNavigation(action.pathname + action.search + action.hash);
   });
 
   if (document.readyState === "complete") scheduleIdleLibraryWarm();
   else window.addEventListener("load", scheduleIdleLibraryWarm, {once: true});
 
   window.addEventListener("pageshow", clearPending);
-  window.addEventListener("pagehide", clearPending);
+  window.addEventListener("pagehide", () => {
+    announceNavigation();
+    clearPending();
+  });
 })();
