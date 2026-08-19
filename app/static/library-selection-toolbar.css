@@ -32,6 +32,7 @@ body:not(.library-multi-selection) .library-display-toolbar.library-selection-to
   margin: 0;
   padding: 5px 8px;
   justify-content: center;
+  align-items: center;
   flex-wrap: nowrap;
   gap: 8px;
   white-space: nowrap;
@@ -39,9 +40,65 @@ body:not(.library-multi-selection) .library-display-toolbar.library-selection-to
   box-shadow: none;
 }
 
-.library-display-toolbar.library-selection-toolbar-ready .library-selection-actions .button {
+.library-display-toolbar.library-selection-toolbar-ready .library-selection-actions .button,
+.library-display-toolbar.library-selection-toolbar-ready .library-bulk-match-summary {
   min-height: 36px;
   padding-inline: 12px;
+}
+
+.library-bulk-separator {
+  width: 1px;
+  height: 24px;
+  flex: 0 0 1px;
+  margin-inline: 2px;
+  background: var(--line);
+}
+
+.library-bulk-match-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.library-bulk-match-menu > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.library-bulk-match-menu > summary::-webkit-details-marker { display: none; }
+.library-bulk-match-menu > summary::after {
+  content: "⌄";
+  margin-left: 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.library-bulk-match-menu[open] > summary,
+.library-bulk-match-menu > summary:hover {
+  border-color: var(--lime);
+  color: var(--lime);
+}
+
+.library-bulk-match-options {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  min-width: 170px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #10171f;
+  box-shadow: 0 16px 36px rgba(0,0,0,.38);
+}
+.library-bulk-match-options .button {
+  width: 100%;
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+}
+.library-bulk-match-options .button:hover {
+  border-color: rgba(174,255,48,.28);
+  background: rgba(174,255,48,.07);
 }
 
 .library-display-toolbar.library-selection-toolbar-ready.has-selection-actions {
@@ -69,7 +126,8 @@ body:not(.library-multi-selection) .library-display-toolbar.library-selection-to
   .library-display-toolbar.library-selection-toolbar-ready .library-selection-actions {
     max-width: 100%;
   }
-  .library-display-toolbar.library-selection-toolbar-ready .library-selection-actions .button {
+  .library-display-toolbar.library-selection-toolbar-ready .library-selection-actions .button,
+  .library-display-toolbar.library-selection-toolbar-ready .library-bulk-match-summary {
     padding-inline: 9px;
     font-size: 12px;
   }
