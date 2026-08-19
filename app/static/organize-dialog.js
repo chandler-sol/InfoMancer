@@ -4,9 +4,17 @@
   if (!dialog || !body || typeof dialog.showModal !== "function") return;
 
   let opener = null;
-  const dialogPath = /^(?:\/titles\/(?:\d+\/(?:organize|libraries)|sort-titles)|\/files\/\d+\/edition-version(?:\/preview)?)$/;
+  const dialogPath = /^(?:\/titles\/(?:\d+\/(?:organize|libraries)|sort-titles|organize-bulk)|\/files\/\d+\/edition-version(?:\/preview)?)$/;
   let draggedSortRow = null;
   const sortRowAnimations = new WeakMap();
+
+  const csrfToken = () => document.querySelector('input[name="csrf_token"]')?.value || "";
+  const requestHeaders = (extra = {}) => {
+    const headers = new Headers(extra);
+    const token = csrfToken();
+    if (token) headers.set("X-CSRF-Token", token);
+    return headers;
+  };
 
   const sortRows = () => [...body.querySelectorAll("[data-sort-title-order] li")];
   const captureSortRowPositions = () => new Map(
@@ -51,6 +59,8 @@
     const content = parsed.querySelector("[data-organize-content]");
     if (!content) return false;
     body.replaceChildren(document.importNode(content, true));
+    body.scrollTop = 0;
+    body.scrollLeft = 0;
     const heading = body.querySelector("h1");
     if (heading) heading.id = "organize-dialog-title";
     body.querySelector(".back")?.remove();
@@ -65,14 +75,25 @@
     return true;
   };
 
-  const openDialog = async (url, trigger) => {
+  const openDialog = async (url, trigger, options = {}) => {
     opener = trigger;
     dialog.classList.remove("title-workflow-dialog");
     dialog.classList.add("loading");
     if (!dialog.open) dialog.showModal();
     try {
-      const response = await fetch(url, {headers: {"X-Requested-With": "InfoMancerDialog"}});
-      if (!response.ok || !(await renderResponse(response))) window.location.assign(url);
+      const parsedUrl = new URL(url, window.location.href);
+      if (parsedUrl.origin !== window.location.origin || !dialogPath.test(parsedUrl.pathname)) {
+        throw new Error("Unsupported dialog destination");
+      }
+      const method = String(options.method || "GET").toUpperCase();
+      const response = await fetch(parsedUrl.href, {
+        method,
+        body: method === "GET" ? undefined : options.body,
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: requestHeaders({"X-Requested-With": "InfoMancerDialog"}),
+      });
+      if (!response.ok || !(await renderResponse(response))) window.location.assign(parsedUrl.href);
     } catch (_) {
       window.location.assign(url);
     }
@@ -123,8 +144,13 @@
   });
 
   document.addEventListener("infomancer:open-dialog", (event) => {
-    if (event.detail?.url) openDialog(event.detail.url, event.detail.trigger || null);
+    if (!event.detail?.url) return;
+    openDialog(event.detail.url, event.detail.trigger || null, {
+      method: event.detail.method || "GET",
+      body: event.detail.body,
+    });
   });
+
   body.addEventListener("dragstart", (event) => {
     if (!event.target.matches(".sort-title-drag")) return;
     draggedSortRow = event.target.closest("[data-sort-title-order] li");
@@ -174,8 +200,9 @@
     try {
       const response = await fetch(form.action, {
         method: "POST",
+        credentials: "same-origin",
         body: new FormData(form),
-        headers: {"X-Requested-With": "InfoMancerDialog"},
+        headers: requestHeaders({"X-Requested-With": "InfoMancerDialog"}),
       });
       const destination = new URL(response.url, window.location.href);
       if (dialogPath.test(destination.pathname)) {
@@ -183,6 +210,13 @@
         return;
       }
       const message = destination.searchParams.get("message") || "Organization saved.";
+      if (form.matches("[data-organize-bulk]")) {
+        closeDialog();
+        document.dispatchEvent(new CustomEvent("infomancer:library-bulk-organized", {
+          detail: {message},
+        }));
+        return;
+      }
       const current = new URL(window.location.href);
       current.searchParams.set("message", message);
       window.location.assign(current.href);
