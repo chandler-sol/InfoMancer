@@ -77,7 +77,7 @@ def build_router(ctx: RouteContext):
     def media_snapshot(title_id: int) -> dict:
         with db.connect() as conn:
             title = conn.execute(
-                """SELECT t.id,t.kind,t.metadata_status,r.label source_label
+                """SELECT t.id,t.kind,t.root_id,t.metadata_status,r.label source_label
                    FROM titles t JOIN roots r ON r.id=t.root_id WHERE t.id=?""",
                 (title_id,),
             ).fetchone()
@@ -209,6 +209,7 @@ def build_router(ctx: RouteContext):
         return {
             "title_id": title_id,
             "kind": str(title["kind"]),
+            "source_href": f"/library?root={int(title['root_id'])}",
             "facts": facts,
             "files": file_views,
             "inspected_count": inspected_count,
