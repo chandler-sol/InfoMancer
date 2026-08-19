@@ -1,6 +1,10 @@
 /* Keep bulk work on the same horizontal control plane as Jump to and the
    List/Covers controls. A single selection uses the Inspector only; this command
    surface appears once two or more titles are selected. */
+body:not(.library-multi-selection) .library-display-toolbar.library-selection-toolbar-ready .library-selection-actions {
+  display: none !important;
+}
+
 .library-display-toolbar.has-letter-jump.library-selection-toolbar-ready {
   display: grid;
   grid-template-columns: minmax(120px, auto) minmax(0, 1fr) minmax(260px, auto);
