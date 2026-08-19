@@ -57,31 +57,61 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn("-webkit-backdrop-filter: none", source)
         self.assertIn("backdrop-filter: none", source)
 
+    def test_library_selection_does_not_force_inspector_open(self):
+        source = (STATIC / "library-selection-polish.js").read_text(encoding="utf-8")
+        self.assertNotIn("inspectTitle(entries[0].id, {explicit: false})", source)
+        self.assertIn("dismissInspectorForBulkSelection", source)
+        self.assertIn("selectedEntries().length > 1", source)
+        self.assertIn("document.addEventListener('infomancer:library-compare-selected'", source)
+        self.assertIn("bar.append(meta, chooser)", source)
+        self.assertNotIn("bar.append(meta, chooser, compare)", source)
+
     def test_library_bulk_bar_starts_at_two_and_stays_single_line_on_desktop(self):
         script = (STATIC / "library-selection-toolbar.js").read_text(encoding="utf-8")
         styles = (STATIC / "library-selection-toolbar.css").read_text(encoding="utf-8")
         self.assertIn("const shouldHide = count < 2", script)
         self.assertIn("if (actions.hidden !== shouldHide) actions.hidden = shouldHide", script)
         self.assertNotIn("new MutationObserver(sync).observe(actions", script)
+        self.assertIn("selectionCountLabel.textContent = `${count} selected`", script)
         self.assertIn("library-multi-selection", styles)
         self.assertIn("flex-wrap: nowrap", styles)
         self.assertIn("white-space: nowrap", styles)
+        self.assertIn("library-bulk-separator", styles)
 
-    def test_library_multi_select_supports_bulk_favorite_and_modal_organize(self):
+    def test_library_bulk_bar_exposes_compare_and_groups_match(self):
+        toolbar = (STATIC / "library-selection-toolbar.js").read_text(encoding="utf-8")
+        self.assertIn("compareButton.textContent = 'Compare'", toolbar)
+        self.assertIn("infomancer:library-compare-selected", toolbar)
+        self.assertIn("matchSummary.textContent = 'Match'", toolbar)
+        self.assertIn("Movies (${movies.length})", toolbar)
+        self.assertIn("TV Shows (${shows.length})", toolbar)
+        self.assertIn("Sort Titles", toolbar)
+        self.assertIn("Refresh Metadata", toolbar)
+        self.assertNotIn("favoriteButton", toolbar)
+
+    def test_library_bulk_organize_is_modal_and_retains_bulk_favorites(self):
         toolbar = (STATIC / "library-selection-toolbar.js").read_text(encoding="utf-8")
         dialog = (STATIC / "organize-dialog.js").read_text(encoding="utf-8")
         template = (TEMPLATES / "organize_bulk.html").read_text(encoding="utf-8")
         route = (ROOT / "app/routes/title_bulk_actions.py").read_text(encoding="utf-8")
-        self.assertIn("/titles/favorite-bulk", toolbar)
-        self.assertIn("Add to Favorites", toolbar)
         self.assertIn("url: '/titles/organize-bulk'", toolbar)
         self.assertIn("method: 'POST'", toolbar)
         self.assertIn("organize-bulk", dialog)
         self.assertIn("event.detail.method", dialog)
         self.assertIn("data-organize-content", template)
         self.assertIn("data-organize-bulk", template)
+        self.assertIn("data-bulk-favorite-selected", template)
+        self.assertIn('fetch("/titles/favorite-bulk"', dialog)
         self.assertIn('@router.post("/titles/favorite-bulk")', route)
         self.assertIn("favorite=1", route)
+
+    def test_sort_titles_keeps_grid_slot_when_poster_is_missing(self):
+        template = (TEMPLATES / "sort_titles_dialog.html").read_text(encoding="utf-8")
+        styles = (STATIC / "library-selection-toolbar.css").read_text(encoding="utf-8")
+        self.assertIn("sort-title-poster-placeholder", template)
+        self.assertIn("title.display_title[:1]", template)
+        self.assertIn(".sort-title-poster-placeholder", styles)
+        self.assertIn("minmax(180px, 1fr)", styles)
 
     def test_sidebar_control_geometry_is_known_before_header_paint(self):
         base = (TEMPLATES / "base.html").read_text(encoding="utf-8")
