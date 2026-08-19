@@ -75,6 +75,13 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn(".account-avatar[style*=\"background-image\"]", source)
         self.assertIn("background-size:cover", source)
 
+    def test_profile_preview_renders_initials_as_text_in_account_rail(self):
+        source = (STATIC / "profile.js").read_text(encoding="utf-8")
+        self.assertIn('accountAvatar.style.removeProperty("background-image")', source)
+        self.assertIn('selectedIcon === "initials"\n      ? initialFor()', source)
+        self.assertIn("sidebarSymbols[selectedIcon] || initialFor()", source)
+        self.assertIn('accountAvatar.dataset.profileAvatarKind = "image"', source)
+
     def test_review_overflow_button_uses_canonical_centered_menu_control(self):
         action_menu = (STATIC / "action-menu.css").read_text(encoding="utf-8")
         review = (TEMPLATES / "review.html").read_text(encoding="utf-8")
