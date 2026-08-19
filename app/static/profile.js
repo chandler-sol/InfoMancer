@@ -30,6 +30,19 @@
   const avatarStatus = document.querySelector("[data-profile-avatar-status]");
   const csrf = form.querySelector('input[name="csrf_token"]')?.value || "";
   const context = canvas?.getContext("2d", {alpha: false});
+  const sidebarSymbols = {
+    film: "◆",
+    television: "▣",
+    star: "★",
+    library: "▤",
+    disc: "◎",
+    camera: "▰",
+    headphones: "∩",
+    folder: "▱",
+    server: "≡",
+    heart: "♥",
+    clapperboard: "▥",
+  };
   let customAvatarUrl = form.dataset.customAvatar === "1"
     ? `/account/avatar/current?v=${Date.now()}`
     : "";
@@ -80,22 +93,6 @@
     setSaveState(sameState(profileState(), initialState) ? "clean" : "dirty");
   };
 
-  const avatarSvg = (choice) => {
-    const selectedIcon = choice?.value || "initials";
-    const icon = selectedIcon !== "initials" && selectedIcon !== "custom" ? choiceSvg(choice) : null;
-    let mark;
-    if (icon) {
-      mark = `<svg x="52" y="52" width="152" height="152" viewBox="0 0 24 24" fill="none" stroke="#0b1009" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${icon.innerHTML}</svg>`;
-    } else {
-      const safe = String(initialFor()).replace(/[&<>"']/g, character => ({
-        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-      }[character]));
-      mark = `<text x="128" y="139" text-anchor="middle" dominant-baseline="middle" font-family="Inter,Segoe UI,sans-serif" font-size="112" font-weight="800" fill="#0b1009">${safe}</text>`;
-    }
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><rect width="256" height="256" rx="128" fill="#b9f542"/>${mark}</svg>`;
-    return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
-  };
-
   const setPreviewImage = (url) => {
     if (!previewImage || !previewGlyph) return;
     previewImage.src = url;
@@ -120,17 +117,37 @@
     previewImage.removeAttribute("src");
   };
 
+  const setAccountAvatar = (choice) => {
+    if (!accountAvatar) return;
+    const selectedIcon = choice?.value || "initials";
+    if (selectedIcon === "custom" && customAvatarUrl) {
+      accountAvatar.textContent = "";
+      accountAvatar.style.backgroundImage = `url("${customAvatarUrl}")`;
+      accountAvatar.dataset.profileAvatarKind = "image";
+      return;
+    }
+
+    /* Initials and built-in marks are text glyphs in the persistent account rail.
+       Do not turn them into a CSS data-image. A failed background image combined
+       with the image-mode transparency rule is what produced the blank green
+       circle on the Profile page. */
+    accountAvatar.style.removeProperty("background-image");
+    delete accountAvatar.dataset.profileAvatarKind;
+    accountAvatar.textContent = selectedIcon === "initials"
+      ? initialFor()
+      : (sidebarSymbols[selectedIcon] || initialFor());
+  };
+
   const updatePreview = () => {
     const choice = selectedChoice();
     if (!choice) return;
     if (previewName) previewName.textContent = displayName?.value.trim() || "Unnamed user";
     if (choice.value === "custom" && customAvatarUrl) {
       setPreviewImage(customAvatarUrl);
-      if (accountAvatar) accountAvatar.style.backgroundImage = `url("${customAvatarUrl}")`;
     } else {
       setPreviewMark(choice);
-      if (accountAvatar) accountAvatar.style.backgroundImage = avatarSvg(choice);
     }
+    setAccountAvatar(choice);
   };
 
   const status = (message = "", error = false) => {
