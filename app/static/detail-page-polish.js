@@ -191,6 +191,7 @@
      rail, and hot hero refreshes, which rebuild the title header. */
   const heroFactState = new Map();
   const heroFactLabels = new Set(["source", "status", "seasons", "episodes", "runtime"]);
+  let sourceHrefState = "";
   let mediaFactLayoutQueued = false;
 
   const normalizeFactLabel = (value) => String(value || "").trim().replace(/:$/, "").toLowerCase();
@@ -218,6 +219,10 @@
       if (value) heroFactState.set(key, value);
       card.remove();
     });
+
+    /* The source is now represented once, in the hero. Remove the old movie-row
+       badge so the same library root is not repeated again inside On Disk. */
+    dossier.querySelectorAll(".dossier-on-disk .file-source").forEach((node) => node.remove());
 
     rail.classList.add("detail-media-quality-rail");
     rail.setAttribute("aria-label", "Media quality");
@@ -251,7 +256,11 @@
     if (source) {
       const label = document.createElement("small");
       label.textContent = "Source";
-      const value = document.createElement("span");
+      const value = sourceHrefState ? document.createElement("a") : document.createElement("span");
+      if (sourceHrefState) {
+        value.href = sourceHrefState;
+        value.title = `Open Library filtered to ${source}`;
+      }
       value.textContent = source;
       sourceLine.append(label, value);
     }
@@ -268,12 +277,35 @@
     requestAnimationFrame(arrangeMediaFacts);
   };
 
+  const syncMediaSnapshot = (event) => {
+    const href = event?.detail?.snapshot?.source_href;
+    if (href) sourceHrefState = href;
+    queueMediaFactLayout();
+  };
+
+  const stabilizeWorkflowDialog = () => {
+    const dialog = document.getElementById("organize-dialog");
+    const body = document.getElementById("organize-dialog-body");
+    if (!dialog || !body) return;
+    const resetHorizontalPosition = () => {
+      if (!dialog.classList.contains("title-workflow-dialog")) return;
+      body.scrollLeft = 0;
+    };
+    const observer = new MutationObserver(() => requestAnimationFrame(resetHorizontalPosition));
+    observer.observe(body, {childList: true});
+    dialog.addEventListener("close", () => {
+      body.scrollLeft = 0;
+      body.scrollTop = 0;
+    });
+  };
+
   onReady(() => {
     buildSeasonToolsRow();
     enhanceCast();
     condenseSeriesMenu();
+    stabilizeWorkflowDialog();
     queueMediaFactLayout();
     window.addEventListener("infomancer:title-detail-updated", queueMediaFactLayout);
-    window.addEventListener("infomancer:title-media-updated", queueMediaFactLayout);
+    window.addEventListener("infomancer:title-media-updated", syncMediaSnapshot);
   });
 })();
