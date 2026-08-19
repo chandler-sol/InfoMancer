@@ -101,6 +101,10 @@
     librarySelection.src = `/static/library-selection-polish.js${version}`;
     librarySelection.async = false;
 
+    const libraryInspectorLifecycle = document.createElement('script');
+    libraryInspectorLifecycle.src = `/static/library-inspector-lifecycle.js${version}`;
+    libraryInspectorLifecycle.async = false;
+
     const librarySelectionToolbar = document.createElement('script');
     librarySelectionToolbar.src = `/static/library-selection-toolbar.js${version}`;
     librarySelectionToolbar.async = false;
@@ -111,6 +115,7 @@
       librarySelectionToolbarStyles,
       librarySurface,
       librarySelection,
+      libraryInspectorLifecycle,
       librarySelectionToolbar,
     );
   }
