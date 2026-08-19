@@ -72,6 +72,15 @@ class HttpPerformanceTests(unittest.TestCase):
         self.assertIn("window.setTimeout(pollFailures, 60000)", source)
         self.assertIn("if (failureRequest) return failureRequest", source)
 
+    def test_title_detail_assets_are_not_loaded_on_every_page(self):
+        source = (Path(__file__).resolve().parents[1] / "app/static/workspace.js").read_text(
+            encoding="utf-8"
+        )
+        guard = 'if (document.querySelector(".media-dossier"))'
+        self.assertIn(guard, source)
+        self.assertGreater(source.index('loadScript("title-detail-ux.js"'), source.index(guard))
+        self.assertGreater(source.index('ensureStyle("title-detail-ux.css"'), source.index(guard))
+
 
 if __name__ == "__main__":
     unittest.main()
