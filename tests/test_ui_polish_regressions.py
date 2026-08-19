@@ -57,6 +57,30 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn("-webkit-backdrop-filter: none", source)
         self.assertIn("backdrop-filter: none", source)
 
+    def test_library_bulk_bar_starts_at_two_and_stays_single_line_on_desktop(self):
+        script = (STATIC / "library-selection-toolbar.js").read_text(encoding="utf-8")
+        styles = (STATIC / "library-selection-toolbar.css").read_text(encoding="utf-8")
+        self.assertIn("actions.hidden = count < 2", script)
+        self.assertIn("library-multi-selection", styles)
+        self.assertIn("flex-wrap: nowrap", styles)
+        self.assertIn("white-space: nowrap", styles)
+
+    def test_library_multi_select_supports_bulk_favorite_and_modal_organize(self):
+        toolbar = (STATIC / "library-selection-toolbar.js").read_text(encoding="utf-8")
+        dialog = (STATIC / "organize-dialog.js").read_text(encoding="utf-8")
+        template = (TEMPLATES / "organize_bulk.html").read_text(encoding="utf-8")
+        route = (ROOT / "app/routes/title_bulk_actions.py").read_text(encoding="utf-8")
+        self.assertIn("/titles/favorite-bulk", toolbar)
+        self.assertIn("Add to Favorites", toolbar)
+        self.assertIn("url: '/titles/organize-bulk'", toolbar)
+        self.assertIn("method: 'POST'", toolbar)
+        self.assertIn("organize-bulk", dialog)
+        self.assertIn("event.detail.method", dialog)
+        self.assertIn("data-organize-content", template)
+        self.assertIn("data-organize-bulk", template)
+        self.assertIn('@router.post("/titles/favorite-bulk")', route)
+        self.assertIn("favorite=1", route)
+
     def test_sidebar_control_geometry_is_known_before_header_paint(self):
         base = (TEMPLATES / "base.html").read_text(encoding="utf-8")
         progress = (STATIC / "progress.css").read_text(encoding="utf-8")
