@@ -4,6 +4,7 @@
 
 body.has-app-sidebar .item-action-menu > summary,
 body.has-app-sidebar .workspace-context-toggle {
+  position: relative;
   box-sizing: border-box;
   display: grid;
   place-items: center;
@@ -27,14 +28,19 @@ body.has-app-sidebar .item-action-menu > summary::-webkit-details-marker {
   display: none;
 }
 
-/* Draw the overflow mark instead of relying on the font's vertical metrics for ⋮.
-   The three dots now sit mathematically in the middle of every canonical trigger. */
+/* Draw the overflow mark instead of relying on font metrics. Absolute centering
+   makes the glyph immune to page-specific flex/grid alignment rules that used to
+   pull the dots several pixels upward on some title-detail surfaces. */
 body.has-app-sidebar .item-action-menu > summary::before,
 body.has-app-sidebar .workspace-context-toggle::before {
   content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
   display: block;
   width: 4px;
   height: 20px;
+  transform: translate(-50%, -50%);
   background:
     radial-gradient(circle at 50% 2px, currentColor 0 2px, transparent 2.2px),
     radial-gradient(circle at 50% 10px, currentColor 0 2px, transparent 2.2px),
