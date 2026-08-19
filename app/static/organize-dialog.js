@@ -4,6 +4,8 @@
   if (!dialog || !body || typeof dialog.showModal !== "function") return;
 
   let opener = null;
+  let activeRequest = null;
+  let requestSerial = 0;
   const dialogPath = /^(?:\/titles\/(?:\d+\/(?:organize|libraries)|sort-titles|organize-bulk)|\/files\/\d+\/edition-version(?:\/preview)?)$/;
   let draggedSortRow = null;
   const sortRowAnimations = new WeakMap();
@@ -16,7 +18,30 @@
     return headers;
   };
 
-  const submitFallback = (url, method = "GET", body = null) => {
+  const setLoading = (loading) => {
+    dialog.classList.toggle("loading", loading);
+    body.toggleAttribute("aria-busy", loading);
+  };
+
+  const cancelActiveRequest = () => {
+    activeRequest?.abort();
+    activeRequest = null;
+    requestSerial += 1;
+  };
+
+  const beginRequest = () => {
+    activeRequest?.abort();
+    const controller = new AbortController();
+    activeRequest = controller;
+    const serial = ++requestSerial;
+    return {controller, serial};
+  };
+
+  const requestIsCurrent = (controller, serial) => (
+    activeRequest === controller && !controller.signal.aborted && serial === requestSerial
+  );
+
+  const submitFallback = (url, method = "GET", requestBody = null) => {
     if (String(method).toUpperCase() === "GET") {
       window.location.assign(url);
       return;
@@ -25,8 +50,8 @@
     form.method = "post";
     form.action = url;
     form.hidden = true;
-    if (body instanceof FormData) {
-      for (const [name, value] of body.entries()) {
+    if (requestBody instanceof FormData) {
+      for (const [name, value] of requestBody.entries()) {
         if (typeof value !== "string") continue;
         const input = document.createElement("input");
         input.type = "hidden";
@@ -60,9 +85,7 @@
       if (!previous) return;
       const x = previous.left - current.left;
       const y = previous.top - current.top;
-      if (Math.abs(x) < 1 || Math.abs(y) < 1) {
-        if (Math.abs(x) < 1 && Math.abs(y) < 1) return;
-      }
+      if (Math.abs(x) < 1 && Math.abs(y) < 1) return;
       sortRowAnimations.get(row)?.cancel();
       const animation = row.animate(
         [
@@ -77,17 +100,22 @@
 
   const closeDialog = () => {
     if (!dialog.open || dialog.classList.contains("closing")) return;
+    cancelActiveRequest();
+    setLoading(false);
     dialog.classList.add("closing");
     window.setTimeout(() => {
       dialog.close();
       dialog.classList.remove("closing", "loading", "title-workflow-dialog");
+      body.removeAttribute("aria-busy");
       body.replaceChildren();
-      opener?.focus();
+      if (opener?.isConnected) opener.focus({preventScroll: true});
+      opener = null;
     }, 350);
   };
 
-  const renderResponse = async (response) => {
+  const renderResponse = async (response, request = null) => {
     const html = await response.text();
+    if (request && !requestIsCurrent(request.controller, request.serial)) return false;
     const parsed = new DOMParser().parseFromString(html, "text/html");
     const content = parsed.querySelector("[data-organize-content]");
     if (!content) return false;
@@ -95,7 +123,10 @@
     body.scrollTop = 0;
     body.scrollLeft = 0;
     const heading = body.querySelector("h1");
-    if (heading) heading.id = "organize-dialog-title";
+    if (heading) {
+      heading.id = "organize-dialog-title";
+      heading.tabIndex = -1;
+    }
     body.querySelector(".back")?.remove();
     body.querySelectorAll("a").forEach((link) => {
       if (link.textContent.trim() === "Cancel") {
@@ -103,17 +134,19 @@
         link.dataset.organizeClose = "";
       }
     });
-    dialog.classList.remove("loading");
+    setLoading(false);
     updateSortTitleOrder();
+    requestAnimationFrame(() => heading?.focus({preventScroll: true}));
     return true;
   };
 
   const openDialog = async (url, trigger, options = {}) => {
-    opener = trigger;
-    dialog.classList.remove("title-workflow-dialog");
-    dialog.classList.add("loading");
+    opener = trigger instanceof HTMLElement ? trigger : document.activeElement;
+    dialog.classList.remove("title-workflow-dialog", "closing");
+    setLoading(true);
     if (!dialog.open) dialog.showModal();
     const method = String(options.method || "GET").toUpperCase();
+    const request = beginRequest();
     try {
       const parsedUrl = new URL(url, window.location.href);
       if (parsedUrl.origin !== window.location.origin || !dialogPath.test(parsedUrl.pathname)) {
@@ -124,13 +157,18 @@
         body: method === "GET" ? undefined : options.body,
         credentials: "same-origin",
         cache: "no-store",
+        signal: request.controller.signal,
         headers: requestHeaders({"X-Requested-With": "InfoMancerDialog"}),
       });
-      if (!response.ok || !(await renderResponse(response))) {
+      if (!requestIsCurrent(request.controller, request.serial)) return;
+      if (!response.ok || !(await renderResponse(response, request))) {
         closeDialog();
         submitFallback(parsedUrl.href, method, options.body);
+        return;
       }
-    } catch (_) {
+      if (activeRequest === request.controller) activeRequest = null;
+    } catch (error) {
+      if (error?.name === "AbortError" || request.controller.signal.aborted) return;
       closeDialog();
       submitFallback(url, method, options.body);
     }
@@ -165,6 +203,7 @@
     const bulkFavorite = event.target.closest("[data-bulk-favorite-selected]");
     if (bulkFavorite) {
       event.preventDefault();
+      if (bulkFavorite.disabled) return;
       const form = bulkFavorite.closest("form");
       const ids = [...new Set(
         [...(form?.querySelectorAll('input[name="selected"]') || [])]
@@ -197,9 +236,10 @@
           detail: {titleIds: data.title_ids || ids, message: data.detail || "Favorites updated."},
         }));
       } catch (error) {
-        bulkFavorite.disabled = false;
         bulkFavorite.textContent = original;
         if (status) status.textContent = error.message || "Selected titles could not be added to Favorites.";
+      } finally {
+        bulkFavorite.disabled = false;
       }
       return;
     }
@@ -274,9 +314,11 @@
     const form = event.target.closest("form.organize-title-form");
     if (!form) return;
     event.preventDefault();
+    if (form.dataset.submitting === "1") return;
+    form.dataset.submitting = "1";
     const submitter = event.submitter;
     submitter?.setAttribute("disabled", "");
-    dialog.classList.add("loading");
+    setLoading(true);
     try {
       const response = await fetch(form.action, {
         method: "POST",
@@ -303,7 +345,9 @@
     } catch (_) {
       form.submit();
     } finally {
+      delete form.dataset.submitting;
       submitter?.removeAttribute("disabled");
+      if (dialog.open && !dialog.classList.contains("closing")) setLoading(false);
     }
   });
 
