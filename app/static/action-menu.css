@@ -21,6 +21,7 @@ body.has-app-sidebar .workspace-context-toggle {
   line-height: 1;
   list-style: none;
   cursor: pointer;
+  touch-action: manipulation;
   transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
 }
 
@@ -65,13 +66,20 @@ body.has-app-sidebar .workspace-context-toggle:focus-visible {
 }
 
 /* Keep the popover itself visually consistent too. Existing positioning rules
-   remain owned by the page-specific menu classes. */
+   remain owned by the page-specific menu classes, while the shared surface owns
+   viewport containment and scrolling. */
 body.has-app-sidebar .item-action-menu > div,
 body.has-app-sidebar .item-action-menu > .series-menu-popover,
 body.has-app-sidebar .workspace-context-popover {
   box-sizing: border-box;
   width: min(285px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: min(70dvh, 520px);
   padding: 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   border: 1px solid var(--line);
   border-radius: 3px;
   background: #121820;
@@ -94,6 +102,7 @@ body.has-app-sidebar .workspace-context-popover button {
   text-align: left;
   text-decoration: none;
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 body.has-app-sidebar .workspace-context-popover a:hover,
@@ -105,10 +114,33 @@ body.has-app-sidebar .workspace-context-popover button:focus-visible {
   outline: 0;
 }
 
+@media (pointer: coarse) {
+  body.has-app-sidebar .item-action-menu > summary,
+  body.has-app-sidebar .workspace-context-toggle {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+  body.has-app-sidebar .workspace-context-popover a,
+  body.has-app-sidebar .workspace-context-popover button {
+    min-height: 44px;
+  }
+}
+
 @media (max-width: 520px) {
   body.has-app-sidebar .item-action-menu > div,
   body.has-app-sidebar .item-action-menu > .series-menu-popover,
   body.has-app-sidebar .workspace-context-popover {
     width: min(285px, calc(100vw - 16px));
+    max-width: calc(100vw - 16px);
+    max-height: min(64dvh, 460px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.has-app-sidebar .item-action-menu > summary,
+  body.has-app-sidebar .workspace-context-toggle {
+    transition: none;
   }
 }
