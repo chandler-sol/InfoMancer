@@ -2,13 +2,19 @@
 {% block title %}Organize selected titles · InfoMancer{% endblock %}
 {% block content %}
 <div class="organize-page organize-bulk-page" data-organize-content data-organize-bulk>
-<header class="page-head"><div><p class="eyebrow">PERSONAL LIBRARY</p><h1>Organize selected titles</h1><p>Add the same custom tags to {{ titles|length }} selected movie{% if titles|length != 1 %}s or TV series{% endif %}.</p></div><a class="button" href="/tags">Manage tags</a></header>
+<header class="page-head"><div><p class="eyebrow">PERSONAL LIBRARY</p><h1>Organize selected titles</h1><p>Apply shared organization to {{ titles|length }} selected movie{% if titles|length != 1 %}s or TV series{% endif %}.</p></div><a class="button" href="/tags">Manage tags</a></header>
 <form class="panel organize-form organize-title-form" method="post" action="/titles/organize-bulk" data-organize-bulk>
   <input type="hidden" name="apply" value="1">
   {% for title_id in title_ids %}<input type="hidden" name="selected" value="{{ title_id }}">{% endfor %}
   <section>
     <h2>Selected titles <span class="count">{{ titles|length }}</span></h2>
     <div class="bulk-title-review">{% for title in titles %}<span>{{ title.display_title }} <small>{{ 'TV' if title.kind == 'tv' else 'Movie' }}</small></span>{% endfor %}</div>
+  </section>
+  <section class="bulk-organize-quick-access">
+    <h2>Quick access</h2>
+    <p class="muted">Favorites remain personal to your account and do not change media or metadata.</p>
+    <button type="button" class="button" data-bulk-favorite-selected>★ Add selected titles to Favorites</button>
+    <small class="muted" data-bulk-favorite-status aria-live="polite"></small>
   </section>
   <section>
     <h2>Add tags</h2>
