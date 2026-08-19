@@ -10,10 +10,12 @@
   }
 
   const assetUrl = (path) => `/static/${path}${assetQuery}`;
+  const absoluteAssetUrl = (path) => new URL(assetUrl(path), window.location.href).href;
 
   const ensureStyle = (path, marker) => new Promise((resolve) => {
-    const selector = `link[data-${marker}]`;
-    const existing = document.querySelector(selector);
+    const absolute = absoluteAssetUrl(path);
+    const existing = document.querySelector(`link[data-${marker}]`)
+      || [...document.querySelectorAll('link[rel="stylesheet"]')].find(link => link.href === absolute);
     if (existing) {
       if (existing.sheet) resolve(existing);
       else {
@@ -33,11 +35,17 @@
   });
 
   const loadScript = (path, marker) => new Promise((resolve) => {
-    const selector = `script[data-${marker}]`;
-    const existing = document.querySelector(selector);
+    const absolute = absoluteAssetUrl(path);
+    const existing = document.querySelector(`script[data-${marker}]`)
+      || [...document.scripts].find(script => script.src === absolute);
     if (existing) {
-      if (existing.dataset.infomancerLoaded === "1") resolve(existing);
-      else {
+      /* A server-rendered defer script can already have executed before this loader
+         reaches it and will not carry our runtime marker. Once parsing is complete,
+         an earlier matching script is therefore safe to treat as ready. */
+      if (existing.dataset.infomancerLoaded === "1"
+          || (existing !== loaderScript && document.readyState !== "loading")) {
+        resolve(existing);
+      } else {
         existing.addEventListener("load", () => resolve(existing), {once: true});
         existing.addEventListener("error", () => resolve(existing), {once: true});
       }
