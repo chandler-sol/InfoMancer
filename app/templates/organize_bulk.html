@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Organize selected titles · InfoMancer{% endblock %}
 {% block content %}
+<div class="organize-page organize-bulk-page" data-organize-content data-organize-bulk>
 <header class="page-head"><div><p class="eyebrow">PERSONAL LIBRARY</p><h1>Organize selected titles</h1><p>Add the same custom tags to {{ titles|length }} selected movie{% if titles|length != 1 %}s or TV series{% endif %}.</p></div><a class="button" href="/tags">Manage tags</a></header>
-<form class="panel organize-form" method="post" action="/titles/organize-bulk">
+<form class="panel organize-form organize-title-form" method="post" action="/titles/organize-bulk" data-organize-bulk>
   <input type="hidden" name="apply" value="1">
   {% for title_id in title_ids %}<input type="hidden" name="selected" value="{{ title_id }}">{% endfor %}
   <section>
@@ -23,4 +24,5 @@
   {% endif %}
   <div class="actions"><a class="button" href="/library">Cancel</a><button class="button primary">Save organization</button></div>
 </form>
+</div>
 {% endblock %}
