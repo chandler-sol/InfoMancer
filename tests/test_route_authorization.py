@@ -18,7 +18,8 @@ class RouteAuthorizationTests(unittest.TestCase):
     def member_safe_unsafe_route(path: str) -> bool:
         if path in {
             "/login", "/setup", "/forgot-password", "/logout",
-            "/titles/organize-bulk", "/tags/create", "/activity/read",
+            "/titles/organize-bulk", "/titles/favorite-bulk",
+            "/tags/create", "/activity/read",
         }:
             return True
         if path.startswith((
@@ -49,6 +50,7 @@ class RouteAuthorizationTests(unittest.TestCase):
             ("/account/profile", "GET"), ("/account/profile", "POST"),
             ("/exports/library", "GET"),
             ("/titles/{title_id}/favorite", "POST"),
+            ("/titles/favorite-bulk", "POST"),
             ("/activity/read", "POST"),
         ):
             with self.subTest(path=path, method=method):
