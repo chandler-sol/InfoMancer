@@ -185,9 +185,102 @@
     });
   };
 
+  /* Source/status/count/runtime describe the title, not the encoding. Keep those in
+     the generous hero column and leave the technical strip for six actual media
+     quality facts. The state survives no-reload media refreshes, which rebuild the
+     rail, and hot hero refreshes, which rebuild the title header. */
+  const heroFactState = new Map();
+  const heroFactLabels = new Set(["source", "status", "seasons", "episodes", "runtime"]);
+  let mediaFactLayoutQueued = false;
+
+  const normalizeFactLabel = (value) => String(value || "").trim().replace(/:$/, "").toLowerCase();
+  const pluralFact = (value, singular) => {
+    const clean = String(value || "").trim();
+    if (!clean) return "";
+    if (new RegExp(`\\b${singular}`, "i").test(clean)) return clean;
+    const numeric = Number.parseFloat(clean.replace(/,/g, ""));
+    const suffix = numeric === 1 ? singular : `${singular}s`;
+    return `${clean} ${suffix}`;
+  };
+
+  const arrangeMediaFacts = () => {
+    mediaFactLayoutQueued = false;
+    const dossier = document.querySelector(".media-dossier");
+    const rail = dossier?.querySelector(".detail-technical-rail");
+    const list = rail?.querySelector("dl");
+    const detailCopy = dossier?.querySelector(".detail-page-head .detail-copy");
+    if (!dossier || !rail || !list || !detailCopy) return;
+
+    Array.from(list.children).forEach((card) => {
+      const key = normalizeFactLabel(card.querySelector("dt")?.textContent);
+      if (!heroFactLabels.has(key)) return;
+      const value = card.querySelector("dd")?.textContent?.trim() || "";
+      if (value) heroFactState.set(key, value);
+      card.remove();
+    });
+
+    rail.classList.add("detail-media-quality-rail");
+    rail.setAttribute("aria-label", "Media quality");
+    rail.hidden = list.children.length === 0;
+
+    let summary = detailCopy.querySelector(".detail-hero-catalog-facts");
+    if (!summary) {
+      summary = document.createElement("div");
+      summary.className = "detail-hero-catalog-facts";
+      const date = detailCopy.querySelector(".detail-date");
+      if (date) date.after(summary);
+      else detailCopy.querySelector("h1")?.after(summary);
+    }
+
+    const catalogLine = document.createElement("div");
+    catalogLine.className = "detail-hero-catalog-line";
+    const addCatalogFact = (text) => {
+      if (!text) return;
+      const span = document.createElement("span");
+      span.textContent = text;
+      catalogLine.append(span);
+    };
+    addCatalogFact(heroFactState.get("status"));
+    addCatalogFact(pluralFact(heroFactState.get("seasons"), "season"));
+    addCatalogFact(pluralFact(heroFactState.get("episodes"), "episode"));
+    addCatalogFact(heroFactState.get("runtime"));
+
+    const source = heroFactState.get("source");
+    const sourceLine = document.createElement("div");
+    sourceLine.className = "detail-hero-source-line";
+    if (source) {
+      const label = document.createElement("small");
+      label.textContent = "Source";
+      const value = document.createElement("span");
+      value.textContent = source;
+      sourceLine.append(label, value);
+    }
+
+    summary.replaceChildren();
+    if (catalogLine.children.length) summary.append(catalogLine);
+    if (sourceLine.children.length) summary.append(sourceLine);
+    summary.hidden = summary.children.length === 0;
+  };
+
+  const queueMediaFactLayout = () => {
+    if (mediaFactLayoutQueued) return;
+    mediaFactLayoutQueued = true;
+    requestAnimationFrame(arrangeMediaFacts);
+  };
+
   onReady(() => {
     buildSeasonToolsRow();
     enhanceCast();
     condenseSeriesMenu();
+    queueMediaFactLayout();
+
+    const dossier = document.querySelector(".media-dossier");
+    if (dossier) {
+      new MutationObserver((mutations) => {
+        if (mutations.some((mutation) => mutation.type === "childList")) queueMediaFactLayout();
+      }).observe(dossier, {childList: true, subtree: true});
+    }
+    window.addEventListener("infomancer:title-detail-updated", queueMediaFactLayout);
+    window.addEventListener("infomancer:title-media-updated", queueMediaFactLayout);
   });
 })();
