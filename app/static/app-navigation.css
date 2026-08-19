@@ -23,9 +23,9 @@ html.app-navigation-pending::after {
   to { transform:scaleX(.82); opacity:1; }
 }
 
-/* The compact rail only has room for the product mark. Keeping the alpha pill in
-   the 74px brand slot made it overlap the icon, so version context stays on the
-   expanded lockup and disappears with the rest of the wordmark when collapsed. */
+/* Geometry for the persistent collapse control now lives in render-blocking CSS so
+   it can never paint at the retired divider position first. This late stylesheet is
+   intentionally limited to state polish and does not move or resize app chrome. */
 @media(min-width:981px) {
   body.has-app-sidebar.sidebar-collapsed .brand .workspace-nav-alpha {
     display:none !important;
@@ -45,62 +45,12 @@ html.app-navigation-pending::after {
     display:grid;
   }
 
-  /* Collapse/expand is a persistent app control, not a handle attached to the
-     sidebar edge. Give it a dedicated top-left slot like a media-app navigation
-     toggle, keep the product mark beside it, and rotate the same chevron to explain
-     the opposite action when compact. */
-  body.has-app-sidebar .brand {
-    padding-left: 58px;
-  }
-
-  body.has-app-sidebar .brand-lockup {
-    width: min(184px, calc(100% - 80px));
-    max-width: calc(100% - 80px);
-  }
-
-  body.has-app-sidebar .sidebar-collapse-toggle {
-    top: 34px;
-    left: 12px;
-    width: 34px;
-    height: 34px;
-    border-radius: 8px;
-    transform: translateY(-50%) rotate(0deg);
-    z-index: 20;
-  }
-
   body.has-app-sidebar .sidebar-collapse-toggle:hover,
   body.has-app-sidebar .sidebar-collapse-toggle:focus-visible {
-    border-color: #526171;
-    background: #17212a;
-    color: var(--lime);
-    outline: 0;
-  }
-
-  body.has-app-sidebar.sidebar-collapsed .brand {
-    justify-content: initial;
-    padding: 0;
-  }
-
-  body.has-app-sidebar.sidebar-collapsed .brand-icon {
-    left: 41px;
-    width: 28px;
-    height: 28px;
-  }
-
-  body.has-app-sidebar.sidebar-collapsed .sidebar-collapse-toggle {
-    top: 34px;
-    left: 5px;
-    transform: translateY(-50%) rotate(180deg);
-  }
-
-  body.has-app-sidebar.sidebar-collapsed:has(.site-menu:hover) .sidebar-collapse-toggle,
-  body.has-app-sidebar.sidebar-collapsed:has(.site-menu:focus-within) .sidebar-collapse-toggle,
-  body.has-app-sidebar.sidebar-collapsed:has(.site-menu.tour-menu-open) .sidebar-collapse-toggle {
-    left: 5px;
-  }
-
-  body.has-app-sidebar .sidebar-collapse-toggle svg {
-    transition: transform .34s cubic-bezier(.22,1,.36,1);
+    border-color:#526171;
+    background:#17212a;
+    color:var(--lime);
+    outline:0;
   }
 }
 
@@ -108,9 +58,5 @@ html.app-navigation-pending::after {
   html.app-navigation-pending::after {
     animation:none;
     transform:scaleX(.72);
-  }
-  body.has-app-sidebar .sidebar-collapse-toggle,
-  body.has-app-sidebar .sidebar-collapse-toggle svg {
-    transition:none;
   }
 }
