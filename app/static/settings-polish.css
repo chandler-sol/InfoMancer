@@ -315,3 +315,49 @@ body .settings-handoff {
     transition: none;
   }
 }
+
+/* Recovery uses an extra wrapper that some older layout rules allowed to bleed to
+   the shell edge. Reset it so its tabs and cards share the same horizontal inset as
+   the other Settings destinations. */
+body .settings-shell {
+  width: auto !important;
+  max-width: none !important;
+  margin-inline: 0 !important;
+  box-sizing: border-box;
+}
+
+/* System is long enough to benefit from persistent local navigation. Keep the jump
+   bar available while scrolling and land anchors below it instead of underneath it. */
+html:has(.settings-jump-nav) {
+  scroll-behavior: smooth;
+}
+
+body .settings-jump-nav {
+  position: sticky;
+  top: 16px;
+  z-index: 28;
+  align-self: start;
+  padding: 6px;
+  background: rgba(13,19,25,.96);
+  box-shadow: 0 12px 30px rgba(0,0,0,.20);
+  backdrop-filter: blur(14px);
+}
+
+body :is(#storage,#fingerprints,#safety,#backups,#updates,#media-information,#logging,#service) {
+  scroll-margin-top: 92px;
+}
+
+@media (max-width: 760px) {
+  body .settings-jump-nav {
+    top: 8px;
+  }
+  body :is(#storage,#fingerprints,#safety,#backups,#updates,#media-information,#logging,#service) {
+    scroll-margin-top: 78px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:has(.settings-jump-nav) {
+    scroll-behavior: auto;
+  }
+}
