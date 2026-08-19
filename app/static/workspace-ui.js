@@ -30,17 +30,9 @@
 
   document.head.append(core, tasks, navigation);
 
-  if (document.querySelector('.settings-section-nav')) {
-    const settingsStyles = document.createElement('link');
-    settingsStyles.rel = 'stylesheet';
-    settingsStyles.href = `/static/settings-polish.css${version}`;
-
-    const settingsPolish = document.createElement('script');
-    settingsPolish.src = `/static/settings-polish.js${version}`;
-    settingsPolish.async = false;
-
-    document.head.append(settingsStyles, settingsPolish);
-  }
+  /* Settings polish now lives in settings.css and the nav labels are rendered
+     correctly by the server. Keeping those rules in the render-blocking stylesheet
+     prevents the Settings workspace from visibly reflowing after each page load. */
 
   if (document.querySelector('.saved-view-bar') && document.querySelector('.catalog-tabs')) {
     const savedViewStyles = document.createElement('link');
