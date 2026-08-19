@@ -3,6 +3,22 @@
   if (!librarySurface) return;
 
   const inspector = () => document.getElementById('workspace-inspector');
+  const interactive = (target) => target?.closest?.(
+    'input, button, summary, details, form, select, textarea, .item-action-menu, .cover-select-control'
+  );
+
+  /* A fresh title should always enter the Inspector at its chrome/identity area.
+     The drawer itself persists between selections, so without an explicit reset a
+     mobile user could open the next title at the previous title's scroll offset. */
+  document.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || interactive(event.target)) return;
+    const item = event.target.closest?.('.cover-card, .library-title-row');
+    if (!item) return;
+    const panel = inspector();
+    if (!panel) return;
+    panel.scrollTop = 0;
+    panel.scrollLeft = 0;
+  }, true);
 
   /* Inspector state is intentionally visit-local. A selected title may remain
      checked when the user comes back, but the drawer itself should not survive a
@@ -22,7 +38,11 @@
 
     if (open) panel?.querySelector('.workspace-inspector-close')?.click();
     document.body.classList.remove('workspace-inspector-open');
-    if (panel) panel.hidden = true;
+    if (panel) {
+      panel.hidden = true;
+      panel.scrollTop = 0;
+      panel.scrollLeft = 0;
+    }
   };
 
   window.addEventListener('pagehide', dismissForNavigation);
