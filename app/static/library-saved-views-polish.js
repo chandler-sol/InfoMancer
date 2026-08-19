@@ -32,6 +32,25 @@
     panel.prepend(empty);
   }
 
+  /* <details> is intentionally used for progressive enhancement, but native details
+     elements do not dismiss when the user clicks elsewhere. Treat this one like the
+     rest of InfoMancer's popovers: outside pointer-down and Escape both close it. */
+  const closeManager = ({restoreFocus = false} = {}) => {
+    if (!manager.open) return;
+    manager.open = false;
+    if (restoreFocus) summary?.focus();
+  };
+
+  document.addEventListener('pointerdown', (event) => {
+    if (manager.open && !manager.contains(event.target)) closeManager();
+  }, true);
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !manager.open) return;
+    event.preventDefault();
+    closeManager({restoreFocus: true});
+  });
+
   bar.classList.add('saved-view-integrated');
   bar.hidden = true;
 })();
