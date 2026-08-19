@@ -4,9 +4,15 @@
 .source-type-hints { display:grid; gap:10px; margin:5px 0; }
 .source-type-hints > span { display:flex; align-items:flex-start; gap:9px; color:var(--muted); font-size:12px; }
 .source-type-hints .kind { flex:0 0 58px; text-align:center; }
-.manual-source { border-top:1px solid var(--line); padding-top:13px; }
-.manual-source > summary { padding:4px 0; }
-.manual-source > form { margin-top:15px; }
+.manual-source { display:grid; gap:13px; margin-top:2px; padding-top:14px; border-top:1px solid var(--line); }
+.manual-source-head { display:grid; gap:2px; }
+.manual-source-head small { color:var(--lime); font-size:9px; font-weight:900; letter-spacing:.12em; }
+.manual-source-head strong { color:var(--text); font-size:13px; }
+.manual-source > form { margin:0; }
+.manual-source .stack { gap:12px; }
+.manual-source .stack label { font-size:12px; }
+.manual-source .stack input,.manual-source .stack select { margin-top:5px; padding:9px 10px; }
+.manual-source .stack .button { justify-self:start; }
 .root-name-editor { position:relative; }
 .root-name-form { position:absolute; z-index:6; top:28px; right:0; width:310px; padding:16px; border:1px solid #465363; border-radius:3px; background:#151c24; box-shadow:0 15px 40px rgba(0,0,0,.55); }
 .root-name-form label { display:block; color:var(--muted); font-size:12px; }
@@ -102,6 +108,7 @@
   .source-folder > span:last-child { display:none; }
   .root-name-form { position:fixed; top:50%; left:15px; right:15px; width:auto; transform:translateY(-50%); }
   .source-live-status { margin-bottom:13px; }
+  .manual-source .stack .button { width:100%; }
 }
 
 @media(prefers-reduced-motion:reduce) {
