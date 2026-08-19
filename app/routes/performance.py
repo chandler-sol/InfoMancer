@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from ..http_performance import StaticAssetCacheMiddleware
+from ..http_performance import LibrarySurfacePartialMiddleware, StaticAssetCacheMiddleware
 from .context import RouteContext
 
 
@@ -14,4 +14,7 @@ def build_router(ctx: RouteContext):
     if not getattr(state, "static_asset_cache_middleware", False):
         app.add_middleware(StaticAssetCacheMiddleware)
         state.static_asset_cache_middleware = True
+    if not getattr(state, "library_surface_partial_middleware", False):
+        app.add_middleware(LibrarySurfacePartialMiddleware)
+        state.library_surface_partial_middleware = True
     return router, {}
