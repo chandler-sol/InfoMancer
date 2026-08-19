@@ -192,6 +192,15 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn("absoluteAssetUrl", workspace)
         self.assertIn("link.href === absolute", workspace)
 
+    def test_workspace_polish_is_consolidated_without_css_import_waterfall(self):
+        review = (STATIC / "review.css").read_text(encoding="utf-8")
+        self.assertFalse((STATIC / "workspace-detail-polish.css").exists())
+        self.assertNotIn("@import", review)
+        self.assertIn("Consolidated 0.8 workspace/detail polish", review)
+        self.assertIn("body.has-app-sidebar main.shell:has(> .catalog-tabs)", review)
+        self.assertIn("workspace-inspector-season", review)
+        self.assertIn("@media (max-width: 520px)", review)
+
     def test_navigation_lifecycle_closes_transient_state(self):
         source = (STATIC / "app-navigation.js").read_text(encoding="utf-8")
         self.assertIn("const announceNavigation", source)
