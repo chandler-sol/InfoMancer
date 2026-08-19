@@ -8,112 +8,94 @@
   else toolbar.append(actions);
   toolbar.classList.add('library-selection-toolbar-ready');
 
-  const selectedIds = () => [
-    ...new Set(
-      [...document.querySelectorAll('.library-title-choice:checked')]
-        .map(choice => String(choice.value || ''))
-        .filter(Boolean),
-    ),
-  ];
+  const selectedChoices = () => {
+    const unique = new Map();
+    document.querySelectorAll('.library-title-choice:checked').forEach((choice) => {
+      if (!unique.has(choice.value)) unique.set(choice.value, choice);
+    });
+    return [...unique.values()];
+  };
+  const selectedIds = () => selectedChoices().map(choice => String(choice.value || '')).filter(Boolean);
 
-  const selectionCount = () => selectedIds().length;
   const status = document.getElementById('search-state');
-  const organizeButton = actions.querySelector('button[formaction="/titles/organize-bulk"]');
+  const selectionCountLabel = document.getElementById('library-selection-count');
   const deselectButton = document.getElementById('deselect-library-titles');
+  const sortButton = document.getElementById('append-sort-titles');
+  const organizeButton = actions.querySelector('button[formaction="/titles/organize-bulk"]');
+  const refreshButton = actions.querySelector('button[formaction="/metadata/queue"]');
+  const analyzeLibraryMovies = document.getElementById('analyze-library-movies');
+  const analyzeLibraryShows = document.getElementById('analyze-library-shows');
 
-  const favoriteButton = document.createElement('button');
-  favoriteButton.type = 'button';
-  favoriteButton.className = 'button library-bulk-favorite';
-  favoriteButton.textContent = 'Add to Favorites';
-  if (deselectButton?.nextSibling) deselectButton.after(favoriteButton);
-  else actions.append(favoriteButton);
+  if (deselectButton) deselectButton.textContent = 'Deselect';
+  if (sortButton) sortButton.textContent = 'Sort Titles';
+  if (refreshButton) refreshButton.textContent = 'Refresh Metadata';
+
+  const compareButton = document.createElement('button');
+  compareButton.type = 'button';
+  compareButton.className = 'button library-bulk-compare';
+  compareButton.textContent = 'Compare';
+  compareButton.addEventListener('click', () => {
+    document.dispatchEvent(new CustomEvent('infomancer:library-compare-selected'));
+  });
+
+  const separator = () => {
+    const node = document.createElement('span');
+    node.className = 'library-bulk-separator';
+    node.setAttribute('aria-hidden', 'true');
+    return node;
+  };
+
+  const matchMenu = document.createElement('details');
+  matchMenu.className = 'library-bulk-match-menu';
+  const matchSummary = document.createElement('summary');
+  matchSummary.className = 'button library-bulk-match-summary';
+  matchSummary.textContent = 'Match';
+  const matchOptions = document.createElement('div');
+  matchOptions.className = 'library-bulk-match-options';
+  matchMenu.append(matchSummary, matchOptions);
+  [analyzeLibraryMovies, analyzeLibraryShows].forEach((button) => {
+    if (!button) return;
+    button.classList.remove('primary');
+    matchOptions.append(button);
+    button.addEventListener('click', () => matchMenu.removeAttribute('open'));
+  });
+
+  /* Rebuild the row deliberately so related actions read as groups instead of a
+     growing collection of unrelated buttons. The legacy controller still owns the
+     actual form submissions; this layer only controls presentation and modal entry. */
+  actions.replaceChildren();
+  if (selectionCountLabel) actions.append(selectionCountLabel);
+  if (deselectButton) actions.append(deselectButton);
+  actions.append(separator());
+  if (sortButton) actions.append(sortButton);
+  if (organizeButton) actions.append(organizeButton);
+  actions.append(separator(), compareButton);
+  if (refreshButton) actions.append(refreshButton);
+  actions.append(matchMenu);
 
   const sync = () => {
-    const count = selectionCount();
-    /* A single selection already has the Inspector and normal title actions. The
-       command bar is specifically the bulk-action surface, so it starts at two.
-       Only mutate the hidden attribute when its value actually changes. The prior
-       MutationObserver watched this same attribute and then rewrote it from inside
-       its own callback, which could create an endless microtask loop and freeze the
-       entire Library page. */
+    const choices = selectedChoices();
+    const count = choices.length;
     const shouldHide = count < 2;
     if (actions.hidden !== shouldHide) actions.hidden = shouldHide;
     toolbar.classList.toggle('has-selection-actions', !shouldHide);
-  };
+    if (selectionCountLabel) selectionCountLabel.textContent = `${count} selected`;
 
-  const markFavoriteInPlace = (titleId) => {
-    document.querySelectorAll(`[data-workspace-title-id="${CSS.escape(String(titleId))}"]`).forEach((item) => {
-      item.querySelectorAll('.cover-favorite-button').forEach((button) => {
-        button.classList.add('active');
-        button.title = 'Remove from favorites';
-        const title = item.querySelector('.cover-card-link > strong, .title-link')?.textContent?.trim() || 'title';
-        button.setAttribute('aria-label', `Remove ${title} from favorites`);
-      });
-      item.querySelectorAll('.favorite-action').forEach((button) => {
-        button.classList.add('active');
-        const star = button.querySelector('span');
-        button.replaceChildren();
-        if (star) button.append(star);
-        button.append(document.createTextNode('Remove favorite'));
-      });
+    const unmatched = choices.filter(choice => choice.dataset.matched !== 'true');
+    const movies = unmatched.filter(choice => choice.dataset.kind === 'movie');
+    const shows = unmatched.filter(choice => choice.dataset.kind === 'tv');
 
-      const titleLink = item.querySelector('.title-link');
-      if (titleLink) {
-        const copy = titleLink.parentElement;
-        let organization = copy?.querySelector(':scope > .title-organization');
-        if (!organization && copy) {
-          organization = document.createElement('div');
-          organization.className = 'title-organization';
-          titleLink.insertAdjacentElement('afterend', organization);
-        }
-        if (organization && !organization.querySelector('.favorite-star')) {
-          const star = document.createElement('span');
-          star.className = 'favorite-star active';
-          star.title = 'Favorite';
-          star.textContent = '★';
-          organization.prepend(star);
-        }
-      }
-    });
-  };
-
-  favoriteButton.addEventListener('click', async () => {
-    const ids = selectedIds();
-    if (ids.length < 2) return;
-    const original = favoriteButton.textContent;
-    favoriteButton.disabled = true;
-    favoriteButton.textContent = 'Adding…';
-    const body = new FormData();
-    ids.forEach(id => body.append('selected', id));
-    const csrf = document.querySelector('input[name="csrf_token"]')?.value || '';
-    try {
-      const response = await fetch('/titles/favorite-bulk', {
-        method: 'POST',
-        credentials: 'same-origin',
-        cache: 'no-store',
-        body,
-        headers: {
-          'Accept': 'application/json',
-          'X-InfoMancer-Async': '1',
-          ...(csrf ? {'X-CSRF-Token': csrf} : {}),
-        },
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
-      (data.title_ids || ids).forEach(markFavoriteInPlace);
-      favoriteButton.textContent = 'Added to Favorites ✓';
-      if (status) status.textContent = data.detail || `Added ${ids.length} selected titles to Favorites.`;
-      window.setTimeout(() => {
-        if (!favoriteButton.isConnected) return;
-        favoriteButton.disabled = false;
-        favoriteButton.textContent = original;
-      }, 1600);
-    } catch (error) {
-      favoriteButton.disabled = false;
-      favoriteButton.textContent = original;
-      if (status) status.textContent = error.message || 'Selected titles could not be added to Favorites.';
+    if (analyzeLibraryMovies) {
+      analyzeLibraryMovies.hidden = movies.length === 0;
+      analyzeLibraryMovies.textContent = `Movies (${movies.length})`;
     }
-  });
+    if (analyzeLibraryShows) {
+      analyzeLibraryShows.hidden = shows.length === 0;
+      analyzeLibraryShows.textContent = `TV Shows (${shows.length})`;
+    }
+    matchMenu.hidden = unmatched.length === 0;
+    if (matchMenu.hidden) matchMenu.removeAttribute('open');
+  };
 
   organizeButton?.addEventListener('click', (event) => {
     const ids = selectedIds();
@@ -135,9 +117,6 @@
     if (status) status.textContent = event.detail?.message || 'Organization saved for selected titles.';
   });
 
-  /* The Library's existing controller remains the source of truth for selection.
-     Reconcile after its normal selection events rather than observing and rewriting
-     the same DOM attribute, which keeps this helper passive and loop-free. */
   document.addEventListener('change', (event) => {
     if (event.target.matches('.library-title-choice, .letter-title-choice, #select-all-titles')) {
       queueMicrotask(sync);
@@ -145,5 +124,16 @@
   });
   document.addEventListener('infomancer:library-results-updated', () => queueMicrotask(sync));
   document.addEventListener('infomancer:library-selection-updated', () => queueMicrotask(sync));
+
+  document.addEventListener('pointerdown', (event) => {
+    if (matchMenu.open && !matchMenu.contains(event.target)) matchMenu.removeAttribute('open');
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && matchMenu.open) {
+      matchMenu.removeAttribute('open');
+      matchSummary.focus();
+    }
+  });
+
   sync();
 })();
