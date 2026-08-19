@@ -63,6 +63,16 @@
     document.head.append(script);
   });
 
+  /* workspace-detail-polish.css was consolidated into the already versioned
+     review.css. workspace-core still has a compatibility guard for the old asset;
+     mark the consolidated stylesheet as satisfying that guard so it cannot issue a
+     dead request while the core runtime is being retired/refactored. */
+  const consolidatedWorkspacePolish = [...document.querySelectorAll('link[rel="stylesheet"]')]
+    .find(link => link.href.includes('/static/review.css'));
+  if (consolidatedWorkspacePolish) {
+    consolidatedWorkspacePolish.dataset.workspaceDetailPolish = "1";
+  }
+
   const coreReady = loadScript("workspace-core.js", "workspace-core");
 
   // Title detail is completely idle outside /titles/<id>. Start its stylesheet
