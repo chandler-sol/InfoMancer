@@ -35,6 +35,28 @@ class HttpPerformanceTests(unittest.TestCase):
         self.assertIn("}, 120);", source)
         self.assertIn("showPendingSoon();", source)
 
+    def test_navigation_reserves_scrollbar_space(self):
+        source = (Path(__file__).resolve().parents[1] / "app/static/app-navigation.css").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("scrollbar-gutter: stable", source)
+
+    def test_settings_polish_is_part_of_initial_css_not_late_workspace_loading(self):
+        settings = (Path(__file__).resolve().parents[1] / "app/static/settings.css").read_text(
+            encoding="utf-8"
+        )
+        workspace = (Path(__file__).resolve().parents[1] / "app/static/workspace-ui.js").read_text(
+            encoding="utf-8"
+        )
+        polish = (Path(__file__).resolve().parents[1] / "app/static/settings-polish.css").read_text(
+            encoding="utf-8"
+        )
+        self.assertTrue(settings.startswith('@import url("settings-polish.css");'))
+        self.assertNotIn("settings-polish.css", workspace)
+        self.assertNotIn("settings-polish.js", workspace)
+        self.assertNotIn("settings-workspace-polished", polish)
+        self.assertNotIn("settings-section-general", polish)
+
     def test_library_surface_switch_parses_only_requested_fragment(self):
         source = (Path(__file__).resolve().parents[1] / "app/static/library-surface-lazy.js").read_text(
             encoding="utf-8"
