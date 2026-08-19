@@ -81,6 +81,16 @@ class HttpPerformanceTests(unittest.TestCase):
         self.assertGreater(source.index('loadScript("title-detail-ux.js"'), source.index(guard))
         self.assertGreater(source.index('ensureStyle("title-detail-ux.css"'), source.index(guard))
 
+    def test_active_title_metadata_polling_uses_worker_state_before_sqlite(self):
+        source = (Path(__file__).resolve().parents[1] / "app/routes/title_metadata_async.py").read_text(
+            encoding="utf-8"
+        )
+        active_branch = source.index("if task_is_this_title:")
+        durable_read = source.index("with db.connect() as conn:", active_branch)
+        self.assertLess(active_branch, durable_read)
+        self.assertIn('task["status"] in {"starting", "running"}', source)
+        self.assertIn("LEFT JOIN metadata_refresh_queue", source)
+
 
 if __name__ == "__main__":
     unittest.main()
