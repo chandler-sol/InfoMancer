@@ -23,6 +23,15 @@ html.app-navigation-pending::after {
   to { transform:scaleX(.82); opacity:1; }
 }
 
+/* The compact rail only has room for the product mark. Keeping the alpha pill in
+   the 74px brand slot made it overlap the icon, so version context stays on the
+   expanded lockup and disappears with the rest of the wordmark when collapsed. */
+@media(min-width:981px) {
+  body.has-app-sidebar.sidebar-collapsed .brand .workspace-nav-alpha {
+    display:none !important;
+  }
+}
+
 @media(prefers-reduced-motion:reduce) {
   html.app-navigation-pending::after {
     animation:none;
