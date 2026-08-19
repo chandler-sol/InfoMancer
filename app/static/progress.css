@@ -273,6 +273,113 @@ button:disabled {
   }
 }
 
+/* Shared dialogs are application chrome, not page content. Establish their final
+   geometry in this early stylesheet so later page-specific CSS cannot make a modal
+   jump horizontally after it opens. The shared shell always owns scrolling. */
+.organize-dialog {
+  box-sizing: border-box !important;
+  width: min(1100px, calc(100vw - 40px)) !important;
+  max-width: none !important;
+  max-height: calc(100dvh - 40px) !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  overscroll-behavior: contain;
+}
+.organize-dialog::backdrop {
+  background: rgba(2, 5, 8, .76) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+.organize-dialog-frame {
+  position: relative !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  max-height: inherit !important;
+  overflow: hidden !important;
+}
+.organize-dialog-body {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  max-height: calc(100dvh - 40px) !important;
+  padding: clamp(24px, 3vw, 34px) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.organize-dialog-body > *,
+.organize-dialog [data-organize-content],
+.organize-dialog [data-organize-content] > *,
+.organize-dialog .organize-page,
+.organize-dialog .organize-title-form,
+.organize-dialog .panel,
+.organize-dialog .results,
+.organize-dialog .result,
+.organize-dialog .rename-card,
+.organize-dialog .cover-picker {
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+.organize-dialog [data-organize-content],
+.organize-dialog .organize-page {
+  width: 100% !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  transform: none !important;
+}
+.organize-dialog .page-head {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  padding-right: 64px !important;
+  transform: none !important;
+}
+.organize-dialog .page-head h1,
+.organize-dialog .page-head p {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.organize-dialog-close {
+  position: absolute !important;
+  z-index: 5 !important;
+  top: 16px !important;
+  right: 16px !important;
+  display: grid !important;
+  place-items: center !important;
+  width: 44px !important;
+  height: 44px !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  font-size: 0 !important;
+  line-height: 1 !important;
+}
+.organize-dialog-close::before,
+.organize-dialog-close::after {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+}
+.organize-dialog-close::before { transform: rotate(45deg); }
+.organize-dialog-close::after { transform: rotate(-45deg); }
+.organize-dialog.loading .organize-dialog-body {
+  cursor: progress;
+}
+
+/* These nearly opaque sticky surfaces do not benefit enough from live backdrop
+   sampling to justify another composited layer on slower GPUs. */
+.workspace-inspector-head,
+.library-display-toolbar.library-selection-toolbar-ready.has-selection-actions {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .scan-track span,
   .task-track i,
@@ -280,6 +387,8 @@ button:disabled {
   .scan-track span,
   .task-track i { width: 100%; }
   body.has-app-sidebar .sidebar-collapse-toggle { transition: none !important; }
+  .organize-dialog,
+  .organize-dialog::backdrop { animation: none !important; }
 }
 
 @media (max-width: 900px) {
@@ -301,4 +410,29 @@ button:disabled {
   .task-widget-toggle .task-card-copy { display: none; }
   .task-dot { width: 10px; height: 10px; }
   .task-widget.idle:not(.has-attention) .task-widget-toggle { opacity: .55; }
+
+  .organize-dialog {
+    width: 100vw !important;
+    height: min(92dvh, 900px) !important;
+    max-height: none !important;
+    margin: auto 0 0 !important;
+    border-width: 1px 0 0 !important;
+    border-radius: 18px 18px 0 0 !important;
+  }
+  .organize-dialog-frame,
+  .organize-dialog-body {
+    height: 100% !important;
+    max-height: none !important;
+  }
+  .organize-dialog-body {
+    padding: 24px 16px calc(24px + env(safe-area-inset-bottom)) !important;
+    scrollbar-gutter: auto;
+  }
+  .organize-dialog .page-head {
+    padding-right: 54px !important;
+  }
+  .organize-dialog-close {
+    top: 12px !important;
+    right: 12px !important;
+  }
 }
