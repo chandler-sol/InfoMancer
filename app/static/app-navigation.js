@@ -1,12 +1,26 @@
 (() => {
   const root = document.documentElement;
   let pendingTimer = 0;
+  let pendingDelayTimer = 0;
   let libraryWarmPromise = null;
   let lastLibraryWarm = 0;
 
   const clearPending = () => {
+    window.clearTimeout(pendingDelayTimer);
     window.clearTimeout(pendingTimer);
+    pendingDelayTimer = 0;
+    pendingTimer = 0;
     root.classList.remove("app-navigation-pending");
+  };
+
+  const showPendingSoon = () => {
+    clearPending();
+    /* Do not flash a progress bar for navigations that complete almost instantly.
+       The indicator is useful feedback only once the user can actually perceive a wait. */
+    pendingDelayTimer = window.setTimeout(() => {
+      root.classList.add("app-navigation-pending");
+      pendingTimer = window.setTimeout(clearPending, 5000);
+    }, 120);
   };
 
   const savedLibraryView = (() => {
@@ -55,13 +69,18 @@
     if (link) warmLibrary();
   }, {passive: true});
 
+  document.addEventListener("focusin", (event) => {
+    const link = event.target.closest?.('a[href="/library"]');
+    if (link) warmLibrary();
+  });
+
   const scheduleIdleLibraryWarm = () => {
     if (!canWarmLibrary()) return;
     const run = () => warmLibrary();
     if ("requestIdleCallback" in window) {
-      window.requestIdleCallback(run, {timeout: 1400});
+      window.requestIdleCallback(run, {timeout: 1800});
     } else {
-      window.setTimeout(run, 900);
+      window.setTimeout(run, 1200);
     }
   };
 
@@ -81,13 +100,12 @@
     if (url.origin !== window.location.origin || !["http:", "https:"].includes(url.protocol)) return;
     if (sameDocumentHashOnly(url)) return;
 
-    root.classList.add("app-navigation-pending");
-    pendingTimer = window.setTimeout(clearPending, 5000);
+    showPendingSoon();
   });
 
   if (document.readyState === "complete") scheduleIdleLibraryWarm();
   else window.addEventListener("load", scheduleIdleLibraryWarm, {once: true});
 
   window.addEventListener("pageshow", clearPending);
-  window.addEventListener("pagehide", () => window.clearTimeout(pendingTimer));
+  window.addEventListener("pagehide", clearPending);
 })();
