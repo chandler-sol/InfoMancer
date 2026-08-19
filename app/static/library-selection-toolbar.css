@@ -115,13 +115,6 @@ body:not(.library-multi-selection) .library-display-toolbar.library-selection-to
   background: rgba(174,255,48,.07);
 }
 
-/* The cover grid should share the exact same left axis as the tabs, filters, and
-   Jump-to control above it. Centering the fixed-width card group created a visible
-   extra gutter at the beginning of the Library. */
-#cover-library.cover-library {
-  justify-content: flex-start !important;
-}
-
 /* The selection outline makes a previously harmless zero-inset caption look like
    it is touching the frame. Give every cover caption a small, consistent content
    gutter so selected and unselected cards keep identical geometry. */
@@ -163,14 +156,15 @@ body:not(.library-multi-selection) .library-display-toolbar.library-selection-to
   padding: 6px 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(12, 17, 23, .97);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .28);
-  backdrop-filter: blur(12px);
+  background: rgba(12, 17, 23, .985);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .24);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .library-display-toolbar.library-selection-toolbar-ready.has-selection-actions .library-selection-actions {
   border-color: #4c6b2d;
-  background: rgba(18, 24, 32, .96);
+  background: rgba(18, 24, 32, .98);
 }
 
 @media (max-width: 1180px) {
