@@ -30,6 +30,20 @@ html.app-navigation-pending::after {
   body.has-app-sidebar.sidebar-collapsed .brand .workspace-nav-alpha {
     display:none !important;
   }
+
+  /* Activity is the only primary item that can carry an unread-count badge. Merely
+     shrinking that badge to max-width:0 leaves its intrinsic minimum size and
+     auto-margin in flex layout, pushing the Activity glyph off center. Remove the
+     badge from layout while compact, then restore it when the rail expands. */
+  body.has-app-sidebar.sidebar-collapsed .site-menu-panel a > .menu-count {
+    display:none;
+  }
+
+  body.has-app-sidebar.sidebar-collapsed .site-menu:hover .site-menu-panel a > .menu-count,
+  body.has-app-sidebar.sidebar-collapsed .site-menu:focus-within .site-menu-panel a > .menu-count,
+  body.has-app-sidebar.sidebar-collapsed .site-menu.tour-menu-open .site-menu-panel a > .menu-count {
+    display:grid;
+  }
 }
 
 @media(prefers-reduced-motion:reduce) {
