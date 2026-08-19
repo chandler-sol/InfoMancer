@@ -307,3 +307,56 @@ body:not(.library-multi-selection) .library-title-row.workspace-selected:has(.li
     opacity: 1;
   }
 }
+
+/* On phones and compact tablets the Inspector is a deterministic viewport sheet,
+   not a content-sized bottom drawer. The previous 72/82vh caps meant short and
+   long titles opened at different vertical positions, and iOS Safari could let the
+   sticky Inspector chrome drift under the app header as its visual viewport moved. */
+@media (max-width: 900px) {
+  body.workspace-inspector-open {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  .workspace-inspector {
+    top: 68px !important;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: auto;
+    max-height: none !important;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    border-top: 1px solid #33404d;
+    border-left: 0;
+    border-radius: 16px 16px 0 0;
+    scroll-padding-top: 54px;
+    transform: translateY(calc(100% + 2px));
+  }
+
+  body.workspace-inspector-open .workspace-inspector {
+    transform: translateY(0);
+  }
+
+  .workspace-inspector-head {
+    top: 0;
+    z-index: 8;
+    background: #0d1218;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .workspace-inspector-close {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (max-width: 760px) {
+  .workspace-inspector {
+    top: 62px !important;
+  }
+}
