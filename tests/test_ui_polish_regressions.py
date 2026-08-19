@@ -69,6 +69,12 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertNotIn("width: 34px;", navigation)
         self.assertNotIn("left: 12px;", navigation)
 
+    def test_profile_page_keeps_sidebar_avatar_visible_before_preview_js(self):
+        source = (STATIC / "profile.css").read_text(encoding="utf-8")
+        self.assertNotIn("background-image:url('/account/avatar/current')", source)
+        self.assertIn(".account-avatar[style*=\"background-image\"]", source)
+        self.assertIn("background-size:cover", source)
+
     def test_review_overflow_button_uses_canonical_centered_menu_control(self):
         action_menu = (STATIC / "action-menu.css").read_text(encoding="utf-8")
         review = (TEMPLATES / "review.html").read_text(encoding="utf-8")
