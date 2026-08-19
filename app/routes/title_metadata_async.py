@@ -60,19 +60,11 @@ def build_router(ctx: RouteContext):
 
     @router.get("/api/titles/{title_id}/metadata-refresh-state")
     def title_metadata_refresh_state(title_id: int):
-        with db.connect() as conn:
-            title = conn.execute(
-                "SELECT id,metadata_refreshed_at,metadata_refresh_error,updated_at FROM titles WHERE id=?",
-                (title_id,),
-            ).fetchone()
-            if not title:
-                return JSONResponse({"detail": "Title not found"}, status_code=404)
-            queue = conn.execute(
-                """SELECT status,requested_at,started_at,completed_at,provider,error
-                   FROM metadata_refresh_queue WHERE title_id=?""",
-                (title_id,),
-            ).fetchone()
-
+        # The browser already asks this endpoint frequently while a scoped refresh is
+        # running. The shared worker state is authoritative during that phase, so do
+        # not open SQLite on every progress tick. Once the task leaves the running
+        # state, read the durable queue/title row exactly once so completion details
+        # and errors are returned from the database.
         with imdb_genre_lock:
             task = {
                 key: imdb_genre_job.get(key)
@@ -84,13 +76,51 @@ def build_router(ctx: RouteContext):
                 if key in imdb_genre_job
             }
         task.setdefault("status", "idle")
+        active_ids = task.get("title_ids")
+        task_is_this_title = (
+            task["status"] in {"starting", "running"}
+            and (active_ids is None or title_id in active_ids)
+        )
+        if task_is_this_title:
+            return {
+                "title_id": title_id,
+                "task": task,
+                "queue": None,
+                "metadata_refreshed_at": None,
+                "metadata_refresh_error": "",
+                "updated_at": None,
+            }
+
+        with db.connect() as conn:
+            row = conn.execute(
+                """SELECT t.id,t.metadata_refreshed_at,t.metadata_refresh_error,t.updated_at,
+                          q.status queue_status,q.requested_at,q.started_at,q.completed_at,
+                          q.provider,q.error queue_error
+                   FROM titles t
+                   LEFT JOIN metadata_refresh_queue q ON q.title_id=t.id
+                   WHERE t.id=?""",
+                (title_id,),
+            ).fetchone()
+        if not row:
+            return JSONResponse({"detail": "Title not found"}, status_code=404)
+
+        queue = None
+        if row["queue_status"] is not None:
+            queue = {
+                "status": row["queue_status"],
+                "requested_at": row["requested_at"],
+                "started_at": row["started_at"],
+                "completed_at": row["completed_at"],
+                "provider": row["provider"],
+                "error": row["queue_error"],
+            }
         return {
             "title_id": title_id,
             "task": task,
-            "queue": dict(queue) if queue else None,
-            "metadata_refreshed_at": title["metadata_refreshed_at"],
-            "metadata_refresh_error": title["metadata_refresh_error"],
-            "updated_at": title["updated_at"],
+            "queue": queue,
+            "metadata_refreshed_at": row["metadata_refreshed_at"],
+            "metadata_refresh_error": row["metadata_refresh_error"],
+            "updated_at": row["updated_at"],
         }
 
     return router, {
