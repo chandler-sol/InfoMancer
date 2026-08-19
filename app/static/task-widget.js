@@ -36,6 +36,8 @@
   let previous = new Map();
   let failures = [];
   let open = widget.classList.contains("is-pinned") && !popover.hidden;
+  let failureTimer = 0;
+  let failureRequest = null;
 
   const failureSignature = (task) => `${task.id}|${task.detail || task.label || "failed"}`;
 
@@ -239,14 +241,23 @@
     applyOpen();
   }
 
+  const refreshFailures = async () => {
+    if (failureRequest) return failureRequest;
+    failureRequest = (async () => {
+      try {
+        const response = await fetch("/api/task-failures", {cache: "no-store"});
+        if (response.ok) {
+          const data = await response.json();
+          failures = Array.isArray(data.failures) ? data.failures : [];
+          render();
+        }
+      } catch (_error) {}
+    })().finally(() => { failureRequest = null; });
+    return failureRequest;
+  };
+
   const finish = (task) => setTimeout(async () => {
-    try {
-      const response = await fetch("/api/task-failures", {cache: "no-store"});
-      if (response.ok) {
-        const data = await response.json();
-        failures = Array.isArray(data.failures) ? data.failures : [];
-      }
-    } catch (_error) {}
+    await refreshFailures();
 
     if (active.some((candidate) => candidate.id === task.id)
         || visibleFailures().some((candidate) => candidate.id === task.id)) {
@@ -303,48 +314,63 @@
     } catch (_error) {}
   };
 
+  const scheduleFailureRefresh = () => {
+    window.clearTimeout(failureTimer);
+    if (document.hidden) {
+      failureTimer = window.setTimeout(pollFailures, 60000);
+    } else if (active.length) {
+      failureTimer = window.setTimeout(pollFailures, 5000);
+    } else if (open) {
+      failureTimer = window.setTimeout(pollFailures, 15000);
+    } else {
+      failureTimer = window.setTimeout(pollFailures, 30000);
+    }
+  };
+
   const pollFailures = async () => {
-    try {
-      const response = await fetch("/api/task-failures", {cache: "no-store"});
-      if (response.ok) {
-        const data = await response.json();
-        failures = Array.isArray(data.failures) ? data.failures : [];
-        render();
-      }
-    } catch (_error) {}
-    setTimeout(pollFailures, active.length ? 1800 : 4000);
+    await refreshFailures();
+    scheduleFailureRefresh();
   };
 
   toggle.addEventListener("click", (event) => {
     event.preventDefault();
     open = !open;
     applyOpen();
+    if (open) refreshFailures();
+    scheduleFailureRefresh();
   });
 
   document.getElementById("task-minimize")?.addEventListener("click", (event) => {
     event.stopPropagation();
     open = false;
     applyOpen();
+    scheduleFailureRefresh();
   });
 
   document.getElementById("task-dismiss")?.addEventListener("click", (event) => {
     event.stopPropagation();
     open = false;
     applyOpen();
+    scheduleFailureRefresh();
   });
 
   document.addEventListener("click", (event) => {
     if (!open || widget.contains(event.target)) return;
     open = false;
     applyOpen();
+    scheduleFailureRefresh();
   });
 
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape" || !open) return;
     open = false;
     applyOpen();
+    scheduleFailureRefresh();
     toggle.focus();
   });
+
+  document.addEventListener("visibilitychange", scheduleFailureRefresh);
+  window.addEventListener("pagehide", () => window.clearTimeout(failureTimer));
 
   new MutationObserver(() => {
     if (open && popover.hidden) queueMicrotask(applyOpen);
