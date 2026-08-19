@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import parse_qs
+
 from starlette.datastructures import MutableHeaders
 
 
@@ -8,7 +10,9 @@ class StaticAssetCacheMiddleware:
 
     InfoMancer appends a process-specific ``?v=`` value to its CSS and JavaScript
     URLs. A restart therefore changes the URL when a new build is loaded, making
-    long-lived immutable browser caching safe for the files under ``/static``.
+    long-lived immutable browser caching safe for those versioned requests.
+    Unversioned assets are left on StaticFiles' normal validation policy so icons
+    or other directly referenced files cannot become permanently stale.
     Dynamic HTML, JSON, downloads, and user data are deliberately untouched.
     """
 
@@ -17,8 +21,19 @@ class StaticAssetCacheMiddleware:
     def __init__(self, app) -> None:
         self.app = app
 
-    async def __call__(self, scope, receive, send) -> None:
+    @staticmethod
+    def _versioned(scope) -> bool:
         if scope.get("type") != "http" or not str(scope.get("path") or "").startswith("/static/"):
+            return False
+        raw_query = scope.get("query_string") or b""
+        try:
+            query = parse_qs(raw_query.decode("ascii", errors="ignore"), keep_blank_values=True)
+        except (AttributeError, UnicodeError):
+            return False
+        return bool(query.get("v", [""])[0])
+
+    async def __call__(self, scope, receive, send) -> None:
+        if not self._versioned(scope):
             await self.app(scope, receive, send)
             return
 
