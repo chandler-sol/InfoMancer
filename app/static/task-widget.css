@@ -12,6 +12,10 @@
 .task-track.determinate i{animation:none;transition:width .25s ease;width:0}
 .task-track.indeterminate i{animation:scan-slide 1.2s ease-in-out infinite;width:35%}
 .task-progress-copy{display:block;margin-top:6px;color:#a8b5c1;font-size:11px;font-variant-numeric:tabular-nums;text-align:right}
+/* Rows used to start their copy exactly on the task-list edge, which made the
+   notification surface feel visually unpadded despite the popover's outer inset. */
+.task-popover .task-row{padding:15px 12px}
+.task-popover .task-empty{padding:14px 12px 13px}
 .task-notification{display:grid;gap:7px}
 .task-notification-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
 .task-notification-head>span:first-child{display:grid;gap:5px;min-width:0}
@@ -20,7 +24,7 @@
 .task-state-badge.complete{color:#b9f542;background:rgba(185,245,66,.09);border:1px solid rgba(185,245,66,.26)}
 .task-state-badge.failed{color:#ff8e89;background:rgba(255,113,108,.09);border:1px solid rgba(255,113,108,.3)}
 .task-complete{background:rgba(185,245,66,.025)}
-.task-failed{margin-inline:-8px;padding-inline:8px;border-radius:8px;background:rgba(255,113,108,.055);box-shadow:inset 2px 0 #ff716c}
+.task-failed{margin-inline:-8px;padding-inline:20px!important;border-radius:8px;background:rgba(255,113,108,.055);box-shadow:inset 2px 0 #ff716c}
 .task-row-actions{display:flex;gap:5px;flex:0 0 auto}
 .task-inline-action{min-height:27px;padding:4px 7px;border:1px solid #334351;border-radius:6px;background:#10171e;color:#aab6c1;font-size:10px;font-weight:700}
 .task-inline-action:hover,.task-inline-action:focus-visible{border-color:#5b6b79;color:var(--text)}
@@ -30,7 +34,7 @@
 .task-activity-link{width:max-content;color:var(--cyan);font-size:11px;font-weight:700;text-decoration:none}
 .task-activity-link:hover,.task-activity-link:focus-visible{color:var(--lime);text-decoration:underline}
 .task-empty{padding:14px 0 13px;text-align:center;color:#8d9aa7}
-.task-widget-footer{display:flex;justify-content:flex-end;padding-top:11px;border-top:1px solid var(--line)}
+.task-widget-footer{display:flex;justify-content:flex-end;padding:11px 12px 0;border-top:1px solid var(--line)}
 .task-scheduled-link{display:inline-flex;align-items:center;justify-content:center;min-height:28px;padding:5px 9px;border:1px solid #334351;border-radius:6px;background:#10171e;color:#aab6c1;font-size:10px;font-weight:750;line-height:1;text-decoration:none}
 .task-scheduled-link:hover,.task-scheduled-link:focus-visible{border-color:#4a632b;color:var(--lime);background:#131c22}
 @media(max-width:760px){.topbar .task-widget-toggle::before{width:20px;height:20px}.topbar .task-widget .task-dot{top:7px;right:7px;left:auto;width:7px;height:7px}}
