@@ -51,10 +51,13 @@
 }
 
 /* Cover cards are independent visual units. Off-screen cards do not need layout or
-   paint work until the viewport approaches them. */
+   paint work until the viewport approaches them. Use a conservative fallback block
+   size on the first visit, then let browsers that support the auto form remember the
+   measured card height. That avoids scrollbar/row-length shifts while scrolling. */
 .cover-card {
   content-visibility: auto;
-  contain-intrinsic-size: 280px 420px;
+  contain-intrinsic-size: 280px 380px;
+  contain-intrinsic-size: auto 380px;
 }
 
 /* content-visibility:auto gives each cover paint containment. That is useful for
