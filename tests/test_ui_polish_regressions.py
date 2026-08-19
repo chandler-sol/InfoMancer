@@ -17,12 +17,20 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn("event.key !== 'Escape'", source)
         self.assertIn("summary?.focus()", source)
 
-    def test_title_media_facts_stay_in_one_scrollable_rail(self):
+    def test_title_media_facts_are_scroll_free_quality_cards(self):
         source = (STATIC / "detail-page-polish.css").read_text(encoding="utf-8")
-        self.assertIn("detail-technical-rail dl", source)
-        self.assertIn("display: flex !important", source)
-        self.assertIn("overflow-x: auto !important", source)
-        self.assertIn("flex: 1 0 130px", source)
+        self.assertIn("grid-template-columns: repeat(6, minmax(0, 1fr))", source)
+        self.assertIn("overflow: visible !important", source)
+        self.assertNotIn("overflow-x: auto !important", source)
+
+    def test_title_source_is_single_clickable_library_filter(self):
+        route = (ROOT / "app/routes/title_media_info.py").read_text(encoding="utf-8")
+        script = (STATIC / "detail-page-polish.js").read_text(encoding="utf-8")
+        styles = (STATIC / "detail-page-polish.css").read_text(encoding="utf-8")
+        self.assertIn('"source_href": f"/library?root=', route)
+        self.assertIn("value.href = sourceHrefState", script)
+        self.assertIn('.dossier-on-disk .file-source").forEach((node) => node.remove())', script)
+        self.assertIn(".dossier-on-disk .file-source {\n  display: none !important;", styles)
 
     def test_title_and_inspector_artwork_fill_their_summary_tracks(self):
         source = (STATIC / "detail-page-polish.css").read_text(encoding="utf-8")
@@ -31,20 +39,35 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn(".workspace-inspector-summary", source)
         self.assertIn("width: 120px", source)
 
-    def test_title_workflow_dialog_has_real_gutters_and_centered_close_control(self):
-        source = (STATIC / "detail-page-polish.css").read_text(encoding="utf-8")
-        self.assertIn("padding: 30px 32px 34px !important", source)
-        self.assertIn(".organize-dialog.title-workflow-dialog .organize-dialog-close", source)
-        self.assertIn("place-items: center", source)
-        self.assertIn("width: 44px", source)
-        self.assertIn("height: 44px", source)
+    def test_title_workflows_cannot_retain_horizontal_scroll(self):
+        script = (STATIC / "detail-page-polish.js").read_text(encoding="utf-8")
+        styles = (STATIC / "detail-page-polish.css").read_text(encoding="utf-8")
+        self.assertIn("body.scrollLeft = 0", script)
+        self.assertIn("overflow-x: hidden !important", styles)
+        self.assertIn("max-width: 100% !important", styles)
+        self.assertIn("margin-left: 0 !important", styles)
+        self.assertIn(".organize-dialog.title-workflow-dialog .organize-dialog-close", styles)
+        self.assertIn("width: 44px", styles)
+        self.assertIn("height: 44px", styles)
 
-    def test_sidebar_has_dedicated_top_left_toggle_with_direction_change(self):
-        source = (STATIC / "app-navigation.css").read_text(encoding="utf-8")
-        self.assertIn("top: 34px", source)
-        self.assertIn("left: 12px", source)
-        self.assertIn("rotate(180deg)", source)
-        self.assertIn("border-radius: 8px", source)
+    def test_library_inspector_is_opaque(self):
+        source = (STATIC / "library-selection-polish.css").read_text(encoding="utf-8")
+        self.assertIn(".workspace-inspector {\n  background: #0d1218;", source)
+        self.assertIn(".library-inspector-selection-bar {", source)
+        self.assertIn("-webkit-backdrop-filter: none", source)
+        self.assertIn("backdrop-filter: none", source)
+
+    def test_sidebar_control_geometry_is_known_before_header_paint(self):
+        base = (TEMPLATES / "base.html").read_text(encoding="utf-8")
+        progress = (STATIC / "progress.css").read_text(encoding="utf-8")
+        navigation = (STATIC / "app-navigation.css").read_text(encoding="utf-8")
+        self.assertLess(base.index("progress.css"), base.index("header.css"))
+        self.assertIn("width: 28px !important", progress)
+        self.assertIn("height: 28px !important", progress)
+        self.assertIn("body.has-app-sidebar {\n    transition: none !important;", progress)
+        self.assertIn("rotate(180deg) !important", progress)
+        self.assertNotIn("width: 34px;", navigation)
+        self.assertNotIn("left: 12px;", navigation)
 
     def test_review_overflow_button_uses_canonical_centered_menu_control(self):
         action_menu = (STATIC / "action-menu.css").read_text(encoding="utf-8")
