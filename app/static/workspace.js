@@ -29,6 +29,11 @@
   };
 
   loadScript("workspace-core.js", "workspace-core");
-  ensureStyle("title-detail-ux.css", "title-detail-ux");
-  loadScript("title-detail-ux.js", "title-detail-ux");
+
+  // These files are sizeable and completely idle outside /titles/<id>. Avoid
+  // downloading and parsing them on Dashboard, Library, Review, Settings, etc.
+  if (document.querySelector(".media-dossier")) {
+    ensureStyle("title-detail-ux.css", "title-detail-ux");
+    loadScript("title-detail-ux.js", "title-detail-ux");
+  }
 })();
