@@ -90,24 +90,10 @@ def build_router(ctx: RouteContext):
             "250+" if activity_unread_count >= 250 else f"{activity_unread_count:,}"
         )
 
-        requested_layout = request.query_params.get("layout", "").strip().casefold()
-        stored_layout = getattr(request.state.user, "home_layout", "modern")
-        if requested_layout == "old":
-            home_template = "dashboard_old_test.html"
-            dashboard_layout = "old"
-        elif requested_layout == "classic" or (
-            not requested_layout and stored_layout == "classic"
-        ):
-            home_template = "dashboard_classic.html"
-            dashboard_layout = "classic"
-        else:
-            # During the 0.8 alpha comparison, the operational dashboard is the
-            # modern/default experience. The immediately previous design stays
-            # available through ?layout=old for side-by-side usefulness testing.
-            home_template = "dashboard_command.html"
-            dashboard_layout = "new"
-
-        return templates.TemplateResponse(request, home_template, {
+        # The 0.8 operational dashboard is now the single supported Home surface.
+        # Historical layout query parameters and stored layout preferences are
+        # intentionally ignored so old bookmarks cannot resurrect retired previews.
+        return templates.TemplateResponse(request, "dashboard_command.html", {
             "counts": counts,
             "roots": roots,
             "recent": recent,
@@ -119,7 +105,6 @@ def build_router(ctx: RouteContext):
             "activity_unread": activity_unread,
             "activity_unread_count": activity_unread_count,
             "activity_unread_display": activity_unread_display,
-            "dashboard_layout": dashboard_layout,
             "message": request.query_params.get("message", ""),
         })
 
