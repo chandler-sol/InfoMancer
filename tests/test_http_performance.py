@@ -40,13 +40,14 @@ class HttpPerformanceTests(unittest.TestCase):
         self.assertIn("}, 120);", source)
         self.assertIn("showPendingSoon();", source)
 
-    def test_navigation_reserves_scrollbar_space(self):
+    def test_navigation_reserves_scrollbar_space_and_compact_icons_stay_centered(self):
         source = (Path(__file__).resolve().parents[1] / "app/static/app-navigation.css").read_text(
             encoding="utf-8"
         )
         self.assertIn("scrollbar-gutter: stable", source)
         self.assertIn("sidebar-collapsed .brand .workspace-nav-alpha", source)
-        self.assertIn("display:none !important", source)
+        self.assertIn("sidebar-collapsed .site-menu-panel a > .menu-count", source)
+        self.assertIn("display:none", source)
 
     def test_system_navigation_sticks_below_topbar_and_uses_eased_offsets(self):
         styles = (Path(__file__).resolve().parents[1] / "app/static/settings-system-nav.css").read_text(
@@ -61,8 +62,11 @@ class HttpPerformanceTests(unittest.TestCase):
         self.assertIn("position: sticky", styles)
         self.assertIn("top: 80px", styles)
         self.assertIn("scroll-margin-top: 158px", styles)
+        self.assertIn("#logging .logging-options", styles)
+        self.assertIn("input:checked + span", styles)
         self.assertIn("easeInOutCubic", script)
         self.assertIn("chromeOffset()", script)
+        self.assertIn("Math.min(850, Math.max(430", script)
         self.assertIn("history.pushState", script)
         self.assertIn("settings-system-nav.css", workspace)
         self.assertIn("settings-system-nav.js", workspace)
@@ -113,6 +117,32 @@ class HttpPerformanceTests(unittest.TestCase):
         )
         self.assertNotIn(b"<html>", covers)
         self.assertNotIn(b"before", listing)
+
+    def test_library_selection_actions_share_the_display_toolbar_and_sticky_row(self):
+        script = (Path(__file__).resolve().parents[1] / "app/static/library-selection-toolbar.js").read_text(
+            encoding="utf-8"
+        )
+        styles = (Path(__file__).resolve().parents[1] / "app/static/library-selection-toolbar.css").read_text(
+            encoding="utf-8"
+        )
+        workspace = (Path(__file__).resolve().parents[1] / "app/static/workspace-ui.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("toolbar.insertBefore(actions, viewToolbar)", script)
+        self.assertIn("has-selection-actions", script)
+        self.assertIn("grid-template-columns: minmax(120px, 1fr) auto minmax(280px, 1fr)", styles)
+        self.assertIn("position: sticky", styles)
+        self.assertIn("library-selection-toolbar.css", workspace)
+        self.assertIn("library-selection-toolbar.js", workspace)
+
+    def test_canonical_action_menu_glyph_is_absolutely_centered(self):
+        styles = (Path(__file__).resolve().parents[1] / "app/static/action-menu.css").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("position: relative", styles)
+        self.assertIn("top: 50%", styles)
+        self.assertIn("left: 50%", styles)
+        self.assertIn("transform: translate(-50%, -50%)", styles)
 
     def test_task_failure_checks_back_off_when_idle_or_hidden(self):
         source = (Path(__file__).resolve().parents[1] / "app/static/task-widget.js").read_text(
