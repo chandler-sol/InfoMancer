@@ -2,6 +2,38 @@
   const current = document.currentScript;
   const version = current?.src ? new URL(current.src).search : "";
 
+  /* The account rail used to rely on a text glyph plus page-specific background
+     image overrides. Desktop sidebar CSS uses a background shorthand on the avatar
+     circle, which can legitimately wipe out those background images. Render the
+     canonical avatar endpoint as a real child image instead. It works for initials,
+     built-in glyphs, and uploaded icons because the endpoint already owns all three
+     representations. Keep the server-rendered symbol in place until the image has
+     actually loaded so this fails visibly rather than becoming an empty circle. */
+  const accountAvatar = document.querySelector(".account-avatar");
+  if (accountAvatar) {
+    const fallback = accountAvatar.textContent.trim() || "?";
+    const avatarImage = document.createElement("img");
+    avatarImage.className = "account-avatar-image";
+    avatarImage.alt = "";
+    avatarImage.decoding = "async";
+    avatarImage.src = `/account/avatar/current?v=${Date.now()}`;
+    avatarImage.style.width = "100%";
+    avatarImage.style.height = "100%";
+    avatarImage.style.display = "block";
+    avatarImage.style.objectFit = "cover";
+    avatarImage.style.borderRadius = "inherit";
+    avatarImage.addEventListener("load", () => {
+      accountAvatar.style.removeProperty("background-image");
+      accountAvatar.replaceChildren(avatarImage);
+      accountAvatar.dataset.profileAvatarKind = "image";
+    }, {once: true});
+    avatarImage.addEventListener("error", () => {
+      accountAvatar.style.removeProperty("background-image");
+      delete accountAvatar.dataset.profileAvatarKind;
+      accountAvatar.textContent = fallback;
+    }, {once: true});
+  }
+
   /* Sidebar width/collapse state is restored synchronously by base.html. Keep the
      matching CSS transitions suppressed through the first stable paint, then turn
      them back on for actual user interaction. This prevents full-page navigation
