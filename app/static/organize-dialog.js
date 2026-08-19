@@ -154,13 +154,56 @@
     });
   };
 
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", async (event) => {
     const close = event.target.closest("[data-organize-close]");
     if (close && dialog.contains(close)) {
       event.preventDefault();
       closeDialog();
       return;
     }
+
+    const bulkFavorite = event.target.closest("[data-bulk-favorite-selected]");
+    if (bulkFavorite) {
+      event.preventDefault();
+      const form = bulkFavorite.closest("form");
+      const ids = [...new Set(
+        [...(form?.querySelectorAll('input[name="selected"]') || [])]
+          .map(input => input.value)
+          .filter(value => /^\d+$/.test(value)),
+      )];
+      if (ids.length < 2) return;
+      const status = form?.querySelector("[data-bulk-favorite-status]");
+      const original = bulkFavorite.textContent;
+      bulkFavorite.disabled = true;
+      bulkFavorite.textContent = "Adding…";
+      const requestBody = new FormData();
+      ids.forEach(id => requestBody.append("selected", id));
+      try {
+        const response = await fetch("/titles/favorite-bulk", {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+          body: requestBody,
+          headers: requestHeaders({
+            "Accept": "application/json",
+            "X-InfoMancer-Async": "1",
+          }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+        bulkFavorite.textContent = "Added to Favorites ✓";
+        if (status) status.textContent = data.detail || `Added ${ids.length} selected titles to Favorites.`;
+        document.dispatchEvent(new CustomEvent("infomancer:bulk-favorite-complete", {
+          detail: {titleIds: data.title_ids || ids, message: data.detail || "Favorites updated."},
+        }));
+      } catch (error) {
+        bulkFavorite.disabled = false;
+        bulkFavorite.textContent = original;
+        if (status) status.textContent = error.message || "Selected titles could not be added to Favorites.";
+      }
+      return;
+    }
+
     const move = event.target.closest("[data-sort-move]");
     if (move && dialog.contains(move)) {
       const row = move.closest("li");
