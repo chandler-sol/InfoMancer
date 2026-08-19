@@ -7,8 +7,10 @@
   const coverSurface = document.getElementById('cover-library');
   const state = document.getElementById('search-state');
   const responseCache = new Map();
+  const inflight = new Map();
   const cacheOrder = [];
   const MAX_CACHE = 10;
+  let jumpSerial = 0;
 
   const active = alphabet.querySelector('a.active');
   const currentLetter = active?.textContent?.trim() || 'All';
@@ -44,7 +46,10 @@
 
   const currentView = () => coverSurface && !coverSurface.hidden ? 'covers' : 'list';
 
-  const cacheKey = (href, view) => `${view}:${new URL(href, window.location.origin).pathname}${new URL(href, window.location.origin).search}`;
+  const cacheKey = (href, view) => {
+    const url = new URL(href, window.location.origin);
+    return `${view}:${url.pathname}${url.search}`;
+  };
 
   const rememberCache = (key, value) => {
     if (!responseCache.has(key)) cacheOrder.push(key);
@@ -57,7 +62,9 @@
 
   const fetchLetter = (href, view) => {
     const key = cacheKey(href, view);
-    if (responseCache.has(key)) return responseCache.get(key);
+    if (responseCache.has(key)) return Promise.resolve(responseCache.get(key));
+    if (inflight.has(key)) return inflight.get(key);
+
     const request = fetch(href, {
       credentials: 'same-origin',
       cache: 'no-store',
@@ -67,12 +74,12 @@
       },
     }).then(async response => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return response.text();
-    }).catch(error => {
-      responseCache.delete(key);
-      throw error;
-    });
-    rememberCache(key, request);
+      const html = await response.text();
+      rememberCache(key, html);
+      return html;
+    }).finally(() => inflight.delete(key));
+
+    inflight.set(key, request);
     return request;
   };
 
@@ -83,17 +90,33 @@
     summary.setAttribute('aria-label', `Jump to titles beginning with ${nextLetter}`);
   };
 
+  /* Avoid parsing the complete InfoMancer document just to replace one Library
+     surface. This follows the same fragment-first path as the lazy List/Covers
+     hydrator and noticeably reduces DOMParser work on large libraries. */
+  const extractSurface = (html, view) => {
+    const marker = view === 'covers'
+      ? '<section class="cover-library" id="cover-library"'
+      : '<section class="panel table-wrap library-table"';
+    const start = html.indexOf(marker);
+    if (start < 0) return null;
+    const end = html.indexOf('</section>', start);
+    if (end < 0) return null;
+    const template = document.createElement('template');
+    template.innerHTML = html.slice(start, end + '</section>'.length).trim();
+    return template.content.firstElementChild;
+  };
+
   const applyResponse = (html, href, view) => {
-    const fresh = new DOMParser().parseFromString(html, 'text/html');
+    const replacement = extractSurface(html, view);
+    if (!replacement) throw new Error('Library surface was not returned');
+
     if (view === 'covers') {
-      const replacement = fresh.getElementById('cover-library');
-      if (!replacement || !coverSurface) throw new Error('Cover surface was not returned');
+      if (!coverSurface) throw new Error('Cover surface is unavailable');
       coverSurface.replaceChildren(...replacement.childNodes);
       if (listSurface) listSurface.dataset.librarySurfacePlaceholder = 'list';
     } else {
-      const replacement = fresh.querySelector('.library-table');
-      const replacementHead = replacement?.querySelector('thead');
-      const replacementBody = replacement?.querySelector('tbody');
+      const replacementHead = replacement.querySelector('thead');
+      const replacementBody = replacement.querySelector('tbody');
       const currentTable = listSurface?.querySelector('table');
       const currentBody = currentTable?.querySelector('tbody');
       if (!replacementBody || !currentTable || !currentBody) throw new Error('List surface was not returned');
@@ -115,20 +138,26 @@
     const href = link.href;
     const view = currentView();
     const wasActive = link.classList.contains('active');
+    const serial = ++jumpSerial;
     setActiveLetter(link);
     menu.removeAttribute('open');
     if (wasActive) return;
 
     menu.classList.add('loading');
+    summary.setAttribute('aria-busy', 'true');
     if (state) state.textContent = 'Updating library…';
     try {
       const html = await fetchLetter(href, view);
+      if (serial !== jumpSerial) return;
       applyResponse(html, href, view);
       if (state) state.textContent = '';
     } catch (_error) {
-      window.location.assign(href);
+      if (serial === jumpSerial) window.location.assign(href);
     } finally {
-      menu.classList.remove('loading');
+      if (serial === jumpSerial) {
+        menu.classList.remove('loading');
+        summary.removeAttribute('aria-busy');
+      }
     }
   };
 
@@ -144,17 +173,23 @@
     if (!link || link.classList.contains('active')) return;
     fetchLetter(link.href, currentView()).catch(() => {});
   };
-  alphabet.addEventListener('pointerover', warmLetter);
+  alphabet.addEventListener('pointerover', warmLetter, {passive: true});
   alphabet.addEventListener('focusin', warmLetter);
 
-  document.addEventListener('click', event => {
+  document.addEventListener('pointerdown', event => {
     if (menu.open && !menu.contains(event.target)) menu.removeAttribute('open');
-  });
+  }, true);
 
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && menu.open) {
+      event.preventDefault();
       menu.removeAttribute('open');
       summary.focus();
     }
+  });
+
+  document.addEventListener('infomancer:before-navigate', () => {
+    jumpSerial += 1;
+    menu.removeAttribute('open');
   });
 })();
