@@ -2,13 +2,9 @@
   const current = document.currentScript;
   const version = current?.src ? new URL(current.src).search : "";
 
-  /* The account rail used to rely on a text glyph plus page-specific background
-     image overrides. Desktop sidebar CSS uses a background shorthand on the avatar
-     circle, which can legitimately wipe out those background images. Render the
-     canonical avatar endpoint as a real child image instead. It works for initials,
-     built-in glyphs, and uploaded icons because the endpoint already owns all three
-     representations. Keep the server-rendered symbol in place until the image has
-     actually loaded so this fails visibly rather than becoming an empty circle. */
+  /* The account rail uses the canonical avatar endpoint as a real image. Keep the
+     server-rendered symbol in place until the image has actually decoded so a slow
+     avatar request never produces an empty circle. */
   const accountAvatar = document.querySelector(".account-avatar");
   if (accountAvatar) {
     const fallback = accountAvatar.textContent.trim() || "?";
@@ -36,140 +32,117 @@
     }, {once: true});
   }
 
-  /* Sidebar width/collapse state is restored synchronously by base.html. Keep the
-     matching CSS transitions suppressed through the first stable paint, then turn
-     them back on for actual user interaction. This prevents full-page navigation
-     from looking like the application shell slides sideways into position. */
+  /* Sidebar geometry is restored synchronously by base.html. Wait through two stable
+     frames before enabling interaction-only motion so full page navigation cannot
+     replay a resize animation. */
   if (document.body?.classList.contains("has-app-sidebar")) {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       document.body.classList.add("sidebar-motion-ready");
     }));
   }
 
-  const styles = document.createElement("link");
-  styles.rel = "stylesheet";
-  styles.href = `/static/task-widget.css${version}`;
+  const assetUrl = (path) => `/static/${path}${version}`;
 
-  const navigationStyles = document.createElement("link");
-  navigationStyles.rel = "stylesheet";
-  navigationStyles.href = `/static/app-navigation.css${version}`;
+  const loadStyle = (path) => new Promise((resolve) => {
+    const href = assetUrl(path);
+    const existing = [...document.querySelectorAll('link[rel="stylesheet"]')]
+      .find(link => link.href === new URL(href, window.location.href).href);
+    if (existing) {
+      if (existing.sheet) resolve(existing);
+      else {
+        existing.addEventListener("load", () => resolve(existing), {once: true});
+        existing.addEventListener("error", () => resolve(existing), {once: true});
+      }
+      return;
+    }
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = href;
+    link.fetchPriority = "high";
+    link.addEventListener("load", () => resolve(link), {once: true});
+    link.addEventListener("error", () => resolve(link), {once: true});
+    document.head.append(link);
+  });
 
-  const actionMenuStyles = document.createElement("link");
-  actionMenuStyles.rel = "stylesheet";
-  actionMenuStyles.href = `/static/action-menu.css${version}`;
+  const loadScript = (path) => new Promise((resolve) => {
+    const src = assetUrl(path);
+    const absolute = new URL(src, window.location.href).href;
+    const existing = [...document.scripts].find(script => script.src === absolute);
+    if (existing) {
+      if (existing.dataset.infomancerLoaded === "1") resolve(existing);
+      else {
+        existing.addEventListener("load", () => resolve(existing), {once: true});
+        existing.addEventListener("error", () => resolve(existing), {once: true});
+      }
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = false;
+    script.addEventListener("load", () => {
+      script.dataset.infomancerLoaded = "1";
+      resolve(script);
+    }, {once: true});
+    script.addEventListener("error", () => resolve(script), {once: true});
+    document.head.append(script);
+  });
 
-  document.head.append(styles, navigationStyles, actionMenuStyles);
+  const loadScriptsSequentially = async (paths) => {
+    for (const path of paths) await loadScript(path);
+  };
 
-  const core = document.createElement("script");
-  core.src = `/static/workspace-ui-core.js${version}`;
-  core.async = false;
+  /* Start all applicable CSS requests immediately. Layout-affecting JavaScript is
+     intentionally held until its matching styles settle, which removes the race
+     where a controller rearranged a surface a frame before its CSS arrived. */
+  const globalStyles = Promise.all([
+    loadStyle("task-widget.css"),
+    loadStyle("app-navigation.css"),
+    loadStyle("action-menu.css"),
+  ]);
 
-  const tasks = document.createElement("script");
-  tasks.src = `/static/task-widget.js${version}`;
-  tasks.async = false;
+  const settingsSystem = Boolean(document.querySelector('.settings-jump-nav'));
+  const savedViews = Boolean(document.querySelector('.saved-view-bar') && document.querySelector('.catalog-tabs'));
+  const letterJump = Boolean(document.querySelector('.library-display-toolbar .alphabet'));
+  const library = Boolean(document.querySelector('.library-table') && document.getElementById('cover-library'));
+  const detail = Boolean(document.querySelector('.media-dossier'));
+  const review = Boolean(document.querySelector('.review-workspace'));
 
-  const navigation = document.createElement("script");
-  navigation.src = `/static/app-navigation.js${version}`;
-  navigation.async = false;
+  const settingsStyles = settingsSystem ? Promise.all([loadStyle("settings-system-nav.css")]) : Promise.resolve();
+  const savedViewStyles = savedViews ? Promise.all([loadStyle("library-saved-views-polish.css")]) : Promise.resolve();
+  const letterJumpStyles = letterJump ? Promise.all([loadStyle("library-letter-jump.css")]) : Promise.resolve();
+  const libraryStyles = library ? Promise.all([
+    loadStyle("library-performance.css"),
+    loadStyle("library-selection-polish.css"),
+    loadStyle("library-selection-toolbar.css"),
+  ]) : Promise.resolve();
+  const detailStyles = detail ? Promise.all([loadStyle("detail-page-polish.css")]) : Promise.resolve();
+  if (review) loadStyle("review-queue-polish.css");
 
-  document.head.append(core, tasks, navigation);
+  globalStyles.then(() => loadScriptsSequentially([
+    "workspace-ui-core.js",
+    "task-widget.js",
+    "app-navigation.js",
+  ]));
 
-  /* Settings polish now lives in settings.css and the nav labels are rendered
-     correctly by the server. Keeping those rules in the render-blocking stylesheet
-     prevents the Settings workspace from visibly reflowing after each page load. */
-
-  if (document.querySelector('.settings-jump-nav')) {
-    const systemNavStyles = document.createElement('link');
-    systemNavStyles.rel = 'stylesheet';
-    systemNavStyles.href = `/static/settings-system-nav.css${version}`;
-
-    const systemNav = document.createElement('script');
-    systemNav.src = `/static/settings-system-nav.js${version}`;
-    systemNav.async = false;
-
-    document.head.append(systemNavStyles, systemNav);
-  }
-
-  if (document.querySelector('.saved-view-bar') && document.querySelector('.catalog-tabs')) {
-    const savedViewStyles = document.createElement('link');
-    savedViewStyles.rel = 'stylesheet';
-    savedViewStyles.href = `/static/library-saved-views-polish.css${version}`;
-
-    const savedViewPolish = document.createElement('script');
-    savedViewPolish.src = `/static/library-saved-views-polish.js${version}`;
-    savedViewPolish.async = false;
-
-    document.head.append(savedViewStyles, savedViewPolish);
-  }
-
-  if (document.querySelector('.library-display-toolbar .alphabet')) {
-    const letterJumpStyles = document.createElement('link');
-    letterJumpStyles.rel = 'stylesheet';
-    letterJumpStyles.href = `/static/library-letter-jump.css${version}`;
-
-    const letterJump = document.createElement('script');
-    letterJump.src = `/static/library-letter-jump.js${version}`;
-    letterJump.async = false;
-
-    document.head.append(letterJumpStyles, letterJump);
-  }
-
-  if (document.querySelector('.library-table') && document.getElementById('cover-library')) {
-    const libraryStyles = document.createElement('link');
-    libraryStyles.rel = 'stylesheet';
-    libraryStyles.href = `/static/library-performance.css${version}`;
-
-    const librarySelectionStyles = document.createElement('link');
-    librarySelectionStyles.rel = 'stylesheet';
-    librarySelectionStyles.href = `/static/library-selection-polish.css${version}`;
-
-    const librarySelectionToolbarStyles = document.createElement('link');
-    librarySelectionToolbarStyles.rel = 'stylesheet';
-    librarySelectionToolbarStyles.href = `/static/library-selection-toolbar.css${version}`;
-
-    const librarySurface = document.createElement('script');
-    librarySurface.src = `/static/library-surface-lazy.js${version}`;
-    librarySurface.async = false;
-
-    const librarySelection = document.createElement('script');
-    librarySelection.src = `/static/library-selection-polish.js${version}`;
-    librarySelection.async = false;
-
-    const libraryInspectorLifecycle = document.createElement('script');
-    libraryInspectorLifecycle.src = `/static/library-inspector-lifecycle.js${version}`;
-    libraryInspectorLifecycle.async = false;
-
-    const librarySelectionToolbar = document.createElement('script');
-    librarySelectionToolbar.src = `/static/library-selection-toolbar.js${version}`;
-    librarySelectionToolbar.async = false;
-
-    document.head.append(
-      libraryStyles,
-      librarySelectionStyles,
-      librarySelectionToolbarStyles,
-      librarySurface,
-      librarySelection,
-      libraryInspectorLifecycle,
-      librarySelectionToolbar,
-    );
-  }
-
-  if (document.querySelector('.media-dossier')) {
-    const detailStyles = document.createElement('link');
-    detailStyles.rel = 'stylesheet';
-    detailStyles.href = `/static/detail-page-polish.css${version}`;
-
-    const detailPolish = document.createElement('script');
-    detailPolish.src = `/static/detail-page-polish.js${version}`;
-    detailPolish.async = false;
-
-    document.head.append(detailStyles, detailPolish);
-  }
-
-  if (document.querySelector('.review-workspace')) {
-    const reviewQueueStyles = document.createElement('link');
-    reviewQueueStyles.rel = 'stylesheet';
-    reviewQueueStyles.href = `/static/review-queue-polish.css${version}`;
-    document.head.append(reviewQueueStyles);
-  }
+  settingsStyles.then(() => {
+    if (settingsSystem) return loadScript("settings-system-nav.js");
+  });
+  savedViewStyles.then(() => {
+    if (savedViews) return loadScript("library-saved-views-polish.js");
+  });
+  letterJumpStyles.then(() => {
+    if (letterJump) return loadScript("library-letter-jump.js");
+  });
+  libraryStyles.then(() => {
+    if (!library) return;
+    return loadScriptsSequentially([
+      "library-surface-lazy.js",
+      "library-selection-polish.js",
+      "library-inspector-lifecycle.js",
+      "library-selection-toolbar.js",
+    ]);
+  });
+  detailStyles.then(() => {
+    if (detail) return loadScript("detail-page-polish.js");
+  });
 })();
