@@ -214,12 +214,72 @@ button:disabled {
   100% { box-shadow: 0 0 0 0 rgba(185, 245, 66, 0); }
 }
 
+/* The sidebar control is part of the application chrome, so its final geometry must
+   be known before header.css paints. Keep width changes out of the animation path:
+   they caused the old divider handle to flash first and triggered expensive layout
+   work on slower laptops. Only the chevron itself animates between directions. */
+@media (min-width: 981px) {
+  body.has-app-sidebar {
+    transition: none !important;
+  }
+
+  body.has-app-sidebar .brand {
+    padding-left: 52px !important;
+    transition: none !important;
+  }
+
+  body.has-app-sidebar .brand-lockup {
+    width: min(184px, calc(100% - 74px)) !important;
+    max-width: calc(100% - 74px) !important;
+  }
+
+  body.has-app-sidebar .site-menu {
+    transition: box-shadow .16s ease !important;
+  }
+
+  body.has-app-sidebar .sidebar-collapse-toggle {
+    top: 34px !important;
+    left: 9px !important;
+    width: 28px !important;
+    height: 28px !important;
+    border-radius: 7px !important;
+    transform: translateY(-50%) rotate(0deg) !important;
+    transition: color .14s ease, background .14s ease, border-color .14s ease,
+                transform .18s cubic-bezier(.22, 1, .36, 1) !important;
+  }
+
+  body.has-app-sidebar .sidebar-collapse-toggle svg {
+    width: 15px !important;
+    height: 15px !important;
+  }
+
+  body.has-app-sidebar.sidebar-collapsed .brand {
+    padding: 0 !important;
+  }
+
+  body.has-app-sidebar.sidebar-collapsed .brand-icon {
+    left: 40px !important;
+    width: 28px !important;
+    height: 28px !important;
+  }
+
+  body.has-app-sidebar.sidebar-collapsed .sidebar-collapse-toggle,
+  body.has-app-sidebar.sidebar-collapsed:has(.site-menu:hover) .sidebar-collapse-toggle,
+  body.has-app-sidebar.sidebar-collapsed:has(.site-menu:focus-within) .sidebar-collapse-toggle,
+  body.has-app-sidebar.sidebar-collapsed:has(.site-menu.tour-menu-open) .sidebar-collapse-toggle {
+    top: 34px !important;
+    left: 7px !important;
+    transform: translateY(-50%) rotate(180deg) !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .scan-track span,
   .task-track i,
   .task-dot { animation: none; }
   .scan-track span,
   .task-track i { width: 100%; }
+  body.has-app-sidebar .sidebar-collapse-toggle { transition: none !important; }
 }
 
 @media (max-width: 900px) {
