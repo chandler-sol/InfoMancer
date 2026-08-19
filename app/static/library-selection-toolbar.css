@@ -1,0 +1,82 @@
+/* Keep selection work on the same horizontal control plane as Jump to and the
+   List/Covers controls. Once a selection exists the whole control row becomes the
+   sticky Library command bar, so nothing has to jump between two vertical bands. */
+.library-display-toolbar.has-letter-jump.library-selection-toolbar-ready {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto minmax(280px, 1fr);
+  align-items: center;
+  gap: 16px;
+  flex-wrap: nowrap;
+}
+
+.library-display-toolbar.library-selection-toolbar-ready .letter-jump-menu {
+  justify-self: start;
+}
+
+.library-display-toolbar.library-selection-toolbar-ready .library-view-toolbar {
+  justify-self: end;
+}
+
+.library-display-toolbar.library-selection-toolbar-ready .library-selection-actions {
+  position: static;
+  top: auto;
+  z-index: auto;
+  justify-self: center;
+  width: auto;
+  max-width: min(720px, 100%);
+  min-height: 42px;
+  margin: 0;
+  padding: 5px 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.library-display-toolbar.library-selection-toolbar-ready.has-selection-actions {
+  position: sticky;
+  top: 76px;
+  z-index: 18;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(12, 17, 23, .97);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .28);
+  backdrop-filter: blur(12px);
+}
+
+.library-display-toolbar.library-selection-toolbar-ready.has-selection-actions .library-selection-actions {
+  border-color: #4c6b2d;
+  background: rgba(18, 24, 32, .96);
+}
+
+@media (max-width: 1180px) {
+  .library-display-toolbar.has-letter-jump.library-selection-toolbar-ready {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .library-display-toolbar.library-selection-toolbar-ready .library-selection-actions {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 900px) {
+  .library-display-toolbar.has-letter-jump.library-selection-toolbar-ready {
+    grid-template-columns: 1fr auto;
+  }
+  .library-display-toolbar.library-selection-toolbar-ready .library-selection-actions {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: stretch;
+    justify-content: flex-start;
+  }
+  .library-display-toolbar.library-selection-toolbar-ready .library-view-toolbar {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 680px) {
+  .library-display-toolbar.library-selection-toolbar-ready.has-selection-actions {
+    top: 70px;
+    padding: 5px;
+  }
+}
