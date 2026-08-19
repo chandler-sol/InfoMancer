@@ -16,6 +16,37 @@
     return headers;
   };
 
+  const submitFallback = (url, method = "GET", body = null) => {
+    if (String(method).toUpperCase() === "GET") {
+      window.location.assign(url);
+      return;
+    }
+    const form = document.createElement("form");
+    form.method = "post";
+    form.action = url;
+    form.hidden = true;
+    if (body instanceof FormData) {
+      for (const [name, value] of body.entries()) {
+        if (typeof value !== "string") continue;
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = name;
+        input.value = value;
+        form.append(input);
+      }
+    }
+    const token = csrfToken();
+    if (token && !form.querySelector('input[name="csrf_token"]')) {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "csrf_token";
+      input.value = token;
+      form.append(input);
+    }
+    document.body.append(form);
+    form.submit();
+  };
+
   const sortRows = () => [...body.querySelectorAll("[data-sort-title-order] li")];
   const captureSortRowPositions = () => new Map(
     sortRows().map((row) => [row, row.getBoundingClientRect()]),
@@ -29,7 +60,9 @@
       if (!previous) return;
       const x = previous.left - current.left;
       const y = previous.top - current.top;
-      if (Math.abs(x) < 1 && Math.abs(y) < 1) return;
+      if (Math.abs(x) < 1 || Math.abs(y) < 1) {
+        if (Math.abs(x) < 1 && Math.abs(y) < 1) return;
+      }
       sortRowAnimations.get(row)?.cancel();
       const animation = row.animate(
         [
@@ -80,12 +113,12 @@
     dialog.classList.remove("title-workflow-dialog");
     dialog.classList.add("loading");
     if (!dialog.open) dialog.showModal();
+    const method = String(options.method || "GET").toUpperCase();
     try {
       const parsedUrl = new URL(url, window.location.href);
       if (parsedUrl.origin !== window.location.origin || !dialogPath.test(parsedUrl.pathname)) {
         throw new Error("Unsupported dialog destination");
       }
-      const method = String(options.method || "GET").toUpperCase();
       const response = await fetch(parsedUrl.href, {
         method,
         body: method === "GET" ? undefined : options.body,
@@ -93,9 +126,13 @@
         cache: "no-store",
         headers: requestHeaders({"X-Requested-With": "InfoMancerDialog"}),
       });
-      if (!response.ok || !(await renderResponse(response))) window.location.assign(parsedUrl.href);
+      if (!response.ok || !(await renderResponse(response))) {
+        closeDialog();
+        submitFallback(parsedUrl.href, method, options.body);
+      }
     } catch (_) {
-      window.location.assign(url);
+      closeDialog();
+      submitFallback(url, method, options.body);
     }
   };
 
