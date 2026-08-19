@@ -195,26 +195,70 @@ body.has-app-sidebar main.shell > .missing-panel {
   color: var(--danger);
 }
 
-/* Keep title media facts as one deliberate rail. Ten current facts fit the normal
-   dossier width; narrower viewports scroll the rail instead of kicking Container or
-   Range onto a visually orphaned second row. */
+/* Source/status/count/runtime now live in the hero. This strip is strictly media
+   quality and stays scroll-free: six current facts fit one desktop row, then wrap
+   responsively only when the viewport genuinely cannot support them. */
 body.has-app-sidebar .media-dossier .detail-technical-rail dl,
 body.has-app-sidebar .media-dossier .detail-technical-rail.media-live-facts dl {
-  display: flex !important;
+  display: grid !important;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   align-items: stretch;
   gap: 8px;
   margin: 0;
-  padding: 0 0 2px;
-  overflow-x: auto !important;
-  overflow-y: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: #344351 transparent;
+  padding: 0;
+  overflow: visible !important;
 }
 body.has-app-sidebar .media-dossier .detail-technical-rail dl > div,
 body.has-app-sidebar .media-dossier .detail-technical-rail.media-live-facts dl > div {
-  flex: 1 0 130px;
   width: auto !important;
-  min-width: 130px;
+  min-width: 0 !important;
+}
+
+/* Catalog facts use the generous title column rather than competing with encoding
+   details. They intentionally read as plain typography rather than more pills. */
+body.has-app-sidebar .media-dossier .detail-hero-catalog-facts {
+  display: grid;
+  gap: 4px;
+  margin: -4px 0 9px;
+  color: var(--muted);
+}
+body.has-app-sidebar .media-dossier .detail-hero-catalog-facts[hidden] {
+  display: none;
+}
+body.has-app-sidebar .media-dossier .detail-hero-catalog-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+body.has-app-sidebar .media-dossier .detail-hero-catalog-line > span + span::before {
+  content: "·";
+  margin: 0 8px;
+  color: #5f7182;
+}
+body.has-app-sidebar .media-dossier .detail-hero-source-line {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  color: #9eacba;
+  font-size: 12px;
+  line-height: 1.35;
+}
+body.has-app-sidebar .media-dossier .detail-hero-source-line small {
+  color: #728394;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+}
+body.has-app-sidebar .media-dossier .detail-hero-source-line span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The artwork column is part of the hero card, so let the poster consume its full
@@ -303,6 +347,13 @@ body.has-app-sidebar .media-dossier .detail-copy .title-quick-actions {
   line-height: 1;
 }
 
+@media (max-width: 1100px) {
+  body.has-app-sidebar .media-dossier .detail-technical-rail dl,
+  body.has-app-sidebar .media-dossier .detail-technical-rail.media-live-facts dl {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 760px) {
   body.has-app-sidebar .media-dossier .season-tools-row {
     align-items: stretch;
@@ -346,5 +397,12 @@ body.has-app-sidebar .media-dossier .detail-copy .title-quick-actions {
   }
   .organize-dialog.title-workflow-dialog .organize-dialog-body > .page-head:first-child {
     padding-right: 54px;
+  }
+}
+
+@media (max-width: 620px) {
+  body.has-app-sidebar .media-dossier .detail-technical-rail dl,
+  body.has-app-sidebar .media-dossier .detail-technical-rail.media-live-facts dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
