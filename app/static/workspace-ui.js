@@ -44,6 +44,18 @@
      correctly by the server. Keeping those rules in the render-blocking stylesheet
      prevents the Settings workspace from visibly reflowing after each page load. */
 
+  if (document.querySelector('.settings-jump-nav')) {
+    const systemNavStyles = document.createElement('link');
+    systemNavStyles.rel = 'stylesheet';
+    systemNavStyles.href = `/static/settings-system-nav.css${version}`;
+
+    const systemNav = document.createElement('script');
+    systemNav.src = `/static/settings-system-nav.js${version}`;
+    systemNav.async = false;
+
+    document.head.append(systemNavStyles, systemNav);
+  }
+
   if (document.querySelector('.saved-view-bar') && document.querySelector('.catalog-tabs')) {
     const savedViewStyles = document.createElement('link');
     savedViewStyles.rel = 'stylesheet';
