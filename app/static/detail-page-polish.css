@@ -254,11 +254,28 @@ body.has-app-sidebar .media-dossier .detail-hero-source-line small {
   letter-spacing: .11em;
   text-transform: uppercase;
 }
-body.has-app-sidebar .media-dossier .detail-hero-source-line span {
+body.has-app-sidebar .media-dossier .detail-hero-source-line span,
+body.has-app-sidebar .media-dossier .detail-hero-source-line a {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+body.has-app-sidebar .media-dossier .detail-hero-source-line a {
+  color: var(--cyan);
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+body.has-app-sidebar .media-dossier .detail-hero-source-line a:hover,
+body.has-app-sidebar .media-dossier .detail-hero-source-line a:focus-visible {
+  color: var(--lime);
+  text-decoration: underline;
+}
+
+/* The old movie-row source pill is intentionally retired. Source is represented
+   once in the hero and links back to the Library filtered to that root. */
+body.has-app-sidebar .media-dossier .dossier-on-disk .file-source {
+  display: none !important;
 }
 
 /* The artwork column is part of the hero card, so let the poster consume its full
@@ -310,15 +327,31 @@ body.has-app-sidebar .media-dossier .detail-copy .title-quick-actions {
 
 /* Title workflows are full modal surfaces now. Give imported standalone content a
    real inner gutter and reserve the top-right corner for a geometrically centered
-   close control. */
+   close control. The shared body is reused across workflows, so never permit an old
+   horizontal scroll position or standalone-page width to push a later modal offscreen. */
 .organize-dialog.title-workflow-dialog .organize-dialog-body {
   padding: 30px 32px 34px !important;
+  overflow-x: hidden !important;
+}
+.organize-dialog.title-workflow-dialog .organize-dialog-body > * {
+  box-sizing: border-box;
+  max-width: 100% !important;
+}
+.organize-dialog.title-workflow-dialog .organize-dialog-body > .page-head,
+.organize-dialog.title-workflow-dialog .organize-dialog-body > .panel,
+.organize-dialog.title-workflow-dialog .organize-dialog-body > .results,
+.organize-dialog.title-workflow-dialog .organize-dialog-body > .rename-card {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  transform: none !important;
 }
 .organize-dialog.title-workflow-dialog .organize-dialog-body > .page-head:first-child {
   box-sizing: border-box;
   width: 100%;
   margin: 0 0 24px !important;
-  padding: 0 62px 0 0;
+  padding: 0 62px 0 0 !important;
   transform: none;
 }
 .organize-dialog.title-workflow-dialog .organize-dialog-body > .page-head:first-child > div {
@@ -328,6 +361,13 @@ body.has-app-sidebar .media-dossier .detail-copy .title-quick-actions {
 .organize-dialog.title-workflow-dialog .organize-dialog-body > .page-head:first-child h1,
 .organize-dialog.title-workflow-dialog .organize-dialog-body > .page-head:first-child p {
   margin-left: 0;
+}
+.organize-dialog.title-workflow-dialog .search,
+.organize-dialog.title-workflow-dialog .results,
+.organize-dialog.title-workflow-dialog .result,
+.organize-dialog.title-workflow-dialog .organize-title-form {
+  min-width: 0 !important;
+  max-width: 100% !important;
 }
 .organize-dialog.title-workflow-dialog .cover-picker {
   box-sizing: border-box;
@@ -392,17 +432,14 @@ body.has-app-sidebar .media-dossier .detail-copy .title-quick-actions {
     height: auto;
     min-height: 0;
   }
+  body.has-app-sidebar .media-dossier .detail-technical-rail dl,
+  body.has-app-sidebar .media-dossier .detail-technical-rail.media-live-facts dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .organize-dialog.title-workflow-dialog .organize-dialog-body {
     padding: 22px 18px 26px !important;
   }
   .organize-dialog.title-workflow-dialog .organize-dialog-body > .page-head:first-child {
-    padding-right: 54px;
-  }
-}
-
-@media (max-width: 620px) {
-  body.has-app-sidebar .media-dossier .detail-technical-rail dl,
-  body.has-app-sidebar .media-dossier .detail-technical-rail.media-live-facts dl {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-right: 54px !important;
   }
 }
