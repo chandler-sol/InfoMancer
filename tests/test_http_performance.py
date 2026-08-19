@@ -18,6 +18,15 @@ class HttpPerformanceTests(unittest.TestCase):
             "public, max-age=31536000, immutable",
         )
 
+    def test_unversioned_static_assets_keep_normal_validation_policy(self):
+        client = TestClient(main.app)
+        response = client.get("/static/infomancer-icon.svg")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotEqual(
+            response.headers.get("cache-control"),
+            "public, max-age=31536000, immutable",
+        )
+
     def test_navigation_progress_waits_before_showing(self):
         source = (Path(__file__).resolve().parents[1] / "app/static/app-navigation.js").read_text(
             encoding="utf-8"
