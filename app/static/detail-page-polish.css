@@ -195,6 +195,114 @@ body.has-app-sidebar main.shell > .missing-panel {
   color: var(--danger);
 }
 
+/* Keep title media facts as one deliberate rail. Ten current facts fit the normal
+   dossier width; narrower viewports scroll the rail instead of kicking Container or
+   Range onto a visually orphaned second row. */
+body.has-app-sidebar .media-dossier .detail-technical-rail dl,
+body.has-app-sidebar .media-dossier .detail-technical-rail.media-live-facts dl {
+  display: flex !important;
+  align-items: stretch;
+  gap: 8px;
+  margin: 0;
+  padding: 0 0 2px;
+  overflow-x: auto !important;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #344351 transparent;
+}
+body.has-app-sidebar .media-dossier .detail-technical-rail dl > div,
+body.has-app-sidebar .media-dossier .detail-technical-rail.media-live-facts dl > div {
+  flex: 1 0 130px;
+  width: auto !important;
+  min-width: 130px;
+}
+
+/* The artwork column is part of the hero card, so let the poster consume its full
+   vertical track instead of leaving an unexplained dark block under the image. */
+body.has-app-sidebar .media-dossier .detail-page-head .detail-poster-column {
+  display: flex;
+  align-self: stretch;
+  min-height: 100%;
+}
+body.has-app-sidebar .media-dossier .detail-page-head .detail-poster,
+body.has-app-sidebar .media-dossier .detail-page-head .detail-poster-placeholder {
+  align-self: stretch;
+  height: 100%;
+  min-height: 100%;
+  max-height: none;
+  object-fit: cover;
+}
+
+/* Align the text inside pill controls to the left edge used by the title/date text.
+   The pill border may hang slightly left, but its label now shares the typographic
+   axis instead of beginning one padding-width to the right. */
+body.has-app-sidebar .media-dossier .detail-copy .genre-list {
+  margin-left: -11px;
+}
+body.has-app-sidebar .media-dossier .detail-copy .detail-match-badge {
+  position: relative;
+  left: -10px;
+}
+body.has-app-sidebar .media-dossier .detail-copy .title-quick-actions {
+  margin-left: -11px;
+}
+
+/* Inspector artwork follows the same rule without distortion: its 120px width is
+   almost exactly a 2:3 poster at the normal summary height, and stretch closes the
+   small dead strip beneath shorter identity blocks. */
+.workspace-inspector-summary {
+  align-items: stretch;
+}
+.workspace-inspector-summary .workspace-inspector-art {
+  align-self: stretch;
+  width: 120px;
+  min-height: 100%;
+  aspect-ratio: auto;
+}
+.workspace-inspector-summary .workspace-inspector-art img {
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Title workflows are full modal surfaces now. Give imported standalone content a
+   real inner gutter and reserve the top-right corner for a geometrically centered
+   close control. */
+.organize-dialog.title-workflow-dialog .organize-dialog-body {
+  padding: 30px 32px 34px !important;
+}
+.organize-dialog.title-workflow-dialog .organize-dialog-body > .page-head:first-child {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0 0 24px !important;
+  padding: 0 62px 0 0;
+  transform: none;
+}
+.organize-dialog.title-workflow-dialog .organize-dialog-body > .page-head:first-child > div {
+  min-width: 0;
+  margin: 0;
+}
+.organize-dialog.title-workflow-dialog .organize-dialog-body > .page-head:first-child h1,
+.organize-dialog.title-workflow-dialog .organize-dialog-body > .page-head:first-child p {
+  margin-left: 0;
+}
+.organize-dialog.title-workflow-dialog .cover-picker {
+  box-sizing: border-box;
+  width: 100%;
+  margin-inline: 0;
+}
+.organize-dialog.title-workflow-dialog .organize-dialog-close {
+  top: 18px;
+  right: 18px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 29px;
+  line-height: 1;
+}
+
 @media (max-width: 760px) {
   body.has-app-sidebar .media-dossier .season-tools-row {
     align-items: stretch;
@@ -224,5 +332,19 @@ body.has-app-sidebar main.shell > .missing-panel {
   .detail-condensed-menu .series-submenu.open > .series-submenu-popover,
   .detail-condensed-menu .series-submenu:focus-within > .series-submenu-popover {
     display: block;
+  }
+  body.has-app-sidebar .media-dossier .detail-page-head .detail-poster-column {
+    min-height: 0;
+  }
+  body.has-app-sidebar .media-dossier .detail-page-head .detail-poster,
+  body.has-app-sidebar .media-dossier .detail-page-head .detail-poster-placeholder {
+    height: auto;
+    min-height: 0;
+  }
+  .organize-dialog.title-workflow-dialog .organize-dialog-body {
+    padding: 22px 18px 26px !important;
+  }
+  .organize-dialog.title-workflow-dialog .organize-dialog-body > .page-head:first-child {
+    padding-right: 54px;
   }
 }
