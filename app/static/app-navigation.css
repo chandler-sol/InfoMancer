@@ -1,3 +1,7 @@
+html {
+  scrollbar-gutter: stable;
+}
+
 html.app-navigation-pending::after {
   content:"";
   position:fixed;
