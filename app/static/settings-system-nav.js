@@ -43,7 +43,9 @@
       return;
     }
 
-    const duration = Math.min(720, Math.max(360, 360 + Math.abs(distance) * .12));
+    /* Keep the same ease-in/ease-out shape, but give the motion a little more
+       breathing room so longer System jumps feel intentional instead of hurried. */
+    const duration = Math.min(850, Math.max(430, 430 + Math.abs(distance) * .14));
     const started = performance.now();
     const step = (now) => {
       const progress = Math.min(1, (now - started) / duration);
