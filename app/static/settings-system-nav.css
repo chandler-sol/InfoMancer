@@ -1,0 +1,50 @@
+/* Persistent local navigation for the long System Settings page. The application
+   topbar occupies 68px on desktop, so the jump bar must stick below that chrome,
+   not underneath it. */
+body .settings-jump-nav {
+  position: sticky;
+  top: 80px;
+  z-index: 34;
+  align-self: start;
+  margin-top: 0;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(13,19,25,.97);
+  box-shadow: 0 12px 30px rgba(0,0,0,.24);
+  backdrop-filter: blur(14px);
+}
+
+body .settings-jump-nav a {
+  border-color: transparent;
+  border-radius: 5px;
+}
+
+body .settings-jump-nav a.active,
+body .settings-jump-nav a[aria-current="location"] {
+  border-color: #435e2b;
+  background: #162014;
+  color: var(--lime);
+}
+
+/* CSS fallback for direct hash navigation. The JavaScript controller computes the
+   exact current topbar + sticky-nav height, but this keeps targets sensible even if
+   scripting is unavailable. */
+body :is(#storage,#fingerprints,#safety,#backups,#updates,#media-information,#logging,#service) {
+  scroll-margin-top: 158px;
+}
+
+@media(max-width:980px) {
+  body .settings-jump-nav {
+    top: 74px;
+  }
+  body :is(#storage,#fingerprints,#safety,#backups,#updates,#media-information,#logging,#service) {
+    scroll-margin-top: 144px;
+  }
+}
+
+@media(max-width:760px) {
+  body .settings-jump-nav {
+    top: calc(70px + env(safe-area-inset-top));
+  }
+}
