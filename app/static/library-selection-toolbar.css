@@ -101,6 +101,25 @@ body:not(.library-multi-selection) .library-display-toolbar.library-selection-to
   background: rgba(174,255,48,.07);
 }
 
+/* A missing poster used to remove an entire grid cell from the Sort Titles row,
+   shifting the title into the 42px artwork column and every control after it one
+   position to the left. Always render a poster slot and style the fallback like a
+   small piece of artwork so every row keeps identical geometry. */
+.sort-title-poster-placeholder {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 700;
+}
+.organize-dialog .sort-title-order li {
+  grid-template-columns: 40px 42px minmax(180px, 1fr) 76px 88px minmax(120px, auto) auto;
+}
+
 .library-display-toolbar.library-selection-toolbar-ready.has-selection-actions {
   position: sticky;
   top: 76px;
@@ -152,6 +171,9 @@ body:not(.library-multi-selection) .library-display-toolbar.library-selection-to
   }
   .library-display-toolbar.library-selection-toolbar-ready .library-view-toolbar {
     grid-column: 2;
+  }
+  .organize-dialog .sort-title-order li {
+    grid-template-columns: 40px 32px minmax(0,1fr) 68px 78px;
   }
 }
 
