@@ -273,13 +273,6 @@
     enhanceCast();
     condenseSeriesMenu();
     queueMediaFactLayout();
-
-    const dossier = document.querySelector(".media-dossier");
-    if (dossier) {
-      new MutationObserver((mutations) => {
-        if (mutations.some((mutation) => mutation.type === "childList")) queueMediaFactLayout();
-      }).observe(dossier, {childList: true, subtree: true});
-    }
     window.addEventListener("infomancer:title-detail-updated", queueMediaFactLayout);
     window.addEventListener("infomancer:title-media-updated", queueMediaFactLayout);
   });
