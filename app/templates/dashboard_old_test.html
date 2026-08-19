@@ -1,9 +1,0 @@
-{% extends "dashboard.html" %}
-{% block content %}
-<link rel="stylesheet" href="{{ url_for('static', path='dashboard-command.css') }}?v={{ app_version }}">
-<div class="home-compare-switch" aria-label="Dashboard layout preview">
-  <span><b>Compare</b> Current dashboard</span>
-  <a href="/?layout=new">Return to operational layout</a>
-</div>
-{{ super() }}
-{% endblock %}
