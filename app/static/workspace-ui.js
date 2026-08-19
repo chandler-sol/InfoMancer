@@ -2,6 +2,16 @@
   const current = document.currentScript;
   const version = current?.src ? new URL(current.src).search : "";
 
+  /* Sidebar width/collapse state is restored synchronously by base.html. Keep the
+     matching CSS transitions suppressed through the first stable paint, then turn
+     them back on for actual user interaction. This prevents full-page navigation
+     from looking like the application shell slides sideways into position. */
+  if (document.body?.classList.contains("has-app-sidebar")) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.body.classList.add("sidebar-motion-ready");
+    }));
+  }
+
   const styles = document.createElement("link");
   styles.rel = "stylesheet";
   styles.href = `/static/task-widget.css${version}`;
