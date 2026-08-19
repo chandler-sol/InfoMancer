@@ -36,12 +36,18 @@
   to { transform: rotate(360deg); }
 }
 
-/* Keep fixed-size cover columns centered instead of stretching the leftover
-   viewport width into uneven outer space. The cover-size slider still controls
-   card width; only the row's placement and inter-card rhythm change. */
+/* Cover size is a density target, not a hard card width. Auto-fill keeps the same
+   number of tracks on incomplete rows while 1fr distributes only the leftover row
+   width across those tracks. The first and last tracks therefore share the page
+   axes with the controls above instead of dumping spare space into an outer gutter. */
 #cover-library.cover-library {
-  justify-content: center;
-  column-gap: clamp(18px, 2vw, 32px);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--cover-size)), 1fr));
+  justify-content: stretch;
+  column-gap: clamp(12px, 1.15vw, 18px);
+}
+#cover-library.cover-library > .cover-card {
+  width: 100%;
+  max-width: none;
 }
 
 /* Cover cards are independent visual units. Off-screen cards do not need layout or
