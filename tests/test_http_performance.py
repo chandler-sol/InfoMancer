@@ -45,6 +45,27 @@ class HttpPerformanceTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("scrollbar-gutter: stable", source)
+        self.assertIn("sidebar-collapsed .brand .workspace-nav-alpha", source)
+        self.assertIn("display:none !important", source)
+
+    def test_system_navigation_sticks_below_topbar_and_uses_eased_offsets(self):
+        styles = (Path(__file__).resolve().parents[1] / "app/static/settings-system-nav.css").read_text(
+            encoding="utf-8"
+        )
+        script = (Path(__file__).resolve().parents[1] / "app/static/settings-system-nav.js").read_text(
+            encoding="utf-8"
+        )
+        workspace = (Path(__file__).resolve().parents[1] / "app/static/workspace-ui.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("position: sticky", styles)
+        self.assertIn("top: 80px", styles)
+        self.assertIn("scroll-margin-top: 158px", styles)
+        self.assertIn("easeInOutCubic", script)
+        self.assertIn("chromeOffset()", script)
+        self.assertIn("history.pushState", script)
+        self.assertIn("settings-system-nav.css", workspace)
+        self.assertIn("settings-system-nav.js", workspace)
 
     def test_settings_polish_is_part_of_initial_css_not_late_workspace_loading(self):
         settings = (Path(__file__).resolve().parents[1] / "app/static/settings.css").read_text(
