@@ -32,21 +32,13 @@
     }, {once: true});
   }
 
-  /* Sidebar geometry is restored synchronously by base.html. Wait through two stable
-     frames before enabling interaction-only motion so full page navigation cannot
-     replay a resize animation. */
-  if (document.body?.classList.contains("has-app-sidebar")) {
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      document.body.classList.add("sidebar-motion-ready");
-    }));
-  }
-
   const assetUrl = (path) => `/static/${path}${version}`;
 
   const loadStyle = (path) => new Promise((resolve) => {
     const href = assetUrl(path);
+    const absolute = new URL(href, window.location.href).href;
     const existing = [...document.querySelectorAll('link[rel="stylesheet"]')]
-      .find(link => link.href === new URL(href, window.location.href).href);
+      .find(link => link.href === absolute);
     if (existing) {
       if (existing.sheet) resolve(existing);
       else {
@@ -116,7 +108,17 @@
     loadStyle("library-selection-toolbar.css"),
   ]) : Promise.resolve();
   const detailStyles = detail ? Promise.all([loadStyle("detail-page-polish.css")]) : Promise.resolve();
-  if (review) loadStyle("review-queue-polish.css");
+  const reviewStyles = review ? Promise.all([loadStyle("review-queue-polish.css")]) : Promise.resolve();
+
+  /* Sidebar geometry is restored synchronously by base.html. Do not turn motion
+     back on until the navigation/action chrome CSS has actually settled. On slower
+     machines this prevents the final sidebar rules from arriving after animation
+     has already been enabled and replaying a visible correction. */
+  if (document.body?.classList.contains("has-app-sidebar")) {
+    globalStyles.then(() => requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.body.classList.add("sidebar-motion-ready");
+    })));
+  }
 
   globalStyles.then(() => loadScriptsSequentially([
     "workspace-ui-core.js",
@@ -145,4 +147,5 @@
   detailStyles.then(() => {
     if (detail) return loadScript("detail-page-polish.js");
   });
+  reviewStyles.then(() => undefined);
 })();
