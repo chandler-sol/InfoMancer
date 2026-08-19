@@ -23,11 +23,13 @@
     avatarImage.style.objectFit = "cover";
     avatarImage.style.borderRadius = "inherit";
     avatarImage.addEventListener("load", () => {
+      if (accountAvatar.dataset.profileAvatarPreview === "1") return;
       accountAvatar.style.removeProperty("background-image");
       accountAvatar.replaceChildren(avatarImage);
       accountAvatar.dataset.profileAvatarKind = "image";
     }, {once: true});
     avatarImage.addEventListener("error", () => {
+      if (accountAvatar.dataset.profileAvatarPreview === "1") return;
       accountAvatar.style.removeProperty("background-image");
       delete accountAvatar.dataset.profileAvatarKind;
       accountAvatar.textContent = fallback;
