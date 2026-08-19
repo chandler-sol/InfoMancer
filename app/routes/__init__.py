@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .performance import build_router as build_performance_router
 from .system import build_router as build_system_router
 from .operations import build_router as build_operations_router
 from .dashboard import build_router as build_dashboard_router
@@ -16,6 +17,7 @@ from .title_metadata_async import build_router as build_title_metadata_async_rou
 from .titles import build_router as build_titles_router
 
 ROUTER_BUILDERS = (
+    build_performance_router,
     build_system_router,
     build_operations_router,
     build_dashboard_router,
