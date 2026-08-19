@@ -60,7 +60,9 @@ class UiPolishRegressionTests(unittest.TestCase):
     def test_library_bulk_bar_starts_at_two_and_stays_single_line_on_desktop(self):
         script = (STATIC / "library-selection-toolbar.js").read_text(encoding="utf-8")
         styles = (STATIC / "library-selection-toolbar.css").read_text(encoding="utf-8")
-        self.assertIn("actions.hidden = count < 2", script)
+        self.assertIn("const shouldHide = count < 2", script)
+        self.assertIn("if (actions.hidden !== shouldHide) actions.hidden = shouldHide", script)
+        self.assertNotIn("new MutationObserver(sync).observe(actions", script)
         self.assertIn("library-multi-selection", styles)
         self.assertIn("flex-wrap: nowrap", styles)
         self.assertIn("white-space: nowrap", styles)
