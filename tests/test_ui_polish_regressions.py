@@ -78,8 +78,11 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn("white-space: nowrap", styles)
         self.assertIn("library-bulk-separator", styles)
 
-    def test_library_bulk_bar_exposes_compare_and_groups_match(self):
+    def test_library_bulk_bar_exposes_favorite_compare_and_grouped_match(self):
         toolbar = (STATIC / "library-selection-toolbar.js").read_text(encoding="utf-8")
+        styles = (STATIC / "library-selection-toolbar.css").read_text(encoding="utf-8")
+        self.assertIn("workspace-inspector-favorite library-bulk-favorite", toolbar)
+        self.assertIn("fetch('/titles/favorite-bulk'", toolbar)
         self.assertIn("compareButton.textContent = 'Compare'", toolbar)
         self.assertIn("infomancer:library-compare-selected", toolbar)
         self.assertIn("matchSummary.textContent = 'Match'", toolbar)
@@ -87,7 +90,16 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn("TV Shows (${shows.length})", toolbar)
         self.assertIn("Sort Titles", toolbar)
         self.assertIn("Refresh Metadata", toolbar)
-        self.assertNotIn("favoriteButton", toolbar)
+        self.assertIn(".library-bulk-favorite", styles)
+
+    def test_library_cover_grid_shares_left_axis_and_captions_are_inset(self):
+        styles = (STATIC / "library-selection-toolbar.css").read_text(encoding="utf-8")
+        self.assertIn("#cover-library.cover-library", styles)
+        self.assertIn("justify-content: flex-start !important", styles)
+        self.assertIn("#cover-library .cover-card-link > strong", styles)
+        self.assertIn("padding: 8px 8px 0", styles)
+        self.assertIn("#cover-library .cover-card-meta", styles)
+        self.assertIn("padding: 3px 8px 8px", styles)
 
     def test_library_bulk_organize_is_modal_and_retains_bulk_favorites(self):
         toolbar = (STATIC / "library-selection-toolbar.js").read_text(encoding="utf-8")
