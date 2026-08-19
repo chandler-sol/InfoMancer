@@ -31,9 +31,14 @@
   const sync = () => {
     const count = selectionCount();
     /* A single selection already has the Inspector and normal title actions. The
-       command bar is specifically the bulk-action surface, so it starts at two. */
-    actions.hidden = count < 2;
-    toolbar.classList.toggle('has-selection-actions', count >= 2);
+       command bar is specifically the bulk-action surface, so it starts at two.
+       Only mutate the hidden attribute when its value actually changes. The prior
+       MutationObserver watched this same attribute and then rewrote it from inside
+       its own callback, which could create an endless microtask loop and freeze the
+       entire Library page. */
+    const shouldHide = count < 2;
+    if (actions.hidden !== shouldHide) actions.hidden = shouldHide;
+    toolbar.classList.toggle('has-selection-actions', !shouldHide);
   };
 
   const markFavoriteInPlace = (titleId) => {
@@ -130,18 +135,15 @@
     if (status) status.textContent = event.detail?.message || 'Organization saved for selected titles.';
   });
 
-  /* The legacy Library controller owns the selection state and still toggles this
-     element for one title. Observe that result and immediately enforce the newer
-     bulk-only visibility rule without duplicating the selection model. */
-  new MutationObserver(sync).observe(actions, {
-    attributes: true,
-    attributeFilter: ['hidden'],
-  });
+  /* The Library's existing controller remains the source of truth for selection.
+     Reconcile after its normal selection events rather than observing and rewriting
+     the same DOM attribute, which keeps this helper passive and loop-free. */
   document.addEventListener('change', (event) => {
     if (event.target.matches('.library-title-choice, .letter-title-choice, #select-all-titles')) {
       queueMicrotask(sync);
     }
   });
   document.addEventListener('infomancer:library-results-updated', () => queueMicrotask(sync));
+  document.addEventListener('infomancer:library-selection-updated', () => queueMicrotask(sync));
   sync();
 })();
