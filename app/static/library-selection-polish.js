@@ -42,6 +42,11 @@
   let syntheticInspect = false;
   let inspectorDismissed = false;
 
+  const dismissInspectorForBulkSelection = () => {
+    if (!document.body.classList.contains('workspace-inspector-open')) return;
+    inspector?.querySelector('.workspace-inspector-close')?.click();
+  };
+
   const inspectTitle = (titleId, {explicit = true} = {}) => {
     if (!explicit && inspectorDismissed) return;
     const item = itemForTitle(titleId);
@@ -76,15 +81,9 @@
     select.setAttribute('aria-label', 'Choose a selected title to inspect');
     chooser.append(chooserLabel, select);
 
-    const compare = document.createElement('button');
-    compare.type = 'button';
-    compare.className = 'button library-selection-compare';
-    compare.textContent = 'Compare';
-
     select.addEventListener('change', () => inspectTitle(select.value, {explicit: true}));
-    compare.addEventListener('click', () => openCompareDialog());
 
-    bar.append(meta, chooser, compare);
+    bar.append(meta, chooser);
     head.after(bar);
     return bar;
   };
@@ -259,7 +258,6 @@
     document.body.classList.toggle('library-has-selection', entries.length > 0);
     document.body.classList.toggle('library-multi-selection', entries.length > 1);
 
-    const current = inspectedTitleId();
     if (entries.length === 0) {
       inspectorDismissed = false;
       const bar = inspector?.querySelector('.library-inspector-selection-bar');
@@ -269,20 +267,17 @@
       return;
     }
 
-    if ((!current || !ids.has(current)) && !inspectorDismissed) {
-      inspectTitle(entries[0].id, {explicit: false});
-    }
-
+    /* Selection and inspection are deliberately separate. Checking titles should
+       never steal Library width by opening the Inspector. The Inspector is shown
+       only after an explicit poster/title click. */
     const bar = ensureInspectorSelectionBar();
     if (!bar) return;
-    bar.hidden = false;
+    bar.hidden = entries.length < 2;
     const count = bar.querySelector('.library-inspector-selection-count');
     const chooser = bar.querySelector('.library-inspector-selection-chooser');
     const select = chooser.querySelector('select');
-    const compare = bar.querySelector('.library-selection-compare');
     count.textContent = `${entries.length} selected`;
     chooser.hidden = entries.length < 2;
-    compare.hidden = entries.length < 2;
 
     select.replaceChildren();
     entries.forEach(entry => {
@@ -324,6 +319,7 @@
     if (entries.length > 1 && !isSelected) {
       event.preventDefault();
       event.stopImmediatePropagation();
+      dismissInspectorForBulkSelection();
       setTitleChecked(titleId, true);
       queueSync();
       return;
@@ -350,6 +346,7 @@
 
   document.addEventListener('change', (event) => {
     if (!event.target.matches('.library-title-choice')) return;
+    if (event.target.checked && selectedEntries().length > 1) dismissInspectorForBulkSelection();
     queueSync();
   });
 
@@ -361,6 +358,8 @@
     factCache.clear();
     queueSync();
   });
+
+  document.addEventListener('infomancer:library-compare-selected', () => openCompareDialog());
 
   /* Closing the Inspector is an explicit user preference for the current selection.
      Keep the selection checked, but do not auto-open the drawer again until a title
