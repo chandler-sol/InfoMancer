@@ -1,11 +1,11 @@
-/* Keep selection work on the same horizontal control plane as Jump to and the
-   List/Covers controls. Once a selection exists the whole control row becomes the
-   sticky Library command bar, so nothing has to jump between two vertical bands. */
+/* Keep bulk work on the same horizontal control plane as Jump to and the
+   List/Covers controls. A single selection uses the Inspector only; this command
+   surface appears once two or more titles are selected. */
 .library-display-toolbar.has-letter-jump.library-selection-toolbar-ready {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) auto minmax(280px, 1fr);
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr) minmax(260px, auto);
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   flex-wrap: nowrap;
 }
 
@@ -22,15 +22,22 @@
   top: auto;
   z-index: auto;
   justify-self: center;
-  width: auto;
-  max-width: min(720px, 100%);
+  width: max-content;
+  max-width: 100%;
   min-height: 42px;
   margin: 0;
   padding: 5px 8px;
   justify-content: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  gap: 8px;
+  white-space: nowrap;
   border-radius: 6px;
   box-shadow: none;
+}
+
+.library-display-toolbar.library-selection-toolbar-ready .library-selection-actions .button {
+  min-height: 36px;
+  padding-inline: 12px;
 }
 
 .library-display-toolbar.library-selection-toolbar-ready.has-selection-actions {
@@ -53,9 +60,17 @@
 @media (max-width: 1180px) {
   .library-display-toolbar.has-letter-jump.library-selection-toolbar-ready {
     grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 10px;
   }
   .library-display-toolbar.library-selection-toolbar-ready .library-selection-actions {
     max-width: 100%;
+  }
+  .library-display-toolbar.library-selection-toolbar-ready .library-selection-actions .button {
+    padding-inline: 9px;
+    font-size: 12px;
+  }
+  .library-display-toolbar.library-selection-toolbar-ready .selection-count {
+    font-size: 11px;
   }
 }
 
@@ -68,6 +83,10 @@
     grid-row: 2;
     justify-self: stretch;
     justify-content: flex-start;
+    width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
   }
   .library-display-toolbar.library-selection-toolbar-ready .library-view-toolbar {
     grid-column: 2;
