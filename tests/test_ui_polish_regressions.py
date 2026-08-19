@@ -50,6 +50,24 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn("width: 44px", styles)
         self.assertIn("height: 44px", styles)
 
+    def test_shared_dialog_shell_has_one_stable_scroll_axis(self):
+        critical = (STATIC / "progress.css").read_text(encoding="utf-8")
+        self.assertIn("width: min(1100px, calc(100vw - 40px)) !important", critical)
+        self.assertIn("overflow-x: hidden !important", critical)
+        self.assertIn("scrollbar-gutter: stable", critical)
+        self.assertIn(".organize-dialog-close::before", critical)
+        self.assertIn("font-size: 0 !important", critical)
+        self.assertIn("backdrop-filter: none !important", critical)
+
+    def test_shared_dialog_cancels_stale_fetches_and_double_submits(self):
+        source = (STATIC / "organize-dialog.js").read_text(encoding="utf-8")
+        self.assertIn("new AbortController()", source)
+        self.assertIn("signal: request.controller.signal", source)
+        self.assertIn('error?.name === "AbortError"', source)
+        self.assertIn('form.dataset.submitting === "1"', source)
+        self.assertIn("requestSerial", source)
+        self.assertIn("heading?.focus({preventScroll: true})", source)
+
     def test_library_inspector_is_opaque(self):
         source = (STATIC / "library-selection-polish.css").read_text(encoding="utf-8")
         self.assertIn(".workspace-inspector {\n  background: #0d1218;", source)
@@ -77,6 +95,7 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn("flex-wrap: nowrap", styles)
         self.assertIn("white-space: nowrap", styles)
         self.assertIn("library-bulk-separator", styles)
+        self.assertIn("backdrop-filter: none", styles)
 
     def test_library_bulk_bar_exposes_favorite_compare_and_grouped_match(self):
         toolbar = (STATIC / "library-selection-toolbar.js").read_text(encoding="utf-8")
@@ -92,10 +111,15 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn("Refresh Metadata", toolbar)
         self.assertIn(".library-bulk-favorite", styles)
 
-    def test_library_cover_grid_shares_left_axis_and_captions_are_inset(self):
+    def test_library_cover_grid_fills_both_page_edges_and_captions_are_inset(self):
+        grid = (STATIC / "library-performance.css").read_text(encoding="utf-8")
         styles = (STATIC / "library-selection-toolbar.css").read_text(encoding="utf-8")
-        self.assertIn("#cover-library.cover-library", styles)
-        self.assertIn("justify-content: flex-start !important", styles)
+        self.assertIn("repeat(auto-fill, minmax(min(100%, var(--cover-size)), 1fr))", grid)
+        self.assertIn("justify-content: stretch", grid)
+        self.assertIn("#cover-library.cover-library > .cover-card", grid)
+        self.assertIn("width: 100%", grid)
+        self.assertNotIn("justify-content: center", grid)
+        self.assertNotIn("justify-content: flex-start !important", styles)
         self.assertIn("#cover-library .cover-card-link > strong", styles)
         self.assertIn("padding: 8px 8px 0", styles)
         self.assertIn("#cover-library .cover-card-meta", styles)
@@ -124,6 +148,16 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn("title.display_title[:1]", template)
         self.assertIn(".sort-title-poster-placeholder", styles)
         self.assertIn("minmax(180px, 1fr)", styles)
+
+    def test_runtime_controllers_wait_for_layout_styles(self):
+        workspace_ui = (STATIC / "workspace-ui.js").read_text(encoding="utf-8")
+        workspace = (STATIC / "workspace.js").read_text(encoding="utf-8")
+        self.assertIn('link.fetchPriority = "high"', workspace_ui)
+        self.assertIn("libraryStyles.then", workspace_ui)
+        self.assertIn("loadScriptsSequentially", workspace_ui)
+        self.assertIn('"library-selection-polish.js"', workspace_ui)
+        self.assertIn("Promise.all([coreReady, styleReady])", workspace)
+        self.assertIn('link.fetchPriority = "high"', workspace)
 
     def test_sidebar_control_geometry_is_known_before_header_paint(self):
         base = (TEMPLATES / "base.html").read_text(encoding="utf-8")
