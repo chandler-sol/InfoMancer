@@ -17,6 +17,16 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn("event.key !== 'Escape'", source)
         self.assertIn("summary?.focus()", source)
 
+    def test_letter_jump_ignores_stale_responses_and_parses_only_surface(self):
+        source = (STATIC / "library-letter-jump.js").read_text(encoding="utf-8")
+        self.assertIn("let jumpSerial = 0", source)
+        self.assertIn("if (serial !== jumpSerial) return", source)
+        self.assertIn("const extractSurface = (html, view)", source)
+        self.assertIn("template.innerHTML = html.slice", source)
+        self.assertNotIn("new DOMParser().parseFromString", source)
+        self.assertIn("infomancer:before-navigate", source)
+        self.assertIn("aria-busy", source)
+
     def test_title_media_facts_are_scroll_free_quality_cards(self):
         source = (STATIC / "detail-page-polish.css").read_text(encoding="utf-8")
         self.assertIn("grid-template-columns: repeat(6, minmax(0, 1fr))", source)
@@ -67,6 +77,26 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn('form.dataset.submitting === "1"', source)
         self.assertIn("requestSerial", source)
         self.assertIn("heading?.focus({preventScroll: true})", source)
+
+    def test_workspace_actions_are_single_flight_and_navigation_safe(self):
+        source = (STATIC / "workspace-ui-core.js").read_text(encoding="utf-8")
+        self.assertIn('form.dataset.workspaceSubmitting === "1"', source)
+        self.assertIn("activeActionControllers", source)
+        self.assertIn("signal: controller.signal", source)
+        self.assertIn('error?.name !== "AbortError"', source)
+        self.assertIn("formDataFor(form, submitter)", source)
+        self.assertIn("infomancer:before-navigate", source)
+        self.assertIn("resetTransientState", source)
+
+    def test_workspace_drawer_and_confirm_restore_focus(self):
+        source = (STATIC / "workspace-ui-core.js").read_text(encoding="utf-8")
+        self.assertIn('aria-labelledby", "workspace-confirm-title', source)
+        self.assertIn("data-workspace-confirm-cancel", source)
+        self.assertIn("opener?.isConnected", source)
+        self.assertIn('class="workspace-drawer-panel" tabindex="-1"', source)
+        self.assertIn('body.setAttribute("aria-busy", "true")', source)
+        self.assertIn('trigger.setAttribute("aria-expanded", "true")', source)
+        self.assertIn("restoreFocus", source)
 
     def test_library_inspector_is_opaque(self):
         source = (STATIC / "library-selection-polish.css").read_text(encoding="utf-8")
@@ -156,8 +186,29 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn("libraryStyles.then", workspace_ui)
         self.assertIn("loadScriptsSequentially", workspace_ui)
         self.assertIn('"library-selection-polish.js"', workspace_ui)
+        self.assertIn("globalStyles.then(() => requestAnimationFrame", workspace_ui)
         self.assertIn("Promise.all([coreReady, styleReady])", workspace)
         self.assertIn('link.fetchPriority = "high"', workspace)
+        self.assertIn("absoluteAssetUrl", workspace)
+        self.assertIn("link.href === absolute", workspace)
+
+    def test_navigation_lifecycle_closes_transient_state(self):
+        source = (STATIC / "app-navigation.js").read_text(encoding="utf-8")
+        self.assertIn("const announceNavigation", source)
+        self.assertIn("infomancer:before-navigate", source)
+        self.assertIn("const beginNavigation", source)
+        self.assertIn('document.addEventListener("submit"', source)
+        self.assertIn('navigator.connection?.effectiveType', source)
+        self.assertIn('window.addEventListener("pageshow", clearPending)', source)
+
+    def test_action_menus_are_viewport_bounded_and_touch_accessible(self):
+        source = (STATIC / "action-menu.css").read_text(encoding="utf-8")
+        self.assertIn("max-height: min(70dvh, 520px)", source)
+        self.assertIn("overscroll-behavior: contain", source)
+        self.assertIn("scrollbar-gutter: stable", source)
+        self.assertIn("@media (pointer: coarse)", source)
+        self.assertIn("min-height: 44px", source)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", source)
 
     def test_sidebar_control_geometry_is_known_before_header_paint(self):
         base = (TEMPLATES / "base.html").read_text(encoding="utf-8")
