@@ -138,6 +138,7 @@
   const libraryStyles = library ? Promise.all([
     loadStyle("library-controls-polish.css"),
     loadStyle("library-performance.css"),
+    loadStyle("library-density.css"),
     loadStyle("library-selection-polish.css"),
     loadStyle("library-selection-toolbar.css"),
   ]) : Promise.resolve();
@@ -186,9 +187,11 @@
     libraryControls?.style.removeProperty('max-width');
     filterSearchInput?.style.removeProperty('visibility');
     /* These controllers do have execution-order dependencies, but they do not need
-       a network waterfall. async=false preserves that order while all four fetches
-       start together. */
+       a network waterfall. async=false preserves that order while all fetches start
+       together. Density runs before selection because it replaces only the display
+       control's legacy slider markup. */
     return loadScriptsOrdered([
+      "library-density.js",
       "library-surface-lazy.js",
       "library-selection-polish.js",
       "library-inspector-lifecycle.js",
