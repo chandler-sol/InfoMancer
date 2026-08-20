@@ -65,7 +65,7 @@ class EventLog:
             encoded = "{}"
         try:
             with self.database.connect() as conn:
-                conn.execute(
+                cursor = conn.execute(
                     """INSERT INTO event_logs
                        (level,category,message,detail,context_json,user_id)
                        VALUES (?,?,?,?,?,?)""",
@@ -75,12 +75,17 @@ class EventLog:
                         encoded, user_id if user_id and user_id > 0 else None,
                     ),
                 )
-                # Keep the embedded log useful without allowing it to grow forever.
-                conn.execute(
-                    """DELETE FROM event_logs WHERE id IN (
-                         SELECT id FROM event_logs ORDER BY id DESC LIMIT -1 OFFSET 50000
-                       )"""
-                )
+                # A scan can emit thousands of events. Pruning the 50k retention
+                # window after every insert made each log write progressively more
+                # expensive. Amortize that housekeeping while keeping the maximum
+                # overshoot small and deterministic.
+                event_id = int(cursor.lastrowid or 0)
+                if event_id > 0 and event_id % 128 == 0:
+                    conn.execute(
+                        """DELETE FROM event_logs WHERE id IN (
+                             SELECT id FROM event_logs ORDER BY id DESC LIMIT -1 OFFSET 50000
+                           )"""
+                    )
         except Exception:
             # Logging must never break a scan, rename, or request.
             return
