@@ -38,6 +38,7 @@
   let open = widget.classList.contains("is-pinned") && !popover.hidden;
   let failureTimer = 0;
   let failureRequest = null;
+  let receivedTaskEvent = false;
 
   const failureSignature = (task) => `${task.id}|${task.detail || task.label || "failed"}`;
 
@@ -302,7 +303,10 @@
     queueMicrotask(render);
   };
 
-  document.addEventListener("infomancer:tasks", (event) => accept(event.detail?.tasks || []));
+  document.addEventListener("infomancer:tasks", (event) => {
+    receivedTaskEvent = true;
+    accept(event.detail?.tasks || []);
+  });
 
   const sync = async () => {
     try {
@@ -383,6 +387,12 @@
 
   pruneRecent();
   render();
-  sync();
+  /* base.html owns the recurring /api/tasks poll and dispatches infomancer:tasks.
+     Give that first response a short chance to arrive before issuing a fallback
+     sync. This preserves correctness if the listener missed the first event while
+     avoiding two identical startup requests in the normal path. */
+  window.setTimeout(() => {
+    if (!receivedTaskEvent) sync();
+  }, 350);
   pollFailures();
 })();
