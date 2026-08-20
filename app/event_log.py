@@ -172,7 +172,24 @@ class EventLog:
         return result
 
     def unread_count(self, user_id: int) -> int:
-        return len(self.activity(user_id, unread_only=True, limit=250)) if user_id > 0 else 0
+        """Count unread activity without loading and decoding up to 250 event rows."""
+        if user_id <= 0:
+            return 0
+        placeholders = ",".join("?" for _ in ACTIVITY_CATEGORIES)
+        with self.database.connect() as conn:
+            row = conn.execute(
+                f"""SELECT COUNT(*) count FROM (
+                      SELECT e.id FROM event_logs e
+                      LEFT JOIN user_event_reads ur
+                        ON ur.event_id=e.id AND ur.user_id=?
+                      WHERE e.category IN ({placeholders})
+                        AND (e.user_id IS NULL OR e.user_id=?)
+                        AND ur.event_id IS NULL
+                      ORDER BY e.id DESC LIMIT 250
+                    )""",
+                [user_id, *sorted(ACTIVITY_CATEGORIES), user_id],
+            ).fetchone()
+        return int(row["count"] if row else 0)
 
     def mark_read(self, user_id: int, event_ids: list[int] | None = None) -> int:
         if user_id <= 0:
