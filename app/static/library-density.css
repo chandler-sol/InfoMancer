@@ -1,0 +1,139 @@
+/* Semantic Library density controls.
+   Desktop stays responsive: density changes the preferred card footprint and the
+   grid auto-fills whatever the viewport can hold. Portrait-phone layouts expose
+   the three useful outcomes directly instead of pretending a continuous pixel
+   slider has meaningful intermediate positions. */
+
+.cover-size-control.library-density-ready {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: min(290px, 100%);
+  color: var(--muted);
+}
+
+.cover-size-control.library-density-ready[hidden] {
+  display: none;
+}
+
+.library-density-label {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.library-density-desktop {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 180px) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.library-density-edge {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.library-density-range {
+  width: 100%;
+  min-width: 110px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--lime);
+  cursor: pointer;
+}
+
+.library-density-range:focus-visible {
+  outline: 2px solid rgba(174,255,48,.55);
+  outline-offset: 4px;
+}
+
+.library-density-mobile {
+  display: none;
+  grid-template-columns: repeat(3, 42px);
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(10,15,21,.72);
+}
+
+.library-density-mobile button {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 34px;
+  min-width: 42px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.library-density-mobile button:hover,
+.library-density-mobile button:focus-visible {
+  color: var(--text);
+  background: rgba(255,255,255,.055);
+  outline: 0;
+}
+
+.library-density-mobile button[aria-pressed="true"] {
+  background: var(--lime);
+  color: #10140b;
+}
+
+.library-density-mobile svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+}
+
+/* Never expose the legacy implementation value if the enhancement script is late
+   or unavailable. The range itself remains a functional fallback. */
+.cover-size-value {
+  display: none !important;
+}
+
+@media (max-width: 600px) {
+  .cover-size-control.library-density-ready {
+    min-width: 0;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .library-density-desktop {
+    display: none;
+  }
+
+  .library-density-mobile {
+    display: grid;
+  }
+
+  /* Portrait phones have three genuinely useful density outcomes. These are
+     viewport-relative columns, not persisted card pixel dimensions. */
+  #cover-library[data-mobile-density="compact"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  #cover-library[data-mobile-density="balanced"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #cover-library[data-mobile-density="spacious"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #cover-library[data-mobile-density] .cover-card {
+    min-width: 0;
+    width: auto;
+  }
+}
