@@ -50,6 +50,12 @@ class EventLogTests(unittest.TestCase):
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 )
             }
+            event_indexes = {
+                row["name"] for row in conn.execute("PRAGMA index_list(event_logs)")
+            }
+            announcement_indexes = {
+                row["name"] for row in conn.execute("PRAGMA index_list(announcements)")
+            }
         self.assertIn("runtime_seconds", file_columns)
         self.assertIn("dynamic_range", file_columns)
         self.assertIn("edition_name", file_columns)
@@ -61,6 +67,8 @@ class EventLogTests(unittest.TestCase):
                 "user_search_history",
             } <= tables
         )
+        self.assertIn("idx_event_logs_activity", event_indexes)
+        self.assertIn("idx_announcements_due", announcement_indexes)
 
     def test_activity_reuses_events_with_per_account_read_state_and_links(self):
         with self.database.connect() as conn:
@@ -78,6 +86,27 @@ class EventLogTests(unittest.TestCase):
         self.assertEqual(self.logs.unread_count(user_id), 1)
         self.assertEqual(self.logs.mark_read(user_id, [activity[0]["id"]]), 1)
         self.assertEqual(self.logs.unread_count(user_id), 0)
+
+    def test_unread_count_does_not_materialize_or_decode_activity_rows(self):
+        with self.database.connect() as conn:
+            user_id = conn.execute(
+                """INSERT INTO users(username,display_name,role,password_hash)
+                   VALUES ('counter','Counter','member','test')"""
+            ).lastrowid
+        for index in range(5):
+            self.logs.write(
+                "library", f"Library event {index}",
+                context={"title_id": index + 1}, user_id=user_id,
+            )
+
+        original_activity = self.logs.activity
+        self.logs.activity = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("unread_count should not call activity()")
+        )
+        try:
+            self.assertEqual(self.logs.unread_count(user_id), 5)
+        finally:
+            self.logs.activity = original_activity
 
 
 if __name__ == "__main__":
