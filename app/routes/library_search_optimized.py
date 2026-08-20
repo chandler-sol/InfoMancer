@@ -83,24 +83,9 @@ def _render_live_results(templates, request, rows, *, query: str, kind: str, vie
     })
 
 
-def search_response(
-    db, templates, display_title_type, fuzzy_people, request,
-    *, q: str, kind: str = "all", record_search: str = "", view: str = "",
-):
-    """Render free-text Library search after finding candidate title ids first.
-
-    The mature Library query aggregates every file and every missing episode before
-    applying its WHERE clause. That is flexible for the advanced filter matrix but
-    expensive for the high-frequency search box. This path preserves the same search
-    sources, then computes file/missing statistics only for matching title ids.
-    """
-    query = q.strip()[:200]
-    user_id = int(getattr(request.state.user, "id", 0) or 0)
-    if record_search == "1":
-        _record_search(db, user_id, query)
-
+def _search_rows(db, *, query: str, kind: str, user_id: int, fuzzy_names=()):
+    """Resolve candidate ids first, then aggregate only the candidate titles."""
     term = f"%{query}%"
-    fuzzy_names = [item["person_name"] for item in fuzzy_people(query, kind, 6)]
     branches = [
         ("SELECT id FROM titles WHERE title LIKE ? OR metadata_title LIKE ?", [term, term]),
         ("SELECT title_id FROM files WHERE filename LIKE ?", [term]),
@@ -118,11 +103,12 @@ def search_response(
             [term],
         ),
     ]
+    fuzzy_names = tuple(dict.fromkeys(str(name) for name in fuzzy_names if name))
     if fuzzy_names:
         placeholders = ",".join("?" for _ in fuzzy_names)
         branches.append((
             f"SELECT title_id FROM title_credits WHERE person_name IN ({placeholders})",
-            fuzzy_names,
+            list(fuzzy_names),
         ))
     candidate_sql = " UNION ".join(statement for statement, _params in branches)
     candidate_params = [value for _statement, values in branches for value in values]
@@ -144,7 +130,7 @@ def search_response(
         query_params.append(kind)
 
     with db.connect() as conn:
-        rows = conn.execute(
+        return conn.execute(
             f"""WITH candidates(id) AS (
                   {candidate_sql}
                 ), file_stats AS (
@@ -192,6 +178,31 @@ def search_response(
                 ORDER BY {title_order} LIMIT 1000""",
             query_params,
         ).fetchall()
+
+
+def search_response(
+    db, templates, display_title_type, fuzzy_people, request,
+    *, q: str, kind: str = "all", record_search: str = "", view: str = "",
+):
+    """Render free-text Library search after finding candidate title ids first.
+
+    The normal path performs one candidate query. Fuzzy person matching is a fallback
+    only when direct title, filename, tag, and credit matching found nothing. That
+    preserves typo tolerance without running SequenceMatcher across up to hundreds of
+    credit names for every keystroke that already has an obvious result.
+    """
+    query = q.strip()[:200]
+    user_id = int(getattr(request.state.user, "id", 0) or 0)
+    if record_search == "1":
+        _record_search(db, user_id, query)
+
+    rows = _search_rows(db, query=query, kind=kind, user_id=user_id)
+    if not rows:
+        fuzzy_names = [item["person_name"] for item in fuzzy_people(query, kind, 6)]
+        if fuzzy_names:
+            rows = _search_rows(
+                db, query=query, kind=kind, user_id=user_id, fuzzy_names=fuzzy_names,
+            )
 
     # This is the high-frequency keystroke path. It needs only the rows being
     # replaced, not filter option scans, saved-view queries, or base.html context.
