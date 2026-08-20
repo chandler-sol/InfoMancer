@@ -1,11 +1,34 @@
 from __future__ import annotations
 
-import time
+import hashlib
+from pathlib import Path
 
 from fastapi import APIRouter
 
 from ..http_performance import LibrarySurfacePartialMiddleware, StaticAssetCacheMiddleware
 from .context import RouteContext
+
+
+def _static_asset_version(static_dir: Path) -> str:
+    """Return a stable cache key for the exact static asset tree.
+
+    Versioned assets are served as immutable for a year, so the version must change
+    when bytes change but should *not* change merely because InfoMancer restarted.
+    Hashing the relatively small static tree once during startup gives us both
+    properties and lets browsers keep their CSS/JS cache across normal restarts.
+    """
+    digest = hashlib.blake2s(digest_size=12)
+    for path in sorted(
+        (candidate for candidate in static_dir.rglob("*") if candidate.is_file()),
+        key=lambda candidate: candidate.relative_to(static_dir).as_posix(),
+    ):
+        relative = path.relative_to(static_dir).as_posix().encode("utf-8")
+        digest.update(len(relative).to_bytes(4, "big"))
+        digest.update(relative)
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(128 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
 
 
 def build_router(ctx: RouteContext):
@@ -15,14 +38,13 @@ def build_router(ctx: RouteContext):
     templates = ctx.live("templates")
     state = app.state
 
-    # base.html has long used ?v={{ static_version }}, but older builds never
-    # supplied that value, leaving browsers with effectively unversioned assets.
-    # Give each running application process one stable token. A restart/rebuild gets
-    # a new URL and therefore a fresh CSS/JS payload, while navigation within the
-    # process can safely reuse the immutable browser cache.
+    # StaticAssetCacheMiddleware marks versioned assets immutable. Use a content
+    # fingerprint rather than a process timestamp so a restart with identical files
+    # reuses the browser cache while any changed asset automatically gets a new URL.
     static_version = getattr(state, "static_version", "")
     if not static_version:
-        static_version = f"{time.time_ns():x}"
+        static_dir = Path(__file__).resolve().parents[1] / "static"
+        static_version = _static_asset_version(static_dir)
         state.static_version = static_version
     templates.env.globals["static_version"] = static_version
 
