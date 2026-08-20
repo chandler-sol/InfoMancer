@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
+from threading import RLock
 
 from .db import Database
 
@@ -86,119 +88,57 @@ class EngagementError(ValueError):
 
 
 class EngagementService:
+    # shared_template_context asks for tour, due count, setup state, then due item in
+    # quick succession. Hand those reads across one short-lived snapshot instead of
+    # opening SQLite four times for every rendered page. The window is intentionally
+    # tiny and every service write invalidates it immediately.
+    PAGE_STATE_TTL_SECONDS = 0.25
+
     def __init__(self, database: Database) -> None:
         self.database = database
+        self._page_state_lock = RLock()
+        self._page_state_cache: dict[int, tuple[float, dict]] = {}
 
-    def seed_official(self) -> None:
-        with self.database.connect() as conn:
-            for item in OFFICIAL_ANNOUNCEMENTS:
-                conn.execute(
-                    """INSERT INTO announcements
-                       (source,source_key,title,body,category,audience,starts_at)
-                       VALUES ('official',?,?,?,?, 'all',?)
-                       ON CONFLICT(source_key) DO UPDATE SET
-                         title=excluded.title,body=excluded.body,
-                         category=excluded.category,updated_at=CURRENT_TIMESTAMP""",
-                    (
-                        item["source_key"], item["title"], item["body"],
-                        item["category"], item["starts_at"],
-                    ),
-                )
+    def _invalidate_page_state(self, user_id: int | None = None) -> None:
+        with self._page_state_lock:
+            if user_id is None:
+                self._page_state_cache.clear()
+            else:
+                self._page_state_cache.pop(int(user_id), None)
 
-    def tour_pending(self, user_id: int) -> bool:
+    def _page_state(self, user_id: int, role: str = "") -> dict:
         if user_id <= 0:
-            return False
+            return {
+                "role": role,
+                "tour_pending": False,
+                "setup_choice_pending": False,
+                "due_count": 0,
+                "due": None,
+            }
+        now = time.monotonic()
+        with self._page_state_lock:
+            cached = self._page_state_cache.get(int(user_id))
+            if cached and cached[0] >= now:
+                state = cached[1]
+                if not role or state["role"] == role:
+                    return state
+
         with self.database.connect() as conn:
-            row = conn.execute(
-                "SELECT completed_at,dismissed_at FROM user_tour_state WHERE user_id=? AND tour_key=?",
-                (user_id, TOUR_KEY),
+            overview = conn.execute(
+                """SELECT
+                     COALESCE((SELECT role FROM users WHERE id=?),'') role,
+                     (SELECT COUNT(*) FROM user_tour_state
+                      WHERE user_id=? AND tour_key=?
+                        AND (completed_at IS NOT NULL OR dismissed_at IS NOT NULL)) tour_done,
+                     (SELECT COUNT(*) FROM user_setup_state WHERE user_id=?) setup_exists,
+                     (SELECT COUNT(*) FROM roots) root_count""",
+                (user_id, user_id, TOUR_KEY, user_id),
             ).fetchone()
-        return not row or not (row["completed_at"] or row["dismissed_at"])
-
-    def set_tour_state(self, user_id: int, completed: bool) -> None:
-        if user_id <= 0:
-            return
-        completed_at = "CURRENT_TIMESTAMP" if completed else "NULL"
-        dismissed_at = "NULL" if completed else "CURRENT_TIMESTAMP"
-        with self.database.connect() as conn:
-            conn.execute(
-                f"""INSERT INTO user_tour_state
-                    (user_id,tour_key,completed_at,dismissed_at,updated_at)
-                    VALUES (?,?,{completed_at},{dismissed_at},CURRENT_TIMESTAMP)
-                    ON CONFLICT(user_id,tour_key) DO UPDATE SET
-                      completed_at={completed_at},dismissed_at={dismissed_at},
-                      updated_at=CURRENT_TIMESTAMP""",
-                (user_id, TOUR_KEY),
-            )
-
-    def setup_state(self, user_id: int):
-        if user_id <= 0:
-            return None
-        with self.database.connect() as conn:
-            return conn.execute(
-                "SELECT * FROM user_setup_state WHERE user_id=?", (user_id,)
-            ).fetchone()
-
-    def setup_choice_pending(self, user_id: int, role: str) -> bool:
-        if user_id <= 0 or role != "librarian":
-            return False
-        with self.database.connect() as conn:
-            state = conn.execute(
-                "SELECT completed_at FROM user_setup_state WHERE user_id=?", (user_id,)
-            ).fetchone()
-            roots = conn.execute("SELECT COUNT(*) FROM roots").fetchone()[0]
-        return not state and roots == 0
-
-    def begin_setup(self, user_id: int, mode: str = "guided") -> None:
-        if user_id <= 0 or mode not in {"guided", "manual"}:
-            raise EngagementError("InfoMancer could not start that setup option.")
-        completed = "CURRENT_TIMESTAMP" if mode == "manual" else "NULL"
-        with self.database.connect() as conn:
-            conn.execute(
-                f"""INSERT INTO user_setup_state
-                    (user_id,mode,current_step,completed_at,updated_at)
-                    VALUES (?,?,'general',{completed},CURRENT_TIMESTAMP)
-                    ON CONFLICT(user_id) DO UPDATE SET
-                      mode=excluded.mode,current_step='general',
-                      completed_at={completed},updated_at=CURRENT_TIMESTAMP""",
-                (user_id, mode),
-            )
-
-    def set_setup_step(self, user_id: int, step: str) -> None:
-        if step not in {"general", "metadata", "sources", "finish"}:
-            raise EngagementError("That setup step is not available.")
-        with self.database.connect() as conn:
-            conn.execute(
-                """INSERT INTO user_setup_state(user_id,mode,current_step,updated_at)
-                   VALUES (?,'guided',?,CURRENT_TIMESTAMP)
-                   ON CONFLICT(user_id) DO UPDATE SET mode='guided',
-                     current_step=excluded.current_step,completed_at=NULL,
-                     updated_at=CURRENT_TIMESTAMP""",
-                (user_id, step),
-            )
-
-    def complete_setup(self, user_id: int) -> None:
-        with self.database.connect() as conn:
-            conn.execute(
-                """INSERT INTO user_setup_state
-                   (user_id,mode,current_step,completed_at,updated_at)
-                   VALUES (?,'guided','finish',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-                   ON CONFLICT(user_id) DO UPDATE SET current_step='finish',
-                     completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP""",
-                (user_id,),
-            )
-
-    @staticmethod
-    def _audience_clause(role: str) -> str:
-        return "all" if role not in {"member", "librarian"} else f"{role}s"
-
-    def due(self, user_id: int, role: str):
-        if user_id <= 0:
-            return None
-        audience = self._audience_clause(role)
-        with self.database.connect() as conn:
-            return conn.execute(
-                """SELECT a.*, r.last_seen_at, r.delivery_count
+            resolved_role = role if role in {"member", "librarian"} else str(overview["role"] or "")
+            audience = self._audience_clause(resolved_role)
+            due = conn.execute(
+                """SELECT a.*, r.last_seen_at, r.delivery_count,
+                          COUNT(*) OVER() due_count
                    FROM announcements a
                    LEFT JOIN announcement_receipts r
                      ON r.announcement_id=a.id AND r.user_id=?
@@ -217,26 +157,144 @@ class EngagementService:
                 (user_id, audience),
             ).fetchone()
 
+        state = {
+            "role": resolved_role,
+            "tour_pending": not bool(overview["tour_done"]),
+            "setup_choice_pending": bool(
+                resolved_role == "librarian"
+                and not overview["setup_exists"]
+                and not overview["root_count"]
+            ),
+            "due_count": int(due["due_count"]) if due else 0,
+            "due": due,
+        }
+        with self._page_state_lock:
+            self._page_state_cache[int(user_id)] = (
+                time.monotonic() + self.PAGE_STATE_TTL_SECONDS,
+                state,
+            )
+            if len(self._page_state_cache) > 128:
+                oldest_user = next(iter(self._page_state_cache))
+                if oldest_user != int(user_id):
+                    self._page_state_cache.pop(oldest_user, None)
+        return state
+
+    def seed_official(self) -> None:
+        with self.database.connect() as conn:
+            for item in OFFICIAL_ANNOUNCEMENTS:
+                conn.execute(
+                    """INSERT INTO announcements
+                       (source,source_key,title,body,category,audience,starts_at)
+                       VALUES ('official',?,?,?,?, 'all',?)
+                       ON CONFLICT(source_key) DO UPDATE SET
+                         title=excluded.title,body=excluded.body,
+                         category=excluded.category,starts_at=excluded.starts_at,
+                         updated_at=CURRENT_TIMESTAMP
+                       WHERE announcements.title<>excluded.title
+                          OR announcements.body<>excluded.body
+                          OR announcements.category<>excluded.category
+                          OR announcements.starts_at<>excluded.starts_at""",
+                    (
+                        item["source_key"], item["title"], item["body"],
+                        item["category"], item["starts_at"],
+                    ),
+                )
+        self._invalidate_page_state()
+
+    def tour_pending(self, user_id: int) -> bool:
+        return bool(self._page_state(user_id)["tour_pending"])
+
+    def set_tour_state(self, user_id: int, completed: bool) -> None:
+        if user_id <= 0:
+            return
+        completed_at = "CURRENT_TIMESTAMP" if completed else "NULL"
+        dismissed_at = "NULL" if completed else "CURRENT_TIMESTAMP"
+        with self.database.connect() as conn:
+            conn.execute(
+                f"""INSERT INTO user_tour_state
+                    (user_id,tour_key,completed_at,dismissed_at,updated_at)
+                    VALUES (?,?,{completed_at},{dismissed_at},CURRENT_TIMESTAMP)
+                    ON CONFLICT(user_id,tour_key) DO UPDATE SET
+                      completed_at={completed_at},dismissed_at={dismissed_at},
+                      updated_at=CURRENT_TIMESTAMP""",
+                (user_id, TOUR_KEY),
+            )
+        self._invalidate_page_state(user_id)
+
+    def setup_state(self, user_id: int):
+        if user_id <= 0:
+            return None
+        with self.database.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM user_setup_state WHERE user_id=?", (user_id,)
+            ).fetchone()
+
+    def setup_choice_pending(self, user_id: int, role: str) -> bool:
+        if user_id <= 0 or role != "librarian":
+            return False
+        return bool(self._page_state(user_id, role)["setup_choice_pending"])
+
+    def begin_setup(self, user_id: int, mode: str = "guided") -> None:
+        if user_id <= 0 or mode not in {"guided", "manual"}:
+            raise EngagementError("InfoMancer could not start that setup option.")
+        completed = "CURRENT_TIMESTAMP" if mode == "manual" else "NULL"
+        with self.database.connect() as conn:
+            conn.execute(
+                f"""INSERT INTO user_setup_state
+                    (user_id,mode,current_step,completed_at,updated_at)
+                    VALUES (?,?,'general',{completed},CURRENT_TIMESTAMP)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                      mode=excluded.mode,current_step='general',
+                      completed_at={completed},updated_at=CURRENT_TIMESTAMP""",
+                (user_id, mode),
+            )
+        self._invalidate_page_state(user_id)
+
+    def set_setup_step(self, user_id: int, step: str) -> None:
+        if step not in {"general", "metadata", "sources", "finish"}:
+            raise EngagementError("That setup step is not available.")
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO user_setup_state(user_id,mode,current_step,updated_at)
+                   VALUES (?,'guided',?,CURRENT_TIMESTAMP)
+                   ON CONFLICT(user_id) DO UPDATE SET mode='guided',
+                     current_step=excluded.current_step,completed_at=NULL,
+                     updated_at=CURRENT_TIMESTAMP""",
+                (user_id, step),
+            )
+        self._invalidate_page_state(user_id)
+
+    def complete_setup(self, user_id: int) -> None:
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO user_setup_state
+                   (user_id,mode,current_step,completed_at,updated_at)
+                   VALUES (?,'guided','finish',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+                   ON CONFLICT(user_id) DO UPDATE SET current_step='finish',
+                     completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP""",
+                (user_id,),
+            )
+        self._invalidate_page_state(user_id)
+
+    @staticmethod
+    def _audience_clause(role: str) -> str:
+        return "all" if role not in {"member", "librarian"} else f"{role}s"
+
+    def due(self, user_id: int, role: str):
+        if user_id <= 0:
+            return None
+        state = self._page_state(user_id, role)
+        # due() is the last engagement read in shared_template_context when an
+        # announcement may be displayed. Drop the handoff after consumption so an
+        # unrelated later read is never held to the tiny coalescing window.
+        with self._page_state_lock:
+            self._page_state_cache.pop(int(user_id), None)
+        return state["due"]
+
     def due_count(self, user_id: int, role: str) -> int:
         if user_id <= 0:
             return 0
-        audience = self._audience_clause(role)
-        with self.database.connect() as conn:
-            row = conn.execute(
-                """SELECT COUNT(*) count
-                   FROM announcements a
-                   LEFT JOIN announcement_receipts r
-                     ON r.announcement_id=a.id AND r.user_id=?
-                   WHERE a.active=1 AND a.starts_at<=CURRENT_TIMESTAMP
-                     AND (a.ends_at IS NULL OR a.ends_at>CURRENT_TIMESTAMP)
-                     AND a.audience IN ('all', ?)
-                     AND (r.last_seen_at IS NULL OR
-                       (a.recurrence_days IS NOT NULL AND
-                        datetime(r.last_seen_at, '+' || a.recurrence_days || ' days')
-                          <= CURRENT_TIMESTAMP))""",
-                (user_id, audience),
-            ).fetchone()
-        return int(row["count"])
+        return int(self._page_state(user_id, role)["due_count"])
 
     def mark_seen(self, announcement_id: int, user_id: int, role: str) -> None:
         if user_id <= 0:
@@ -261,6 +319,7 @@ class EngagementService:
                      delivery_count=announcement_receipts.delivery_count+1""",
                 (announcement_id, user_id),
             )
+        self._invalidate_page_state(user_id)
 
     def list_for_user(self, user_id: int, role: str):
         audience = self._audience_clause(role)
@@ -331,7 +390,9 @@ class EngagementService:
                     recurrence_days, created_by,
                 ),
             )
-            return int(cursor.lastrowid)
+            announcement_id = int(cursor.lastrowid)
+        self._invalidate_page_state()
+        return announcement_id
 
     def deactivate(self, announcement_id: int) -> None:
         with self.database.connect() as conn:
@@ -347,6 +408,7 @@ class EngagementService:
                    WHERE id=?""",
                 (announcement_id,),
             )
+        self._invalidate_page_state()
 
 
 def utc_from_local(value: str, timezone_name: str) -> str:
