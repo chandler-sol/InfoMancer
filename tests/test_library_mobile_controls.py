@@ -34,6 +34,18 @@ class LibraryMobileControlTests(unittest.TestCase):
         self.assertIn('data-mobile-density="spacious"', css)
         self.assertIn("grid-template-columns: minmax(0, 1fr)", css)
 
+    def test_general_settings_uses_density_names_while_preserving_server_value(self):
+        script = (ROOT / "app/static/settings-cover-density.js").read_text(encoding="utf-8")
+        loader = (ROOT / "app/static/workspace-ui.js").read_text(encoding="utf-8")
+
+        self.assertIn("Default cover density", script)
+        self.assertIn("range.removeAttribute('name')", script)
+        self.assertIn("hidden.name = fieldName", script)
+        self.assertIn("hidden.value = String(step.size)", script)
+        self.assertIn("output.value = step.name", script)
+        self.assertIn("settingsCoverDensity", loader)
+        self.assertIn('loadScript("settings-cover-density.js")', loader)
+
     def test_multi_selection_promotes_common_actions_and_collapses_secondary_work(self):
         script = (ROOT / "app/static/library-selection-toolbar.js").read_text(encoding="utf-8")
         css = (ROOT / "app/static/library-selection-compact.css").read_text(encoding="utf-8")
