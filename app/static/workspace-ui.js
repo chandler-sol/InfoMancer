@@ -141,6 +141,7 @@
     loadStyle("library-density.css"),
     loadStyle("library-selection-polish.css"),
     loadStyle("library-selection-toolbar.css"),
+    loadStyle("library-selection-compact.css"),
   ]) : Promise.resolve();
   const detailStyles = detail ? Promise.all([loadStyle("detail-page-polish.css")]) : Promise.resolve();
   const reviewStyles = review ? Promise.all([loadStyle("review-queue-polish.css")]) : Promise.resolve();
