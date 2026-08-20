@@ -18,6 +18,18 @@ from .library_cached import (
 from .library_search_optimized import eligible_search, search_response
 
 
+def _warm_response(render_state: str, view: str) -> Response:
+    headers = {
+        "Cache-Control": "private, no-store",
+        "X-InfoMancer-Library-Render": render_state,
+        "X-InfoMancer-Library-Query": "scoped",
+        "X-InfoMancer-Library-Prefetch": "warm",
+    }
+    if view:
+        headers["X-InfoMancer-Library-Surface"] = view
+    return Response(status_code=204, headers=headers)
+
+
 def build_router(ctx):
     """Wrap the normal Library router with optimized high-frequency read paths.
 
@@ -59,6 +71,10 @@ def build_router(ctx):
         has_transient_context = (
             "message" in request.query_params or "tour" in request.query_params
         )
+        is_prefetch = (
+            request.headers.get("x-infomancer-prefetch", "").strip().casefold()
+            == "library"
+        )
 
         if not has_transient_context and eligible_search(
             q=q, kind=kind, letter=letter, genre=genre, title_type=title_type,
@@ -93,6 +109,10 @@ def build_router(ctx):
         key = (_session_key(request), request.url.path, view or "full")
         cached = _cache_get(key, signature)
         if cached is not None:
+            if is_prefetch:
+                # Hover/focus warming needs the server-side render cache, not a copy
+                # of the entire Library document in a response the browser discards.
+                return _warm_response("hit", view)
             headers = {
                 "Cache-Control": "private, no-store",
                 "X-InfoMancer-Library-Render": "hit",
@@ -107,6 +127,8 @@ def build_router(ctx):
         served_body = _trim_library_surface(body, view)
         if response.status_code == 200 and served_body:
             _cache_put(key, signature, served_body)
+        if is_prefetch and response.status_code == 200:
+            return _warm_response("miss", view)
         if served_body != body:
             headers = {
                 key: value for key, value in response.headers.items()
