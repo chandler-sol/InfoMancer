@@ -7,7 +7,6 @@ from .library import build_router as build_base_router
 from .library_cached import (
     _cache_get,
     _cache_put,
-    _library_signature,
     _requested_view,
     _session_key,
     _trim_library_surface,
@@ -15,6 +14,7 @@ from .library_cached import (
 )
 from .library_landing_optimized import fast_landing_response
 from .library_search_optimized import eligible_search, search_response
+from .library_signature_optimized import library_signature
 
 
 def _warm_response(render_state: str, view: str) -> Response:
@@ -168,7 +168,7 @@ def build_router(ctx):
             return _live_results_response(response) if is_live_partial else response
 
         user_id = int(getattr(request.state.user, "id", 0) or 0)
-        signature = _library_signature(db, user_id)
+        signature = library_signature(db, user_id)
         # Cache the one full render, not separate List and Covers documents. The
         # active surface is sliced from that source in memory on every hit. This
         # means switching views or lazy-hydrating the other surface never repeats
