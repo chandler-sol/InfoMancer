@@ -9,10 +9,11 @@ from fastapi.responses import Response
 
 from app.db import Database
 from app.routes import library_optimized
-from app.routes.library_cached import (
-    _cacheable_landing, _library_signature, _trim_library_surface,
+from app.routes.library_cached import _library_signature, _trim_library_surface
+from app.routes.library_landing_optimized import fast_landing_response
+from app.routes.library_optimized import (
+    _cacheable_landing, _live_results_fragment, _warm_response,
 )
-from app.routes.library_optimized import _live_results_fragment, _warm_response
 from app.routes.library_search_optimized import eligible_search, search_response
 
 
@@ -20,13 +21,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class LibraryLandingPerformanceTests(unittest.TestCase):
-    def test_default_library_landing_is_cacheable_but_filtered_views_are_not(self):
+    def test_default_library_landings_are_cacheable_but_filtered_views_are_not(self):
         base = dict(
             q="", kind="all", letter="", genre="", title_type="", root="",
             person="", person_name="", credit_role="", match="", gaps="",
             favorite="", tag="", sort="title", record_search="",
         )
         self.assertTrue(_cacheable_landing(**base))
+        self.assertTrue(_cacheable_landing(**{**base, "kind": "movie"}))
+        self.assertTrue(_cacheable_landing(**{**base, "kind": "tv"}))
         self.assertFalse(_cacheable_landing(**{**base, "q": "Alien"}))
         self.assertFalse(_cacheable_landing(**{**base, "sort": "file_size"}))
         self.assertFalse(_cacheable_landing(**{**base, "record_search": "1"}))
@@ -80,14 +83,63 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
         self.assertNotIn("EXPENSIVE FOOTER", text)
 
     def test_default_landing_scopes_expensive_aggregates_to_visible_candidates(self):
-        cache = (ROOT / "app/routes/library_cached.py").read_text(encoding="utf-8")
+        source = (ROOT / "app/routes/library_landing_optimized.py").read_text(encoding="utf-8")
+        self.assertIn("WITH candidates AS", source)
+        self.assertIn("LIMIT 1000", source)
+        self.assertIn("FROM files f JOIN candidates c ON c.id=f.title_id", source)
+        self.assertIn("FROM expected_episodes e JOIN candidates c ON c.id=e.title_id", source)
+        self.assertIn("WHERE t.kind=?", source)
 
-        self.assertIn("WITH candidates AS", cache)
-        self.assertIn("LIMIT 1000", cache)
-        self.assertIn("FROM files f JOIN candidates c ON c.id=f.title_id", cache)
-        self.assertIn("FROM expected_episodes e JOIN candidates c ON c.id=e.title_id", cache)
-        self.assertIn('X-InfoMancer-Library-Query', cache)
-        self.assertIn('"scoped"', cache)
+    def test_movie_and_tv_landings_filter_candidates_before_aggregation(self):
+        class Templates:
+            def __init__(self):
+                self.context = None
+
+            def TemplateResponse(self, request, template, context):
+                self.context = context
+                return Response("<main>landing</main>", media_type="text/html")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            database = Database(Path(temporary) / "kind-landings.db")
+            database.initialize()
+            with database.connect() as conn:
+                movie_root = conn.execute(
+                    "INSERT INTO roots(path,kind,label) VALUES ('/movies','movie','Movies')"
+                ).lastrowid
+                tv_root = conn.execute(
+                    "INSERT INTO roots(path,kind,label) VALUES ('/tv','tv','TV')"
+                ).lastrowid
+                conn.execute(
+                    "INSERT INTO titles(root_id,kind,title,folder_path) VALUES (?,?,?,?)",
+                    (movie_root, "movie", "Alien", "/movies/Alien"),
+                )
+                conn.execute(
+                    "INSERT INTO titles(root_id,kind,title,folder_path) VALUES (?,?,?,?)",
+                    (tv_root, "tv", "The Expanse", "/tv/The Expanse"),
+                )
+
+            request = Request({
+                "type": "http", "method": "GET", "scheme": "http",
+                "path": "/movies", "raw_path": b"/movies", "query_string": b"",
+                "headers": [], "client": ("127.0.0.1", 1000),
+                "server": ("test", 80),
+            })
+            request.state.user = SimpleNamespace(id=0)
+            movie_templates = Templates()
+            fast_landing_response(
+                database, movie_templates, lambda value: value, request, kind="movie",
+            )
+            self.assertEqual(movie_templates.context["kind"], "movie")
+            self.assertEqual(movie_templates.context["current_view_path"], "/movies")
+            self.assertEqual([row["kind"] for row in movie_templates.context["rows"]], ["movie"])
+
+            tv_templates = Templates()
+            fast_landing_response(
+                database, tv_templates, lambda value: value, request, kind="tv",
+            )
+            self.assertEqual(tv_templates.context["kind"], "tv")
+            self.assertEqual(tv_templates.context["current_view_path"], "/shows")
+            self.assertEqual([row["kind"] for row in tv_templates.context["rows"]], ["tv"])
 
     def test_common_text_search_uses_candidate_first_plan(self):
         base = dict(
@@ -254,10 +306,23 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
         def original_library():
             return "ok"
 
+        @base_router.get("/movies")
+        def original_movies():
+            return "movies"
+
+        @base_router.get("/shows")
+        def original_shows():
+            return "shows"
+
         original_builder = library_optimized.build_base_router
         library_optimized.build_base_router = lambda _ctx: (
             base_router,
-            {"library": original_library, "sentinel": object()},
+            {
+                "library": original_library,
+                "movies": original_movies,
+                "shows": original_shows,
+                "sentinel": object(),
+            },
         )
 
         class Context:
@@ -273,13 +338,21 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
 
         self.assertIs(router, base_router)
         self.assertIn("library", handlers)
+        self.assertIn("movies", handlers)
+        self.assertIn("shows", handlers)
         self.assertIn("sentinel", handlers)
         self.assertIsNot(handlers["library"], original_library)
-        self.assertTrue(any(getattr(route, "path", "") == "/library" for route in router.routes))
+        self.assertIsNot(handlers["movies"], original_movies)
+        self.assertIsNot(handlers["shows"], original_shows)
+        paths = [getattr(route, "path", "") for route in router.routes]
+        self.assertEqual(paths.count("/library"), 1)
+        self.assertEqual(paths.count("/movies"), 1)
+        self.assertEqual(paths.count("/shows"), 1)
 
     def test_library_router_and_navigation_use_warm_render_path(self):
         routes = (ROOT / "app/routes/__init__.py").read_text(encoding="utf-8")
         adapter = (ROOT / "app/routes/library_optimized.py").read_text(encoding="utf-8")
+        landing = (ROOT / "app/routes/library_landing_optimized.py").read_text(encoding="utf-8")
         loader = (ROOT / "app/static/workspace-ui.js").read_text(encoding="utf-8")
         navigation = (ROOT / "app/static/app-navigation.js").read_text(encoding="utf-8")
         lazy = (ROOT / "app/static/library-surface-lazy.js").read_text(encoding="utf-8")
@@ -289,9 +362,13 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
 
         self.assertIn(".library_optimized import build_router", routes)
         self.assertIn("router, handlers = build_base_router(ctx)", adapter)
+        self.assertIn("fast_landing_response", adapter)
+        self.assertIn('@router.get("/movies"', adapter)
+        self.assertIn('@router.get("/shows"', adapter)
         self.assertIn("eligible_search", adapter)
         self.assertIn("search_response", adapter)
         self.assertIn("return router, updated_handlers", adapter)
+        self.assertIn("WITH candidates AS", landing)
         self.assertIn('fetch("/library"', navigation)
         self.assertIn("navigator.connection?.saveData", navigation)
         self.assertIn('infomancer_library_view', navigation)
