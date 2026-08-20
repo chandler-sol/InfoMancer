@@ -227,6 +227,16 @@ def _library_read_indexes(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def _shared_chrome_indexes(conn: sqlite3.Connection) -> None:
+    """Index tiny-but-frequent queries that are executed for global application chrome."""
+    statements = (
+        "CREATE INDEX IF NOT EXISTS idx_event_logs_activity ON event_logs(category,user_id,id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_announcements_due ON announcements(active,audience,starts_at,ends_at,id)",
+    )
+    for statement in statements:
+        conn.execute(statement)
+
+
 MIGRATIONS = (
     Migration(1, "title metadata columns", _titles),
     Migration(2, "source health columns", _roots),
@@ -243,6 +253,7 @@ MIGRATIONS = (
     Migration(13, "operation history and safe undo", _operation_history),
     Migration(14, "persisted global rename proposals", _rename_proposals),
     Migration(15, "library read-path indexes", _library_read_indexes),
+    Migration(16, "shared chrome read indexes", _shared_chrome_indexes),
 )
 
 
