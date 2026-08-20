@@ -82,6 +82,18 @@ def _cacheable_landing(
     ))
 
 
+def _cached_landing_response(body: bytes, *, view: str, render_state: str) -> Response:
+    served = _trim_library_surface(body, view)
+    headers = {
+        "Cache-Control": "private, no-store",
+        "X-InfoMancer-Library-Render": render_state,
+        "X-InfoMancer-Library-Query": "scoped",
+    }
+    if view:
+        headers["X-InfoMancer-Library-Surface"] = view
+    return Response(content=served, media_type="text/html", headers=headers)
+
+
 def build_router(ctx):
     """Wrap Library routes with optimized landing, search, partial, and warm paths."""
     router, handlers = build_base_router(ctx)
@@ -157,46 +169,31 @@ def build_router(ctx):
 
         user_id = int(getattr(request.state.user, "id", 0) or 0)
         signature = _library_signature(db, user_id)
-        key = (_session_key(request), request.url.path, kind, view or "full")
-        cached = _cache_get(key, signature)
-        if cached is not None:
+        # Cache the one full render, not separate List and Covers documents. The
+        # active surface is sliced from that source in memory on every hit. This
+        # means switching views or lazy-hydrating the other surface never repeats
+        # the expensive query/Jinja pass and does not duplicate all page chrome in
+        # the render cache.
+        source_key = (_session_key(request), request.url.path, kind, "source")
+        cached_source = _cache_get(source_key, signature)
+        if cached_source is not None:
             if is_prefetch:
                 return _warm_response("hit", view)
-            headers = {
-                "Cache-Control": "private, no-store",
-                "X-InfoMancer-Library-Render": "hit",
-                "X-InfoMancer-Library-Query": "scoped",
-            }
-            if view:
-                headers["X-InfoMancer-Library-Surface"] = view
-            response = Response(content=cached, media_type="text/html", headers=headers)
+            response = _cached_landing_response(
+                cached_source, view=view, render_state="hit",
+            )
             return _live_results_response(response) if is_live_partial else response
 
         response = fast_landing_response(
             db, templates, display_title_type, request, kind=kind,
         )
         body = getattr(response, "body", b"")
-        served_body = _trim_library_surface(body, view)
-        if response.status_code == 200 and served_body:
-            _cache_put(key, signature, served_body)
+        if response.status_code == 200 and body:
+            _cache_put(source_key, signature, body)
         if is_prefetch and response.status_code == 200:
             return _warm_response("miss", view)
-        if served_body != body:
-            headers = {
-                key: value for key, value in response.headers.items()
-                if key.lower() != "content-length"
-            }
-            headers["Cache-Control"] = "private, no-store"
-            headers["X-InfoMancer-Library-Render"] = "miss"
-            headers["X-InfoMancer-Library-Surface"] = view
-            headers["X-InfoMancer-Library-Query"] = "scoped"
-            response = Response(
-                content=served_body, status_code=response.status_code, headers=headers
-            )
-        elif response.status_code == 200 and body:
-            response.headers["X-InfoMancer-Library-Render"] = "miss"
-            response.headers["X-InfoMancer-Library-Query"] = "scoped"
-            response.headers.setdefault("Cache-Control", "private, no-store")
+        if response.status_code == 200 and body:
+            response = _cached_landing_response(body, view=view, render_state="miss")
         return _live_results_response(response) if is_live_partial else response
 
     @router.get("/library", response_class=HTMLResponse, name="library")
