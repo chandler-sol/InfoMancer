@@ -10,6 +10,12 @@
   flex-wrap: wrap;
 }
 
+/* The old A-Z strip used its flexible width to push the view controls to the far
+   edge. Keep that alignment after the alphabet is moved into the compact menu. */
+.library-display-toolbar.has-letter-jump .library-view-toolbar {
+  margin-left: auto;
+}
+
 .letter-jump-menu {
   position: relative;
   flex: 0 0 auto;
