@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 
 from app.app_settings import AppSettingError, AppSettings
@@ -146,6 +147,34 @@ class AppSettingsTests(unittest.TestCase):
             self.settings.validate_import({"timezone": "Not/A_Zone"})
         with self.assertRaisesRegex(AppSettingError, "must contain text"):
             self.settings.validate_import({"default_cover_size": 200})
+
+    def test_read_cache_reuses_one_snapshot_and_invalidates_after_write(self):
+        original_connect = self.database.connect
+        connection_count = 0
+
+        @contextmanager
+        def counted_connect():
+            nonlocal connection_count
+            connection_count += 1
+            with original_connect() as conn:
+                yield conn
+
+        self.database.connect = counted_connect
+        self.settings = AppSettings(
+            self.database, "https://example.test/search?q={query}"
+        )
+
+        self.assertEqual(self.settings.values()["log_level"], "info")
+        self.assertEqual(self.settings.get("timezone"), "UTC")
+        self.assertEqual(self.settings.file_protection_mode(), "standard")
+        self.assertEqual(connection_count, 1)
+
+        self.settings.set_internal("log_level", "debug")
+        self.assertEqual(connection_count, 2)
+        self.assertEqual(self.settings.get("log_level"), "debug")
+        self.assertEqual(connection_count, 3)
+        self.assertEqual(self.settings.get("log_level"), "debug")
+        self.assertEqual(connection_count, 3)
 
 
 if __name__ == "__main__":
