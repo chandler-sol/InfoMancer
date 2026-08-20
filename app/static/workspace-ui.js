@@ -94,21 +94,54 @@
 
   const settingsSystem = Boolean(document.querySelector('.settings-jump-nav'));
   const savedViews = Boolean(document.querySelector('.saved-view-bar') && document.querySelector('.catalog-tabs'));
-  const letterJump = Boolean(document.querySelector('.library-display-toolbar .alphabet'));
+  const letterJumpToolbar = document.querySelector('.library-display-toolbar');
+  const letterJumpAlphabet = letterJumpToolbar?.querySelector('.alphabet');
+  const libraryViewToolbar = letterJumpToolbar?.querySelector('.library-view-toolbar');
+  const libraryControls = document.querySelector('.library-controls');
+  const filterSearch = document.getElementById('library-filter-search');
+  const filterSearchInput = document.getElementById('live-library-search');
+  const letterJump = Boolean(letterJumpAlphabet);
   const library = Boolean(document.querySelector('.library-table') && document.getElementById('cover-library'));
   const detail = Boolean(document.querySelector('.media-dossier'));
   const review = Boolean(document.querySelector('.review-workspace'));
+
+  /* The Library ships a fully functional A-Z strip in its server HTML and upgrades
+     it to the compact Jump-to control. Hide only the legacy strip during that brief
+     enhancement window while preserving its flex footprint. This keeps the List /
+     Covers controls in their final right-aligned position and prevents the old
+     alphabet from flashing before the compact menu is ready. */
+  if (letterJumpAlphabet) {
+    letterJumpAlphabet.style.visibility = 'hidden';
+    letterJumpAlphabet.setAttribute('aria-hidden', 'true');
+    if (letterJumpToolbar) letterJumpToolbar.style.justifyContent = 'space-between';
+    if (libraryViewToolbar) libraryViewToolbar.style.marginLeft = 'auto';
+  }
+
+  /* Apply the main filter-strip geometry immediately. The dedicated Library polish
+     stylesheet takes ownership as soon as it finishes loading. */
+  if (libraryControls) {
+    libraryControls.style.boxSizing = 'border-box';
+    libraryControls.style.width = 'fit-content';
+    libraryControls.style.maxWidth = '100%';
+  }
+  if (filterSearch && filterSearchInput && !filterSearch.classList.contains('open')) {
+    filterSearchInput.style.visibility = 'hidden';
+  }
 
   const settingsStyles = settingsSystem ? Promise.all([loadStyle("settings-system-nav.css")]) : Promise.resolve();
   const savedViewStyles = savedViews ? Promise.all([loadStyle("library-saved-views-polish.css")]) : Promise.resolve();
   const letterJumpStyles = letterJump ? Promise.all([loadStyle("library-letter-jump.css")]) : Promise.resolve();
   const libraryStyles = library ? Promise.all([
+    loadStyle("library-controls-polish.css"),
     loadStyle("library-performance.css"),
     loadStyle("library-selection-polish.css"),
     loadStyle("library-selection-toolbar.css"),
   ]) : Promise.resolve();
   const detailStyles = detail ? Promise.all([loadStyle("detail-page-polish.css")]) : Promise.resolve();
   const reviewStyles = review ? Promise.all([loadStyle("review-queue-polish.css")]) : Promise.resolve();
+  const letterJumpReady = letterJump
+    ? letterJumpStyles.then(() => loadScript("library-letter-jump.js"))
+    : Promise.resolve();
 
   /* Sidebar geometry is restored synchronously by base.html. Do not turn motion
      back on until the navigation/action chrome CSS has actually settled. On slower
@@ -132,11 +165,19 @@
   savedViewStyles.then(() => {
     if (savedViews) return loadScript("library-saved-views-polish.js");
   });
-  letterJumpStyles.then(() => {
-    if (letterJump) return loadScript("library-letter-jump.js");
+  letterJumpReady.then(() => {
+    if (!letterJump) return;
+    letterJumpAlphabet.style.removeProperty('visibility');
+    letterJumpAlphabet.removeAttribute('aria-hidden');
+    letterJumpToolbar?.style.removeProperty('justify-content');
+    libraryViewToolbar?.style.removeProperty('margin-left');
   });
   libraryStyles.then(() => {
     if (!library) return;
+    libraryControls?.style.removeProperty('box-sizing');
+    libraryControls?.style.removeProperty('width');
+    libraryControls?.style.removeProperty('max-width');
+    filterSearchInput?.style.removeProperty('visibility');
     return loadScriptsSequentially([
       "library-surface-lazy.js",
       "library-selection-polish.js",
