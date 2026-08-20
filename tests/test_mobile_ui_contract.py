@@ -40,6 +40,18 @@ class MobileUiContractTests(unittest.TestCase):
         self.assertIn(".cover-card { position:relative; z-index:0; isolation:isolate;", stylesheet)
         self.assertIn("infomancer:open-dialog", script)
 
+    def test_mobile_library_display_toolbar_keeps_compact_control_rows(self):
+        toolbar = Path("app/static/library-selection-toolbar.css").read_text(encoding="utf-8")
+
+        self.assertIn("@media (max-width: 760px)", toolbar)
+        self.assertIn("display: contents;", toolbar)
+        self.assertIn("grid-column: 1 / -1;", toolbar)
+        self.assertIn("grid-row: 2;", toolbar)
+        self.assertIn("white-space: nowrap;", toolbar)
+        self.assertIn("min-width: 132px;", toolbar)
+        self.assertIn("border-top: 1px solid var(--line);", toolbar)
+        self.assertIn("grid-row: auto;", toolbar)
+
     def test_mobile_task_widget_and_footer_have_explicit_states(self):
         base = Path("app/templates/base.html").read_text(encoding="utf-8")
         progress = Path("app/static/progress.css").read_text(encoding="utf-8")
