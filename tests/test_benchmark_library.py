@@ -1,5 +1,8 @@
+import tempfile
 import unittest
+from pathlib import Path
 
+from app.db import Database
 from scripts.benchmark_library import benchmark_once
 
 
@@ -20,6 +23,29 @@ class BenchmarkHarnessTests(unittest.TestCase):
         ):
             self.assertIn(key, result)
             self.assertGreaterEqual(float(result[key]), 0.0)
+
+    def test_library_read_path_indexes_are_installed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            database = Database(Path(temporary) / "indexes.db")
+            database.initialize()
+            with database.connect() as conn:
+                indexes = {
+                    row["name"]
+                    for table in (
+                        "titles", "user_title_state", "app_settings", "announcements",
+                        "title_tags", "expected_episodes", "files",
+                    )
+                    for row in conn.execute(f"PRAGMA index_list({table})").fetchall()
+                }
+        self.assertTrue({
+            "idx_titles_updated",
+            "idx_user_title_state_updated",
+            "idx_app_settings_updated",
+            "idx_announcements_updated",
+            "idx_title_tags_tag",
+            "idx_expected_aired_lookup",
+            "idx_files_episode_range",
+        }.issubset(indexes))
 
 
 if __name__ == "__main__":
