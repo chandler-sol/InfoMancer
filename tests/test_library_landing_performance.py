@@ -9,12 +9,13 @@ from fastapi.responses import Response
 
 from app.db import Database
 from app.routes import library_optimized
-from app.routes.library_cached import _library_signature, _trim_library_surface
+from app.routes.library_cached import _trim_library_surface
 from app.routes.library_landing_optimized import fast_landing_response
 from app.routes.library_optimized import (
     _cacheable_landing, _live_results_fragment, _warm_response,
 )
 from app.routes.library_search_optimized import eligible_search, search_response
+from app.routes.library_signature_optimized import library_signature
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,7 +39,7 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             database = Database(Path(temporary) / "library.db")
             database.initialize()
-            before = _library_signature(database, 0)
+            before = library_signature(database, 0)
             with database.connect() as conn:
                 root_id = conn.execute(
                     "INSERT INTO roots(path,kind,label) VALUES ('/media/movies','movie','Movies')"
@@ -48,7 +49,7 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
                     "VALUES (?,?,?,?,'2026-01-01T00:00:00')",
                     (root_id, "movie", "Alien", "/media/movies/Alien"),
                 )
-            after = _library_signature(database, 0)
+            after = library_signature(database, 0)
             self.assertNotEqual(before, after)
 
     def test_preferred_view_keeps_only_one_large_library_surface(self):
@@ -152,7 +153,9 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
         self.assertFalse(eligible_search(**{**base, "sort": "rating"}))
 
         source = (ROOT / "app/routes/library_search_optimized.py").read_text(encoding="utf-8")
-        self.assertIn("WITH candidates(id) AS", source)
+        self.assertIn("WITH raw_candidates(id) AS", source)
+        self.assertIn("), candidates AS (", source)
+        self.assertIn("LIMIT 1000", source)
         self.assertIn("FROM files f JOIN candidates c ON c.id=f.title_id", source)
         self.assertIn("FROM expected_episodes e JOIN candidates c ON c.id=e.title_id", source)
         self.assertIn('"candidate-search"', source)
