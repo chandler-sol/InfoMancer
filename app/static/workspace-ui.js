@@ -71,6 +71,8 @@
     }
     const script = document.createElement("script");
     script.src = src;
+    /* Dynamic scripts default to async. Setting async=false before insertion keeps
+       execution order while still letting the browser fetch a batch in parallel. */
     script.async = false;
     script.addEventListener("load", () => {
       script.dataset.infomancerLoaded = "1";
@@ -80,8 +82,9 @@
     document.head.append(script);
   });
 
-  const loadScriptsSequentially = async (paths) => {
-    for (const path of paths) await loadScript(path);
+  const loadScriptsOrdered = async (paths) => {
+    const pending = paths.map((path) => loadScript(path));
+    await Promise.all(pending);
   };
 
   /* Start all applicable CSS requests immediately. Layout-affecting JavaScript is
@@ -156,8 +159,7 @@
 
   /* These three controllers are independent. They used to load one after another,
      making the last global controller wait through three network/parse turns. Start
-     them together once their chrome CSS is ready; page-specific controllers below
-     retain sequencing where they actually have dependencies. */
+     them together once their chrome CSS is ready. */
   globalStyles.then(() => Promise.all([
     loadScript("workspace-ui-core.js"),
     loadScript("task-widget.js"),
@@ -183,7 +185,10 @@
     libraryControls?.style.removeProperty('width');
     libraryControls?.style.removeProperty('max-width');
     filterSearchInput?.style.removeProperty('visibility');
-    return loadScriptsSequentially([
+    /* These controllers do have execution-order dependencies, but they do not need
+       a network waterfall. async=false preserves that order while all four fetches
+       start together. */
+    return loadScriptsOrdered([
       "library-surface-lazy.js",
       "library-selection-polish.js",
       "library-inspector-lifecycle.js",
