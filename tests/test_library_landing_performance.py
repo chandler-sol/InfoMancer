@@ -11,6 +11,7 @@ from app.routes import library_optimized
 from app.routes.library_cached import (
     _cacheable_landing, _library_signature, _trim_library_surface,
 )
+from app.routes.library_optimized import _warm_response
 from app.routes.library_search_optimized import eligible_search, search_response
 
 
@@ -136,6 +137,14 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
             self.assertEqual(len(templates.context["rows"]), 1)
             self.assertEqual(templates.context["rows"][0]["id"], title_id)
 
+    def test_library_warm_response_never_carries_rendered_html(self):
+        response = _warm_response("hit", "covers")
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.body, b"")
+        self.assertEqual(response.headers["X-InfoMancer-Library-Render"], "hit")
+        self.assertEqual(response.headers["X-InfoMancer-Library-Prefetch"], "warm")
+        self.assertEqual(response.headers["X-InfoMancer-Library-Surface"], "covers")
+
     def test_optimized_library_preserves_router_handler_bundle_contract(self):
         base_router = APIRouter()
 
@@ -183,6 +192,11 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
         self.assertIn("navigator.connection?.saveData", navigation)
         self.assertIn('infomancer_library_view', navigation)
         self.assertIn('X-InfoMancer-Prefetch', navigation)
+        self.assertIn("response.body?.cancel()", navigation)
+        self.assertNotIn("response.arrayBuffer()", navigation)
+        self.assertIn('request.headers.get("x-infomancer-prefetch"', adapter)
+        self.assertIn('return _warm_response("hit", view)', adapter)
+        self.assertIn('return _warm_response("miss", view)', adapter)
         self.assertIn('library-surface-lazy.js', loader)
         self.assertIn('library-performance.css', loader)
         self.assertIn('X-InfoMancer-Library-View', lazy)
