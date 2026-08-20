@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from urllib.parse import urlencode
 
+from fastapi.responses import HTMLResponse
+
 from .library_cached import _trimmed_response
 from ..saved_views import SavedViewService
 
@@ -38,6 +40,47 @@ def _record_search(db, user_id: int, query: str) -> None:
                )""",
             (user_id, user_id),
         )
+
+
+def _live_partial(request) -> bool:
+    return (
+        request.headers.get("x-infomancer-partial", "").strip().casefold()
+        == "library"
+    )
+
+
+def _render_live_results(templates, request, rows, *, query: str, kind: str, view: str):
+    """Render only the result surfaces without running global template processors.
+
+    Jinja2Templates applies every context processor even to tiny partial templates.
+    Library live-search can fire several times while someone types, so using the
+    environment directly avoids announcement/tour/activity/settings queries that are
+    unrelated to replacing the Library result rows.
+    """
+    template = templates.env.get_template("library_results.html")
+    body = template.render({
+        "request": request,
+        "rows": rows,
+        "q": query,
+        "kind": kind,
+        "view": view,
+        "letter": "",
+        "genre": "",
+        "title_type": "",
+        "root_id": None,
+        "match_status": "",
+        "gap_status": "",
+        "favorite_status": "",
+        "tag_id": None,
+        "person_id": "",
+        "person_name": "",
+        "credit_role": "",
+    })
+    return HTMLResponse(body, headers={
+        "Cache-Control": "private, no-store",
+        "X-InfoMancer-Library-Query": "candidate-search",
+        "X-InfoMancer-Partial": "library",
+    })
 
 
 def search_response(
@@ -150,6 +193,15 @@ def search_response(
             query_params,
         ).fetchall()
 
+    # This is the high-frequency keystroke path. It needs only the rows being
+    # replaced, not filter option scans, saved-view queries, or base.html context.
+    if _live_partial(request):
+        return _render_live_results(
+            templates, request, rows, query=query, kind=kind, view=view,
+        )
+
+    # Full page navigation still needs the controls and their current option lists.
+    with db.connect() as conn:
         option_conditions = ["(genres IS NOT NULL OR imdb_title_type IS NOT NULL)"]
         option_params: list = []
         if kind in {"movie", "tv"}:
