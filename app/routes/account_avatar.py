@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import html
 import os
 import tempfile
@@ -46,6 +47,7 @@ PROFILE_ICON_CHOICES = {"initials", "custom", *PROFILE_ICON_SVGS}
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
 AVATAR_EDGE = 256
+AVATAR_CACHE_CONTROL = "private, no-cache"
 
 
 # AuthService deliberately validates profile_icon against its shared PROFILE_ICONS
@@ -79,6 +81,18 @@ def _avatar_directory(settings) -> Path:
 
 def _avatar_path(settings, user_id: int) -> Path:
     return _avatar_directory(settings) / f"{int(user_id)}.png"
+
+
+def _etag_matches(request: Request, etag: str) -> bool:
+    supplied = request.headers.get("if-none-match", "")
+    if not supplied:
+        return False
+    candidates = {value.strip() for value in supplied.split(",")}
+    return "*" in candidates or etag in candidates or f"W/{etag}" in candidates
+
+
+def _avatar_headers(etag: str) -> dict[str, str]:
+    return {"Cache-Control": AVATAR_CACHE_CONTROL, "ETag": etag}
 
 
 def _validate_canvas_png(payload: bytes) -> str:
@@ -220,15 +234,26 @@ def build_router(ctx: RouteContext):
             custom_path = _avatar_path(settings, user_id)
             preview = request.query_params.get("preview") == "1"
             if custom_path.is_file() and (preview or user.profile_icon == "custom"):
+                stat = custom_path.stat()
+                etag = f'"custom-{user_id:x}-{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+                headers = _avatar_headers(etag)
+                if _etag_matches(request, etag):
+                    return Response(status_code=304, headers=headers)
                 return FileResponse(
                     custom_path,
                     media_type="image/png",
-                    headers={"Cache-Control": "private, no-store"},
+                    headers=headers,
                 )
+        payload = _svg_avatar(user)
+        fingerprint = hashlib.blake2s(payload.encode("utf-8"), digest_size=12).hexdigest()
+        etag = f'"svg-{fingerprint}"'
+        headers = _avatar_headers(etag)
+        if _etag_matches(request, etag):
+            return Response(status_code=304, headers=headers)
         return Response(
-            _svg_avatar(user),
+            payload,
             media_type="image/svg+xml",
-            headers={"Cache-Control": "private, no-store"},
+            headers=headers,
         )
 
     @router.post("/account/profile/avatar")
