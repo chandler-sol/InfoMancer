@@ -154,10 +154,14 @@
     })));
   }
 
-  globalStyles.then(() => loadScriptsSequentially([
-    "workspace-ui-core.js",
-    "task-widget.js",
-    "app-navigation.js",
+  /* These three controllers are independent. They used to load one after another,
+     making the last global controller wait through three network/parse turns. Start
+     them together once their chrome CSS is ready; page-specific controllers below
+     retain sequencing where they actually have dependencies. */
+  globalStyles.then(() => Promise.all([
+    loadScript("workspace-ui-core.js"),
+    loadScript("task-widget.js"),
+    loadScript("app-navigation.js"),
   ]));
 
   settingsStyles.then(() => {
