@@ -19,6 +19,20 @@ class HttpPerformanceTests(unittest.TestCase):
             "public, max-age=31536000, immutable",
         )
 
+    def test_large_text_assets_are_compressed_after_cache_policy(self):
+        client = TestClient(main.app)
+        response = client.get(
+            "/static/library.css?v=test",
+            headers={"Accept-Encoding": "gzip"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("content-encoding"), "gzip")
+        self.assertIn("Accept-Encoding", response.headers.get("vary", ""))
+        self.assertEqual(
+            response.headers.get("cache-control"),
+            "public, max-age=31536000, immutable",
+        )
+
     def test_templates_have_a_real_static_cache_version(self):
         version = main.templates.env.globals.get("static_version", "")
         self.assertTrue(version)
