@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from threading import RLock
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -58,22 +59,34 @@ class AppSettings:
             "hash_pause_for_activity": "1",
             "hash_last_scheduled_at": "",
         }
+        # App settings are read on nearly every rendered page and by several
+        # background coordinators, but they change very rarely. InfoMancer owns one
+        # runtime per catalog, so a small process-local snapshot removes repeated
+        # SQLite connection/query churn without introducing cross-worker staleness.
+        self._cache_lock = RLock()
+        self._cache: dict[str, str] | None = None
+
+    def _values_locked(self) -> dict[str, str]:
+        if self._cache is None:
+            values = dict(self.defaults)
+            with self.database.connect() as conn:
+                rows = conn.execute("SELECT key, value FROM app_settings").fetchall()
+            values.update({row["key"]: row["value"] for row in rows if row["key"] in values})
+            self._cache = values
+        return self._cache
 
     def get(self, key: str) -> str:
         if key not in self.defaults:
             raise KeyError(key)
-        with self.database.connect() as conn:
-            row = conn.execute(
-                "SELECT value FROM app_settings WHERE key=?", (key,)
-            ).fetchone()
-        return row["value"] if row else self.defaults[key]
+        with self._cache_lock:
+            return self._values_locked()[key]
 
     def values(self) -> dict[str, str]:
-        values = dict(self.defaults)
-        with self.database.connect() as conn:
-            rows = conn.execute("SELECT key, value FROM app_settings").fetchall()
-        values.update({row["key"]: row["value"] for row in rows if row["key"] in values})
-        return values
+        with self._cache_lock:
+            # Never expose the mutable cached dictionary to callers. A copy is tiny
+            # compared with opening SQLite and protects the cache from accidental
+            # mutation by template/context code.
+            return dict(self._values_locked())
 
     def validate_general(
         self, installation_name: str, timezone_name: str,
@@ -140,9 +153,10 @@ class AppSettings:
         return {"default_season_display": display}
 
     def file_protection_mode(self) -> str:
-        if self.get("read_only_mode") == "1":
+        values = self.values()
+        if values["read_only_mode"] == "1":
             return "readonly"
-        if self.get("lockdown_mode") == "1":
+        if values["lockdown_mode"] == "1":
             return "lockdown"
         return "standard"
 
@@ -311,13 +325,15 @@ class AppSettings:
     def set_internal(self, key: str, value: str) -> None:
         if key not in self.defaults:
             raise KeyError(key)
-        with self.database.connect() as conn:
-            conn.execute(
-                """INSERT INTO app_settings(key,value,updated_at)
-                   VALUES (?,?,CURRENT_TIMESTAMP)
-                   ON CONFLICT(key) DO UPDATE SET value=excluded.value,
-                     updated_at=CURRENT_TIMESTAMP""", (key, value),
-            )
+        with self._cache_lock:
+            with self.database.connect() as conn:
+                conn.execute(
+                    """INSERT INTO app_settings(key,value,updated_at)
+                       VALUES (?,?,CURRENT_TIMESTAMP)
+                       ON CONFLICT(key) DO UPDATE SET value=excluded.value,
+                         updated_at=CURRENT_TIMESTAMP""", (key, value),
+                )
+            self._cache = None
 
     def update(self, values: dict[str, str], changed_by: int | None) -> int:
         unknown = set(values) - self.EDITABLE_KEYS
@@ -325,31 +341,34 @@ class AppSettings:
             raise AppSettingError("InfoMancer received an unsupported setting and made no changes.")
         actor = changed_by if changed_by and changed_by > 0 else None
         changed = 0
-        with self.database.connect() as conn:
-            existing = {
-                row["key"]: row["value"]
-                for row in conn.execute(
-                    f"SELECT key, value FROM app_settings WHERE key IN ({','.join('?' for _ in values)})",
-                    tuple(values),
-                )
-            } if values else {}
-            for key, new_value in values.items():
-                old_value = existing.get(key, self.defaults[key])
-                if old_value == new_value:
-                    continue
-                conn.execute(
-                    """INSERT INTO app_settings(key,value,updated_by,updated_at)
-                       VALUES (?,?,?,CURRENT_TIMESTAMP)
-                       ON CONFLICT(key) DO UPDATE SET value=excluded.value,
-                         updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP""",
-                    (key, new_value, actor),
-                )
-                conn.execute(
-                    """INSERT INTO app_setting_changes
-                       (key,old_value,new_value,changed_by) VALUES (?,?,?,?)""",
-                    (key, old_value, new_value, actor),
-                )
-                changed += 1
+        with self._cache_lock:
+            with self.database.connect() as conn:
+                existing = {
+                    row["key"]: row["value"]
+                    for row in conn.execute(
+                        f"SELECT key, value FROM app_settings WHERE key IN ({','.join('?' for _ in values)})",
+                        tuple(values),
+                    )
+                } if values else {}
+                for key, new_value in values.items():
+                    old_value = existing.get(key, self.defaults[key])
+                    if old_value == new_value:
+                        continue
+                    conn.execute(
+                        """INSERT INTO app_settings(key,value,updated_by,updated_at)
+                           VALUES (?,?,?,CURRENT_TIMESTAMP)
+                           ON CONFLICT(key) DO UPDATE SET value=excluded.value,
+                             updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP""",
+                        (key, new_value, actor),
+                    )
+                    conn.execute(
+                        """INSERT INTO app_setting_changes
+                           (key,old_value,new_value,changed_by) VALUES (?,?,?,?)""",
+                        (key, old_value, new_value, actor),
+                    )
+                    changed += 1
+            if changed:
+                self._cache = None
         return changed
 
     def history(self, limit: int = 20):
