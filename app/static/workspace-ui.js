@@ -97,6 +97,7 @@
   ]);
 
   const settingsSystem = Boolean(document.querySelector('.settings-jump-nav'));
+  const settingsCoverDensity = Boolean(document.getElementById('settings-cover-size'));
   const savedViews = Boolean(document.querySelector('.saved-view-bar') && document.querySelector('.catalog-tabs'));
   const letterJumpToolbar = document.querySelector('.library-display-toolbar');
   const letterJumpAlphabet = letterJumpToolbar?.querySelector('.alphabet');
@@ -171,6 +172,7 @@
   settingsStyles.then(() => {
     if (settingsSystem) return loadScript("settings-system-nav.js");
   });
+  if (settingsCoverDensity) loadScript("settings-cover-density.js");
   savedViewStyles.then(() => {
     if (savedViews) return loadScript("library-saved-views-polish.js");
   });
