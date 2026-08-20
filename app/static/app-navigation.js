@@ -73,8 +73,13 @@
       credentials: "same-origin",
       cache: "no-store",
       headers,
-    }).then((response) => response.arrayBuffer())
-      .catch(() => null)
+    }).then((response) => {
+      /* The optimized server answers warm requests with 204 after populating its
+         render cache. Cancel any body defensively so an older server or proxy can
+         never turn a hover warm-up into a discarded full-Library download. */
+      response.body?.cancel();
+      return null;
+    }).catch(() => null)
       .finally(() => { libraryWarmPromise = null; });
     return libraryWarmPromise;
   };
