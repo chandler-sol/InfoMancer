@@ -15,19 +15,23 @@ from .library_cached import (
     _trim_library_surface,
     _trimmed_response,
 )
+from .library_search_optimized import eligible_search, search_response
 
 
 def build_router(ctx):
-    """Wrap the normal Library router with the optimized landing-page path.
+    """Wrap the normal Library router with optimized high-frequency read paths.
 
     app.routes.library.build_router returns the repository-wide ``(router, handlers)``
     bundle used by app.main. Keep that contract intact while replacing only the GET
-    /library endpoint with the cached/scoped implementation.
+    /library endpoint. The default landing uses scoped aggregates plus a render cache;
+    ordinary free-text search uses a candidate-first query; the advanced filter matrix
+    continues through the mature base handler.
     """
     router, handlers = build_base_router(ctx)
     db = ctx.live("db")
     templates = ctx.live("templates")
     display_title_type = ctx.live("display_title_type")
+    fuzzy_people = ctx.live("fuzzy_people")
 
     original_route = next(
         (
@@ -52,12 +56,27 @@ def build_router(ctx):
         sort: str = "title", record_search: str = "",
     ):
         view = _requested_view(request)
+        has_transient_context = (
+            "message" in request.query_params or "tour" in request.query_params
+        )
+
+        if not has_transient_context and eligible_search(
+            q=q, kind=kind, letter=letter, genre=genre, title_type=title_type,
+            root=root, person=person, person_name=person_name,
+            credit_role=credit_role, match=match, gaps=gaps, favorite=favorite,
+            tag=tag, sort=sort, record_search=record_search,
+        ):
+            return search_response(
+                db, templates, display_title_type, fuzzy_people, request,
+                q=q, kind=kind, record_search=record_search, view=view,
+            )
+
         cacheable = _cacheable_landing(
             q=q, kind=kind, letter=letter, genre=genre, title_type=title_type,
             root=root, person=person, person_name=person_name,
             credit_role=credit_role, match=match, gaps=gaps, favorite=favorite,
             tag=tag, sort=sort, record_search=record_search,
-        ) and "message" not in request.query_params and "tour" not in request.query_params
+        ) and not has_transient_context
 
         arguments = (
             request, q, kind, letter, genre, title_type, root, person,
