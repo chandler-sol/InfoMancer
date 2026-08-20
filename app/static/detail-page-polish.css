@@ -395,6 +395,12 @@ body.has-app-sidebar .media-dossier .detail-copy .title-quick-actions {
 }
 
 @media (max-width: 760px) {
+  /* The desktop dossier deliberately breathes under the persistent header, but that
+     same 46px shell inset leaves an oversized dead band on phones. Keep the header's
+     touch-friendly height and tighten only the detail surface beneath it. */
+  body.has-app-sidebar main.shell:has(> .media-dossier) {
+    padding-top: 18px;
+  }
   body.has-app-sidebar .media-dossier .season-tools-row {
     align-items: stretch;
     flex-direction: column;
