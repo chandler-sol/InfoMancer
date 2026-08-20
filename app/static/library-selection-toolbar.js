@@ -26,31 +26,39 @@
   const analyzeLibraryMovies = document.getElementById('analyze-library-movies');
   const analyzeLibraryShows = document.getElementById('analyze-library-shows');
 
-  if (deselectButton) deselectButton.textContent = 'Deselect';
-  if (sortButton) sortButton.textContent = 'Sort Titles';
-  if (refreshButton) refreshButton.textContent = 'Refresh Metadata';
+  if (deselectButton) {
+    deselectButton.textContent = 'Clear';
+    deselectButton.classList.add('library-selection-clear');
+  }
+  if (sortButton) {
+    sortButton.textContent = 'Sort Titles';
+    sortButton.classList.add('library-selection-secondary-command');
+  }
+  if (organizeButton) {
+    organizeButton.textContent = 'Organize';
+    organizeButton.classList.add('library-selection-command');
+    organizeButton.title = 'Organize and tag selected titles';
+    organizeButton.setAttribute('aria-label', 'Organize and tag selected titles');
+  }
+  if (refreshButton) {
+    refreshButton.textContent = 'Refresh Metadata';
+    refreshButton.classList.add('library-selection-secondary-command');
+  }
 
   const favoriteButton = document.createElement('button');
   favoriteButton.type = 'button';
-  favoriteButton.className = 'workspace-inspector-favorite library-bulk-favorite';
+  favoriteButton.className = 'workspace-inspector-favorite library-bulk-favorite library-selection-command';
   favoriteButton.setAttribute('aria-pressed', 'false');
   favoriteButton.title = 'Add selected titles to Favorites';
   favoriteButton.innerHTML = '<span aria-hidden="true">★</span><small>Favorite</small>';
 
   const compareButton = document.createElement('button');
   compareButton.type = 'button';
-  compareButton.className = 'button library-bulk-compare';
-  compareButton.textContent = 'Compare';
+  compareButton.className = 'button library-bulk-compare library-selection-command';
+  compareButton.innerHTML = '<span class="library-selection-command-icon" aria-hidden="true">⇄</span><span>Compare</span>';
   compareButton.addEventListener('click', () => {
     document.dispatchEvent(new CustomEvent('infomancer:library-compare-selected'));
   });
-
-  const separator = () => {
-    const node = document.createElement('span');
-    node.className = 'library-bulk-separator';
-    node.setAttribute('aria-hidden', 'true');
-    return node;
-  };
 
   const matchMenu = document.createElement('details');
   matchMenu.className = 'library-bulk-match-menu';
@@ -63,22 +71,39 @@
   [analyzeLibraryMovies, analyzeLibraryShows].forEach((button) => {
     if (!button) return;
     button.classList.remove('primary');
+    button.classList.add('library-selection-secondary-command');
     matchOptions.append(button);
     button.addEventListener('click', () => matchMenu.removeAttribute('open'));
   });
 
-  /* Selection state, personal organization, and catalog/media operations are
-     intentionally grouped. The compact Favorite control mirrors the Inspector so
-     it reads as the same personal action rather than another large toolbar button. */
-  actions.replaceChildren();
-  if (selectionCountLabel) actions.append(selectionCountLabel);
-  if (deselectButton) actions.append(deselectButton);
-  actions.append(separator(), favoriteButton);
-  if (sortButton) actions.append(sortButton);
-  if (organizeButton) actions.append(organizeButton);
-  actions.append(separator(), compareButton);
-  if (refreshButton) actions.append(refreshButton);
-  actions.append(matchMenu);
+  const selectionSummary = document.createElement('div');
+  selectionSummary.className = 'library-selection-summary';
+  if (selectionCountLabel) selectionSummary.append(selectionCountLabel);
+  if (deselectButton) selectionSummary.append(deselectButton);
+
+  const primaryCommands = document.createElement('div');
+  primaryCommands.className = 'library-selection-primary';
+  primaryCommands.append(favoriteButton);
+  if (organizeButton) primaryCommands.append(organizeButton);
+  primaryCommands.append(compareButton);
+
+  const moreMenu = document.createElement('details');
+  moreMenu.className = 'library-bulk-more-menu';
+  const moreSummary = document.createElement('summary');
+  moreSummary.className = 'button library-selection-command library-bulk-more-summary';
+  moreSummary.innerHTML = '<span class="library-selection-command-icon" aria-hidden="true">•••</span><span>More</span>';
+  const moreOptions = document.createElement('div');
+  moreOptions.className = 'library-bulk-more-options';
+  if (sortButton) moreOptions.append(sortButton);
+  if (refreshButton) moreOptions.append(refreshButton);
+  moreOptions.append(matchMenu);
+  moreMenu.append(moreSummary, moreOptions);
+  primaryCommands.append(moreMenu);
+
+  /* Multi-selection is a command bar, not a second form. Keep the selection state
+     and the four most useful entry points visible; lower-frequency operations live
+     under More so phone layouts stay roughly two compact rows high. */
+  actions.replaceChildren(selectionSummary, primaryCommands);
 
   const markFavoriteInPlace = (titleId) => {
     document.querySelectorAll(`[data-workspace-title-id="${CSS.escape(String(titleId))}"]`).forEach((item) => {
@@ -144,6 +169,9 @@
       favoriteButton.classList.remove('active');
       favoriteButton.setAttribute('aria-pressed', 'false');
       favoriteButton.title = 'Add selected titles to Favorites';
+    } else {
+      moreMenu.removeAttribute('open');
+      matchMenu.removeAttribute('open');
     }
 
     const unmatched = choices.filter(choice => choice.dataset.matched !== 'true');
@@ -191,12 +219,15 @@
   document.addEventListener('infomancer:library-selection-updated', () => queueMicrotask(sync));
 
   document.addEventListener('pointerdown', (event) => {
+    if (moreMenu.open && !moreMenu.contains(event.target)) moreMenu.removeAttribute('open');
     if (matchMenu.open && !matchMenu.contains(event.target)) matchMenu.removeAttribute('open');
   });
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && matchMenu.open) {
-      matchMenu.removeAttribute('open');
-      matchSummary.focus();
+    if (event.key !== 'Escape') return;
+    if (matchMenu.open) matchMenu.removeAttribute('open');
+    if (moreMenu.open) {
+      moreMenu.removeAttribute('open');
+      moreSummary.focus();
     }
   });
 
