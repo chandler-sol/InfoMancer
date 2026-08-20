@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import tempfile
 import unittest
 from pathlib import Path
@@ -42,6 +43,41 @@ class EngagementTests(unittest.TestCase):
             self.assertIsNotNone(due)
             self.service.mark_seen(due["id"], 2, "member")
         self.assertIsNone(self.service.due(2, "member"))
+
+    def test_unchanged_official_seed_does_not_rewrite_announcement_timestamp(self):
+        self.service.seed_official()
+        source_key = OFFICIAL_ANNOUNCEMENTS[0]["source_key"]
+        with self.database.connect() as conn:
+            conn.execute(
+                "UPDATE announcements SET updated_at='2000-01-01 00:00:00' WHERE source_key=?",
+                (source_key,),
+            )
+        self.service.seed_official()
+        with self.database.connect() as conn:
+            updated_at = conn.execute(
+                "SELECT updated_at FROM announcements WHERE source_key=?",
+                (source_key,),
+            ).fetchone()["updated_at"]
+        self.assertEqual(updated_at, "2000-01-01 00:00:00")
+
+    def test_shared_page_engagement_reads_use_one_database_connection(self):
+        self.service.seed_official()
+        original_connect = self.database.connect
+        connection_count = 0
+
+        @contextmanager
+        def counted_connect():
+            nonlocal connection_count
+            connection_count += 1
+            with original_connect() as conn:
+                yield conn
+
+        self.database.connect = counted_connect
+        self.assertTrue(self.service.tour_pending(1))
+        self.assertGreaterEqual(self.service.due_count(1, "librarian"), 1)
+        self.assertTrue(self.service.setup_choice_pending(1, "librarian"))
+        self.assertIsNotNone(self.service.due(1, "librarian"))
+        self.assertEqual(connection_count, 1)
 
     def test_since_0_4_release_notes_cover_current_safety_features(self):
         release = next(
