@@ -11,7 +11,7 @@ from app.routes import library_optimized
 from app.routes.library_cached import (
     _cacheable_landing, _library_signature, _trim_library_surface,
 )
-from app.routes.library_optimized import _warm_response
+from app.routes.library_optimized import _live_results_fragment, _warm_response
 from app.routes.library_search_optimized import eligible_search, search_response
 
 
@@ -62,6 +62,21 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
         self.assertIn("COVER", cover_html)
         self.assertNotIn("LIST", cover_html)
         self.assertIn('data-library-surface-placeholder="list"', cover_html)
+
+    def test_live_result_fragment_drops_application_chrome(self):
+        body = b'''<!doctype html><html><body><header>EXPENSIVE CHROME</header>
+<section class="cover-library" id="cover-library" aria-label="Library covers"><article>COVER</article></section>
+<aside>MORE CHROME</aside>
+<section class="panel table-wrap library-table" data-library-kind="all"><table><tbody><tr><td>LIST</td></tr></tbody></table></section>
+<footer>EXPENSIVE FOOTER</footer></body></html>'''
+        fragment = _live_results_fragment(body)
+        self.assertIsNotNone(fragment)
+        text = fragment.decode("utf-8")
+        self.assertIn("COVER", text)
+        self.assertIn("LIST", text)
+        self.assertNotIn("EXPENSIVE CHROME", text)
+        self.assertNotIn("MORE CHROME", text)
+        self.assertNotIn("EXPENSIVE FOOTER", text)
 
     def test_default_landing_scopes_expensive_aggregates_to_visible_candidates(self):
         cache = (ROOT / "app/routes/library_cached.py").read_text(encoding="utf-8")
@@ -195,8 +210,10 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
         self.assertIn("response.body?.cancel()", navigation)
         self.assertNotIn("response.arrayBuffer()", navigation)
         self.assertIn('request.headers.get("x-infomancer-prefetch"', adapter)
+        self.assertIn('request.headers.get("x-infomancer-partial"', adapter)
         self.assertIn('return _warm_response("hit", view)', adapter)
         self.assertIn('return _warm_response("miss", view)', adapter)
+        self.assertIn('X-InfoMancer-Partial', adapter)
         self.assertIn('library-surface-lazy.js', loader)
         self.assertIn('library-performance.css', loader)
         self.assertIn('X-InfoMancer-Library-View', lazy)
