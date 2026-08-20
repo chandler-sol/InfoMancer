@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 
 from fastapi import APIRouter
+from starlette.middleware.gzip import GZipMiddleware
 
 from ..http_performance import LibrarySurfacePartialMiddleware, StaticAssetCacheMiddleware
 from .context import RouteContext
@@ -54,4 +55,10 @@ def build_router(ctx: RouteContext):
     if not getattr(state, "library_surface_partial_middleware", False):
         app.add_middleware(LibrarySurfacePartialMiddleware)
         state.library_surface_partial_middleware = True
+    if not getattr(state, "gzip_middleware", False):
+        # Added last so compression wraps the already-trimmed Library response. A
+        # moderate level gets most of the CSS/HTML/JS savings without making request
+        # threads spend excessive CPU chasing the final few percent of compression.
+        app.add_middleware(GZipMiddleware, minimum_size=4096, compresslevel=5)
+        state.gzip_middleware = True
     return router, {}
