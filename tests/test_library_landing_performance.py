@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
@@ -152,6 +153,92 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
             self.assertEqual(len(templates.context["rows"]), 1)
             self.assertEqual(templates.context["rows"][0]["id"], title_id)
 
+    def test_live_candidate_search_skips_full_page_option_and_context_queries(self):
+        class RenderedTemplate:
+            def __init__(self, owner):
+                self.owner = owner
+
+            def render(self, context):
+                self.owner.context = context
+                return '<section class="cover-library" id="cover-library"></section>'
+
+        class Environment:
+            def __init__(self, owner):
+                self.owner = owner
+
+            def get_template(self, name):
+                self.owner.template_name = name
+                return RenderedTemplate(self.owner)
+
+        class Templates:
+            def __init__(self):
+                self.context = None
+                self.template_name = ""
+                self.full_page_calls = 0
+                self.env = Environment(self)
+
+            def TemplateResponse(self, request, template, context):
+                self.full_page_calls += 1
+                return Response("unexpected full page", media_type="text/html")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            database = Database(Path(temporary) / "partial-search.db")
+            database.initialize()
+            with database.connect() as conn:
+                root_id = conn.execute(
+                    "INSERT INTO roots(path,kind,label) VALUES ('/media/movies','movie','Movies')"
+                ).lastrowid
+                title_id = conn.execute(
+                    "INSERT INTO titles(root_id,kind,title,folder_path) VALUES (?,?,?,?)",
+                    (root_id, "movie", "Alien", "/media/movies/Alien"),
+                ).lastrowid
+                conn.execute(
+                    """INSERT INTO files(
+                         title_id,path,filename,extension,size_bytes,seen_scan
+                       ) VALUES (?,?,?,?,?,?)""",
+                    (
+                        title_id, "/media/movies/Alien/Alien.mkv",
+                        "Alien.mkv", ".mkv", 100, "test-scan",
+                    ),
+                )
+
+            original_connect = database.connect
+            connection_count = 0
+
+            @contextmanager
+            def counted_connect():
+                nonlocal connection_count
+                connection_count += 1
+                with original_connect() as conn:
+                    yield conn
+
+            database.connect = counted_connect
+            request = Request({
+                "type": "http", "method": "GET", "scheme": "http",
+                "path": "/library", "raw_path": b"/library",
+                "query_string": b"q=Alien", "headers": [
+                    (b"x-infomancer-partial", b"library"),
+                ],
+                "client": ("127.0.0.1", 1000), "server": ("test", 80),
+            })
+            request.state.user = SimpleNamespace(id=0)
+            templates = Templates()
+            response = search_response(
+                database, templates, lambda value: value, lambda *_args: [], request,
+                q="Alien", kind="all", view="list",
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.headers["X-InfoMancer-Partial"], "library")
+            self.assertEqual(response.headers["X-InfoMancer-Library-Query"], "candidate-search")
+            self.assertEqual(connection_count, 1)
+            self.assertEqual(templates.full_page_calls, 0)
+            self.assertEqual(templates.template_name, "library_results.html")
+            self.assertEqual(templates.context["view"], "list")
+            self.assertEqual(templates.context["rows"][0]["id"], title_id)
+            self.assertNotIn("saved_views", templates.context)
+            self.assertNotIn("root_options", templates.context)
+
     def test_library_warm_response_never_carries_rendered_html(self):
         response = _warm_response("hit", "covers")
         self.assertEqual(response.status_code, 204)
@@ -197,6 +284,8 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
         navigation = (ROOT / "app/static/app-navigation.js").read_text(encoding="utf-8")
         lazy = (ROOT / "app/static/library-surface-lazy.js").read_text(encoding="utf-8")
         cache = (ROOT / "app/routes/library_cached.py").read_text(encoding="utf-8")
+        search = (ROOT / "app/routes/library_search_optimized.py").read_text(encoding="utf-8")
+        partial = (ROOT / "app/templates/library_results.html").read_text(encoding="utf-8")
 
         self.assertIn(".library_optimized import build_router", routes)
         self.assertIn("router, handlers = build_base_router(ctx)", adapter)
@@ -214,6 +303,10 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
         self.assertIn('return _warm_response("hit", view)', adapter)
         self.assertIn('return _warm_response("miss", view)', adapter)
         self.assertIn('X-InfoMancer-Partial', adapter)
+        self.assertIn('templates.env.get_template("library_results.html")', search)
+        self.assertIn("if _live_partial(request):", search)
+        self.assertIn("{% if view == 'list' %}", partial)
+        self.assertIn("{% if view == 'covers' %}", partial)
         self.assertIn('library-surface-lazy.js', loader)
         self.assertIn('library-performance.css', loader)
         self.assertIn('X-InfoMancer-Library-View', lazy)
