@@ -207,6 +207,26 @@ def _rename_proposals(conn: sqlite3.Connection) -> None:
     )
 
 
+def _library_read_indexes(conn: sqlite3.Connection) -> None:
+    """Add covering/read-path indexes used by the 0.8 Library hot paths.
+
+    These target cache-signature checks and missing-episode/file-range lookups. They
+    intentionally avoid write-heavy or low-selectivity indexes that would cost every
+    scan without helping a measured Library query.
+    """
+    statements = (
+        "CREATE INDEX IF NOT EXISTS idx_titles_updated ON titles(updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_user_title_state_updated ON user_title_state(user_id,updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_app_settings_updated ON app_settings(updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_announcements_updated ON announcements(updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_title_tags_tag ON title_tags(tag_id,title_id)",
+        "CREATE INDEX IF NOT EXISTS idx_expected_aired_lookup ON expected_episodes(title_id,season,aired,episode)",
+        "CREATE INDEX IF NOT EXISTS idx_files_episode_range ON files(title_id,season,episode_start,episode_end)",
+    )
+    for statement in statements:
+        conn.execute(statement)
+
+
 MIGRATIONS = (
     Migration(1, "title metadata columns", _titles),
     Migration(2, "source health columns", _roots),
@@ -222,6 +242,7 @@ MIGRATIONS = (
     Migration(12, "user saved library views", _user_saved_views),
     Migration(13, "operation history and safe undo", _operation_history),
     Migration(14, "persisted global rename proposals", _rename_proposals),
+    Migration(15, "library read-path indexes", _library_read_indexes),
 )
 
 
