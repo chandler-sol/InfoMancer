@@ -110,11 +110,11 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
                 ).lastrowid
                 conn.execute(
                     """INSERT INTO files(
-                         root_id,title_id,path,filename,extension,size_bytes,mtime_ns
-                       ) VALUES (?,?,?,?,?,?,?)""",
+                         title_id,path,filename,extension,size_bytes,seen_scan
+                       ) VALUES (?,?,?,?,?,?)""",
                     (
-                        root_id, title_id, "/media/movies/Prometheus/Alien-reference.mkv",
-                        "Alien-reference.mkv", ".mkv", 100, 1,
+                        title_id, "/media/movies/Prometheus/Alien-reference.mkv",
+                        "Alien-reference.mkv", ".mkv", 100, "test-scan",
                     ),
                 )
 
