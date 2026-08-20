@@ -36,6 +36,45 @@
   to { transform: rotate(360deg); }
 }
 
+/* Library is the one workspace where artificial desktop max-widths work against the
+   content. Filters, Jump to, view controls, and the cover matrix should all share the
+   same available axis. Let the shell use the full post-sidebar viewport, then make
+   every primary Library surface shrink inside that axis instead of establishing a
+   min-content width that can create a document scrollbar. */
+body.has-app-sidebar main.shell:has(> .catalog-tabs) {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  margin-inline: 0;
+}
+
+body.has-app-sidebar main.shell:has(> .catalog-tabs) > :is(
+  .catalog-tabs,
+  .saved-view-bar,
+  .library-controls,
+  .library-display-toolbar,
+  .library-table,
+  #cover-library
+) {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.library-display-toolbar,
+.library-display-toolbar > *,
+.library-view-toolbar,
+.library-view-controls,
+.cover-size-control {
+  min-width: 0;
+}
+
+.library-view-controls {
+  max-width: 100%;
+}
+
 /* Cover size is a density target, not a hard card width. Auto-fill keeps the same
    number of tracks on incomplete rows while 1fr distributes only the leftover row
    width across those tracks. The first and last tracks therefore share the page
@@ -47,7 +86,8 @@
 }
 #cover-library.cover-library > .cover-card {
   width: 100%;
-  max-width: none;
+  max-width: 100%;
+  min-width: 0;
 }
 
 /* Cover cards are independent visual units. Off-screen cards do not need layout or
