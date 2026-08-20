@@ -30,6 +30,45 @@ def _warm_response(render_state: str, view: str) -> Response:
     return Response(status_code=204, headers=headers)
 
 
+def _live_results_fragment(body: bytes) -> bytes | None:
+    """Keep only the two nodes the inline Library filter actually consumes."""
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+    cover_start = text.find('<section class="cover-library" id="cover-library"')
+    cover_end = text.find("</section>", cover_start)
+    list_start = text.find('<section class="panel table-wrap library-table"')
+    list_end = text.find("</section>", list_start)
+    if min(cover_start, cover_end, list_start, list_end) < 0:
+        return None
+    cover_end += len("</section>")
+    list_end += len("</section>")
+    return (
+        "<!doctype html><html><body>"
+        + text[cover_start:cover_end]
+        + text[list_start:list_end]
+        + "</body></html>"
+    ).encode("utf-8")
+
+
+def _live_results_response(response: Response) -> Response:
+    body = getattr(response, "body", b"")
+    if response.status_code != 200 or not body:
+        return response
+    fragment = _live_results_fragment(body)
+    if fragment is None:
+        return response
+    headers = {
+        key: value for key, value in response.headers.items()
+        if key.lower() != "content-length"
+    }
+    headers["Cache-Control"] = "private, no-store"
+    headers["X-InfoMancer-Partial"] = "library"
+    return Response(content=fragment, status_code=200, headers=headers)
+
+
 def build_router(ctx):
     """Wrap the normal Library router with optimized high-frequency read paths.
 
@@ -75,6 +114,10 @@ def build_router(ctx):
             request.headers.get("x-infomancer-prefetch", "").strip().casefold()
             == "library"
         )
+        is_live_partial = (
+            request.headers.get("x-infomancer-partial", "").strip().casefold()
+            == "library"
+        )
 
         if not has_transient_context and eligible_search(
             q=q, kind=kind, letter=letter, genre=genre, title_type=title_type,
@@ -82,10 +125,11 @@ def build_router(ctx):
             credit_role=credit_role, match=match, gaps=gaps, favorite=favorite,
             tag=tag, sort=sort, record_search=record_search,
         ):
-            return search_response(
+            response = search_response(
                 db, templates, display_title_type, fuzzy_people, request,
                 q=q, kind=kind, record_search=record_search, view=view,
             )
+            return _live_results_response(response) if is_live_partial else response
 
         cacheable = _cacheable_landing(
             q=q, kind=kind, letter=letter, genre=genre, title_type=title_type,
@@ -102,7 +146,8 @@ def build_router(ctx):
 
         if not cacheable:
             response = original_library(*arguments)
-            return _trimmed_response(response, getattr(response, "body", b""), view)
+            response = _trimmed_response(response, getattr(response, "body", b""), view)
+            return _live_results_response(response) if is_live_partial else response
 
         user_id = int(getattr(request.state.user, "id", 0) or 0)
         signature = _library_signature(db, user_id)
@@ -120,7 +165,8 @@ def build_router(ctx):
             }
             if view:
                 headers["X-InfoMancer-Library-Surface"] = view
-            return Response(content=cached, media_type="text/html", headers=headers)
+            response = Response(content=cached, media_type="text/html", headers=headers)
+            return _live_results_response(response) if is_live_partial else response
 
         response = _fast_landing_response(db, templates, display_title_type, request)
         body = getattr(response, "body", b"")
@@ -138,12 +184,14 @@ def build_router(ctx):
             headers["X-InfoMancer-Library-Render"] = "miss"
             headers["X-InfoMancer-Library-Surface"] = view
             headers["X-InfoMancer-Library-Query"] = "scoped"
-            return Response(content=served_body, status_code=response.status_code, headers=headers)
-        if response.status_code == 200 and body:
+            response = Response(
+                content=served_body, status_code=response.status_code, headers=headers
+            )
+        elif response.status_code == 200 and body:
             response.headers["X-InfoMancer-Library-Render"] = "miss"
             response.headers["X-InfoMancer-Library-Query"] = "scoped"
             response.headers.setdefault("Cache-Control", "private, no-store")
-        return response
+        return _live_results_response(response) if is_live_partial else response
 
     updated_handlers = dict(handlers)
     updated_handlers["library"] = cached_library
