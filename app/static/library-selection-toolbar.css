@@ -207,9 +207,77 @@ body:not(.library-multi-selection) .library-display-toolbar.library-selection-to
   }
 }
 
+/* The base Library stylesheet stacks the display controls below 760px. That made
+   the right side turn into a tall card on phones: List/Covers occupied one line,
+   the slider occupied another inside the same wrapper, and Jump to was squeezed
+   enough to wrap its label. Flatten those wrappers into the toolbar grid on mobile.
+   Row one is navigation + view mode; cover density becomes a quiet full-width row
+   only when Covers is active. Bulk actions naturally auto-place after that row. */
+@media (max-width: 760px) {
+  .library-display-toolbar.has-letter-jump.library-selection-toolbar-ready {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px 12px;
+  }
+
+  .library-display-toolbar.library-selection-toolbar-ready .letter-jump-menu {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+  }
+
+  .library-display-toolbar.library-selection-toolbar-ready .letter-jump-menu > summary,
+  .library-display-toolbar.library-selection-toolbar-ready .letter-jump-label,
+  .library-display-toolbar.library-selection-toolbar-ready .letter-jump-current {
+    white-space: nowrap;
+  }
+
+  .library-display-toolbar.library-selection-toolbar-ready .letter-jump-menu > summary {
+    width: max-content;
+    min-width: 132px;
+    max-width: 100%;
+  }
+
+  .library-display-toolbar.library-selection-toolbar-ready .library-view-toolbar,
+  .library-display-toolbar.library-selection-toolbar-ready .library-view-controls {
+    display: contents;
+  }
+
+  .library-display-toolbar.library-selection-toolbar-ready .library-view-toggle {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+    align-self: center;
+  }
+
+  .library-display-toolbar.library-selection-toolbar-ready .cover-size-control {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: stretch;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: none;
+    grid-template-columns: 32px minmax(0, 1fr) 32px;
+    gap: 8px;
+    padding: 9px 2px 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .library-display-toolbar.library-selection-toolbar-ready .library-selection-actions {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+}
+
 @media (max-width: 680px) {
   .library-display-toolbar.library-selection-toolbar-ready.has-selection-actions {
     top: 70px;
     padding: 5px;
+  }
+}
+
+@media (max-width: 420px) {
+  .library-display-toolbar.library-selection-toolbar-ready .letter-jump-menu > summary {
+    min-width: 76px;
   }
 }
