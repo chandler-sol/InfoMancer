@@ -43,6 +43,16 @@ class AppNavigationContracts(unittest.TestCase):
             (static_dir / "app.css").write_text("body{color:black}", encoding="utf-8")
             self.assertNotEqual(first, _static_asset_version(static_dir))
 
+    def test_account_avatar_uses_stable_revalidatable_url(self):
+        loader = (ROOT / "app/static/workspace-ui.js").read_text(encoding="utf-8")
+        avatar_route = (ROOT / "app/routes/account_avatar.py").read_text(encoding="utf-8")
+
+        self.assertIn('avatarImage.src = "/account/avatar/current"', loader)
+        self.assertNotIn('avatarImage.src = `/account/avatar/current?v=${Date.now()}`', loader)
+        self.assertIn('AVATAR_CACHE_CONTROL = "private, no-cache"', avatar_route)
+        self.assertIn('request.headers.get("if-none-match"', avatar_route)
+        self.assertIn('return Response(status_code=304, headers=headers)', avatar_route)
+
 
 if __name__ == "__main__":
     unittest.main()
