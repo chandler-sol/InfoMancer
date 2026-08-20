@@ -1,14 +1,17 @@
 from pathlib import Path
+from types import SimpleNamespace
 import tempfile
 import unittest
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from fastapi.responses import Response
 
 from app.db import Database
 from app.routes import library_optimized
 from app.routes.library_cached import (
     _cacheable_landing, _library_signature, _trim_library_surface,
 )
+from app.routes.library_search_optimized import eligible_search, search_response
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,6 +72,70 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
         self.assertIn('X-InfoMancer-Library-Query', cache)
         self.assertIn('"scoped"', cache)
 
+    def test_common_text_search_uses_candidate_first_plan(self):
+        base = dict(
+            q="Alien", kind="all", letter="", genre="", title_type="", root="",
+            person="", person_name="", credit_role="", match="", gaps="",
+            favorite="", tag="", sort="title", record_search="",
+        )
+        self.assertTrue(eligible_search(**base))
+        self.assertFalse(eligible_search(**{**base, "genre": "Sci-Fi"}))
+        self.assertFalse(eligible_search(**{**base, "sort": "rating"}))
+
+        source = (ROOT / "app/routes/library_search_optimized.py").read_text(encoding="utf-8")
+        self.assertIn("WITH candidates(id) AS", source)
+        self.assertIn("FROM files f JOIN candidates c ON c.id=f.title_id", source)
+        self.assertIn("FROM expected_episodes e JOIN candidates c ON c.id=e.title_id", source)
+        self.assertIn('"candidate-search"', source)
+
+    def test_candidate_search_matches_filename_without_whole_catalog_aggregation(self):
+        class Templates:
+            def __init__(self):
+                self.context = None
+
+            def TemplateResponse(self, request, template, context):
+                self.context = context
+                return Response("<main>search</main>", media_type="text/html")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            database = Database(Path(temporary) / "search.db")
+            database.initialize()
+            with database.connect() as conn:
+                root_id = conn.execute(
+                    "INSERT INTO roots(path,kind,label) VALUES ('/media/movies','movie','Movies')"
+                ).lastrowid
+                title_id = conn.execute(
+                    "INSERT INTO titles(root_id,kind,title,folder_path) VALUES (?,?,?,?)",
+                    (root_id, "movie", "Prometheus", "/media/movies/Prometheus"),
+                ).lastrowid
+                conn.execute(
+                    """INSERT INTO files(
+                         root_id,title_id,path,filename,extension,size_bytes,mtime_ns
+                       ) VALUES (?,?,?,?,?,?,?)""",
+                    (
+                        root_id, title_id, "/media/movies/Prometheus/Alien-reference.mkv",
+                        "Alien-reference.mkv", ".mkv", 100, 1,
+                    ),
+                )
+
+            request = Request({
+                "type": "http", "method": "GET", "scheme": "http",
+                "path": "/library", "raw_path": b"/library",
+                "query_string": b"q=Alien", "headers": [],
+                "client": ("127.0.0.1", 1000), "server": ("test", 80),
+            })
+            request.state.user = SimpleNamespace(id=0)
+            templates = Templates()
+            response = search_response(
+                database, templates, lambda value: value, lambda *_args: [], request,
+                q="Alien", kind="all", view="",
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.headers["X-InfoMancer-Library-Query"], "candidate-search")
+            self.assertEqual(len(templates.context["rows"]), 1)
+            self.assertEqual(templates.context["rows"][0]["id"], title_id)
+
     def test_optimized_library_preserves_router_handler_bundle_contract(self):
         base_router = APIRouter()
 
@@ -109,6 +176,8 @@ class LibraryLandingPerformanceTests(unittest.TestCase):
 
         self.assertIn(".library_optimized import build_router", routes)
         self.assertIn("router, handlers = build_base_router(ctx)", adapter)
+        self.assertIn("eligible_search", adapter)
+        self.assertIn("search_response", adapter)
         self.assertIn("return router, updated_handlers", adapter)
         self.assertIn('fetch("/library"', navigation)
         self.assertIn("navigator.connection?.saveData", navigation)
