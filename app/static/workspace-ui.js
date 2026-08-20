@@ -4,7 +4,8 @@
 
   /* The account rail uses the canonical avatar endpoint as a real image. Keep the
      server-rendered symbol in place until the image has actually decoded so a slow
-     avatar request never produces an empty circle. */
+     avatar request never produces an empty circle. The endpoint is ETag-aware, so
+     keep its URL stable and let the browser cheaply revalidate it across pages. */
   const accountAvatar = document.querySelector(".account-avatar");
   if (accountAvatar) {
     const fallback = accountAvatar.textContent.trim() || "?";
@@ -12,7 +13,7 @@
     avatarImage.className = "account-avatar-image";
     avatarImage.alt = "";
     avatarImage.decoding = "async";
-    avatarImage.src = `/account/avatar/current?v=${Date.now()}`;
+    avatarImage.src = "/account/avatar/current";
     avatarImage.style.width = "100%";
     avatarImage.style.height = "100%";
     avatarImage.style.display = "block";
