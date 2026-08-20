@@ -33,6 +33,7 @@
   let recent = Array.isArray(savedRecent) ? savedRecent : [];
   let acknowledgements = new Set(Array.isArray(savedAcks) ? savedAcks : []);
   let active = [];
+  let activeSignature = null;
   let previous = new Map();
   let failures = [];
   let open = widget.classList.contains("is-pinned") && !popover.hidden;
@@ -41,6 +42,12 @@
   let receivedTaskEvent = false;
 
   const failureSignature = (task) => `${task.id}|${task.detail || task.label || "failed"}`;
+  const taskSetSignature = (tasks) => tasks.map((task) => [
+    task.id,
+    task.label || "",
+    task.detail || "",
+    task.status || "",
+  ].join("\u0001")).join("\u0002");
 
   const pruneRecent = () => {
     const next = recent.filter((task) => Number(task.expiresAt) > Date.now());
@@ -281,8 +288,11 @@
   const accept = (incoming) => {
     const next = (Array.isArray(incoming) ? incoming : [])
       .filter((task) => task?.id && task.id !== "media-fingerprints-queued");
-    const nextMap = new Map(next.map((task) => [task.id, task]));
+    const nextSignature = taskSetSignature(next);
+    if (nextSignature === activeSignature) return;
+    activeSignature = nextSignature;
 
+    const nextMap = new Map(next.map((task) => [task.id, task]));
     for (const [id, task] of previous) {
       if (!nextMap.has(id)) finish(task);
     }
