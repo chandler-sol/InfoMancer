@@ -1,0 +1,63 @@
+/* Compact, stable Library controls for the 0.8 workspace. */
+
+.library-controls {
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.library-controls > select {
+  flex: 0 1 220px;
+  width: 220px;
+  max-width: 240px;
+}
+
+/* The expanded search should take only the space it needs rather than consuming
+   the remaining filter-strip width. */
+.library-filter-search.open {
+  flex: 0 1 285px;
+  width: min(285px, 100%);
+}
+
+/* Once collapsed, fully remove the input from the painted/focusable surface. This
+   prevents the focused input outline from lingering behind the circular trigger. */
+.library-filter-search:not(.open) input {
+  visibility: hidden;
+}
+
+.library-filter-search.open input {
+  visibility: visible;
+  padding-right: 44px;
+}
+
+/* Give the search affordance the same inset breathing room as the other controls,
+   especially at the right edge when the field is expanded. */
+.library-filter-search-toggle {
+  box-sizing: border-box;
+  top: 4px;
+  left: 4px;
+  width: 34px;
+  height: 34px;
+}
+
+.library-filter-search.open .library-filter-search-toggle {
+  left: calc(100% - 38px);
+}
+
+@media (max-width: 760px) {
+  .library-controls {
+    width: 100%;
+  }
+
+  .library-controls > select {
+    flex: 1 1 calc(50% - 8px);
+    width: auto;
+    max-width: none;
+  }
+
+  .library-filter-search.open {
+    flex-basis: 100%;
+    width: 100%;
+    max-width: none;
+  }
+}
