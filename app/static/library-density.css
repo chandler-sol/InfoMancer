@@ -103,6 +103,45 @@
   display: none !important;
 }
 
+/* Keep display controls as one intentional right-side cluster on desktop. The
+   density control belongs to List/Covers, so it should not float independently in
+   the middle of a wide toolbar. Desktop density still describes visual spacing,
+   not a fixed number of columns. */
+@media (min-width: 681px) {
+  .library-display-toolbar.has-letter-jump {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: 18px;
+  }
+
+  .library-display-toolbar.has-letter-jump .library-view-toolbar {
+    justify-self: end;
+    width: auto;
+    max-width: 100%;
+    margin-left: 0;
+  }
+
+  .library-display-toolbar.has-letter-jump .library-view-controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    width: auto;
+    max-width: 100%;
+    margin-left: auto;
+    gap: 12px;
+  }
+
+  .cover-size-control.library-density-ready {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .library-density-desktop {
+    grid-template-columns: auto minmax(110px, 160px) auto;
+  }
+}
+
 @media (max-width: 600px) {
   .cover-size-control.library-density-ready {
     min-width: 0;
