@@ -53,8 +53,6 @@
     return [...choices.values()];
   };
 
-  const selectedIds = () => selectionOrder.slice();
-
   const persistSelection = () => {
     try { sessionStorage.setItem(selectionStorageKey, JSON.stringify(selectionOrder)); } catch (_error) {}
   };
@@ -70,28 +68,32 @@
     const choices = uniqueChoices();
     const visibleIds = new Set(choices.map((choice) => String(choice.value)));
     selectionOrder = selectionOrder.filter((titleId) => visibleIds.has(titleId));
+    const selectedSet = new Set(selectionOrder);
     choices.forEach((choice) => {
       const id = String(choice.value);
-      if (choice.checked && !selectionOrder.includes(id)) selectionOrder.push(id);
+      if (choice.checked && !selectedSet.has(id)) {
+        selectedSet.add(id);
+        selectionOrder.push(id);
+      }
     });
     persistSelection();
 
-    const selected = new Set(selectionOrder);
     document.querySelectorAll('.library-title-choice').forEach((choice) => {
-      choice.checked = selected.has(String(choice.value));
+      choice.checked = selectedSet.has(String(choice.value));
     });
 
     const selectAll = document.getElementById('select-all-titles');
     if (selectAll) {
-      selectAll.checked = choices.length > 0 && choices.every((choice) => choice.checked);
-      selectAll.indeterminate = choices.some((choice) => choice.checked) && !selectAll.checked;
+      const selectedCount = choices.reduce((count, choice) => count + Number(choice.checked), 0);
+      selectAll.checked = choices.length > 0 && selectedCount === choices.length;
+      selectAll.indeterminate = selectedCount > 0 && selectedCount < choices.length;
     }
 
     document.querySelectorAll('.letter-title-choice').forEach((letterChoice) => {
       const group = choices.filter((choice) => choice.dataset.initial === letterChoice.dataset.letter);
-      const selectedGroup = group.filter((choice) => choice.checked);
-      letterChoice.checked = group.length > 0 && selectedGroup.length === group.length;
-      letterChoice.indeterminate = selectedGroup.length > 0 && selectedGroup.length < group.length;
+      const selectedCount = group.reduce((count, choice) => count + Number(choice.checked), 0);
+      letterChoice.checked = group.length > 0 && selectedCount === group.length;
+      letterChoice.indeterminate = selectedCount > 0 && selectedCount < group.length;
     });
 
     document.dispatchEvent(new CustomEvent('infomancer:library-selection-updated', {
@@ -99,16 +101,18 @@
     }));
   };
 
-  const setTitleSelected = (titleId, checked) => {
-    const id = String(titleId || '');
-    if (!id) return;
-    document.querySelectorAll(`.library-title-choice[value="${CSS.escape(id)}"]`).forEach((choice) => {
-      choice.checked = checked;
+  const setManySelected = (ids, checked) => {
+    const targets = new Set(ids.map(String).filter(Boolean));
+    if (!targets.size) return;
+    document.querySelectorAll('.library-title-choice').forEach((choice) => {
+      if (targets.has(String(choice.value))) choice.checked = checked;
     });
-    selectionOrder = selectionOrder.filter((candidate) => candidate !== id);
-    if (checked) selectionOrder.push(id);
+    selectionOrder = selectionOrder.filter((id) => !targets.has(id));
+    if (checked) targets.forEach((id) => selectionOrder.push(id));
     syncSelectionIndicators();
   };
+
+  const setTitleSelected = (titleId, checked) => setManySelected([titleId], checked);
 
   const setFilterSearchOpen = (open) => {
     if (!filterSearch || !filterSearchToggle) return;
@@ -321,19 +325,17 @@
   document.addEventListener('change', (event) => {
     const target = event.target;
     if (target.matches('#select-all-titles')) {
-      uniqueChoices().forEach((choice) => setTitleSelected(choice.value, target.checked));
+      setManySelected(uniqueChoices().map((choice) => choice.value), target.checked);
       return;
     }
     if (target.matches('.letter-title-choice')) {
-      const letter = target.dataset.letter;
-      uniqueChoices()
-        .filter((choice) => choice.dataset.initial === letter)
-        .forEach((choice) => setTitleSelected(choice.value, target.checked));
+      const ids = uniqueChoices()
+        .filter((choice) => choice.dataset.initial === target.dataset.letter)
+        .map((choice) => choice.value);
+      setManySelected(ids, target.checked);
       return;
     }
-    if (target.matches('.library-title-choice')) {
-      setTitleSelected(target.value, target.checked);
-    }
+    if (target.matches('.library-title-choice')) setTitleSelected(target.value, target.checked);
   });
 
   deselectLibraryTitles?.addEventListener('click', () => {
