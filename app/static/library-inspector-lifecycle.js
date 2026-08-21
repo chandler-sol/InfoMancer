@@ -7,6 +7,22 @@
     'input, button, summary, details, form, select, textarea, .item-action-menu, .cover-select-control'
   );
 
+  /* library-selection-polish owns selection behavior in capture phase. Older logic
+     intentionally swallowed a second click on the currently inspected title, which
+     prevented workspace-core from seeing the click that should toggle the Inspector
+     closed. Handle that one case at window capture, ahead of the selection layer. */
+  window.addEventListener('click', (event) => {
+    if (event.button !== 0 || interactive(event.target)) return;
+    const item = event.target.closest?.('.cover-card, .library-title-row');
+    if (!item || !item.classList.contains('workspace-selected')) return;
+    if (!document.body.classList.contains('workspace-inspector-open')) return;
+    const panel = inspector();
+    if (!panel || panel.hidden) return;
+    event.preventDefault();
+    event.stopPropagation();
+    panel.querySelector('.workspace-inspector-close')?.click();
+  }, true);
+
   /* A fresh title should always enter the Inspector at its chrome/identity area.
      The drawer itself persists between selections, so without an explicit reset a
      mobile user could open the next title at the previous title's scroll offset. */
