@@ -6,12 +6,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SettingsWorkspacePolishContracts(unittest.TestCase):
-    def test_workspace_loader_mounts_settings_polish_only_on_settings_surfaces(self):
-        script = (ROOT / "app/static/workspace-ui.js").read_text(encoding="utf-8")
+    def test_settings_stylesheet_owns_polish_without_workspace_loader_dependency(self):
+        settings_css = (ROOT / "app/static/settings.css").read_text(encoding="utf-8")
+        workspace_ui = (ROOT / "app/static/workspace-ui.js").read_text(encoding="utf-8")
 
-        self.assertIn("document.querySelector('.settings-section-nav')", script)
-        self.assertIn("settings-polish.css", script)
-        self.assertIn("settings-polish.js", script)
+        self.assertIn('@import url("settings-polish.css")', settings_css)
+        self.assertNotIn("settings-polish.css", workspace_ui)
+        self.assertNotIn("settings-polish.js", workspace_ui)
 
     def test_general_settings_are_balanced_without_changing_form_controls(self):
         script = (ROOT / "app/static/settings-polish.js").read_text(encoding="utf-8")
@@ -23,17 +24,18 @@ class SettingsWorkspacePolishContracts(unittest.TestCase):
         self.assertIn("REGION & INTERFACE", script)
         self.assertIn("LIBRARY BROWSING", script)
 
-    def test_settings_cards_share_alignment_and_scheduled_tasks_are_reorganized(self):
+    def test_settings_cards_share_first_paint_alignment_and_complex_pages_keep_shape(self):
         css = (ROOT / "app/static/settings-polish.css").read_text(encoding="utf-8")
 
-        self.assertIn(".settings-page-grid", css)
+        self.assertIn("body .settings-page-grid", css)
+        self.assertIn('body form.settings-page-grid[action="/settings/general"]', css)
         self.assertIn("align-items: stretch", css)
-        self.assertIn(".settings-general-card", css)
-        self.assertIn("grid-template-rows: repeat(2", css)
-        self.assertIn("body.settings-section-system .settings-page-grid", css)
-        self.assertIn("body.settings-section-scheduled-tasks .scheduled-fingerprint-card", css)
+        self.assertIn("min-height: 286px", css)
+        self.assertIn("body .settings-page-grid:has(.system-overview-grid)", css)
+        self.assertIn("body .scheduled-task-layout", css)
+        self.assertIn("body .scheduled-fingerprint-card", css)
         self.assertIn("grid-column: 1 / -1", css)
-        self.assertIn("body.settings-section-sources .split", css)
+        self.assertIn("body .split:has(.source-add-panel)", css)
 
 
 if __name__ == "__main__":
