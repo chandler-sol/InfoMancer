@@ -3,56 +3,24 @@
   const coverSurface = document.getElementById('cover-library');
   const listButton = document.getElementById('library-list-view');
   const coverButton = document.getElementById('library-cover-view');
+  const densityControl = document.getElementById('cover-size-control');
   if (!listSurface || !coverSurface || !listButton || !coverButton) return;
 
-  const cookieName = 'infomancer_library_view';
+  const COOKIE_NAME = 'infomancer_library_view';
+  const STORAGE_KEY = 'infomancer-library-view';
   const inflight = new Map();
 
-  const setViewCookie = (view) => {
-    if (!['list', 'covers'].includes(view)) return;
-    document.cookie = `${cookieName}=${view}; Path=/; SameSite=Lax; Max-Age=31536000`;
-  };
-
+  const validView = (value) => ['list', 'covers'].includes(value) ? value : '';
   const currentView = () => coverSurface.hidden ? 'list' : 'covers';
 
-  const rememberTitleReturn = (surface) => {
-    surface.querySelectorAll('a[href^="/titles/"]').forEach((link) => {
-      if (link.dataset.libraryReturnReady === '1') return;
-      link.dataset.libraryReturnReady = '1';
-      link.addEventListener('click', () => {
-        const row = link.closest("[id^='title-']");
-        const anchor = row?.id ? `#${row.id}` : '';
-        try {
-          sessionStorage.setItem(
-            'infomancerLibraryReturn',
-            window.location.pathname + window.location.search + anchor,
-          );
-        } catch (_error) {}
-      });
-    });
+  const setViewCookie = (view) => {
+    if (!validView(view)) return;
+    document.cookie = `${COOKIE_NAME}=${view}; Path=/; SameSite=Lax; Max-Age=31536000`;
   };
 
-  const bindHydratedListControls = () => {
-    const selectAll = listSurface.querySelector('#select-all-titles');
-    if (!selectAll || selectAll.dataset.lazyBound === '1') return;
-    selectAll.dataset.lazyBound = '1';
-    selectAll.addEventListener('change', () => {
-      const unique = new Map();
-      listSurface.querySelectorAll('.library-title-choice').forEach((choice) => unique.set(choice.value, choice));
-      unique.forEach((choice) => {
-        if (choice.checked === selectAll.checked) return;
-        choice.checked = selectAll.checked;
-        choice.dispatchEvent(new Event('change', {bubbles: true}));
-      });
-    });
-    listSurface.addEventListener('change', (event) => {
-      if (!event.target.matches('.library-title-choice, .letter-title-choice')) return;
-      queueMicrotask(() => {
-        const choices = [...listSurface.querySelectorAll('.library-title-choice')];
-        selectAll.checked = choices.length > 0 && choices.every((choice) => choice.checked);
-        selectAll.indeterminate = choices.some((choice) => choice.checked) && !selectAll.checked;
-      });
-    });
+  const rememberView = (view) => {
+    setViewCookie(view);
+    try { localStorage.setItem(STORAGE_KEY, view); } catch (_error) {}
   };
 
   const markLoading = (view) => {
@@ -74,9 +42,6 @@
     }
   };
 
-  /* The server response is still a complete Library document for compatibility,
-     but parsing the whole application shell just to hydrate one hidden surface is
-     wasteful. Extract the requested section first, then parse only that fragment. */
   const extractSurface = (html, view) => {
     const marker = view === 'covers'
       ? '<section class="cover-library" id="cover-library"'
@@ -107,8 +72,7 @@
     return request;
   };
 
-  const hydrateSurface = async (view, {remember = true, announce = true, showLoading = true} = {}) => {
-    if (remember) setViewCookie(view);
+  const hydrateSurface = async (view, {announce = true, showLoading = true} = {}) => {
     const surface = view === 'covers' ? coverSurface : listSurface;
     if (surface.dataset.librarySurfacePlaceholder !== view) return true;
     if (surface.dataset.librarySurfaceLoading === '1') return inflight.get(view) || false;
@@ -123,7 +87,6 @@
 
       if (view === 'covers') {
         coverSurface.replaceChildren(...replacement.childNodes);
-        rememberTitleReturn(coverSurface);
       } else {
         const replacementTable = replacement.querySelector('table');
         const replacementHead = replacementTable?.querySelector('thead');
@@ -139,13 +102,15 @@
           else currentTable.prepend(replacementHead.cloneNode(true));
         }
         currentBody.replaceChildren(...replacementBody.childNodes);
-        if (replacement.dataset.libraryKind) listSurface.dataset.libraryKind = replacement.dataset.libraryKind;
-        bindHydratedListControls();
-        rememberTitleReturn(listSurface);
+        if (replacement.dataset.libraryKind) {
+          listSurface.dataset.libraryKind = replacement.dataset.libraryKind;
+        }
       }
 
       delete surface.dataset.librarySurfacePlaceholder;
-      if (announce) document.dispatchEvent(new CustomEvent('infomancer:library-results-updated'));
+      if (announce) {
+        document.dispatchEvent(new CustomEvent('infomancer:library-results-updated'));
+      }
       return true;
     } catch (_error) {
       if (!showLoading) return false;
@@ -157,7 +122,9 @@
         coverSurface.append(message);
       } else {
         const body = listSurface.querySelector('tbody');
-        if (body) body.innerHTML = '<tr><td colspan="7" class="empty">List view could not be loaded. Try again.</td></tr>';
+        if (body) {
+          body.innerHTML = '<tr><td colspan="7" class="empty">List view could not be loaded. Try again.</td></tr>';
+        }
       }
       return false;
     } finally {
@@ -165,25 +132,36 @@
     }
   };
 
-  listButton.addEventListener('click', () => hydrateSurface('list'));
-  coverButton.addEventListener('click', () => hydrateSurface('covers'));
+  const applyView = async (view, {persist = true, hydrate = true} = {}) => {
+    const next = validView(view) || 'list';
+    const covers = next === 'covers';
+    listSurface.hidden = covers;
+    coverSurface.hidden = !covers;
+    if (densityControl) densityControl.hidden = !covers;
+    listButton.classList.toggle('active', !covers);
+    coverButton.classList.toggle('active', covers);
+    listButton.setAttribute('aria-pressed', String(!covers));
+    coverButton.setAttribute('aria-pressed', String(covers));
+    if (persist) rememberView(next);
+    if (hydrate) await hydrateSurface(next);
+    document.dispatchEvent(new CustomEvent('infomancer:library-view-changed', {
+      detail: {view: next},
+    }));
+  };
 
-  /* Start hydrating the opposite surface only after the user shows intent by
-     hovering or keyboard-focusing its toggle. The preference is not changed and
-     the hidden surface stays hidden, so an eventual click can switch immediately. */
+  listButton.addEventListener('click', () => applyView('list'));
+  coverButton.addEventListener('click', () => applyView('covers'));
+
   const warm = (view) => {
     const surface = view === 'covers' ? coverSurface : listSurface;
     if (surface.dataset.librarySurfacePlaceholder !== view) return;
-    hydrateSurface(view, {remember: false, announce: false, showLoading: false});
+    hydrateSurface(view, {announce: false, showLoading: false});
   };
   listButton.addEventListener('pointerenter', () => warm('list'), {passive: true});
   coverButton.addEventListener('pointerenter', () => warm('covers'), {passive: true});
   listButton.addEventListener('focus', () => warm('list'));
   coverButton.addEventListener('focus', () => warm('covers'));
 
-  /* The built-in live filter updates both surface child lists from one response.
-     The server intentionally leaves the inactive surface empty, so mark that side
-     as lazy again after every filter/search refresh. */
   document.addEventListener('infomancer:library-results-updated', () => {
     const view = currentView();
     setViewCookie(view);
@@ -194,8 +172,7 @@
     }
   });
 
-  /* If the saved browser preference changed before this response arrived, the
-     server can legitimately send the opposite surface. Hydrate the visible choice
-     immediately rather than leaving a lightweight placeholder on screen. */
-  hydrateSurface(currentView());
+  let preferred = '';
+  try { preferred = validView(localStorage.getItem(STORAGE_KEY) || ''); } catch (_error) {}
+  applyView(preferred || currentView(), {persist: true, hydrate: true});
 })();
