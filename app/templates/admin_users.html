@@ -1,11 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Users · InfoMancer{% endblock %}
+{% block title %}User Management · InfoMancer{% endblock %}
 {% block content %}
 <header class="settings-heading">
-  <p class="eyebrow">ADMIN OPTIONS</p><h1>Users</h1>
-  <p>Librarians manage the catalog and filesystem. Members can browse, search, and review the library.</p>
+  <p class="eyebrow">SETTINGS</p><h1>User Management</h1>
+  <p>Manage who can access this InfoMancer installation and what they are allowed to do.</p>
 </header>
-{% include "_account_nav.html" %}
+{% set section = 'users' %}
+{% include "_settings_nav.html" %}
 {% if error %}<div class="form-error page-error" role="alert">{{ error }}</div>{% endif %}
 {% if invitation_url %}
 <section class="invitation-result" role="status">
