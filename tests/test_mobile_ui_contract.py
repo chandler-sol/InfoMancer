@@ -56,9 +56,11 @@ class MobileUiContractTests(unittest.TestCase):
         base = Path("app/templates/base.html").read_text(encoding="utf-8")
         progress = Path("app/static/progress.css").read_text(encoding="utf-8")
         header = Path("app/static/header.css").read_text(encoding="utf-8")
+        task_widget = Path("app/static/task-widget.js").read_text(encoding="utf-8")
 
         self.assertIn('aria-label="No background tasks or notifications"', base)
-        self.assertIn('classList.add("has-attention")', base)
+        self.assertIn("widget.classList.toggle('has-attention'", task_widget)
+        self.assertIn("widget.classList.toggle('has-failure'", task_widget)
         self.assertIn(".task-widget-toggle .task-card-copy", progress)
         self.assertIn("footer a:hover", header)
 
