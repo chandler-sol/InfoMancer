@@ -19,12 +19,12 @@
   menu.className = 'letter-jump-menu';
 
   const summary = document.createElement('summary');
-  summary.setAttribute('aria-label', `A to Z jump. Showing titles beginning with ${currentLetter}`);
-  summary.title = 'Jump directly to titles by their first character';
+  summary.setAttribute('aria-label', `Filter titles by first character. Showing ${currentLetter}`);
+  summary.title = 'Show titles starting with a specific character';
 
   const label = document.createElement('span');
   label.className = 'letter-jump-label';
-  label.textContent = 'A–Z Jump';
+  label.textContent = 'Starts with';
 
   const current = document.createElement('strong');
   current.className = 'letter-jump-current';
@@ -37,7 +37,7 @@
 
   const heading = document.createElement('span');
   heading.className = 'letter-jump-heading';
-  heading.textContent = 'Jump to titles starting with';
+  heading.textContent = 'Show titles starting with';
 
   alphabet.classList.add('letter-jump-grid');
   panel.append(heading, alphabet);
@@ -88,7 +88,7 @@
     alphabet.querySelectorAll('a').forEach(item => item.classList.toggle('active', item === link));
     const nextLetter = link.textContent.trim() || 'All';
     current.textContent = nextLetter;
-    summary.setAttribute('aria-label', `A to Z jump. Showing titles beginning with ${nextLetter}`);
+    summary.setAttribute('aria-label', `Filter titles by first character. Showing ${nextLetter}`);
   };
 
   /* Avoid parsing the complete InfoMancer document just to replace one Library
