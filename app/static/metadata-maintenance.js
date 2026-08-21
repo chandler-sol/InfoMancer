@@ -210,10 +210,9 @@
       'aria-label',
       `${labels[scope]}. ${description} Activate to view matching titles.`
     );
-    metric.title = `${description} Click to view matching titles.`;
     const hint = document.createElement('small');
     hint.className = 'metadata-maintenance-metric-hint';
-    hint.textContent = `${description} View titles.`;
+    hint.textContent = description;
     metric.append(hint);
   });
 
@@ -256,7 +255,6 @@
     scopeButtons.set(scope.key, button);
     scopeBar.append(button);
   });
-
   const summary = document.createElement('div');
   summary.className = 'metadata-maintenance-summary';
   const summaryText = document.createElement('span');
