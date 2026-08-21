@@ -13,7 +13,7 @@ class UiPolishContractTests(unittest.TestCase):
         self.assertIn("width: 19px; height: 19px", styles)
 
     def test_shift_range_selection_suppresses_native_text_selection(self):
-        script = (ROOT / "app" / "static" / "workspace.js").read_text(encoding="utf-8")
+        script = (ROOT / "app" / "static" / "workspace-core.js").read_text(encoding="utf-8")
         styles = (ROOT / "app" / "static" / "workspace.css").read_text(encoding="utf-8")
         self.assertIn('document.addEventListener("mousedown"', script)
         self.assertIn("event.shiftKey", script)
