@@ -6,16 +6,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TaskWidgetPerformanceTests(unittest.TestCase):
-    def test_task_widget_reuses_base_poll_and_avoids_unchanged_dom_work(self):
+    def test_task_widget_owns_polling_and_avoids_unchanged_dom_work(self):
         source = (ROOT / "app/static/task-widget.js").read_text(encoding="utf-8")
 
-        self.assertIn("let receivedTaskEvent = false", source)
-        self.assertIn("receivedTaskEvent = true", source)
-        self.assertIn("if (!receivedTaskEvent) sync();", source)
-        self.assertIn("}, 350);", source)
+        self.assertEqual(source.count("fetch('/api/tasks'"), 1)
         self.assertIn("const taskSetSignature =", source)
-        self.assertIn("if (nextSignature === activeSignature) return;", source)
+        self.assertIn("const signatureChanged = nextSignature !== activeSignature", source)
+        self.assertIn("if (signatureChanged || scheduledChanged) queueMicrotask(render);", source)
         self.assertIn("activeSignature = nextSignature", source)
+        self.assertIn("const localOnlyTask =", source)
+        self.assertIn("!localOnlyTask(task)", source)
 
     def test_library_controller_batch_is_fetched_without_network_waterfall(self):
         source = (ROOT / "app/static/workspace-ui.js").read_text(encoding="utf-8")
