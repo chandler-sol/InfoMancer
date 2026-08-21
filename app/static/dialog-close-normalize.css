@@ -1,5 +1,0 @@
-/* All dialog dismiss buttons share one optically centered close glyph. Individual
-   modal styles still own the button shape, size, border, and hover treatment. */
-dialog button[aria-label^="Close"]{display:grid!important;place-items:center!important;padding:0!important;text-align:center!important;line-height:1!important;font-size:0!important}
-dialog button[aria-label^="Close"]>*{display:none!important}
-dialog button[aria-label^="Close"]::before{content:"×";display:block;font:400 24px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;transform:translateY(-1px)}
