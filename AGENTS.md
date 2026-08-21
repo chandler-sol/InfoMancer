@@ -39,3 +39,32 @@ re-read whole files.
 After big code changes, refresh the graph with `graft build` (deterministic,
 no API key, $0).
 <!-- graft:end -->
+
+## 0.8 UI ownership rules
+
+Interactive application surfaces have one canonical controller. Do not add inline
+compatibility controllers or a second listener that mutates the same state to work
+around an ordering bug. Fix the canonical owner or its load boundary instead.
+
+- `app/static/app-shell.js` owns global search, the site menu, sidebar interaction,
+  flash cleanup, and CSRF injection for native POST forms. `app-shell-bootstrap.js`
+  may only restore first-paint shell geometry.
+- `app/static/task-widget.js` owns `/api/tasks` polling, task/failure/scheduled state,
+  bell state, task popover rendering, and the onboarding task-demo handoff.
+- `app/static/library-controller.js` owns Library filter/search AJAX and canonical
+  title-selection state. Other Library enhancements consume its events rather than
+  maintaining a second selection model.
+- `app/static/library-surface-lazy.js` exclusively owns List/Covers state, the
+  `infomancer_library_view` cookie, view persistence, and lazy surface hydration.
+- `app/static/library-density.js` owns cover density only. It must not switch views.
+- `app/static/workspace-core.js` owns Inspector open/close behavior. Selection polish
+  may influence selection UX but must not intercept the core same-title toggle.
+- `app/static/app-navigation.js` owns navigation pending state and prefetch only. It
+  must not become a second owner for global search or Library view state.
+- `app/templates/base.html` and `app/templates/library.html` are markup/state seeds,
+  not JavaScript controller hosts. Keep them free of inline controller scripts.
+
+When changing one of these surfaces, extend `tests/test_08_release_ui_gremlins.py`
+with an ownership contract when practical. Prefer server-rendering the correct first
+state and then enhancing it, rather than painting a legacy state and correcting it
+later with JavaScript.
