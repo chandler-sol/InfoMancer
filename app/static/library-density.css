@@ -26,9 +26,7 @@
   text-transform: uppercase;
 }
 
-/* Desktop uses five semantic steps instead of a wide slider. This keeps Density
-   visually attached to List/Covers and prevents the control from spilling out of
-   the display-options slot on medium-width windows. */
+/* Desktop uses five semantic steps instead of a wide slider. */
 .library-density-desktop,
 .library-density-mobile {
   align-items: center;
@@ -113,40 +111,49 @@
   display: none !important;
 }
 
-/* Keep display controls as one intentional right-side cluster on desktop. The
-   density selector is compact enough to live beside List/Covers without forcing
-   its parent wider than the available toolbar. */
-@media (min-width: 681px) {
-  .library-display-toolbar.has-letter-jump {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: center;
-    column-gap: 18px;
-    width: 100%;
-  }
+/* View mode and Density belong to the Library scope row. All / Movies / TV Shows
+   and Saved Views remain on the left; display controls consume only the space they
+   need on the right. Starts-with navigation is intentionally kept on its own row. */
+.catalog-tabs {
+  align-items: center;
+  flex-wrap: wrap;
+}
 
-  .library-display-toolbar.has-letter-jump .library-view-toolbar {
-    justify-self: end;
-    width: auto;
-    max-width: 100%;
-    margin-left: 0;
-  }
+.catalog-tabs > .library-view-toolbar {
+  order: 100;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  min-height: 38px;
+  width: auto;
+  max-width: 100%;
+  margin: 0 0 0 auto;
+}
 
-  .library-display-toolbar.has-letter-jump .library-view-controls {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    width: auto;
-    max-width: 100%;
-    margin-left: auto;
-    gap: 10px;
-    flex-wrap: nowrap;
-  }
+.catalog-tabs > .library-view-toolbar .library-view-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: auto;
+  max-width: 100%;
+  margin: 0;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
 
-  .cover-size-control.library-density-ready {
-    flex: 0 0 auto;
-    width: auto;
-  }
+.cover-size-control.library-density-ready {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+/* Once the view controls leave this row, alphabet filtering owns only its own
+   compact Starts-with surface and no longer needs a phantom flexible column. */
+.library-display-toolbar.has-letter-jump {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
 }
 
 @media (max-width: 920px) and (min-width: 601px) {
@@ -154,12 +161,32 @@
     display: none;
   }
 
-  .library-display-toolbar.has-letter-jump .library-view-controls {
+  .catalog-tabs > .library-view-toolbar {
+    flex: 1 0 100%;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .catalog-tabs > .library-view-toolbar .library-view-controls {
+    width: 100%;
+    justify-content: flex-end;
     gap: 7px;
   }
 }
 
 @media (max-width: 600px) {
+  .catalog-tabs > .library-view-toolbar {
+    flex: 1 0 100%;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .catalog-tabs > .library-view-toolbar .library-view-controls {
+    width: 100%;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
   .cover-size-control.library-density-ready {
     min-width: 0;
     width: auto;
