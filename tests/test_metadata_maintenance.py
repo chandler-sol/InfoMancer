@@ -10,17 +10,6 @@ from app import main
 from app.db import Database
 
 
-class ImmediateThread:
-    def __init__(self, *, target, args=(), kwargs=None, daemon=None):
-        self.target = target
-        self.args = args
-        self.kwargs = kwargs or {}
-        self.daemon = daemon
-
-    def start(self):
-        self.target(*self.args, **self.kwargs)
-
-
 class FakeTVDB:
     api_key = "test-key"
     pin = ""
@@ -46,11 +35,31 @@ class FakeTVDB:
             ],
             "status": {"name": "Released"},
             "characters": [
-                {"peopleId": 10, "personName": "Actor One", "peopleType": "Actor", "sort": 1},
-                {"peopleId": 20, "personName": "Director One", "peopleType": "Director", "sort": 1},
-                {"peopleId": 30, "personName": "Writer One", "peopleType": "Writer", "sort": 1},
+                {
+                    "peopleId": 10,
+                    "personName": "Actor One",
+                    "peopleType": "Actor",
+                    "sort": 1,
+                },
+                {
+                    "peopleId": 20,
+                    "personName": "Director One",
+                    "peopleType": "Director",
+                    "sort": 1,
+                },
+                {
+                    "peopleId": 30,
+                    "personName": "Writer One",
+                    "peopleType": "Writer",
+                    "sort": 1,
+                },
             ],
         }
+
+
+class FailingTVDB(FakeTVDB):
+    def movie(self, movie_id: int):
+        raise RuntimeError("Provider unavailable")
 
 
 class MetadataMaintenanceTests(unittest.TestCase):
@@ -96,7 +105,8 @@ class MetadataMaintenanceTests(unittest.TestCase):
         starter.assert_called_once()
         with self.database.connect() as conn:
             queued = conn.execute(
-                "SELECT status FROM metadata_refresh_queue WHERE title_id=?", (self.title_id,)
+                "SELECT status FROM metadata_refresh_queue WHERE title_id=?",
+                (self.title_id,),
             ).fetchone()
         self.assertEqual(queued["status"], "queued")
 
@@ -112,7 +122,7 @@ class MetadataMaintenanceTests(unittest.TestCase):
         self.assertIn("Metadata maintenance", page.text)
         self.assertIn("Provider unavailable", page.text)
 
-    def test_title_scoped_refresh_uses_targeted_tvdb_not_bulk_imdb_queue(self):
+    def test_title_scoped_refresh_finishes_in_request_without_bulk_imdb_queue(self):
         with self.database.connect() as conn:
             conn.execute(
                 "UPDATE titles SET tvdb_movie_id=77,poster_url='',overview='' WHERE id=?",
@@ -120,16 +130,19 @@ class MetadataMaintenanceTests(unittest.TestCase):
             )
         main.tvdb = FakeTVDB()
 
-        with patch("app.routes.title_metadata_async.threading.Thread", ImmediateThread), \
-             patch.object(main, "queue_metadata_refresh") as bulk_queue:
+        with patch.object(main, "queue_metadata_refresh") as bulk_queue:
             response = self.client.post(
                 f"/titles/{self.title_id}/imdb-refresh",
                 headers={"Accept": "application/json", "X-InfoMancer-Async": "1"},
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json()["started"])
-        self.assertEqual(response.json()["ui_scope"], "local")
+        payload = response.json()
+        self.assertTrue(payload["started"])
+        self.assertTrue(payload["completed"])
+        self.assertEqual(payload["status"], "complete")
+        self.assertEqual(payload["ui_scope"], "local")
+        self.assertGreaterEqual(payload["duration_ms"], 0)
         bulk_queue.assert_not_called()
 
         with self.database.connect() as conn:
@@ -166,7 +179,10 @@ class MetadataMaintenanceTests(unittest.TestCase):
         self.assertEqual(queue["provider"], "TVDB")
         self.assertEqual(queue["error"], "")
         self.assertEqual(
-            [(row["imdb_person_id"], row["person_name"], row["role"]) for row in credits],
+            [
+                (row["imdb_person_id"], row["person_name"], row["role"])
+                for row in credits
+            ],
             [
                 ("tvdb:10", "Actor One", "actor"),
                 ("tvdb:20", "Director One", "director"),
@@ -177,6 +193,38 @@ class MetadataMaintenanceTests(unittest.TestCase):
             self.assertEqual(main.imdb_genre_job.get("status"), "complete")
             self.assertEqual(main.imdb_genre_job.get("ui_scope"), "local")
             self.assertEqual(main.imdb_genre_job.get("ui_title_id"), self.title_id)
+
+    def test_title_scoped_refresh_returns_provider_failure_instead_of_spinning(self):
+        with self.database.connect() as conn:
+            conn.execute(
+                "UPDATE titles SET tvdb_movie_id=77 WHERE id=?",
+                (self.title_id,),
+            )
+        main.tvdb = FailingTVDB()
+
+        response = self.client.post(
+            f"/titles/{self.title_id}/imdb-refresh",
+            headers={"Accept": "application/json", "X-InfoMancer-Async": "1"},
+        )
+
+        self.assertEqual(response.status_code, 502)
+        payload = response.json()
+        self.assertTrue(payload["started"])
+        self.assertFalse(payload["completed"])
+        self.assertEqual(payload["status"], "failed")
+        self.assertIn("Provider unavailable", payload["detail"])
+        with self.database.connect() as conn:
+            queue = conn.execute(
+                "SELECT status,error FROM metadata_refresh_queue WHERE title_id=?",
+                (self.title_id,),
+            ).fetchone()
+            title = conn.execute(
+                "SELECT metadata_refresh_error FROM titles WHERE id=?",
+                (self.title_id,),
+            ).fetchone()
+        self.assertEqual(queue["status"], "failed")
+        self.assertIn("Provider unavailable", queue["error"])
+        self.assertIn("Provider unavailable", title["metadata_refresh_error"])
 
     def test_quick_refresh_requires_existing_tvdb_match(self):
         main.tvdb = FakeTVDB()
@@ -204,25 +252,34 @@ class MetadataMaintenanceTests(unittest.TestCase):
 
     def test_metadata_controller_keeps_scope_and_refresh_state_across_view_switches(self):
         root = Path(__file__).resolve().parents[1]
-        controller = (root / "app/static/metadata-maintenance.js").read_text(encoding="utf-8")
-        styles = (root / "app/static/metadata-maintenance.css").read_text(encoding="utf-8")
-        task_widget = (root / "app/static/task-widget.js").read_text(encoding="utf-8")
+        controller = (root / "app/static/metadata-maintenance.js").read_text(
+            encoding="utf-8"
+        )
+        styles = (root / "app/static/metadata-maintenance.css").read_text(
+            encoding="utf-8"
+        )
+        task_widget = (root / "app/static/task-widget.js").read_text(
+            encoding="utf-8"
+        )
         modern = (root / "app/static/modern.css").read_text(encoding="utf-8")
-        title_route = (root / "app/routes/title_metadata_async.py").read_text(encoding="utf-8")
+        title_route = (root / "app/routes/title_metadata_async.py").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("const scopeCache = new Map", controller)
         self.assertIn("const refreshJobs = new Map()", controller)
         self.assertIn("prefetchOtherScopes", controller)
-        self.assertIn(
-            "Progress will stay with this title even if you switch maintenance views.",
-            controller,
-        )
         self.assertNotIn("if (!row.isConnected) return", controller)
         self.assertNotIn("metric.title =", controller)
         self.assertIn("metadata-maintenance-inline-task", controller)
         self.assertIn("metadata-refresh-state", controller)
         self.assertIn("metricDescriptions", controller)
         self.assertIn("Refreshed within the last 30 days.", controller)
+        self.assertIn("fetchWithTimeout", controller)
+        self.assertIn("data.completed === true", controller)
+        self.assertIn("attempt < 120", controller)
+        self.assertIn("95000", controller)
+        self.assertNotIn("Metadata refresh queued", controller)
 
         self.assertIn("height:min(78vh,760px)", styles)
         self.assertIn(".metadata-maintenance-list{min-height:0;overflow:auto", styles)
@@ -235,6 +292,8 @@ class MetadataMaintenanceTests(unittest.TestCase):
         self.assertIn("run_targeted_refresh", title_route)
         self.assertIn("tvdb.movie", title_route)
         self.assertIn("tvdb.series", title_route)
+        self.assertIn("result = run_targeted_refresh", title_route)
+        self.assertNotIn("threading.Thread", title_route)
         self.assertNotIn("queue_metadata_refresh =", title_route)
 
         self.assertIn('dialog button[aria-label^="Close"]', modern)
