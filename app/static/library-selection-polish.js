@@ -329,9 +329,12 @@
        reopens a drawer the user previously dismissed. */
     inspectorDismissed = false;
 
+    /* workspace-core owns opening and closing the Inspector. Do not consume a
+       second click on the current title here; letting it continue through the event
+       pipeline allows the core controller's same-title toggle to close the drawer.
+       Selection state remains intact and is synchronized after the click. */
     if (isSelected && isCurrent) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
+      queueSync();
       return;
     }
 
