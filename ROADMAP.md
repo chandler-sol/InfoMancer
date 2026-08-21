@@ -198,6 +198,10 @@ Use the 0.8 benchmark data to guide targeted work rather than optimizing specula
 
 0.9 may expand integrations only where they reinforce InfoMancer's catalog, intelligence, review, and safe-management role. Integrations should continue to respect the project's intentional boundary against automatically acquiring copyrighted media.
 
+Candidate expansion:
+
+- allow multiple user-configured external search providers, with a deliberate provider chooser and ordering instead of replacing the current single-provider shortcut.
+
 Specific integration scope should be chosen after 0.8 rather than committed prematurely.
 
 ---
