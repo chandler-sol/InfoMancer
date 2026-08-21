@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import threading
+import time
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -105,11 +105,12 @@ def build_router(ctx: RouteContext):
     def update_task(**values) -> None:
         with imdb_genre_lock:
             # Keep this one-title job on the local surface. task-widget.js explicitly
-            # ignores ui_scope=local, while the Metadata modal polls this state.
+            # ignores ui_scope=local, while the Metadata modal owns the interaction.
             imdb_genre_job.update(values)
             imdb_genre_job["ui_scope"] = "local"
 
-    def run_targeted_refresh(title_id: int, user_id: int, label: str) -> None:
+    def run_targeted_refresh(title_id: int, label: str) -> dict:
+        started = time.monotonic()
         try:
             with db.connect() as conn:
                 title = conn.execute(
@@ -128,21 +129,31 @@ def build_router(ctx: RouteContext):
                     (title_id,),
                 )
 
-            update_task(status="running", phase="provider", title_ids=[title_id], scope_label=label)
+            update_task(
+                status="running", phase="provider",
+                title_ids=[title_id], scope_label=label,
+            )
             if title["kind"] == "movie":
                 provider_id = int(title["tvdb_movie_id"] or 0)
                 if not provider_id:
-                    raise ValueError("This movie needs a TVDB match before it can be refreshed quickly.")
+                    raise ValueError(
+                        "This movie needs a TVDB match before it can be refreshed quickly."
+                    )
                 record = tvdb.movie(provider_id)
             else:
                 provider_id = int(title["tvdb_id"] or 0)
                 if not provider_id:
-                    raise ValueError("This series needs a TVDB match before it can be refreshed quickly.")
+                    raise ValueError(
+                        "This series needs a TVDB match before it can be refreshed quickly."
+                    )
                 record = tvdb.series(provider_id)
             if not record:
                 raise ValueError("TVDB returned no metadata for this title")
 
-            update_task(status="running", phase="details", title_ids=[title_id], scope_label=label)
+            update_task(
+                status="running", phase="details",
+                title_ids=[title_id], scope_label=label,
+            )
             display_title, title_language = localized_tvdb_title(
                 record, str(title["metadata_title"] or title["title"] or "")
             )
@@ -153,13 +164,21 @@ def build_router(ctx: RouteContext):
             metadata_year = safe_year(record.get("year"))
             status_record = record.get("status") or {}
             metadata_status = str(
-                status_record.get("name") if isinstance(status_record, dict) else status_record
+                status_record.get("name")
+                if isinstance(status_record, dict)
+                else status_record
             ).strip()
 
-            update_task(status="running", phase="credits", title_ids=[title_id], scope_label=label)
+            update_task(
+                status="running", phase="credits",
+                title_ids=[title_id], scope_label=label,
+            )
             credits = title_credits(record)
 
-            update_task(status="running", phase="save", title_ids=[title_id], scope_label=label)
+            update_task(
+                status="running", phase="save",
+                title_ids=[title_id], scope_label=label,
+            )
             with db.connect() as conn:
                 conn.execute(
                     """UPDATE titles SET
@@ -195,7 +214,9 @@ def build_router(ctx: RouteContext):
                 # records. Replace credits only when TVDB supplied usable credits so a
                 # sparse provider response cannot erase previously good IMDb credits.
                 if credits:
-                    conn.execute("DELETE FROM title_credits WHERE title_id=?", (title_id,))
+                    conn.execute(
+                        "DELETE FROM title_credits WHERE title_id=?", (title_id,)
+                    )
                     conn.executemany(
                         """INSERT OR IGNORE INTO title_credits
                            (title_id,imdb_person_id,person_name,role,billing_order)
@@ -213,6 +234,7 @@ def build_router(ctx: RouteContext):
                     (title_id,),
                 )
 
+            duration_ms = int((time.monotonic() - started) * 1000)
             update_task(
                 status="complete",
                 phase="complete",
@@ -221,9 +243,19 @@ def build_router(ctx: RouteContext):
                 matched=1,
                 requested=1,
                 credits_matched=1 if credits else 0,
+                duration_ms=duration_ms,
             )
+            return {
+                "completed": True,
+                "status": "complete",
+                "detail": "Metadata refresh complete.",
+                "provider": "TVDB",
+                "credits_matched": 1 if credits else 0,
+                "duration_ms": duration_ms,
+            }
         except Exception as exc:
             detail = str(exc) or "Metadata refresh failed"
+            duration_ms = int((time.monotonic() - started) * 1000)
             with db.connect() as conn:
                 conn.execute(
                     "UPDATE titles SET metadata_refresh_error=? WHERE id=?",
@@ -241,7 +273,14 @@ def build_router(ctx: RouteContext):
                 title_ids=[title_id],
                 scope_label=label,
                 error=detail,
+                duration_ms=duration_ms,
             )
+            return {
+                "completed": False,
+                "status": "failed",
+                "detail": detail,
+                "duration_ms": duration_ms,
+            }
 
     @router.post(
         "/titles/{title_id}/imdb-refresh",
@@ -258,20 +297,28 @@ def build_router(ctx: RouteContext):
         if not title:
             detail = "Metadata refresh could not start because that title no longer exists."
             if async_request(request):
-                return JSONResponse({"started": False, "detail": detail}, status_code=404)
+                return JSONResponse(
+                    {"started": False, "detail": detail}, status_code=404,
+                )
             return redirect("/library", detail)
 
         if not tvdb.api_key:
             detail = "TVDB credentials must be configured before refreshing one title."
             if async_request(request):
-                return JSONResponse({"started": False, "detail": detail}, status_code=409)
+                return JSONResponse(
+                    {"started": False, "detail": detail}, status_code=409,
+                )
             return redirect(f"/titles/{title_id}", detail)
 
-        provider_id = title["tvdb_movie_id"] if title["kind"] == "movie" else title["tvdb_id"]
+        provider_id = (
+            title["tvdb_movie_id"] if title["kind"] == "movie" else title["tvdb_id"]
+        )
         if not provider_id:
             detail = "This title needs a TVDB match before it can use the quick refresh action."
             if async_request(request):
-                return JSONResponse({"started": False, "detail": detail}, status_code=409)
+                return JSONResponse(
+                    {"started": False, "detail": detail}, status_code=409,
+                )
             return redirect(f"/titles/{title_id}", detail)
 
         label = f"Refreshing metadata for {title['display_title']}"
@@ -279,7 +326,9 @@ def build_router(ctx: RouteContext):
             if imdb_genre_job.get("status") in {"starting", "running"}:
                 detail = "Another metadata refresh is already running. Try again when it finishes."
                 if async_request(request):
-                    return JSONResponse({"started": False, "detail": detail}, status_code=409)
+                    return JSONResponse(
+                        {"started": False, "detail": detail}, status_code=409,
+                    )
                 return redirect(f"/titles/{title_id}", detail)
             imdb_genre_job.clear()
             imdb_genre_job.update({
@@ -300,31 +349,34 @@ def build_router(ctx: RouteContext):
                        status='queued',requested_by=excluded.requested_by,
                        requested_at=CURRENT_TIMESTAMP,started_at=NULL,
                        completed_at=NULL,error=''""",
-                (title_id, request.state.user.id if request.state.user.id > 0 else None),
+                (
+                    title_id,
+                    request.state.user.id if request.state.user.id > 0 else None,
+                ),
             )
 
-        threading.Thread(
-            target=run_targeted_refresh,
-            args=(title_id, request.state.user.id, label),
-            daemon=True,
-        ).start()
-
-        detail = "Quick metadata refresh started."
+        # A one-title refresh is deliberately completed inside this request. The
+        # provider calls are already bounded by TVDBClient timeouts, so keeping the
+        # operation here removes the background-thread/polling race that could leave
+        # the UI stuck at "queued". Bulk refresh remains asynchronous elsewhere.
+        result = run_targeted_refresh(title_id, label)
+        payload = {
+            "started": True,
+            "title_id": title_id,
+            "ui_scope": "local",
+            **result,
+        }
         if async_request(request):
-            return JSONResponse({
-                "started": True,
-                "title_id": title_id,
-                "detail": detail,
-                "status": "starting",
-                "ui_scope": "local",
-            })
-        return redirect(f"/titles/{title_id}", detail)
+            return JSONResponse(
+                payload, status_code=200 if result["completed"] else 502,
+            )
+        return redirect(f"/titles/{title_id}", result["detail"])
 
     @router.get("/api/titles/{title_id}/metadata-refresh-state")
     def title_metadata_refresh_state(title_id: int):
-        # While this title is active the in-process task state is authoritative and
-        # avoids a SQLite read on every progress tick. Completion/error is durable in
-        # metadata_refresh_queue and titles, so the next poll reads final state there.
+        # Retain the durable state endpoint for recovery, older clients, and
+        # diagnostics. The current Metadata UI does not need it for the normal
+        # one-title refresh path once the POST returns.
         with imdb_genre_lock:
             task = {
                 key: imdb_genre_job.get(key)
@@ -332,7 +384,7 @@ def build_router(ctx: RouteContext):
                     "status", "phase", "scope_label", "title_ids", "records",
                     "matched", "requested", "id_processed", "id_total",
                     "id_found", "id_missing", "id_errors", "credits_matched",
-                    "error", "ui_scope", "ui_title_id",
+                    "duration_ms", "error", "ui_scope", "ui_title_id",
                 )
                 if key in imdb_genre_job
             }
