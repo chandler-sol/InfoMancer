@@ -21,6 +21,11 @@ from .title_metadata_async import build_router as build_title_metadata_async_rou
 from .titles import build_router as build_titles_router
 
 ROUTER_BUILDERS = (
+    # The single-title metadata action must own its URL before any broader or
+    # legacy route bundle is registered. The Metadata maintenance UI expects this
+    # handler to finish the bounded TVDB refresh inside the request and return a
+    # final JSON result rather than enqueueing the old bulk IMDb worker.
+    build_title_metadata_async_router,
     build_performance_router,
     build_system_router,
     build_operations_router,
@@ -37,9 +42,6 @@ ROUTER_BUILDERS = (
     build_metadata_maintenance_router,
     build_collections_router,
     build_title_bulk_actions_router,
-    # Keep corrected title actions before the legacy titles bundle while the
-    # route split continues so Starlette resolves the no-reload handlers first.
     build_title_media_info_router,
-    build_title_metadata_async_router,
     build_titles_router,
 )
