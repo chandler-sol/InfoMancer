@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .security_hardening import build_router as build_security_hardening_router
 from .performance import build_router as build_performance_router
 from .system import build_router as build_system_router
 from .operations import build_router as build_operations_router
@@ -21,6 +22,9 @@ from .title_metadata_async import build_router as build_title_metadata_async_rou
 from .titles import build_router as build_titles_router
 
 ROUTER_BUILDERS = (
+    # Install cross-cutting security hooks before domain routers capture their
+    # live helpers or Jinja templates.
+    build_security_hardening_router,
     # The single-title metadata action must own its URL before any broader or
     # legacy route bundle is registered. The Metadata maintenance UI expects this
     # handler to finish the bounded TVDB refresh inside the request and return a
