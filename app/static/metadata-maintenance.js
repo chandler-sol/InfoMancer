@@ -188,14 +188,15 @@
   ];
   const labels = Object.fromEntries(scopes.map((scope) => [scope.key, scope.label]));
   const metricDescriptions = {
-    fresh: 'Refreshed within the last 30 days.',
-    stale: 'Never refreshed, or last refreshed more than 30 days ago.',
-    artwork: 'Titles that do not currently have saved poster artwork.',
-    credits: 'Titles that do not currently have stored cast or crew credits.',
+    fresh: 'Matched titles refreshed within the last 30 days.',
+    stale: 'Matched titles never refreshed, or last refreshed more than 30 days ago.',
+    artwork: 'Matched titles that do not currently have saved poster artwork.',
+    credits: 'Matched titles that do not currently have stored cast or crew credits.',
   };
 
   card.classList.add('metadata-maintenance-card');
   const staleButton = staleForm.querySelector('button');
+  const retryButton = retryForm?.querySelector('button');
   if (staleButton) staleButton.textContent = 'Refresh all stale';
 
   card.querySelector('.settings-table-wrap')?.remove();
@@ -246,7 +247,7 @@
   title.textContent = 'Library metadata';
   const subtitle = document.createElement('p');
   subtitle.className = 'muted';
-  subtitle.textContent = 'Review titles by maintenance state and refresh individual records.';
+  subtitle.textContent = 'Review matched titles by maintenance state and refresh individual records.';
   headingCopy.append(eyebrow, title, subtitle);
 
   const closeButton = document.createElement('button');
@@ -300,6 +301,7 @@
   document.body.append(dialog);
 
   const PAGE_SIZE = 100;
+  const SUCCESS_LINGER_MS = 1250;
   let activeScope = 'stale';
   const scopeCache = new Map(
     scopes.map(({key}) => [key, {
@@ -350,10 +352,33 @@
   };
 
   const updateMetricTotal = (scope, value) => {
+    const numericValue = Number(value);
     const number = metricByScope.get(scope)?.querySelector('strong');
-    if (number && Number.isFinite(Number(value))) {
-      number.textContent = Number(value).toLocaleString();
+    if (number && Number.isFinite(numericValue)) {
+      number.textContent = numericValue.toLocaleString();
     }
+    if (scope === 'stale' && staleButton && Number.isFinite(numericValue)) {
+      staleButton.disabled = numericValue === 0;
+    }
+  };
+
+  const syncMetricTotals = () => {
+    metricScopes.forEach(async (scope) => {
+      try {
+        const url = new URL('/api/metadata/maintenance', window.location.origin);
+        url.searchParams.set('scope', scope);
+        url.searchParams.set('limit', '1');
+        const response = await fetch(url, {
+          credentials: 'same-origin',
+          cache: 'no-store',
+        });
+        if (!response.ok) return;
+        const data = await response.json();
+        updateMetricTotal(scope, Number(data.total || 0));
+      } catch (_error) {
+        // Keep the server-rendered value if the lightweight sync cannot complete.
+      }
+    });
   };
 
   const applyJobToRow = (row, job) => {
@@ -456,16 +481,43 @@
     return row;
   };
 
+  const setBulkButtonsBusy = (scope, busy) => {
+    const sourceButton = scope === 'stale' ? staleButton : retryButton;
+    if (sourceButton) sourceButton.disabled = busy;
+    if (activeScope === scope) bulkAction.disabled = busy;
+  };
+
+  const startBulkRefresh = async (scope) => {
+    if (!['stale', 'failures'].includes(scope)) return;
+    setBulkButtonsBusy(scope, true);
+    try {
+      const url = new URL('/api/metadata/maintenance/bulk-refresh', window.location.origin);
+      url.searchParams.set('scope', scope);
+      const response = await fetch(url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: asyncHeaders(),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+      summaryText.textContent = data.detail || 'Metadata refresh queued.';
+      if (!data.started) setBulkButtonsBusy(scope, false);
+    } catch (error) {
+      summaryText.textContent = error?.message || 'Metadata refresh could not be started.';
+      setBulkButtonsBusy(scope, false);
+    }
+  };
+
   const updateBulkAction = () => {
     bulkAction.hidden = false;
     if (activeScope === 'stale') {
       bulkAction.textContent = 'Refresh all stale';
       bulkAction.disabled = Boolean(staleButton?.disabled);
-      bulkAction.onclick = () => staleForm.requestSubmit();
+      bulkAction.onclick = () => startBulkRefresh('stale');
     } else if (activeScope === 'failures') {
       bulkAction.textContent = 'Retry failures';
-      bulkAction.disabled = Boolean(retryForm?.querySelector('button')?.disabled);
-      bulkAction.onclick = () => retryForm?.requestSubmit();
+      bulkAction.disabled = Boolean(retryButton?.disabled);
+      bulkAction.onclick = () => startBulkRefresh('failures');
     } else {
       bulkAction.hidden = true;
       bulkAction.onclick = null;
@@ -625,7 +677,7 @@
             detail: 'Updating maintenance views…',
             polling: false,
           });
-          await sleep(250);
+          await sleep(SUCCESS_LINGER_MS);
           invalidateScopes();
           await fetchScope(activeScope, {force: true});
           prefetchOtherScopes();
@@ -683,10 +735,11 @@
           tone: 'success',
           heading: 'Refresh complete',
           detail: data.duration_ms
-            ? `TVDB refresh finished in ${(Number(data.duration_ms) / 1000).toFixed(1)} seconds. Updating maintenance views…`
-            : 'Updating maintenance views…',
+            ? `TVDB refresh finished in ${(Number(data.duration_ms) / 1000).toFixed(1)} seconds.`
+            : 'Metadata is up to date.',
           polling: false,
         });
+        await sleep(SUCCESS_LINGER_MS);
         invalidateScopes();
         await fetchScope(activeScope, {force: true});
         prefetchOtherScopes();
@@ -760,6 +813,14 @@
     });
   });
 
+  staleForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    startBulkRefresh('stale');
+  });
+  retryForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    startBulkRefresh('failures');
+  });
   viewButton.addEventListener('click', () => openDialog('stale'));
   scopeButtons.forEach((button, scope) => {
     button.addEventListener('click', () => switchScope(scope));
@@ -776,4 +837,9 @@
   dialog.addEventListener('click', (event) => {
     if (event.target === dialog) dialog.close();
   });
+
+  // The server-rendered Settings context predates the matched-only maintenance
+  // boundary. Correct the four visible totals immediately from the canonical
+  // maintenance API without loading the full modal lists.
+  syncMetricTotals();
 })();
