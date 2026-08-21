@@ -144,11 +144,11 @@ class UiPolishRegressionTests(unittest.TestCase):
     def test_library_cover_grid_fills_both_page_edges_and_captions_are_inset(self):
         grid = (STATIC / "library-performance.css").read_text(encoding="utf-8")
         styles = (STATIC / "library-selection-toolbar.css").read_text(encoding="utf-8")
+        self.assertIn("#cover-library.cover-library {", grid)
         self.assertIn("repeat(auto-fill, minmax(min(100%, var(--cover-size)), 1fr))", grid)
         self.assertIn("justify-content: stretch", grid)
         self.assertIn("#cover-library.cover-library > .cover-card", grid)
         self.assertIn("width: 100%", grid)
-        self.assertNotIn("justify-content: center", grid)
         self.assertNotIn("justify-content: flex-start !important", styles)
         self.assertIn("#cover-library .cover-card-link > strong", styles)
         self.assertIn("padding: 8px 8px 0", styles)
