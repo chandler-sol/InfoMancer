@@ -13,9 +13,23 @@
 
 @media (min-width: 1180px) {
   body.has-app-sidebar.workspace-inspector-open main.shell:has(> .catalog-tabs) {
-    max-width: 1700px !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    margin-inline: 0 !important;
     padding-right: 24px !important;
   }
+}
+
+body.library-drag-selecting,
+body.library-drag-selecting #cover-library,
+body.library-drag-selecting #cover-library * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+body.library-drag-selecting #cover-library .cover-card {
+  cursor: copy;
 }
 
 .cover-card.workspace-selected .cover-art {
