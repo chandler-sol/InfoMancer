@@ -172,6 +172,12 @@
     {key: 'failures', label: 'Failures'},
   ];
   const labels = Object.fromEntries(scopes.map((scope) => [scope.key, scope.label]));
+  const metricDescriptions = {
+    fresh: 'Refreshed within the last 30 days.',
+    stale: 'Never refreshed, or last refreshed more than 30 days ago.',
+    artwork: 'Titles that do not currently have saved poster artwork.',
+    credits: 'Titles that do not currently have stored cast or crew credits.',
+  };
 
   card.classList.add('metadata-maintenance-card');
 
@@ -191,16 +197,23 @@
   actions?.append(viewButton);
 
   const metricScopes = ['fresh', 'stale', 'artwork', 'credits'];
+  const metricByScope = new Map();
   metrics.slice(0, 4).forEach((metric, index) => {
     const scope = metricScopes[index];
+    const description = metricDescriptions[scope];
+    metricByScope.set(scope, metric);
     metric.classList.add('metadata-maintenance-metric');
     metric.dataset.metadataScope = scope;
     metric.tabIndex = 0;
     metric.setAttribute('role', 'button');
-    metric.setAttribute('aria-label', `View ${labels[scope].toLowerCase()} titles`);
+    metric.setAttribute(
+      'aria-label',
+      `${labels[scope]}. ${description} Activate to view matching titles.`
+    );
+    metric.title = `${description} Click to view matching titles.`;
     const hint = document.createElement('small');
     hint.className = 'metadata-maintenance-metric-hint';
-    hint.textContent = 'View titles';
+    hint.textContent = `${description} View titles.`;
     metric.append(hint);
   });
 
@@ -279,9 +292,19 @@
   let total = 0;
   let loading = false;
   let requestController = null;
+  const runningTitleIds = new Set();
   const PAGE_SIZE = 100;
 
+  const sleep = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
   const formatKind = (kind) => kind === 'tv' ? 'TV Show' : 'Movie';
+  const phaseLabel = (phase = '') => ({
+    basics: 'Checking title records',
+    ratings: 'Updating ratings',
+    episodes: 'Updating episode links',
+    crew: 'Updating crew credits',
+    principals: 'Updating cast credits',
+    names: 'Resolving people',
+  }[String(phase).toLowerCase()] || 'Refreshing metadata');
 
   const issueChip = (text, tone = '') => {
     const chip = document.createElement('span');
@@ -300,9 +323,92 @@
     return chips;
   };
 
-  const refreshTitle = async (item, button) => {
+  const setInlineTask = (banner, tone, headingText, detailText = '') => {
+    banner.hidden = false;
+    banner.className = `metadata-maintenance-inline-task ${tone}`;
+    banner.querySelector('strong').textContent = headingText;
+    const detail = banner.querySelector('small');
+    detail.textContent = detailText;
+    detail.hidden = !detailText;
+  };
+
+  const updateMetricTotal = (scope, value) => {
+    const metric = metricByScope.get(scope);
+    const number = metric?.querySelector('strong');
+    if (number && Number.isFinite(Number(value))) {
+      number.textContent = Number(value).toLocaleString();
+    }
+  };
+
+  const pollTitleRefresh = async (item, row, button, banner) => {
+    try {
+      for (let attempt = 0; attempt < 900; attempt += 1) {
+        if (!row.isConnected) return;
+        await sleep(attempt === 0 ? 450 : 1000);
+        const response = await fetch(`/api/titles/${item.id}/metadata-refresh-state`, {
+          credentials: 'same-origin',
+          cache: 'no-store',
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const state = await response.json();
+        const task = state.task || {};
+        const queue = state.queue || {};
+
+        if (['starting', 'running'].includes(String(task.status || ''))) {
+          setInlineTask(
+            banner,
+            'working',
+            phaseLabel(task.phase),
+            'This title is refreshing here. It will not create a global notification.'
+          );
+          continue;
+        }
+
+        if (queue.status === 'failed' || state.metadata_refresh_error) {
+          const error = queue.error || state.metadata_refresh_error || 'Metadata refresh failed.';
+          setInlineTask(banner, 'error', 'Refresh could not finish', error);
+          button.disabled = false;
+          button.textContent = 'Retry';
+          return;
+        }
+
+        if (queue.status === 'complete' || state.metadata_refreshed_at) {
+          setInlineTask(banner, 'success', 'Refresh complete', 'Updating this list…');
+          await sleep(650);
+          const previousScroll = list.scrollTop;
+          await loadScope(activeScope);
+          list.scrollTop = Math.min(previousScroll, Math.max(0, list.scrollHeight - list.clientHeight));
+          return;
+        }
+      }
+      setInlineTask(
+        banner,
+        'error',
+        'Refresh is taking longer than expected',
+        'The background worker may still be running. Close and reopen this list to check its state.'
+      );
+      button.disabled = false;
+      button.textContent = 'Check again';
+    } catch (error) {
+      setInlineTask(
+        banner,
+        'error',
+        'Refresh status could not be checked',
+        error?.message || 'Try again.'
+      );
+      button.disabled = false;
+      button.textContent = 'Retry';
+    } finally {
+      runningTitleIds.delete(item.id);
+    }
+  };
+
+  const refreshTitle = async (item, row, button, banner) => {
+    if (runningTitleIds.has(item.id)) return;
+    runningTitleIds.add(item.id);
     button.disabled = true;
     button.textContent = 'Starting…';
+    setInlineTask(banner, 'working', 'Starting refresh', 'Preparing this title for metadata refresh.');
     try {
       const response = await fetch(`/titles/${item.id}/imdb-refresh`, {
         method: 'POST',
@@ -315,21 +421,31 @@
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
-      button.textContent = data.started ? 'Queued' : 'Refresh';
-      if (!data.started) button.disabled = false;
+      button.textContent = 'Refreshing…';
+      setInlineTask(
+        banner,
+        'working',
+        'Metadata refresh queued',
+        'Progress will stay with this title instead of the notification widget.'
+      );
+      await pollTitleRefresh(item, row, button, banner);
     } catch (error) {
-      button.textContent = 'Refresh';
+      runningTitleIds.delete(item.id);
+      button.textContent = 'Retry';
       button.disabled = false;
-      const message = document.createElement('small');
-      message.className = 'metadata-maintenance-row-error';
-      message.textContent = error?.message || 'Refresh could not be started.';
-      button.closest('.metadata-maintenance-row')?.querySelector('.metadata-maintenance-row-copy')?.append(message);
+      setInlineTask(
+        banner,
+        'error',
+        'Refresh could not start',
+        error?.message || 'Try again.'
+      );
     }
   };
 
   const renderItem = (item) => {
     const row = document.createElement('article');
     row.className = 'metadata-maintenance-row';
+    row.dataset.titleId = String(item.id);
 
     const copy = document.createElement('div');
     copy.className = 'metadata-maintenance-row-copy';
@@ -356,9 +472,23 @@
     action.type = 'button';
     action.className = 'button metadata-maintenance-row-refresh';
     action.textContent = 'Refresh';
-    action.addEventListener('click', () => refreshTitle(item, action));
 
-    row.append(copy, action);
+    const banner = document.createElement('div');
+    banner.className = 'metadata-maintenance-inline-task';
+    banner.hidden = true;
+    banner.setAttribute('role', 'status');
+    banner.setAttribute('aria-live', 'polite');
+    const indicator = document.createElement('span');
+    indicator.className = 'metadata-maintenance-inline-indicator';
+    indicator.setAttribute('aria-hidden', 'true');
+    const bannerCopy = document.createElement('span');
+    const bannerHeading = document.createElement('strong');
+    const bannerDetail = document.createElement('small');
+    bannerCopy.append(bannerHeading, bannerDetail);
+    banner.append(indicator, bannerCopy);
+
+    action.addEventListener('click', () => refreshTitle(item, row, action, banner));
+    row.append(copy, action, banner);
     return row;
   };
 
@@ -432,6 +562,7 @@
       }
       offset += items.length;
       summaryText.textContent = `${total.toLocaleString()} ${labels[activeScope].toLowerCase()} title${total === 1 ? '' : 's'}`;
+      updateMetricTotal(activeScope, total);
       loadMore.hidden = offset >= total;
     } catch (error) {
       if (error?.name === 'AbortError') return;
