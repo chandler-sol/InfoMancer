@@ -49,6 +49,10 @@
     task.detail || '',
     task.status || '',
   ].join('\u0001')).join('\u0002');
+  const localOnlyTask = (task) => (
+    task?.ui_scope === 'local'
+    || String(task?.label || '').startsWith('Refreshing metadata for ')
+  );
 
   const pruneRecent = () => {
     const next = recent.filter((task) => Number(task.expiresAt) > Date.now());
@@ -289,7 +293,11 @@
 
   const accept = (incoming, incomingScheduled = []) => {
     const next = (Array.isArray(incoming) ? incoming : [])
-      .filter((task) => task?.id && task.id !== 'media-fingerprints-queued');
+      .filter((task) => (
+        task?.id
+        && task.id !== 'media-fingerprints-queued'
+        && !localOnlyTask(task)
+      ));
     const nextScheduled = Array.isArray(incomingScheduled) ? incomingScheduled : [];
     const nextSignature = taskSetSignature(next);
     const nextScheduledSignature = taskSetSignature(nextScheduled);
