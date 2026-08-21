@@ -111,12 +111,17 @@ class CollectionDetailManagementTests(unittest.TestCase):
         ) = self.original
         self.temporary.cleanup()
 
-    def test_collection_page_exposes_reorder_and_integrated_delete_controls(self):
+    def test_collection_page_uses_compact_management_dialogs_and_reorder_controls(self):
         response = self.client.get(f"/collections/{self.collection_id}")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Collection order", response.text)
+        self.assertIn("manual order", response.text)
+        self.assertNotIn("shown only on the Collections page", response.text)
+        self.assertIn('id="collection-add-dialog"', response.text)
+        self.assertIn('id="collection-edit-dialog"', response.text)
         self.assertIn("data-collection-reorder-toggle", response.text)
+        self.assertIn("Reorder collection", response.text)
         self.assertIn("collection-danger-zone", response.text)
+        self.assertIn("data-collection-cover-size", response.text)
         self.assertIn(
             f'data-collection-item="title:{self.iron_ids[0]}"',
             response.text,
