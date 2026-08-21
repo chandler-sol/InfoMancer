@@ -2,5 +2,4 @@
   <a href="/account/profile" {% if request.url.path == '/account/profile' %}class="active"{% endif %}>Profile</a>
   <a href="/account/security" {% if request.url.path == '/account/security' %}class="active"{% endif %}>Password</a>
   <a href="/account/sessions" {% if request.url.path == '/account/sessions' %}class="active"{% endif %}>Sessions</a>
-  {% if current_user.is_librarian %}<a href="/admin/users" {% if request.url.path == '/admin/users' %}class="active"{% endif %}>Users</a>{% endif %}
 </nav>
