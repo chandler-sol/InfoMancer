@@ -2,6 +2,7 @@
 {% block title %}Scheduled Tasks · {{ app_name }}{% endblock %}
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('static', path='scheduled-tasks.css') }}?v={{ app_version }}">
+<script src="{{ url_for('static', path='scheduled-tasks.js') }}?v={{ app_version }}" defer></script>
 <header class="settings-heading app-settings-heading scheduled-tasks-heading">
   <p class="eyebrow">LIBRARIAN</p>
   <h1>Scheduled Tasks</h1>
@@ -9,6 +10,11 @@
 </header>
 {% include "_settings_nav.html" %}
 {% if error %}<div class="form-error page-error" role="alert">{{ error }}</div>{% endif %}
+
+{% set schedule_hour24 = preferences.hash_schedule_time.split(':')[0]|int %}
+{% set schedule_minute = preferences.hash_schedule_time.split(':')[1]|int %}
+{% set schedule_hour12 = schedule_hour24 % 12 if schedule_hour24 % 12 else 12 %}
+{% set schedule_period = 'PM' if schedule_hour24 >= 12 else 'AM' %}
 
 <div class="scheduled-task-layout">
   <section class="panel settings-card scheduled-task-card scheduled-fingerprint-card">
@@ -24,15 +30,31 @@
       <div><span>Waiting</span><strong>{{ '{:,}'.format(hash_counts.queued or 0) }} files</strong></div>
     </div>
     <form class="settings-form scheduled-task-form" id="scheduled-fingerprint-form" method="post" action="/settings/scheduled-tasks/fingerprints">
-      <div class="settings-form-grid">
-        <label>Behavior<select name="hash_mode"><option value="automatic" {% if preferences.hash_mode == 'automatic' %}selected{% endif %}>Automatic + scheduled fallback</option><option value="scheduled" {% if preferences.hash_mode == 'scheduled' %}selected{% endif %}>Scheduled only</option><option value="on_demand" {% if preferences.hash_mode == 'on_demand' %}selected{% endif %}>On demand only</option><option value="off" {% if preferences.hash_mode == 'off' %}selected{% endif %}>Off</option></select><small>Automatic can fingerprint a limited number of new files immediately and leave the rest for the schedule.</small></label>
-        <label>Immediate file limit<input type="number" name="hash_immediate_limit" min="1" max="10000" value="{{ preferences.hash_immediate_limit }}" required><small>Used by Automatic mode before remaining files are deferred.</small></label>
-        <label>Frequency<select name="hash_schedule_frequency"><option value="daily" {% if preferences.hash_schedule_frequency == 'daily' %}selected{% endif %}>Daily</option><option value="weekly" {% if preferences.hash_schedule_frequency == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if preferences.hash_schedule_frequency == 'monthly' %}selected{% endif %}>Monthly</option></select></label>
-        <label>Schedule day<input type="number" name="hash_schedule_day" min="0" max="28" value="{{ preferences.hash_schedule_day }}" required><small>Weekly: 0 Monday through 6 Sunday. Monthly: 1 through 28. Daily ignores this value.</small></label>
-        <label>Start time<input type="time" name="hash_schedule_time" value="{{ preferences.hash_schedule_time }}" required><small>Uses the installation time zone.</small></label>
-        <label>Disk activity<select name="hash_io_intensity"><option value="low" {% if preferences.hash_io_intensity == 'low' %}selected{% endif %}>Low</option><option value="balanced" {% if preferences.hash_io_intensity == 'balanced' %}selected{% endif %}>Balanced</option><option value="high" {% if preferences.hash_io_intensity == 'high' %}selected{% endif %}>High</option></select></label>
+      <div class="scheduled-config-grid">
+        <label class="scheduled-field"><span class="scheduled-field-label">Behavior</span><select name="hash_mode"><option value="automatic" {% if preferences.hash_mode == 'automatic' %}selected{% endif %}>Automatic + scheduled fallback</option><option value="scheduled" {% if preferences.hash_mode == 'scheduled' %}selected{% endif %}>Scheduled only</option><option value="on_demand" {% if preferences.hash_mode == 'on_demand' %}selected{% endif %}>On demand only</option><option value="off" {% if preferences.hash_mode == 'off' %}selected{% endif %}>Off</option></select><small>Automatic can fingerprint a limited number of new files immediately and leave the rest for the schedule.</small></label>
+        <label class="scheduled-field"><span class="scheduled-field-label">Immediate file limit</span><input type="number" name="hash_immediate_limit" min="1" max="10000" value="{{ preferences.hash_immediate_limit }}" required><small>Used by Automatic mode before remaining files are deferred.</small></label>
+        <label class="scheduled-field"><span class="scheduled-field-label">Disk activity</span><select name="hash_io_intensity"><option value="low" {% if preferences.hash_io_intensity == 'low' %}selected{% endif %}>Low</option><option value="balanced" {% if preferences.hash_io_intensity == 'balanced' %}selected{% endif %}>Balanced</option><option value="high" {% if preferences.hash_io_intensity == 'high' %}selected{% endif %}>High</option></select><small>Controls how aggressively fingerprinting uses storage bandwidth.</small></label>
       </div>
-      <label class="checkbox-label"><input type="checkbox" name="hash_pause_for_activity" value="1" {% if preferences.hash_pause_for_activity == '1' %}checked{% endif %}> Pause fingerprinting while scans, matching, or media inspection are running</label>
+
+      <fieldset class="scheduled-timing-group">
+        <legend>Schedule</legend>
+        <div class="scheduled-timing-grid">
+          <label class="scheduled-field"><span class="scheduled-field-label">Frequency</span><select name="hash_schedule_frequency" data-schedule-frequency><option value="daily" {% if preferences.hash_schedule_frequency == 'daily' %}selected{% endif %}>Daily</option><option value="weekly" {% if preferences.hash_schedule_frequency == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if preferences.hash_schedule_frequency == 'monthly' %}selected{% endif %}>Monthly</option></select></label>
+          <label class="scheduled-field"><span class="scheduled-field-label">Day</span><input type="hidden" name="hash_schedule_day" value="{{ preferences.hash_schedule_day }}" data-schedule-day-value><select data-schedule-day aria-label="Schedule day">
+            {% if preferences.hash_schedule_frequency == 'weekly' %}
+              {% set weekday_names = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'] %}
+              {% for day_name in weekday_names %}<option value="{{ loop.index0 }}" {% if preferences.hash_schedule_day|int == loop.index0 %}selected{% endif %}>{{ day_name }}</option>{% endfor %}
+            {% elif preferences.hash_schedule_frequency == 'monthly' %}
+              {% for day_number in range(1, 29) %}<option value="{{ day_number }}" {% if preferences.hash_schedule_day|int == day_number %}selected{% endif %}>Day {{ day_number }}</option>{% endfor %}
+            {% else %}
+              <option value="{{ preferences.hash_schedule_day }}">Every day</option>
+            {% endif %}
+          </select><small data-schedule-day-help>{% if preferences.hash_schedule_frequency == 'weekly' %}Choose the weekday for the scheduled run.{% elif preferences.hash_schedule_frequency == 'monthly' %}Choose the calendar day for the scheduled run.{% else %}Daily schedules run every day.{% endif %}</small></label>
+          <label class="scheduled-field"><span class="scheduled-field-label">Start time</span><input type="hidden" name="hash_schedule_time" value="{{ preferences.hash_schedule_time }}" data-schedule-time-value><span class="scheduled-time-picker" role="group" aria-label="Start time"><select data-schedule-hour aria-label="Hour">{% for hour in range(1, 13) %}<option value="{{ hour }}" {% if schedule_hour12 == hour %}selected{% endif %}>{{ hour }}</option>{% endfor %}</select><span class="scheduled-time-colon" aria-hidden="true">:</span><select data-schedule-minute aria-label="Minute"><option value="{{ '%02d'|format(schedule_minute) }}" selected>{{ '%02d'|format(schedule_minute) }}</option></select><select data-schedule-period aria-label="AM or PM"><option value="AM" {% if schedule_period == 'AM' %}selected{% endif %}>AM</option><option value="PM" {% if schedule_period == 'PM' %}selected{% endif %}>PM</option></select></span><small>Uses the installation time zone.</small></label>
+        </div>
+      </fieldset>
+
+      <label class="scheduled-checkbox"><input type="checkbox" name="hash_pause_for_activity" value="1" {% if preferences.hash_pause_for_activity == '1' %}checked{% endif %}><span>Pause fingerprinting while scans, matching, or media inspection are running</span></label>
     </form>
     <div class="actions scheduled-task-actions">
       <button class="button primary" type="submit" form="scheduled-fingerprint-form">Save fingerprint schedule</button>
@@ -40,7 +62,7 @@
     </div>
   </section>
 
-  <section class="panel settings-card scheduled-task-card">
+  <section class="panel settings-card scheduled-task-card scheduled-retention-card">
     <div class="settings-card-head scheduled-task-head">
       <div><p class="eyebrow">MANAGED TRASH</p><h2>Retention cleanup</h2></div>
       <span class="settings-state {{ 'active' if trash_task.status == 'Running' else 'warn' if 'Paused' in trash_task.status or trash_task.status == 'Needs attention' else 'good' }}">{{ trash_task.status }}</span>
@@ -53,14 +75,9 @@
       <div><span>Current state</span><strong>{{ trash_task.detail }}</strong></div>
     </div>
     <form class="scheduled-retention-form" method="post" action="/settings/scheduled-tasks/trash-retention">
-      <label>Default managed-trash retention<select name="trash_retention_days"><option value="never" {% if trash_task.retention == 'never' %}selected{% endif %}>Never expire automatically</option><option value="7" {% if trash_task.retention == '7' %}selected{% endif %}>7 days</option><option value="30" {% if trash_task.retention == '30' %}selected{% endif %}>30 days</option><option value="90" {% if trash_task.retention == '90' %}selected{% endif %}>90 days</option><option value="365" {% if trash_task.retention == '365' %}selected{% endif %}>1 year</option></select><small>This controls how long eligible managed-trash items are kept before automatic cleanup can remove them.</small></label>
-      <button class="button primary">Save retention</button>
+      <label class="scheduled-field"><span class="scheduled-field-label">Default managed-trash retention</span><select name="trash_retention_days"><option value="never" {% if trash_task.retention == 'never' %}selected{% endif %}>Never expire automatically</option><option value="7" {% if trash_task.retention == '7' %}selected{% endif %}>7 days</option><option value="30" {% if trash_task.retention == '30' %}selected{% endif %}>30 days</option><option value="90" {% if trash_task.retention == '90' %}selected{% endif %}>90 days</option><option value="365" {% if trash_task.retention == '365' %}selected{% endif %}>1 year</option></select><small>This controls how long eligible managed-trash items are kept before automatic cleanup can remove them.</small></label>
+      <div class="scheduled-retention-actions"><button class="button primary">Save retention</button></div>
     </form>
-  </section>
-
-  <section class="panel settings-card scheduled-task-card scheduled-task-future">
-    <div><p class="eyebrow">SCHEDULE CENTER</p><h2>One home for recurring maintenance</h2><p class="muted">Only tasks with an actual automatic schedule are shown here. If future maintenance features gain scheduling controls, they can join this page without cluttering the live task widget.</p></div>
-    <a class="button" href="/activity">Open task history</a>
   </section>
 </div>
 {% endblock %}
