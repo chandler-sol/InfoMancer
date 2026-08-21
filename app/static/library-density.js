@@ -8,9 +8,8 @@
   const LEGACY_KEY = 'infomancer-cover-size';
   const phoneQuery = window.matchMedia('(max-width: 600px)');
 
-  /* The desktop control expresses visual density, never an exact column count.
-     Auto-fill remains responsible for making full use of narrow, wide, and
-     ultrawide viewports. Pixel values are deliberately an internal mapping only. */
+  /* Desktop density remains semantic. The internal card footprint is only the
+     mechanism used by auto-fill, never a promise about an exact column count. */
   const desktopSteps = [
     {name: 'Compact', size: 120},
     {name: 'Dense', size: 165},
@@ -47,24 +46,34 @@
 
   const desktop = document.createElement('div');
   desktop.className = 'library-density-desktop';
+  desktop.setAttribute('role', 'group');
+  desktop.setAttribute('aria-label', 'Cover density');
 
-  const compactEdge = document.createElement('span');
-  compactEdge.className = 'library-density-edge';
-  compactEdge.textContent = 'Compact';
+  const iconForDesktopStep = (stepNumber) => {
+    const count = desktopSteps.length - stepNumber + 1;
+    const gap = count > 1 ? 1.25 : 0;
+    const cardWidth = count === 1 ? 13 : Math.max(2.2, (18 - gap * (count - 1)) / count);
+    const totalWidth = cardWidth * count + gap * (count - 1);
+    const start = (24 - totalWidth) / 2;
+    const cards = Array.from({length: count}, (_unused, index) => {
+      const x = start + index * (cardWidth + gap);
+      return `<rect x="${x.toFixed(2)}" y="4" width="${cardWidth.toFixed(2)}" height="16" rx="1"></rect>`;
+    }).join('');
+    return `<svg viewBox="0 0 24 24" aria-hidden="true">${cards}</svg>`;
+  };
 
-  const range = document.createElement('input');
-  range.type = 'range';
-  range.className = 'library-density-range';
-  range.min = '1';
-  range.max = String(desktopSteps.length);
-  range.step = '1';
-  range.value = String(desktopValue);
-  range.setAttribute('aria-label', 'Cover density');
-
-  const spaciousEdge = document.createElement('span');
-  spaciousEdge.className = 'library-density-edge';
-  spaciousEdge.textContent = 'Spacious';
-  desktop.append(compactEdge, range, spaciousEdge);
+  const desktopButtons = desktopSteps.map((step, index) => {
+    const value = index + 1;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'library-density-step';
+    button.dataset.densityStep = String(value);
+    button.title = `${step.name} cover density`;
+    button.setAttribute('aria-label', `${step.name} cover density`);
+    button.innerHTML = iconForDesktopStep(value);
+    desktop.append(button);
+    return button;
+  });
 
   const mobile = document.createElement('div');
   mobile.className = 'library-density-mobile';
@@ -74,7 +83,7 @@
   const iconForColumns = (columns) => {
     const cells = Array.from({length: columns}, (_unused, index) => {
       const width = columns === 1 ? 14 : columns === 2 ? 7 : 4;
-      const gap = columns === 1 ? 0 : columns === 2 ? 2 : 2;
+      const gap = columns === 1 ? 0 : 2;
       const x = columns === 1 ? 5 : 2 + index * (width + gap);
       return `<rect x="${x}" y="3" width="${width}" height="18" rx="1.5"></rect>`;
     }).join('');
@@ -98,9 +107,11 @@
   const applyDesktop = (value, persist = true) => {
     desktopValue = clampDesktop(value);
     const step = desktopSteps[desktopValue - 1];
-    range.value = String(desktopValue);
-    range.setAttribute('aria-valuetext', step.name);
     coverLibrary.style.setProperty('--cover-size', `${step.size}px`);
+    coverLibrary.dataset.desktopDensity = step.name.toLowerCase();
+    desktopButtons.forEach((button) => {
+      button.setAttribute('aria-pressed', String(Number(button.dataset.densityStep) === desktopValue));
+    });
     if (persist) {
       localStorage.setItem(DESKTOP_KEY, String(desktopValue));
       /* Keep the legacy value synchronized for older builds without surfacing it
@@ -123,7 +134,9 @@
     else applyDesktop(desktopValue, false);
   };
 
-  range.addEventListener('input', () => applyDesktop(range.value));
+  desktopButtons.forEach(button => {
+    button.addEventListener('click', () => applyDesktop(button.dataset.densityStep));
+  });
   mobileButtons.forEach(button => {
     button.addEventListener('click', () => applyMobile(button.dataset.density));
   });
