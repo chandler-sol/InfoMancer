@@ -87,6 +87,25 @@ body .settings-page-grid > .settings-card:not(.full-width) {
   height: 100%;
 }
 
+/* auth.css intentionally keeps standalone account forms narrow. Inside the App
+   Settings grid that legacy max-width must not shrink one card inside its column,
+   otherwise the right edges of General/Users no longer line up with full-width
+   cards, navigation, and save bars. */
+body .settings-page-grid > .settings-form {
+  width: 100%;
+  max-width: none;
+}
+
+/* User Management now participates in the same Settings shell. Keep the common
+   two-column width and 16px gutter, but let each card size to its own content so a
+   short user list is not stretched to the height of the invitation form. */
+body .settings-page-grid.user-management-grid {
+  align-items: start;
+}
+body .settings-page-grid.user-management-grid > .settings-card {
+  height: auto;
+}
+
 body .settings-card {
   gap: 14px;
 }
