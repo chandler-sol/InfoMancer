@@ -13,3 +13,17 @@
 .tour-demo-cover i{font:500 clamp(1rem,2vw,1.5rem)/1.05 var(--serif);font-style:normal;text-shadow:0 2px 8px #000}.tour-demo-covers strong{display:block;margin-top:.5rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tour-demo-covers small{color:var(--muted)}.tour-demo-covers small b{color:#ffd54d;margin-right:.35rem}
 .tour-library-demo[data-view="covers"] .tour-demo-list{display:none}.tour-library-demo[data-view="covers"] .tour-demo-covers{display:grid}
 @media(max-width:760px){.tour-library-demo{padding:.65rem}.tour-demo-list-head{display:none}.tour-demo-list article{grid-template-columns:minmax(0,1fr) auto;padding-right:.7rem}.tour-demo-list article em{display:none}.tour-demo-covers{grid-template-columns:repeat(2,minmax(100px,1fr))}}
+
+/* Detail hero regression guard: expanding long cast/crew content makes the grid row
+   taller, but the poster itself must keep its normal 2:3 geometry instead of
+   stretching to match that row. This rule intentionally wins over legacy fixed
+   height declarations while retaining their responsive width breakpoints. */
+body.has-app-sidebar .media-dossier .detail-poster-column{
+  align-self:start;
+  height:max-content;
+}
+body.has-app-sidebar .media-dossier .detail-page-head .detail-poster{
+  height:auto!important;
+  aspect-ratio:2/3;
+  align-self:start;
+}
