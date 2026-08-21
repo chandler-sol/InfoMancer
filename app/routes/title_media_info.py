@@ -310,6 +310,7 @@ def build_router(ctx: RouteContext):
             "media",
             f"Media inspection requested for {title['metadata_title'] or title['title']}.",
             context={"title_id": title_id, "files": len(stale_ids)},
+            user_id=request.state.user.id,
         )
         message = (
             f"Media inspection started for {len(stale_ids)} changed "
