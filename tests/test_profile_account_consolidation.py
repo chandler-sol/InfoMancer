@@ -50,17 +50,27 @@ class ProfileAccountConsolidationContracts(unittest.TestCase):
         self.assertIn('class="panel session-panel"', sessions)
         self.assertIn('/account/sessions/revoke-others', sessions)
 
-    def test_profile_compact_polish_keeps_account_actions_in_header(self):
-        source = (ROOT / "app/static/profile-account-dialogs.css").read_text(
+    def test_profile_settings_uses_compact_preview_owned_account_actions(self):
+        template = (ROOT / "app/templates/account_profile.html").read_text(
+            encoding="utf-8"
+        )
+        styles = (ROOT / "app/static/profile-account-dialogs.css").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn(".profile-settings-heading", source)
-        self.assertIn("grid-template-columns:minmax(0,1fr) auto", source)
-        self.assertIn(".profile-icon-choice", source)
-        self.assertIn("min-height:84px", source)
-        self.assertIn(".profile-preview-inner", source)
-        self.assertIn("min-height:286px", source)
+        self.assertIn("<h1>Profile Settings</h1>", template)
+        self.assertNotIn('<p class="eyebrow">ACCOUNT</p><h1>Profile', template)
+        self.assertNotIn("PROFILE PREVIEW", template)
+        preview_start = template.index('class="profile-preview-inner"')
+        preview_end = template.index('class="profile-preview-actions"')
+        preview = template[preview_start:preview_end]
+        self.assertIn('data-profile-account-dialog="password"', preview)
+        self.assertIn('data-profile-account-dialog="sessions"', preview)
+        self.assertIn(".profile-settings-heading h1", styles)
+        self.assertIn("min-height:84px", styles)
+        self.assertIn(".profile-preview-inner", styles)
+        self.assertIn("min-height:250px", styles)
+        self.assertIn("width:96px", styles)
 
 
 if __name__ == "__main__":
