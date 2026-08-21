@@ -37,6 +37,29 @@
     showPendingSoon();
   };
 
+  /* base.html owns the global-search interaction, but its delayed focus and recent
+     search popover can outlive the visual collapse. Keep the closed state truly
+     closed: no invisible focused input and no suggestion panel left hanging under
+     the circular search button. */
+  const search = document.getElementById("global-search");
+  const searchInput = document.getElementById("global-search-input");
+  const searchSuggestions = document.getElementById("global-search-suggestions");
+  const settleClosedSearch = () => {
+    if (!search || search.classList.contains("open")) return;
+    if (searchSuggestions) searchSuggestions.hidden = true;
+    if (document.activeElement === searchInput) searchInput.blur();
+  };
+  if (search && searchInput) {
+    new MutationObserver(settleClosedSearch).observe(search, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+    searchInput.addEventListener("focus", () => {
+      if (!search.classList.contains("open")) searchInput.blur();
+    });
+    settleClosedSearch();
+  }
+
   const savedLibraryView = (() => {
     try {
       const saved = window.localStorage.getItem("infomancer-library-view") || "";
