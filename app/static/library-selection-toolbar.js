@@ -121,31 +121,84 @@
      under More so phone layouts stay roughly two compact rows high. */
   actions.replaceChildren(selectionSummary, primaryCommands);
 
-  const markFavoriteInPlace = (titleId) => {
-    document.querySelectorAll(`[data-workspace-title-id="${CSS.escape(String(titleId))}"]`).forEach((item) => {
+  const titleIsFavorite = (titleId) => {
+    const selector = `[data-workspace-title-id="${CSS.escape(String(titleId))}"]`;
+    return [...document.querySelectorAll(selector)].some((item) => Boolean(
+      item.querySelector('.cover-favorite-button.active, .favorite-action.active, .favorite-star.active')
+    ));
+  };
+
+  const setFavoriteInPlace = (titleId, favorite) => {
+    const selector = `[data-workspace-title-id="${CSS.escape(String(titleId))}"]`;
+    document.querySelectorAll(selector).forEach((item) => {
+      const title = item.querySelector('.cover-card-link > strong, .title-link')?.textContent?.trim() || 'title';
       item.querySelectorAll('.cover-favorite-button').forEach((button) => {
-        button.classList.add('active');
-        button.title = 'Remove from favorites';
-        const title = item.querySelector('.cover-card-link > strong, .title-link')?.textContent?.trim() || 'title';
-        button.setAttribute('aria-label', `Remove ${title} from favorites`);
+        button.classList.toggle('active', favorite);
+        button.title = favorite ? 'Remove from favorites' : 'Add to favorites';
+        button.setAttribute(
+          'aria-label',
+          `${favorite ? 'Remove' : 'Add'} ${title} ${favorite ? 'from' : 'to'} favorites`,
+        );
       });
       item.querySelectorAll('.favorite-action').forEach((button) => {
-        button.classList.add('active');
+        button.classList.toggle('active', favorite);
         const star = button.querySelector('span');
         button.replaceChildren();
         if (star) button.append(star);
-        button.append(document.createTextNode('Remove favorite'));
+        button.append(document.createTextNode(favorite ? 'Remove favorite' : 'Add favorite'));
       });
+
+      if (item.matches('.library-title-row')) {
+        const titleCopy = item.querySelector('.library-title-cell .title-cell > div');
+        let organization = titleCopy?.querySelector('.title-organization');
+        let star = organization?.querySelector('.favorite-star');
+        if (favorite && titleCopy && !star) {
+          if (!organization) {
+            organization = document.createElement('div');
+            organization.className = 'title-organization';
+            const path = titleCopy.querySelector('.library-file-path');
+            if (path) titleCopy.insertBefore(organization, path);
+            else titleCopy.append(organization);
+          }
+          star = document.createElement('span');
+          star.className = 'favorite-star active';
+          star.title = 'Favorite';
+          star.textContent = '★';
+          organization.prepend(star);
+        } else if (!favorite && star) {
+          star.remove();
+          if (organization && !organization.children.length && !organization.textContent.trim()) {
+            organization.remove();
+          }
+        }
+      }
     });
   };
 
+  const syncFavoriteButton = (choices = selectedChoices()) => {
+    const allFavorite = choices.length >= 2 && choices.every(choice => titleIsFavorite(choice.value));
+    favoriteButton.classList.toggle('active', allFavorite);
+    favoriteButton.setAttribute('aria-pressed', String(allFavorite));
+    favoriteButton.title = allFavorite
+      ? 'Remove selected titles from Favorites'
+      : 'Add selected titles to Favorites';
+    const label = favoriteButton.querySelector('small');
+    if (label) label.textContent = allFavorite ? 'Unfavorite' : 'Favorite';
+    return allFavorite;
+  };
+
   favoriteButton.addEventListener('click', async () => {
-    const ids = selectedIds();
+    const choices = selectedChoices();
+    const ids = choices.map(choice => String(choice.value || '')).filter(Boolean);
     if (ids.length < 2 || favoriteButton.disabled) return;
+    const targetFavorite = !choices.every(choice => titleIsFavorite(choice.value));
     favoriteButton.disabled = true;
-    favoriteButton.title = 'Adding selected titles to Favorites…';
+    favoriteButton.title = targetFavorite
+      ? 'Adding selected titles to Favorites…'
+      : 'Removing selected titles from Favorites…';
     const body = new FormData();
     ids.forEach(id => body.append('selected', id));
+    body.append('favorite', targetFavorite ? '1' : '0');
     const csrf = document.querySelector('input[name="csrf_token"]')?.value || '';
     try {
       const response = await fetch('/titles/favorite-bulk', {
@@ -161,14 +214,17 @@
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
-      (data.title_ids || ids).forEach(markFavoriteInPlace);
-      favoriteButton.classList.add('active');
-      favoriteButton.setAttribute('aria-pressed', 'true');
-      favoriteButton.title = 'Selected titles added to Favorites';
-      if (status) status.textContent = data.detail || `Added ${ids.length} selected titles to Favorites.`;
+      const favorite = typeof data.favorite === 'boolean' ? data.favorite : targetFavorite;
+      (data.title_ids || ids).forEach(id => setFavoriteInPlace(id, favorite));
+      syncFavoriteButton(choices);
+      if (status) status.textContent = data.detail || (
+        favorite
+          ? `Added ${ids.length} selected titles to Favorites.`
+          : `Removed ${ids.length} selected titles from Favorites.`
+      );
     } catch (error) {
-      favoriteButton.title = 'Add selected titles to Favorites';
-      if (status) status.textContent = error.message || 'Selected titles could not be added to Favorites.';
+      syncFavoriteButton(choices);
+      if (status) status.textContent = error.message || 'Selected titles could not be updated in Favorites.';
     } finally {
       favoriteButton.disabled = false;
     }
@@ -182,10 +238,13 @@
     toolbar.classList.toggle('has-selection-actions', !shouldHide);
     if (selectionCountLabel) selectionCountLabel.textContent = `${count} selected`;
     if (!shouldHide) {
+      syncFavoriteButton(choices);
+    } else {
       favoriteButton.classList.remove('active');
       favoriteButton.setAttribute('aria-pressed', 'false');
       favoriteButton.title = 'Add selected titles to Favorites';
-    } else {
+      const label = favoriteButton.querySelector('small');
+      if (label) label.textContent = 'Favorite';
       moreMenu.removeAttribute('open');
       matchMenu.removeAttribute('open');
     }
