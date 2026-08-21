@@ -66,13 +66,13 @@
     <div class="user-list-heading"><div><p class="eyebrow">ACCESS</p><h2>People with access</h2></div></div>
     <div class="user-role-groups">
       <section class="user-role-group" aria-labelledby="members-heading">
-        <header class="user-role-heading"><span><strong id="members-heading">Members</strong><small>Browse, search, organize, and review the library.</small></span><span class="user-role-count">{{ members|length }} {{ 'account' if members|length == 1 else 'accounts' }}</span></header>
+        <header class="user-role-heading"><span><strong id="members-heading">Members</strong><small>Browse, search, organize, and review the library.</small></span></header>
         <div class="user-role-list">
           {% for user in members %}{{ user_card(user) }}{% else %}<div class="user-role-empty">No other Members have access.</div>{% endfor %}
         </div>
       </section>
       <section class="user-role-group" aria-labelledby="librarians-heading">
-        <header class="user-role-heading"><span><strong id="librarians-heading">Librarians</strong><small>Manage the catalog, filesystem, settings, and other accounts.</small></span><span class="user-role-count">{{ librarians|length }} {{ 'account' if librarians|length == 1 else 'accounts' }}</span></header>
+        <header class="user-role-heading"><span><strong id="librarians-heading">Librarians</strong><small>Manage the catalog, filesystem, settings, and other accounts.</small></span></header>
         <div class="user-role-list">
           {% for user in librarians %}{{ user_card(user) }}{% else %}<div class="user-role-empty">No other Librarians have access.</div>{% endfor %}
         </div>
