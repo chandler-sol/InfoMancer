@@ -15,16 +15,20 @@
   <small>Expires {{ local_time(invitation_expires) }}. Creating another link will cancel this one.</small>
 </section>
 {% endif %}
+{% set managed_users = users | rejectattr('id', 'equalto', current_user.id) | list %}
 <section class="settings-page-grid user-management-grid">
   <div class="panel settings-card user-list-panel">
-    <h2>People with access</h2>
+    <div class="user-list-heading">
+      <div><p class="eyebrow">ACCESS</p><h2>Other people with access</h2></div>
+      <span class="user-count">{{ managed_users|length }}</span>
+    </div>
     <div class="admin-user-list">
-    {% for user in users %}
+    {% for user in managed_users %}
       <details class="admin-user">
         <summary>
-          <span class="profile-avatar">{{ user.display_name[:1]|upper }}</span>
-          <span><strong>{{ user.display_name }}</strong><small>@{{ user.username }} · {{ user.role|title }}</small></span>
-          <span class="account-state {% if not user.active %}disabled{% elif auth_mode == 'local' and not user.has_password %}pending{% else %}active{% endif %}">
+          <span class="admin-user-disclosure" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"></path></svg></span>
+          <span class="admin-user-identity"><strong>{{ user.display_name }}</strong><small>@{{ user.username }} · {{ user.role|title }}</small></span>
+          <span class="account-state {% if not user.active %}disabled{% elif (auth_mode == 'local' and not user.has_password) or (auth_mode == 'cloudflare' and not user.providers) %}pending{% else %}active{% endif %}">
             {% if not user.active %}Disabled{% elif auth_mode == 'local' and not user.has_password and user.invitation_expires_at %}Pending setup{% elif auth_mode == 'local' and not user.has_password %}Setup link needed{% elif auth_mode == 'cloudflare' and not user.providers %}Awaiting Cloudflare{% else %}Active{% endif %}
           </span>
         </summary>
@@ -39,15 +43,29 @@
             </div>
             <button class="button">Save user</button>
           </form>
-          {% if auth_mode == 'local' %}
-          <div class="user-invitation-actions">
-            <form method="post" action="/admin/users/{{ user.id }}/invitation"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button">{% if user.has_password %}Create password-reset link{% elif user.invitation_expires_at %}Replace setup link{% else %}Create setup link{% endif %}</button></form>
-            {% if user.invitation_expires_at %}<form method="post" action="/admin/users/{{ user.id }}/invitation/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button danger">Revoke setup link</button></form>{% endif %}
+          <div class="admin-user-actions">
+            {% if auth_mode == 'local' %}
+            <div class="user-invitation-actions">
+              <form method="post" action="/admin/users/{{ user.id }}/invitation"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button">{% if user.has_password %}Create password-reset link{% elif user.invitation_expires_at %}Replace setup link{% else %}Create setup link{% endif %}</button></form>
+              {% if user.invitation_expires_at %}<form method="post" action="/admin/users/{{ user.id }}/invitation/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button danger">Revoke setup link</button></form>{% endif %}
+            </div>
+            {% endif %}
+            <form method="post" action="/admin/users/{{ user.id }}/sessions/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button danger">Sign out all sessions</button></form>
           </div>
-          {% endif %}
-          <form method="post" action="/admin/users/{{ user.id }}/sessions/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button danger">Sign out all sessions</button></form>
+          <details class="admin-user-delete">
+            <summary class="button danger">Delete user</summary>
+            <div class="admin-user-delete-confirm">
+              <div><strong>Delete {{ user.display_name }}?</strong><p>This permanently removes the account, its sessions, personal ratings, favorites, tags, saved views, and search history. Shared library data is not deleted.</p></div>
+              <form method="post" action="/admin/users/{{ user.id }}/delete">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="button danger">Delete {{ user.display_name }}</button>
+              </form>
+            </div>
+          </details>
         </div>
       </details>
+    {% else %}
+      <div class="empty user-management-empty">No other Members or Librarians have access yet.</div>
     {% endfor %}
     </div>
   </div>
