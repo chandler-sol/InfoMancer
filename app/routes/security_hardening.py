@@ -37,7 +37,7 @@ _SETTINGS_WARNING = """{% set secret_warning = deployment_secret_warning() %}
 """
 SAFE_DIAGNOSTIC_STRING_KEYS = {
     "operation", "scope", "status", "reason", "category", "mode", "provider",
-    "phase", "decision", "source", "rule_key",
+    "phase", "decision", "rule_key",
 }
 SENSITIVE_DIAGNOSTIC_KEY_PARTS = {
     "path", "filename", "title", "name", "user", "email", "ip", "host", "url",
@@ -249,7 +249,7 @@ def build_router(ctx: RouteContext):
                 "app_version": ctx.get("APP_VERSION"),
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "database_size": db.path.stat().st_size if db.path.exists() else 0,
-                "library_health": mie.summary(),
+                "library_health": _safe_diagnostic_context(mie.summary()),
                 "backup_count": len(list_database_backups(db.path)),
                 "privacy_profile": "sanitized-support-v1",
             }, indent=2, default=str))
