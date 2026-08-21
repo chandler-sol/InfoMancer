@@ -27,12 +27,18 @@ class AuthenticationFlowTests(unittest.TestCase):
             with TestClient(main.app, follow_redirects=False) as client:
                 page = client.get("/")
                 self.assertEqual(page.status_code, 200)
+                self.assertIn('http-equiv="Content-Security-Policy"', page.text)
+                self.assertIn("script-src 'self' 'nonce-", page.text)
                 token = client.cookies.get("infomancer_local_csrf")
                 self.assertTrue(token)
-                accepted_without_browser_metadata = client.post(
+                rejected_without_csrf = client.post(
                     "/account/home-layout", data={}
                 )
-                self.assertEqual(accepted_without_browser_metadata.status_code, 303)
+                self.assertEqual(rejected_without_csrf.status_code, 403)
+                rejected_blank_csrf = client.post(
+                    "/account/home-layout", data={"csrf_token": ""}
+                )
+                self.assertEqual(rejected_blank_csrf.status_code, 403)
                 rejected = client.post(
                     "/account/home-layout", data={},
                     headers={
@@ -167,7 +173,7 @@ class AuthenticationFlowTests(unittest.TestCase):
                     self.assertEqual(setup_general_saved.status_code, 303)
                     self.assertIn("/getting-started/metadata", setup_general_saved.headers["location"])
                     self.assertIn(
-            "TheTVDB is not connected yet",
+                        "TheTVDB is not connected yet",
                         client.get("/getting-started/metadata").text,
                     )
                     setup_metadata = client.post("/getting-started/metadata", data={
@@ -270,6 +276,12 @@ class AuthenticationFlowTests(unittest.TestCase):
                                 "Technical detail: EBML header parsing failed",
                             ),
                         )
+                    librarian_export = client.get("/exports/library?format=json")
+                    self.assertEqual(librarian_export.status_code, 200)
+                    self.assertTrue(any(
+                        item.get("file_path") == "/media/test/Unreadable Movie/broken.mkv"
+                        for item in librarian_export.json()["items"]
+                    ))
                     system_with_failure = client.get("/settings/system")
                     self.assertIn("1 file needs attention", system_with_failure.text)
                     self.assertIn(
@@ -330,6 +342,12 @@ class AuthenticationFlowTests(unittest.TestCase):
                     self.assertEqual(client.get("/sources").status_code, 403)
                     self.assertEqual(client.get("/settings/general").status_code, 403)
                     self.assertEqual(client.get("/getting-started").status_code, 403)
+                    member_export = client.get("/exports/library?format=json")
+                    self.assertEqual(member_export.status_code, 200)
+                    member_items = member_export.json()["items"]
+                    self.assertTrue(member_items)
+                    self.assertTrue(all(item.get("source_path") == "" for item in member_items))
+                    self.assertTrue(all(item.get("file_path") == "" for item in member_items))
                     member_announcements = client.get("/announcements")
                     self.assertEqual(member_announcements.status_code, 200)
                     self.assertIn("Library maintenance", member_announcements.text)
