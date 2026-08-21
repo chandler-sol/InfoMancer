@@ -1,43 +1,28 @@
 (() => {
-  /* base.html still provides the compatibility task poller used to bridge older
-     installations into the 0.8 workspace. It also attached UI listeners and kept
-     references to the server-rendered task DOM. Give the enhanced task center sole
-     ownership by replacing that element once at startup. The legacy poller may keep
-     updating its now-detached copy, but its document-level infomancer:tasks event
-     remains the data bridge into this controller. This prevents two controllers
-     from racing over bell state, visibility, copy, and click behavior. */
-  const legacyWidget = document.getElementById("task-widget");
-  if (!legacyWidget) return;
-  const widget = legacyWidget.cloneNode(true);
-  legacyWidget.replaceWith(widget);
+  const widget = document.getElementById('task-widget');
+  if (!widget) return;
 
-  const toggle = widget.querySelector("#task-widget-toggle");
-  const popover = widget.querySelector("#task-popover");
-  const summary = widget.querySelector("#task-summary");
-  const cardDetail = widget.querySelector("#task-card-detail");
-  const list = widget.querySelector("#task-list");
+  const toggle = widget.querySelector('#task-widget-toggle');
+  const popover = widget.querySelector('#task-popover');
+  const summary = widget.querySelector('#task-summary');
+  const cardDetail = widget.querySelector('#task-card-detail');
+  const list = widget.querySelector('#task-list');
   if (!toggle || !popover || !summary || !cardDetail || !list) return;
 
-  const heading = popover.querySelector(".task-popover-heading strong");
-  if (heading) heading.textContent = "Tasks";
+  const heading = popover.querySelector('.task-popover-heading strong');
+  if (heading) heading.textContent = 'Tasks';
 
   const COMPLETE_TTL_MS = 600000;
-  const RECENT_KEY = "infomancer-task-complete-v1";
-  const FAILURE_ACK_KEY = "infomancer-task-failure-acks-v1";
-  const canSeeFailures = document.body.classList.contains("role-librarian");
+  const RECENT_KEY = 'infomancer-task-complete-v1';
+  const FAILURE_ACK_KEY = 'infomancer-task-failure-acks-v1';
+  const canSeeFailures = document.body.classList.contains('role-librarian');
 
   const read = (key, fallback) => {
-    try {
-      return JSON.parse(localStorage.getItem(key) || "null") ?? fallback;
-    } catch (_error) {
-      return fallback;
-    }
+    try { return JSON.parse(localStorage.getItem(key) || 'null') ?? fallback; }
+    catch (_error) { return fallback; }
   };
-
   const write = (key, value) => {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch (_error) {}
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (_error) {}
   };
 
   const savedRecent = read(RECENT_KEY, []);
@@ -45,21 +30,23 @@
   let recent = Array.isArray(savedRecent) ? savedRecent : [];
   let acknowledgements = new Set(Array.isArray(savedAcks) ? savedAcks : []);
   let active = [];
+  let scheduled = [];
   let activeSignature = null;
   let previous = new Map();
   let failures = [];
-  let open = widget.classList.contains("is-pinned") && !popover.hidden;
+  let open = widget.classList.contains('is-pinned') && !popover.hidden;
+  let taskTimer = 0;
+  let taskRequest = null;
   let failureTimer = 0;
   let failureRequest = null;
-  let receivedTaskEvent = false;
 
-  const failureSignature = (task) => `${task.id}|${task.detail || task.label || "failed"}`;
+  const failureSignature = (task) => `${task.id}|${task.detail || task.label || 'failed'}`;
   const taskSetSignature = (tasks) => tasks.map((task) => [
     task.id,
-    task.label || "",
-    task.detail || "",
-    task.status || "",
-  ].join("\u0001")).join("\u0002");
+    task.label || '',
+    task.detail || '',
+    task.status || '',
+  ].join('\u0001')).join('\u0002');
 
   const pruneRecent = () => {
     const next = recent.filter((task) => Number(task.expiresAt) > Date.now());
@@ -70,137 +57,132 @@
   };
 
   const taskProgress = (task) => {
-    const match = String(task.detail || "").match(/([\d,]+)\s+of\s+([\d,]+)/i);
+    const match = String(task.detail || '').match(/([\d,]+)\s+of\s+([\d,]+)/i);
     if (!match) return null;
-    const current = Number(match[1].replaceAll(",", ""));
-    const total = Number(match[2].replaceAll(",", ""));
+    const current = Number(match[1].replaceAll(',', ''));
+    const total = Number(match[2].replaceAll(',', ''));
     return Number.isFinite(current) && total > 0 ? {current, total} : null;
   };
 
   const actionButton = (text, handler) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "task-inline-action";
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'task-inline-action';
     button.textContent = text;
-    button.addEventListener("click", handler);
+    button.addEventListener('click', handler);
     return button;
   };
 
   const activeRow = (task) => {
-    const row = document.createElement("div");
-    row.className = "task-row task-active";
-
-    const label = document.createElement("strong");
+    const row = document.createElement('div');
+    row.className = 'task-row task-active';
+    const label = document.createElement('strong');
     label.textContent = task.label;
-    const detail = document.createElement("small");
-    detail.textContent = task.detail || "Working in the background";
+    const detail = document.createElement('small');
+    detail.textContent = task.detail || 'Working in the background';
     row.append(label, detail);
 
     const progress = taskProgress(task);
-    const track = document.createElement("span");
-    const fill = document.createElement("i");
-    track.className = `task-track ${progress ? "determinate" : "indeterminate"}`;
-    track.setAttribute("role", "progressbar");
+    const track = document.createElement('span');
+    const fill = document.createElement('i');
+    track.className = `task-track ${progress ? 'determinate' : 'indeterminate'}`;
+    track.setAttribute('role', 'progressbar');
     track.append(fill);
 
     if (progress) {
       const percent = Math.max(0, Math.min(100, progress.current / progress.total * 100));
       fill.style.width = `${percent}%`;
-      track.setAttribute("aria-valuemin", "0");
-      track.setAttribute("aria-valuemax", String(progress.total));
-      track.setAttribute("aria-valuenow", String(Math.min(progress.current, progress.total)));
-      const copy = document.createElement("span");
-      copy.className = "task-progress-copy";
+      track.setAttribute('aria-valuemin', '0');
+      track.setAttribute('aria-valuemax', String(progress.total));
+      track.setAttribute('aria-valuenow', String(Math.min(progress.current, progress.total)));
+      const copy = document.createElement('span');
+      copy.className = 'task-progress-copy';
       copy.textContent = `${percent.toFixed(percent >= 10 ? 0 : 1)}%`;
       row.append(track, copy);
     } else {
-      track.setAttribute("aria-label", "Preparing task progress");
+      track.setAttribute('aria-label', 'Preparing task progress');
       row.append(track);
     }
-
     return row;
   };
 
   const completeRow = (task) => {
-    const row = document.createElement("div");
-    row.className = "task-row task-notification task-complete";
-
-    const head = document.createElement("div");
-    head.className = "task-notification-head";
-    const title = document.createElement("span");
-    const badge = document.createElement("b");
-    const label = document.createElement("strong");
-    badge.className = "task-state-badge complete";
-    badge.textContent = "Complete";
-    label.textContent = task.label || "Background task";
+    const row = document.createElement('div');
+    row.className = 'task-row task-notification task-complete';
+    const head = document.createElement('div');
+    head.className = 'task-notification-head';
+    const title = document.createElement('span');
+    const badge = document.createElement('b');
+    const label = document.createElement('strong');
+    badge.className = 'task-state-badge complete';
+    badge.textContent = 'Complete';
+    label.textContent = task.label || 'Background task';
     title.append(badge, label);
-    head.append(title, actionButton("Clear", () => {
+    head.append(title, actionButton('Clear', () => {
       recent = recent.filter((candidate) => candidate.id !== task.id);
       write(RECENT_KEY, recent);
       render();
     }));
-
-    const detail = document.createElement("small");
-    detail.textContent = "Finished successfully.";
+    const detail = document.createElement('small');
+    detail.textContent = 'Finished successfully.';
     row.append(head, detail);
     return row;
   };
 
   const failureRow = (task) => {
-    const row = document.createElement("div");
-    row.className = "task-row task-notification task-failed";
+    const row = document.createElement('div');
+    row.className = 'task-row task-notification task-failed';
+    const head = document.createElement('div');
+    head.className = 'task-notification-head';
+    const title = document.createElement('span');
+    const badge = document.createElement('b');
+    const label = document.createElement('strong');
+    const actions = document.createElement('span');
+    const detail = document.createElement('p');
 
-    const head = document.createElement("div");
-    head.className = "task-notification-head";
-    const title = document.createElement("span");
-    const badge = document.createElement("b");
-    const label = document.createElement("strong");
-    const actions = document.createElement("span");
-    const detail = document.createElement("p");
-
-    badge.className = "task-state-badge failed";
-    badge.textContent = "Failed";
-    label.textContent = task.label || "Background task";
+    badge.className = 'task-state-badge failed';
+    badge.textContent = 'Failed';
+    label.textContent = task.label || 'Background task';
     title.append(badge, label);
-
-    actions.className = "task-row-actions";
-    detail.className = "task-failure-detail";
+    actions.className = 'task-row-actions';
+    detail.className = 'task-failure-detail';
     detail.hidden = true;
-    detail.textContent = task.detail || "The task stopped unexpectedly.";
+    detail.textContent = task.detail || 'The task stopped unexpectedly.';
 
-    const detailsButton = actionButton("Details", () => {
+    const detailsButton = actionButton('Details', () => {
       detail.hidden = !detail.hidden;
-      detailsButton.textContent = detail.hidden ? "Details" : "Hide details";
-      detailsButton.setAttribute("aria-expanded", String(!detail.hidden));
+      detailsButton.textContent = detail.hidden ? 'Details' : 'Hide details';
+      detailsButton.setAttribute('aria-expanded', String(!detail.hidden));
     });
-    detailsButton.setAttribute("aria-expanded", "false");
-
-    actions.append(detailsButton, actionButton("Clear", () => {
+    detailsButton.setAttribute('aria-expanded', 'false');
+    actions.append(detailsButton, actionButton('Clear', () => {
       acknowledgements.add(failureSignature(task));
       write(FAILURE_ACK_KEY, [...acknowledgements].slice(-100));
       render();
     }));
     head.append(title, actions);
 
-    const note = document.createElement("small");
-    note.textContent = "This task needs attention.";
-    const activityLink = document.createElement("a");
-    activityLink.href = task.href || "/activity";
-    activityLink.className = "task-activity-link";
-    activityLink.textContent = "Open Activity";
+    const note = document.createElement('small');
+    note.textContent = 'This task needs attention.';
+    const activityLink = document.createElement('a');
+    activityLink.href = task.href || '/activity';
+    activityLink.className = 'task-activity-link';
+    activityLink.textContent = 'Open Activity';
     row.append(head, note, detail, activityLink);
     return row;
   };
 
   const scheduledTasksFooter = () => {
     if (!canSeeFailures) return null;
-    const footer = document.createElement("div");
-    footer.className = "task-widget-footer";
-    const link = document.createElement("a");
-    link.className = "task-scheduled-link";
-    link.href = "/settings/scheduled-tasks";
-    link.textContent = "Scheduled Tasks";
-    link.title = "Open scheduled task settings";
+    const footer = document.createElement('div');
+    footer.className = 'task-widget-footer';
+    const link = document.createElement('a');
+    link.className = 'task-scheduled-link';
+    link.href = '/settings/scheduled-tasks';
+    link.textContent = scheduled.length
+      ? `Scheduled Tasks (${scheduled.length})`
+      : 'Scheduled Tasks';
+    link.title = 'Open scheduled task settings';
     footer.append(link);
     return footer;
   };
@@ -209,37 +191,39 @@
   const hasTaskContent = () => Boolean(active.length || recent.length || visibleFailures().length);
 
   const applyOpen = () => {
-    widget.classList.toggle("visible", hasTaskContent());
-    widget.classList.toggle("is-pinned", open);
+    widget.classList.toggle('visible', hasTaskContent());
+    widget.classList.toggle('is-pinned', open);
     popover.hidden = !open;
-    toggle.setAttribute("aria-expanded", String(open));
+    toggle.setAttribute('aria-expanded', String(open));
   };
 
   function render() {
     pruneRecent();
     const failed = visibleFailures();
-    widget.classList.toggle("idle", !active.length);
-    widget.classList.toggle("has-attention", !active.length && Boolean(recent.length) && !failed.length);
-    widget.classList.toggle("has-failure", Boolean(failed.length));
+    widget.classList.toggle('idle', !active.length);
+    widget.classList.toggle('has-attention', !active.length && Boolean(recent.length) && !failed.length);
+    widget.classList.toggle('has-failure', Boolean(failed.length));
 
     if (failed.length) {
-      summary.textContent = failed.length === 1 ? "1 task failed" : `${failed.length} tasks failed`;
-      cardDetail.textContent = "Open for details";
-      toggle.setAttribute("aria-label", `${summary.textContent}. Open task notifications.`);
+      summary.textContent = failed.length === 1 ? '1 task failed' : `${failed.length} tasks failed`;
+      cardDetail.textContent = 'Open for details';
+      toggle.setAttribute('aria-label', `${summary.textContent}. Open task notifications.`);
     } else if (active.length) {
       summary.textContent = active.length === 1 ? active[0].label : `${active.length} tasks running`;
       cardDetail.textContent = active.length === 1
-        ? (active[0].detail || "Working in the background")
-        : "Open for task details";
-      toggle.setAttribute("aria-label", summary.textContent);
+        ? (active[0].detail || 'Working in the background')
+        : 'Open for task details';
+      toggle.setAttribute('aria-label', summary.textContent);
     } else if (recent.length) {
-      summary.textContent = recent.length === 1 ? "Task complete" : `${recent.length} tasks completed`;
-      cardDetail.textContent = "Completed tasks remain here for 10 minutes";
-      toggle.setAttribute("aria-label", `${summary.textContent}. Open task notifications.`);
+      summary.textContent = recent.length === 1 ? 'Task complete' : `${recent.length} tasks completed`;
+      cardDetail.textContent = 'Completed tasks remain here for 10 minutes';
+      toggle.setAttribute('aria-label', `${summary.textContent}. Open task notifications.`);
     } else {
-      summary.textContent = "No tasks currently active";
-      cardDetail.textContent = "Open task center";
-      toggle.setAttribute("aria-label", "No tasks currently active. Open task center.");
+      summary.textContent = 'No tasks currently active';
+      cardDetail.textContent = scheduled.length
+        ? `${scheduled.length} scheduled task${scheduled.length === 1 ? '' : 's'}`
+        : 'Open task center';
+      toggle.setAttribute('aria-label', 'No tasks currently active. Open task center.');
     }
 
     const rows = [
@@ -247,14 +231,12 @@
       ...failed.map(failureRow),
       ...recent.slice().sort((a, b) => b.createdAt - a.createdAt).map(completeRow),
     ];
-
     if (!rows.length) {
-      const empty = document.createElement("div");
-      empty.className = "task-empty";
-      empty.textContent = "No Tasks Currently Active";
+      const empty = document.createElement('div');
+      empty.className = 'task-empty';
+      empty.textContent = 'No Tasks Currently Active';
       rows.push(empty);
     }
-
     const footer = scheduledTasksFooter();
     if (footer) rows.push(footer);
     list.replaceChildren(...rows);
@@ -262,8 +244,6 @@
   }
 
   const refreshFailures = async () => {
-    /* Failure detail is intentionally Librarian-only server data. Members should
-       not spend the life of every page issuing predictable 403 requests. */
     if (!canSeeFailures) {
       failures = [];
       return;
@@ -271,7 +251,10 @@
     if (failureRequest) return failureRequest;
     failureRequest = (async () => {
       try {
-        const response = await fetch("/api/task-failures", {cache: "no-store"});
+        const response = await fetch('/api/task-failures', {
+          credentials: 'same-origin',
+          cache: 'no-store',
+        });
         if (response.ok) {
           const data = await response.json();
           failures = Array.isArray(data.failures) ? data.failures : [];
@@ -282,15 +265,13 @@
     return failureRequest;
   };
 
-  const finish = (task) => setTimeout(async () => {
+  const finish = (task) => window.setTimeout(async () => {
     await refreshFailures();
-
     if (active.some((candidate) => candidate.id === task.id)
         || visibleFailures().some((candidate) => candidate.id === task.id)) {
       render();
       return;
     }
-
     const now = Date.now();
     recent = recent.filter((candidate) => candidate.id !== task.id);
     recent.push({
@@ -303,121 +284,124 @@
     render();
   }, 1800);
 
-  const accept = (incoming) => {
+  const accept = (incoming, incomingScheduled = []) => {
     const next = (Array.isArray(incoming) ? incoming : [])
-      .filter((task) => task?.id && task.id !== "media-fingerprints-queued");
+      .filter((task) => task?.id && task.id !== 'media-fingerprints-queued');
+    scheduled = Array.isArray(incomingScheduled) ? incomingScheduled : [];
     const nextSignature = taskSetSignature(next);
-    if (nextSignature === activeSignature) return;
-    activeSignature = nextSignature;
+    const signatureChanged = nextSignature !== activeSignature;
+    if (signatureChanged) {
+      activeSignature = nextSignature;
+      const nextMap = new Map(next.map((task) => [task.id, task]));
+      for (const [id, task] of previous) {
+        if (!nextMap.has(id)) finish(task);
+      }
 
-    const nextMap = new Map(next.map((task) => [task.id, task]));
-    for (const [id, task] of previous) {
-      if (!nextMap.has(id)) finish(task);
-    }
-
-    let changed = false;
-    for (const task of next) {
-      for (const key of [...acknowledgements]) {
-        if (key.startsWith(`${task.id}|`)) {
-          acknowledgements.delete(key);
-          changed = true;
+      let acknowledgementsChanged = false;
+      for (const task of next) {
+        for (const key of [...acknowledgements]) {
+          if (key.startsWith(`${task.id}|`)) {
+            acknowledgements.delete(key);
+            acknowledgementsChanged = true;
+          }
         }
       }
+      if (acknowledgementsChanged) write(FAILURE_ACK_KEY, [...acknowledgements]);
+      active = next;
+      previous = nextMap;
     }
-    if (changed) write(FAILURE_ACK_KEY, [...acknowledgements]);
 
-    active = next;
-    previous = nextMap;
-    queueMicrotask(render);
+    document.dispatchEvent(new CustomEvent('infomancer:tasks', {
+      detail: {active: next.length > 0, tasks: next, scheduled},
+    }));
+    if (signatureChanged || scheduled.length) queueMicrotask(render);
   };
 
-  document.addEventListener("infomancer:tasks", (event) => {
-    receivedTaskEvent = true;
-    accept(event.detail?.tasks || []);
-  });
+  const pollTasks = async () => {
+    if (taskRequest) return taskRequest;
+    taskRequest = (async () => {
+      try {
+        const response = await fetch('/api/tasks', {
+          credentials: 'same-origin',
+          cache: 'no-store',
+        });
+        if (response.ok) {
+          const data = await response.json();
+          accept(data.tasks || [], data.scheduled || []);
+        }
+      } catch (_error) {}
+    })().finally(() => { taskRequest = null; });
+    return taskRequest;
+  };
 
-  const sync = async () => {
-    try {
-      const response = await fetch("/api/tasks", {cache: "no-store"});
-      if (response.ok) {
-        const data = await response.json();
-        accept(data.tasks || []);
-      }
-    } catch (_error) {}
+  const scheduleTaskPoll = (delay = null) => {
+    window.clearTimeout(taskTimer);
+    const interval = delay ?? (document.hidden ? 15000 : active.length ? 1500 : 4000);
+    taskTimer = window.setTimeout(async () => {
+      await pollTasks();
+      scheduleTaskPoll();
+    }, interval);
   };
 
   const scheduleFailureRefresh = () => {
     window.clearTimeout(failureTimer);
     if (!canSeeFailures) return;
-    if (document.hidden) {
-      failureTimer = window.setTimeout(pollFailures, 60000);
-    } else if (active.length) {
-      failureTimer = window.setTimeout(pollFailures, 5000);
-    } else if (open) {
-      failureTimer = window.setTimeout(pollFailures, 15000);
-    } else {
-      failureTimer = window.setTimeout(pollFailures, 30000);
-    }
+    const interval = document.hidden ? 60000 : active.length ? 5000 : open ? 15000 : 30000;
+    failureTimer = window.setTimeout(async () => {
+      await refreshFailures();
+      scheduleFailureRefresh();
+    }, interval);
   };
 
-  const pollFailures = async () => {
-    await refreshFailures();
-    scheduleFailureRefresh();
-  };
-
-  toggle.addEventListener("click", (event) => {
+  toggle.addEventListener('click', (event) => {
     event.preventDefault();
     open = !open;
     applyOpen();
     if (open) refreshFailures();
     scheduleFailureRefresh();
   });
-
-  widget.querySelector("#task-minimize")?.addEventListener("click", (event) => {
+  widget.querySelector('#task-minimize')?.addEventListener('click', (event) => {
     event.stopPropagation();
     open = false;
     applyOpen();
     scheduleFailureRefresh();
   });
-
-  widget.querySelector("#task-dismiss")?.addEventListener("click", (event) => {
+  widget.querySelector('#task-dismiss')?.addEventListener('click', (event) => {
     event.stopPropagation();
     open = false;
     applyOpen();
     scheduleFailureRefresh();
   });
-
-  document.addEventListener("click", (event) => {
+  document.addEventListener('click', (event) => {
     if (!open || widget.contains(event.target)) return;
     open = false;
     applyOpen();
     scheduleFailureRefresh();
   });
-
-  document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || !open) return;
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !open) return;
     open = false;
     applyOpen();
     scheduleFailureRefresh();
     toggle.focus();
   });
 
-  document.addEventListener("visibilitychange", scheduleFailureRefresh);
-  window.addEventListener("pagehide", () => window.clearTimeout(failureTimer));
+  document.addEventListener('visibilitychange', () => {
+    scheduleTaskPoll(0);
+    scheduleFailureRefresh();
+  });
+  window.addEventListener('pagehide', () => {
+    window.clearTimeout(taskTimer);
+    window.clearTimeout(failureTimer);
+  });
 
-  setInterval(() => {
+  window.setInterval(() => {
     pruneRecent();
     if (recent.length || visibleFailures().length) render();
   }, 15000);
 
   pruneRecent();
   render();
-  /* base.html owns the recurring /api/tasks poll and dispatches infomancer:tasks.
-     Give that first response a short chance to arrive before issuing a fallback
-     sync. This preserves correctness if the listener missed the first event while
-     avoiding two identical startup requests in the normal path. */
-  window.setTimeout(() => {
-    if (!receivedTaskEvent) sync();
-  }, 350);
-  if (canSeeFailures) pollFailures();
+  pollTasks().finally(() => scheduleTaskPoll());
+  if (canSeeFailures) refreshFailures().finally(scheduleFailureRefresh);
 })();
