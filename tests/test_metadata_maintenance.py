@@ -97,21 +97,35 @@ class MetadataMaintenanceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("imdb-metadata", {item["id"] for item in response.json()["failures"]})
 
-    def test_metadata_controller_owns_local_progress_and_metric_explanations(self):
+    def test_metadata_controller_keeps_scope_and_refresh_state_across_view_switches(self):
         root = Path(__file__).resolve().parents[1]
         controller = (root / "app/static/metadata-maintenance.js").read_text(encoding="utf-8")
         styles = (root / "app/static/metadata-maintenance.css").read_text(encoding="utf-8")
         task_widget = (root / "app/static/task-widget.js").read_text(encoding="utf-8")
+        modern = (root / "app/static/modern.css").read_text(encoding="utf-8")
 
+        self.assertIn("const scopeCache = new Map", controller)
+        self.assertIn("const refreshJobs = new Map()", controller)
+        self.assertIn("prefetchOtherScopes", controller)
+        self.assertIn("Progress will stay with this title even if you switch maintenance views.", controller)
+        self.assertNotIn("if (!row.isConnected) return", controller)
+        self.assertNotIn("metric.title =", controller)
         self.assertIn("metadata-maintenance-inline-task", controller)
         self.assertIn("metadata-refresh-state", controller)
-        self.assertIn("await loadScope(activeScope)", controller)
         self.assertIn("metricDescriptions", controller)
         self.assertIn("Refreshed within the last 30 days.", controller)
+
+        self.assertIn("height:min(78vh,760px)", styles)
+        self.assertIn(".metadata-maintenance-list{min-height:0;overflow:auto", styles)
         self.assertIn("metadata-maintenance-inline-task.working", styles)
         self.assertIn("metadata-maintenance-metric>strong", styles)
+
         self.assertIn("const localOnlyTask =", task_widget)
         self.assertIn("Refreshing metadata for ", task_widget)
+
+        self.assertIn('dialog button[aria-label^="Close"]', modern)
+        self.assertIn('content: "×"', modern)
+        self.assertIn("place-items: center !important", modern)
 
 
 if __name__ == "__main__":
