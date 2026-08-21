@@ -1,11 +1,22 @@
 (() => {
-  const widget = document.getElementById("task-widget");
-  const toggle = document.getElementById("task-widget-toggle");
-  const popover = document.getElementById("task-popover");
-  const summary = document.getElementById("task-summary");
-  const cardDetail = document.getElementById("task-card-detail");
-  const list = document.getElementById("task-list");
-  if (!widget || !toggle || !popover || !summary || !cardDetail || !list) return;
+  /* base.html still provides the compatibility task poller used to bridge older
+     installations into the 0.8 workspace. It also attached UI listeners and kept
+     references to the server-rendered task DOM. Give the enhanced task center sole
+     ownership by replacing that element once at startup. The legacy poller may keep
+     updating its now-detached copy, but its document-level infomancer:tasks event
+     remains the data bridge into this controller. This prevents two controllers
+     from racing over bell state, visibility, copy, and click behavior. */
+  const legacyWidget = document.getElementById("task-widget");
+  if (!legacyWidget) return;
+  const widget = legacyWidget.cloneNode(true);
+  legacyWidget.replaceWith(widget);
+
+  const toggle = widget.querySelector("#task-widget-toggle");
+  const popover = widget.querySelector("#task-popover");
+  const summary = widget.querySelector("#task-summary");
+  const cardDetail = widget.querySelector("#task-card-detail");
+  const list = widget.querySelector("#task-list");
+  if (!toggle || !popover || !summary || !cardDetail || !list) return;
 
   const heading = popover.querySelector(".task-popover-heading strong");
   if (heading) heading.textContent = "Tasks";
@@ -13,6 +24,7 @@
   const COMPLETE_TTL_MS = 600000;
   const RECENT_KEY = "infomancer-task-complete-v1";
   const FAILURE_ACK_KEY = "infomancer-task-failure-acks-v1";
+  const canSeeFailures = document.body.classList.contains("role-librarian");
 
   const read = (key, fallback) => {
     try {
@@ -181,7 +193,7 @@
   };
 
   const scheduledTasksFooter = () => {
-    if (!document.body.classList.contains("role-librarian")) return null;
+    if (!canSeeFailures) return null;
     const footer = document.createElement("div");
     footer.className = "task-widget-footer";
     const link = document.createElement("a");
@@ -250,6 +262,12 @@
   }
 
   const refreshFailures = async () => {
+    /* Failure detail is intentionally Librarian-only server data. Members should
+       not spend the life of every page issuing predictable 403 requests. */
+    if (!canSeeFailures) {
+      failures = [];
+      return;
+    }
     if (failureRequest) return failureRequest;
     failureRequest = (async () => {
       try {
@@ -315,14 +333,7 @@
 
   document.addEventListener("infomancer:tasks", (event) => {
     receivedTaskEvent = true;
-    const tasks = event.detail?.tasks || [];
-    const scheduled = event.detail?.scheduled || [];
-    accept(tasks);
-    /* The legacy base poll still reports scheduled jobs through the same widget and
-       temporarily marks them as attention-worthy. A scheduled job is not an active
-       notification. Reassert the enhanced widget state after that poll finishes so
-       only running, completed, or failed work lights the bell. */
-    if (!tasks.length && scheduled.length) queueMicrotask(render);
+    accept(event.detail?.tasks || []);
   });
 
   const sync = async () => {
@@ -337,6 +348,7 @@
 
   const scheduleFailureRefresh = () => {
     window.clearTimeout(failureTimer);
+    if (!canSeeFailures) return;
     if (document.hidden) {
       failureTimer = window.setTimeout(pollFailures, 60000);
     } else if (active.length) {
@@ -361,14 +373,14 @@
     scheduleFailureRefresh();
   });
 
-  document.getElementById("task-minimize")?.addEventListener("click", (event) => {
+  widget.querySelector("#task-minimize")?.addEventListener("click", (event) => {
     event.stopPropagation();
     open = false;
     applyOpen();
     scheduleFailureRefresh();
   });
 
-  document.getElementById("task-dismiss")?.addEventListener("click", (event) => {
+  widget.querySelector("#task-dismiss")?.addEventListener("click", (event) => {
     event.stopPropagation();
     open = false;
     applyOpen();
@@ -393,10 +405,6 @@
   document.addEventListener("visibilitychange", scheduleFailureRefresh);
   window.addEventListener("pagehide", () => window.clearTimeout(failureTimer));
 
-  new MutationObserver(() => {
-    if (open && popover.hidden) queueMicrotask(applyOpen);
-  }).observe(popover, {attributes: true, attributeFilter: ["hidden"]});
-
   setInterval(() => {
     pruneRecent();
     if (recent.length || visibleFailures().length) render();
@@ -411,5 +419,5 @@
   window.setTimeout(() => {
     if (!receivedTaskEvent) sync();
   }, 350);
-  pollFailures();
+  if (canSeeFailures) pollFailures();
 })();
