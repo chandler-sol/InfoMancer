@@ -1,6 +1,158 @@
 (() => {
   if (window.location.pathname !== '/settings/metadata') return;
 
+  const csrfToken = document.body?.dataset.csrfToken || '';
+
+  const setupTvdbCredentials = () => {
+    const manageLink = document.querySelector('a[href="/getting-started/metadata"]');
+    const providerCard = manageLink?.closest('.settings-card');
+    if (!manageLink || !providerCard) return;
+
+    manageLink.setAttribute('aria-haspopup', 'dialog');
+    manageLink.setAttribute('aria-controls', 'tvdb-credentials-dialog');
+
+    const dialog = document.createElement('dialog');
+    dialog.id = 'tvdb-credentials-dialog';
+    dialog.className = 'tvdb-credentials-dialog';
+    dialog.setAttribute('aria-labelledby', 'tvdb-credentials-title');
+
+    const shell = document.createElement('div');
+    shell.className = 'tvdb-credentials-shell';
+
+    const header = document.createElement('header');
+    header.className = 'tvdb-credentials-head';
+    const headingCopy = document.createElement('div');
+    const eyebrow = document.createElement('p');
+    eyebrow.className = 'eyebrow';
+    eyebrow.textContent = 'TVDB';
+    const heading = document.createElement('h2');
+    heading.id = 'tvdb-credentials-title';
+    heading.textContent = 'Manage credentials';
+    const intro = document.createElement('p');
+    intro.className = 'muted';
+    intro.textContent = 'Update the credentials this InfoMancer installation uses for TVDB metadata. Existing secrets are never shown back in the browser.';
+    headingCopy.append(eyebrow, heading, intro);
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'tvdb-credentials-close';
+    close.setAttribute('aria-label', 'Close TVDB credentials');
+    close.textContent = '×';
+    header.append(headingCopy, close);
+
+    const form = document.createElement('form');
+    form.className = 'tvdb-credentials-form';
+    form.method = 'post';
+    form.action = '/settings/metadata/tvdb-credentials';
+
+    const keyLabel = document.createElement('label');
+    keyLabel.textContent = 'Project API key';
+    const keyInput = document.createElement('input');
+    keyInput.type = 'password';
+    keyInput.name = 'api_key';
+    keyInput.autocomplete = 'off';
+    keyInput.placeholder = 'Leave blank to keep the connected key';
+    const keyHelp = document.createElement('small');
+    keyHelp.textContent = 'Enter a new key only when you want to replace the one already configured.';
+    keyLabel.append(keyInput, keyHelp);
+
+    const pinLabel = document.createElement('label');
+    pinLabel.textContent = 'Subscriber PIN';
+    const pinInput = document.createElement('input');
+    pinInput.type = 'password';
+    pinInput.name = 'subscriber_pin';
+    pinInput.autocomplete = 'off';
+    pinInput.placeholder = 'Leave blank to keep the saved PIN';
+    const pinHelp = document.createElement('small');
+    pinHelp.textContent = 'Only enter a PIN when your TVDB access model requires one.';
+    pinLabel.append(pinInput, pinHelp);
+
+    const notice = document.createElement('div');
+    notice.className = 'tvdb-credentials-notice';
+    notice.setAttribute('role', 'status');
+    notice.hidden = true;
+
+    const footer = document.createElement('footer');
+    footer.className = 'tvdb-credentials-footer';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'button';
+    cancel.textContent = 'Cancel';
+    const save = document.createElement('button');
+    save.type = 'submit';
+    save.className = 'button primary';
+    save.textContent = 'Verify and save';
+    footer.append(cancel, save);
+
+    form.append(keyLabel, pinLabel, notice, footer);
+    shell.append(header, form);
+    dialog.append(shell);
+    document.body.append(dialog);
+
+    const setNotice = (message = '', tone = '') => {
+      notice.hidden = !message;
+      notice.className = `tvdb-credentials-notice${tone ? ` ${tone}` : ''}`;
+      notice.textContent = message;
+    };
+
+    const updateProviderCard = (data) => {
+      const facts = [...providerCard.querySelectorAll('.settings-facts dd')];
+      if (facts[0] && data.key_hint) facts[0].textContent = data.key_hint;
+      if (facts[1]) facts[1].textContent = data.pin_configured ? 'Configured' : 'Not configured';
+      const state = providerCard.querySelector('.settings-state');
+      if (state) {
+        state.classList.remove('warn');
+        state.classList.add('good');
+        state.textContent = 'Configured';
+      }
+      providerCard.querySelector('form[action="/settings/metadata/tvdb-test"] button')?.removeAttribute('disabled');
+    };
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      setNotice();
+      save.disabled = true;
+      save.textContent = 'Verifying…';
+      try {
+        const response = await fetch(form.action, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'Accept': 'application/json',
+            'X-InfoMancer-Async': '1',
+            ...(csrfToken ? {'X-CSRF-Token': csrfToken} : {}),
+          },
+          body: new FormData(form),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+        updateProviderCard(data);
+        keyInput.value = '';
+        pinInput.value = '';
+        setNotice(data.detail || 'TVDB credentials verified and saved securely.', 'success');
+      } catch (error) {
+        setNotice(error?.message || 'TVDB credentials could not be saved.', 'error');
+      } finally {
+        save.disabled = false;
+        save.textContent = 'Verify and save';
+      }
+    });
+
+    const closeDialog = () => dialog.close();
+    manageLink.addEventListener('click', (event) => {
+      event.preventDefault();
+      setNotice();
+      dialog.showModal();
+      window.setTimeout(() => keyInput.focus(), 0);
+    });
+    close.addEventListener('click', closeDialog);
+    cancel.addEventListener('click', closeDialog);
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) closeDialog();
+    });
+  };
+
+  setupTvdbCredentials();
+
   const staleScopeInput = document.querySelector(
     'form[action="/metadata/queue"] input[name="scope"][value="stale"]'
   );
@@ -12,7 +164,6 @@
   const metrics = [...card.querySelectorAll('.settings-metrics > div')];
   if (metrics.length < 4) return;
 
-  const csrfToken = document.body?.dataset.csrfToken || '';
   const scopes = [
     {key: 'fresh', label: 'Fresh'},
     {key: 'stale', label: 'Stale'},
