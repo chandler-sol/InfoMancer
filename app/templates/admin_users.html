@@ -28,19 +28,17 @@
         {% endif %}
         <form method="post" action="/admin/users/{{ user.id }}/sessions/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button danger">Sign out all sessions</button></form>
       </div>
-      <details class="admin-user-delete">
-        <summary class="admin-user-delete-toggle">Delete user</summary>
-        <div class="admin-user-delete-confirm">
-          <div><strong>Delete {{ user.display_name }}?</strong><p>This permanently removes the account, its sessions, personal ratings, favorites, tags, saved views, and search history. Shared library data is not deleted.</p></div>
-          <div class="admin-user-delete-confirm-actions">
-            <button type="button" class="button admin-user-delete-cancel">Cancel</button>
-            <form method="post" action="/admin/users/{{ user.id }}/delete">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="button danger">Delete {{ user.display_name }}</button>
-            </form>
-          </div>
+      <button type="button" class="admin-user-delete-toggle" aria-expanded="false" aria-controls="delete-confirm-{{ user.id }}">Delete user</button>
+      <div class="admin-user-delete-confirm" id="delete-confirm-{{ user.id }}" hidden>
+        <div><strong>Delete {{ user.display_name }}?</strong><p>This permanently removes the account, its sessions, personal ratings, favorites, tags, saved views, and search history. Shared library data is not deleted.</p></div>
+        <div class="admin-user-delete-confirm-actions">
+          <button type="button" class="button admin-user-delete-cancel">Cancel</button>
+          <form method="post" action="/admin/users/{{ user.id }}/delete">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button danger">Delete {{ user.display_name }}</button>
+          </form>
         </div>
-      </details>
+      </div>
     </div>
   </div>
 </details>
