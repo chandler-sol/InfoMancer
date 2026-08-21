@@ -52,9 +52,9 @@
         <div class="profile-custom-panel" data-profile-icon-choice="custom">
           <label class="profile-custom-select">
             <input type="radio" name="profile_icon" value="custom" {% if current_user.profile_icon == 'custom' %}checked{% endif %}>
-            <span class="profile-icon-glyph" data-profile-custom-choice-glyph {% if current_user.profile_icon == 'custom' %}hidden{% endif %}>+</span>
+            <span class="profile-icon-glyph profile-custom-plus" data-profile-custom-choice-glyph {% if current_user.profile_icon == 'custom' %}hidden{% endif %}>+</span>
             <img class="profile-icon-glyph" data-profile-custom-choice-image {% if current_user.profile_icon != 'custom' %}hidden{% endif %} src="/account/avatar/current" alt="">
-            <span class="profile-custom-copy"><strong>Custom icon</strong><small>Use your own square image. InfoMancer stores only the processed 256 × 256 result.</small></span>
+            <span class="profile-custom-copy"><strong>Custom Icon</strong><small>Use your own square image. InfoMancer stores only the processed 256 × 256 result.</small></span>
           </label>
           <button class="button small profile-custom-upload" type="button" data-profile-avatar-open>{{ 'Change image' if current_user.profile_icon == 'custom' else 'Upload image' }}</button>
         </div>
