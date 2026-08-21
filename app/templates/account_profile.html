@@ -2,9 +2,18 @@
 {% block title %}Profile · InfoMancer{% endblock %}
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('static', path='profile.css') }}?v={{ static_version }}">
+<link rel="stylesheet" href="{{ url_for('static', path='profile-account-dialogs.css') }}?v={{ static_version }}">
 <div class="profile-page">
-<header class="settings-heading"><p class="eyebrow">ACCOUNT</p><h1>Profile</h1><p>Choose how your account appears inside InfoMancer and preview changes before you save them.</p></header>
-{% include "_account_nav.html" %}
+<header class="settings-heading profile-settings-heading">
+  <div><p class="eyebrow">ACCOUNT</p><h1>Profile</h1><p>Choose how your account appears inside InfoMancer and preview changes before you save them.</p></div>
+  {% if auth_mode != 'disabled' %}
+  <div class="profile-account-tools" aria-label="Account security">
+    <a class="button small profile-account-tool" href="/account/security" data-profile-account-dialog="password"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v2"></path></svg><span>Password</span></a>
+    <a class="button small profile-account-tool" href="/account/sessions" data-profile-account-dialog="sessions"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"></rect><path d="M8 21h8M12 17v4"></path></svg><span>Sessions</span></a>
+  </div>
+  <span class="profile-account-feedback" data-profile-account-feedback role="status" aria-live="polite" hidden></span>
+  {% endif %}
+</header>
 {% set icon_labels = {'initials':'Initials','film':'Film','television':'Television','star':'Star','library':'Library','disc':'Disc','camera':'Camera','headphones':'Headphones','folder':'Folder','server':'Server','heart':'Heart','clapperboard':'Clapperboard'} %}
 {% macro profile_icon_svg(icon) -%}
 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -103,6 +112,18 @@
 <section class="panel profile-tour-card"><p class="eyebrow">GETTING STARTED</p><h2>Want the guided walkthrough again?</h2><p>Restarting the tour only changes your onboarding progress. It does not modify your libraries, metadata, account details, or files.</p><div class="actions"><a class="button" href="/tour">Open Tour</a>{% if current_user.id > 0 %}<form method="post" action="/getting-started/restart"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button">Restart from the beginning</button></form>{% endif %}</div></section>
 </div>
 
+{% if auth_mode != 'disabled' %}
+<dialog class="profile-account-dialog" id="profile-account-dialog" aria-labelledby="profile-account-dialog-title">
+  <div class="profile-account-dialog-shell">
+    <div class="profile-account-dialog-head">
+      <div><p class="eyebrow">ACCOUNT SECURITY</p><h2 id="profile-account-dialog-title" data-profile-account-dialog-title>Account</h2><p data-profile-account-dialog-copy></p></div>
+      <button class="button profile-account-dialog-close" type="button" data-profile-account-dialog-close aria-label="Close account window">×</button>
+    </div>
+    <div class="profile-account-dialog-body" data-profile-account-dialog-body></div>
+  </div>
+</dialog>
+{% endif %}
+
 <dialog class="profile-avatar-dialog" id="profile-avatar-dialog" aria-labelledby="profile-avatar-dialog-title">
   <div class="profile-avatar-dialog-shell">
     <div class="profile-avatar-dialog-head"><div><p class="eyebrow">CUSTOM PROFILE ICON</p><h2 id="profile-avatar-dialog-title">Choose an image</h2></div><button class="button profile-avatar-dialog-close" type="button" data-profile-avatar-close aria-label="Close custom icon window">×</button></div>
@@ -113,4 +134,5 @@
   </div>
 </dialog>
 <script src="{{ url_for('static', path='profile.js') }}?v={{ static_version }}" defer></script>
+{% if auth_mode != 'disabled' %}<script src="{{ url_for('static', path='profile-account-dialogs.js') }}?v={{ static_version }}" defer></script>{% endif %}
 {% endblock %}
