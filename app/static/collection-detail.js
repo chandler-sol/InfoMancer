@@ -16,70 +16,80 @@
   };
 
   const dialogs = [...document.querySelectorAll(".collection-management-dialog")];
+  const closeDeleteConfirmations = (except = null) => {
+    document.querySelectorAll(".collection-delete-confirm[open]").forEach((details) => {
+      if (details !== except) details.open = false;
+    });
+  };
+
   document.addEventListener("click", (event) => {
     const opener = event.target.closest("[data-collection-dialog-open]");
     if (opener) {
       const dialog = document.getElementById(opener.dataset.collectionDialogOpen || "");
       if (dialog?.showModal) {
         event.preventDefault();
+        closeDeleteConfirmations();
         dialog.showModal();
         window.setTimeout(() => dialog.querySelector("input:not([type=hidden]), textarea")?.focus(), 0);
       }
       return;
     }
+
     const closer = event.target.closest("[data-collection-dialog-close]");
     if (closer) {
       event.preventDefault();
+      closeDeleteConfirmations();
       closer.closest("dialog")?.close();
+      return;
     }
+
+    const deleteCancel = event.target.closest("[data-collection-delete-cancel]");
+    if (deleteCancel) {
+      event.preventDefault();
+      deleteCancel.closest(".collection-delete-confirm")?.removeAttribute("open");
+      return;
+    }
+
+    const activeDelete = event.target.closest(".collection-delete-confirm");
+    closeDeleteConfirmations(activeDelete);
   });
+
   dialogs.forEach((dialog) => {
     dialog.addEventListener("click", (event) => {
-      if (event.target === dialog) dialog.close();
+      if (event.target === dialog) {
+        closeDeleteConfirmations();
+        dialog.close();
+      }
     });
+    dialog.addEventListener("close", () => closeDeleteConfirmations());
   });
 
   const sizeInput = document.querySelector("[data-collection-cover-size]");
-  const sizeOutput = document.querySelector("[data-collection-cover-size-output]");
-  const sizeControl = sizeInput?.closest(".cover-size-control");
   const sizeSmaller = document.querySelector("[data-collection-cover-smaller]");
   const sizeLarger = document.querySelector("[data-collection-cover-larger]");
   const coverSizeStorageKey = "infomancer.collectionCoverSize";
-  let sizeTipTimer = 0;
 
   const clampCoverSize = (value) => Math.min(300, Math.max(120, Math.round(value / 10) * 10));
   const applyCoverSize = (value, persist = true) => {
     if (!grid || !sizeInput) return;
-    const size = clampCoverSize(Number(value) || Number(sizeInput.value) || 180);
-    sizeInput.value = String(size);
-    if (sizeOutput) sizeOutput.textContent = `${size}px`;
+    const requested = clampCoverSize(Number(value) || Number(sizeInput.value) || 180);
+    const availableWidth = Math.max(120, Math.floor(grid.getBoundingClientRect().width || requested));
+    const size = Math.min(requested, availableWidth);
+    sizeInput.value = String(requested);
     grid.style.setProperty("--cover-size", `${size}px`);
     if (persist) {
-      try { window.localStorage.setItem(coverSizeStorageKey, String(size)); } catch (_) {}
+      try { window.localStorage.setItem(coverSizeStorageKey, String(requested)); } catch (_) {}
     }
   };
-  const showSizeTip = () => {
-    if (!sizeControl) return;
-    sizeControl.classList.add("adjusting");
-    window.clearTimeout(sizeTipTimer);
-    sizeTipTimer = window.setTimeout(() => sizeControl.classList.remove("adjusting"), 650);
-  };
+
   if (sizeInput) {
     let saved = "";
     try { saved = window.localStorage.getItem(coverSizeStorageKey) || ""; } catch (_) {}
     applyCoverSize(saved || sizeInput.value, false);
-    sizeInput.addEventListener("input", () => {
-      applyCoverSize(sizeInput.value);
-      showSizeTip();
-    });
-    sizeSmaller?.addEventListener("click", () => {
-      applyCoverSize(Number(sizeInput.value) - 10);
-      showSizeTip();
-    });
-    sizeLarger?.addEventListener("click", () => {
-      applyCoverSize(Number(sizeInput.value) + 10);
-      showSizeTip();
-    });
+    sizeInput.addEventListener("input", () => applyCoverSize(sizeInput.value));
+    sizeSmaller?.addEventListener("click", () => applyCoverSize(Number(sizeInput.value) - 10));
+    sizeLarger?.addEventListener("click", () => applyCoverSize(Number(sizeInput.value) + 10));
+    window.addEventListener("resize", () => applyCoverSize(sizeInput.value, false), {passive: true});
   }
 
   let floatingMenu = null;
@@ -320,6 +330,10 @@
   const managementButtons = [...document.querySelectorAll("[data-collection-dialog-open]")];
   let originalOrder = [];
   let draggedCard = null;
+  let dragCandidate = null;
+  let dragPointerId = null;
+  let dragStartX = 0;
+  let dragStartY = 0;
   const reorderAnimations = new WeakMap();
 
   const cards = () => [...grid.querySelectorAll("[data-collection-item]")];
@@ -365,14 +379,28 @@
     if (save) save.disabled = sameOrder(currentOrder(), originalOrder);
   };
 
+  const finishPointerDrag = (pointerId = null) => {
+    if (draggedCard) {
+      draggedCard.classList.remove("collection-dragging", "is-pointer-dragging");
+      draggedCard.style.pointerEvents = "";
+    }
+    cards().forEach((card) => card.classList.remove("collection-drop-target"));
+    if (pointerId !== null && grid.hasPointerCapture?.(pointerId)) {
+      try { grid.releasePointerCapture(pointerId); } catch (_) {}
+    }
+    draggedCard = null;
+    dragCandidate = null;
+    dragPointerId = null;
+    updateControls();
+  };
+
   const setReordering = (enabled) => {
     dialogs.forEach((dialog) => { if (dialog.open) dialog.close(); });
+    closeDeleteConfirmations();
     removeFloatingMenu({closeDetails: true});
+    if (!enabled) finishPointerDrag(dragPointerId);
     grid.classList.toggle("is-reordering", enabled);
     toolbar.hidden = !enabled;
-    cards().forEach((card) => {
-      card.draggable = enabled;
-    });
     if (toggle) toggle.hidden = enabled;
     managementButtons.forEach((button) => { button.disabled = enabled; });
     if (help) {
@@ -426,28 +454,45 @@
     if (event.target.closest(".cover-card-link")) event.preventDefault();
   });
 
-  grid.addEventListener("dragstart", (event) => {
+  grid.addEventListener("pointerdown", (event) => {
     if (!grid.classList.contains("is-reordering")) return;
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (event.target.closest("[data-collection-move]")) return;
     const card = event.target.closest("[data-collection-item]");
     if (!card) return;
-    draggedCard = card;
-    card.classList.add("collection-dragging");
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", card.dataset.collectionItem || "");
+    dragCandidate = card;
+    dragPointerId = event.pointerId;
+    dragStartX = event.clientX;
+    dragStartY = event.clientY;
   });
 
-  grid.addEventListener("dragover", (event) => {
-    if (!draggedCard || !grid.classList.contains("is-reordering")) return;
-    const target = event.target.closest("[data-collection-item]");
-    if (!target || target === draggedCard) return;
+  grid.addEventListener("pointermove", (event) => {
+    if (!dragCandidate || event.pointerId !== dragPointerId) return;
+    const distance = Math.hypot(event.clientX - dragStartX, event.clientY - dragStartY);
+    if (!draggedCard && distance < 6) return;
+
+    if (!draggedCard) {
+      draggedCard = dragCandidate;
+      draggedCard.classList.add("collection-dragging", "is-pointer-dragging");
+      draggedCard.style.pointerEvents = "none";
+      try { grid.setPointerCapture(event.pointerId); } catch (_) {}
+    }
+
     event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
+    const hit = document.elementFromPoint(event.clientX, event.clientY);
+    const target = hit?.closest("[data-collection-item]");
+    if (!target || target === draggedCard || !grid.contains(target)) return;
+
     const box = target.getBoundingClientRect();
-    const before = event.clientX < box.left + box.width / 2;
+    const withinTargetRow = event.clientY >= box.top && event.clientY <= box.bottom;
+    const before = withinTargetRow
+      ? event.clientX < box.left + box.width / 2
+      : event.clientY < box.top + box.height / 2;
     const alreadyThere = before
       ? target.previousElementSibling === draggedCard
       : target.nextElementSibling === draggedCard;
     if (alreadyThere) return;
+
     const positions = capturePositions();
     cards().forEach((card) => card.classList.remove("collection-drop-target"));
     target.classList.add("collection-drop-target");
@@ -457,17 +502,11 @@
     animatePositions(positions);
   });
 
-  grid.addEventListener("drop", (event) => {
-    if (!draggedCard) return;
-    event.preventDefault();
-    cards().forEach((card) => card.classList.remove("collection-drop-target"));
-    updateControls();
+  grid.addEventListener("pointerup", (event) => {
+    if (event.pointerId === dragPointerId) finishPointerDrag(event.pointerId);
   });
-
-  grid.addEventListener("dragend", () => {
-    cards().forEach((card) => card.classList.remove("collection-dragging", "collection-drop-target"));
-    draggedCard = null;
-    updateControls();
+  grid.addEventListener("pointercancel", (event) => {
+    if (event.pointerId === dragPointerId) finishPointerDrag(event.pointerId);
   });
 
   save?.addEventListener("click", async () => {
