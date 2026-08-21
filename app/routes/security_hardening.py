@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import io
+import json
 import re
 import secrets
+import zipfile
+from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import Response
 from jinja2 import BaseLoader
 
+from ..access import require_librarian
 from .context import RouteContext
 
 
@@ -29,6 +35,14 @@ _SETTINGS_WARNING = """{% set secret_warning = deployment_secret_warning() %}
 </section>
 {% endif %}
 """
+SAFE_DIAGNOSTIC_STRING_KEYS = {
+    "operation", "scope", "status", "reason", "category", "mode", "provider",
+    "phase", "decision", "source", "rule_key",
+}
+SENSITIVE_DIAGNOSTIC_KEY_PARTS = {
+    "path", "filename", "title", "name", "user", "email", "ip", "host", "url",
+    "token", "secret", "key", "pin", "password", "cookie", "session", "authorization",
+}
 
 
 def _host(value: str) -> str:
@@ -77,6 +91,53 @@ def _strip_member_export_paths(rows: list[dict], *, is_librarian: bool) -> list[
         item["file_path"] = ""
         sanitized.append(item)
     return sanitized
+
+
+def _diagnostic_key_is_sensitive(key: object) -> bool:
+    normalized = str(key).strip().casefold().replace("-", "_")
+    parts = {part for part in normalized.split("_") if part}
+    return bool(parts.intersection(SENSITIVE_DIAGNOSTIC_KEY_PARTS))
+
+
+def _safe_diagnostic_context(value, *, key: str = "", depth: int = 0):
+    """Retain troubleshooting shape/counters without exporting library or identity data."""
+    if depth >= 8:
+        return "[truncated]"
+    if _diagnostic_key_is_sensitive(key):
+        return "[redacted]"
+    if isinstance(value, dict):
+        return {
+            str(child_key): _safe_diagnostic_context(
+                child_value, key=str(child_key), depth=depth + 1,
+            )
+            for child_key, child_value in value.items()
+        }
+    if isinstance(value, (list, tuple, set)):
+        return [
+            _safe_diagnostic_context(item, key=key, depth=depth + 1)
+            for item in value
+        ]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str) and key.casefold() in SAFE_DIAGNOSTIC_STRING_KEYS:
+        return value[:160]
+    return "[redacted]"
+
+
+def _safe_diagnostic_event(row) -> dict:
+    item = dict(row)
+    try:
+        context = json.loads(item.get("context_json") or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        context = {}
+    return {
+        "id": item.get("id"),
+        "created_at": item.get("created_at"),
+        "level": item.get("level"),
+        "category": item.get("category"),
+        # Raw message/detail and account display names are deliberately omitted.
+        "context": _safe_diagnostic_context(context),
+    }
 
 
 def _nonce(request) -> str:
@@ -142,6 +203,10 @@ def build_router(ctx: RouteContext):
     templates = ctx.live("templates")
     settings = ctx.live("settings")
     db = ctx.live("db")
+    event_log = ctx.live("event_log")
+    mie = ctx.live("mie")
+    list_database_backups = ctx.live("list_database_backups")
+    record_event = ctx.live("record_event")
 
     templates.env.globals["csp_nonce"] = _nonce
     templates.env.globals["deployment_secret_warning"] = (
@@ -171,4 +236,53 @@ def build_router(ctx: RouteContext):
         secure_library_export_rows._infomancer_security_wrapped = True
         ctx.set("library_export_rows", secure_library_export_rows)
 
-    return router, {}
+    @router.get(
+        "/maintenance/diagnostics",
+        dependencies=[Depends(require_librarian)],
+        name="download_sanitized_diagnostics",
+    )
+    def download_sanitized_diagnostics(request: Request):
+        """Export support diagnostics without library, account, network, or secret data."""
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("summary.json", json.dumps({
+                "app_version": ctx.get("APP_VERSION"),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "database_size": db.path.stat().st_size if db.path.exists() else 0,
+                "library_health": mie.summary(),
+                "backup_count": len(list_database_backups(db.path)),
+                "privacy_profile": "sanitized-support-v1",
+            }, indent=2, default=str))
+            events = [
+                _safe_diagnostic_event(row)
+                for row in event_log.query(limit=1000)
+            ]
+            archive.writestr(
+                "recent-events.json", json.dumps(events, indent=2, default=str)
+            )
+            archive.writestr("README.txt", (
+                "InfoMancer diagnostic bundle\n\n"
+                "This privacy-safe support bundle contains application status and a "
+                "sanitized event timeline. Raw event messages, technical details, account "
+                "names, media titles, filenames, filesystem paths, network addresses, "
+                "hostnames, credentials, sessions, provider secrets, and the media database "
+                "are not included.\n"
+            ))
+        record_event(
+            "diagnostics", "A privacy-sanitized diagnostic bundle was exported.",
+            context={"privacy_profile": "sanitized-support-v1"},
+            user_id=request.state.user.id,
+        )
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        return Response(
+            output.getvalue(), media_type="application/zip",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="infomancer-diagnostics-{stamp}.zip"'
+                )
+            },
+        )
+
+    return router, {
+        "download_sanitized_diagnostics": download_sanitized_diagnostics,
+    }
