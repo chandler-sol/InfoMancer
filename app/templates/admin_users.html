@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}User Management · InfoMancer{% endblock %}
 {% block content %}
-<header class="settings-heading">
+<header class="settings-heading app-settings-heading">
   <p class="eyebrow">SETTINGS</p><h1>User Management</h1>
   <p>Manage who can access this InfoMancer installation and what they are allowed to do.</p>
 </header>
@@ -15,8 +15,8 @@
   <small>Expires {{ local_time(invitation_expires) }}. Creating another link will cancel this one.</small>
 </section>
 {% endif %}
-<section class="settings-grid">
-  <div class="panel user-list-panel">
+<section class="settings-page-grid user-management-grid">
+  <div class="panel settings-card user-list-panel">
     <h2>People with access</h2>
     <div class="admin-user-list">
     {% for user in users %}
@@ -51,7 +51,7 @@
     {% endfor %}
     </div>
   </div>
-  <form class="panel settings-form create-user-form" method="post" action="/admin/users">
+  <form class="panel settings-card settings-form create-user-form" method="post" action="/admin/users">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><p class="eyebrow">ADD USER</p><h2>Invite a person</h2>
     <label>Username<input name="username" minlength="3" maxlength="50" required><small>Unique and permanent; used for local sign-in.</small></label>
     <label>Email<input name="email" type="email" {% if auth_mode == 'cloudflare' %}required{% endif %}></label>
