@@ -36,6 +36,7 @@
   let previous = new Map();
   let failures = [];
   let open = widget.classList.contains('is-pinned') && !popover.hidden;
+  let tourDemoActive = widget.dataset.tourDemo === '1';
   let taskTimer = 0;
   let taskRequest = null;
   let failureTimer = 0;
@@ -199,6 +200,7 @@
   };
 
   function render() {
+    if (tourDemoActive) return;
     pruneRecent();
     const failed = visibleFailures();
     widget.classList.toggle('idle', !active.length);
@@ -359,7 +361,28 @@
     }, interval);
   };
 
+  const syncTourDemoOwnership = () => {
+    const next = widget.dataset.tourDemo === '1';
+    if (next === tourDemoActive) return;
+    tourDemoActive = next;
+    if (tourDemoActive) {
+      open = false;
+      popover.hidden = true;
+      toggle.setAttribute('aria-expanded', 'false');
+      widget.classList.remove('has-attention', 'has-failure', 'is-pinned');
+      return;
+    }
+    render();
+    scheduleTaskPoll(0);
+    scheduleFailureRefresh();
+  };
+  new MutationObserver(syncTourDemoOwnership).observe(widget, {
+    attributes: true,
+    attributeFilter: ['data-tour-demo'],
+  });
+
   toggle.addEventListener('click', (event) => {
+    if (tourDemoActive) return;
     event.preventDefault();
     open = !open;
     applyOpen();
@@ -406,6 +429,11 @@
     if (recent.length || visibleFailures().length) render();
   }, 15000);
 
+  if (tourDemoActive) {
+    open = false;
+    popover.hidden = true;
+    toggle.setAttribute('aria-expanded', 'false');
+  }
   pruneRecent();
   render();
   pollTasks().finally(() => scheduleTaskPoll());
