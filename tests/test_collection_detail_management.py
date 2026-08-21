@@ -17,6 +17,9 @@ from app.engagement import EngagementService
 from app.event_log import EventLog
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class CollectionDetailManagementTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -121,11 +124,23 @@ class CollectionDetailManagementTests(unittest.TestCase):
         self.assertIn("data-collection-reorder-toggle", response.text)
         self.assertIn("Reorder collection", response.text)
         self.assertIn("collection-danger-zone", response.text)
+        self.assertIn("data-collection-delete-cancel", response.text)
         self.assertIn("data-collection-cover-size", response.text)
+        self.assertNotIn("data-collection-cover-size-output", response.text)
         self.assertIn(
             f'data-collection-item="title:{self.iron_ids[0]}"',
             response.text,
         )
+
+    def test_collection_client_uses_pointer_reorder_without_native_drag_ghost(self):
+        script = (ROOT / "app/static/collection-detail.js").read_text(encoding="utf-8")
+        stylesheet = (ROOT / "app/static/collection-detail.css").read_text(encoding="utf-8")
+        self.assertIn('grid.addEventListener("pointerdown"', script)
+        self.assertIn('grid.addEventListener("pointermove"', script)
+        self.assertNotIn('grid.addEventListener("dragstart"', script)
+        self.assertNotIn("card.draggable =", script)
+        self.assertIn("data-collection-delete-cancel", script)
+        self.assertIn("justify-content: space-between", stylesheet)
 
     def test_collection_search_ignores_punctuation(self):
         response = self.client.get(
