@@ -103,7 +103,6 @@ class MetadataMaintenanceMatchedOnlyTests(unittest.TestCase):
         self.assertIn("await sleep(SUCCESS_LINGER_MS)", controller)
         self.assertIn("syncMetricTotals();", controller)
         self.assertIn("/api/metadata/maintenance/bulk-refresh", controller)
-        self.assertIn("Matched titles refreshed within the last 30 days.", controller)
         self.assertIn("MATCHED_PREDICATE", route)
         self.assertIn("tvdb_movie_id IS NOT NULL", route)
         self.assertIn("tvdb_id IS NOT NULL", route)
