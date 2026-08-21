@@ -2,6 +2,72 @@
   const current = document.currentScript;
   const version = current?.src ? new URL(current.src).search : '';
 
+  const bulkMatchReturn = (() => {
+    const config = {
+      '/movies/bulk-match': {kind: 'movie', noun: 'Movies'},
+      '/shows/bulk-match': {kind: 'tv', noun: 'TV Shows'},
+    }[window.location.pathname];
+    if (!config || new URLSearchParams(window.location.search).get('selected') !== 'true') return null;
+
+    const returnKey = `infomancer:bulk-match-return:${config.kind}`;
+    const pendingKey = `infomancer:bulk-match-return-pending:${config.kind}`;
+    let saved = null;
+    try {
+      saved = JSON.parse(window.sessionStorage.getItem(returnKey) || 'null');
+    } catch (_) {
+      window.sessionStorage.removeItem(returnKey);
+    }
+    if (!saved?.url || !saved?.at || Date.now() - Number(saved.at) > 30 * 60 * 1000) {
+      try {
+        window.sessionStorage.removeItem(returnKey);
+        window.sessionStorage.removeItem(pendingKey);
+      } catch (_) {}
+      return null;
+    }
+
+    const back = document.querySelector('a.back');
+    if (back) {
+      back.href = saved.url;
+      back.textContent = '← Search results';
+    }
+    document.querySelectorAll('.review-actions > a.button').forEach((link) => {
+      link.href = saved.url;
+      link.textContent = 'Back to search results';
+    });
+
+    document.querySelectorAll('form[action="/movies/bulk-match"], form[action="/shows/bulk-match"]').forEach((form) => {
+      form.addEventListener('submit', (event) => {
+        const submitter = event.submitter;
+        if (!submitter || submitter.textContent.trim() !== 'Apply selected matches') return;
+        try {
+          window.sessionStorage.setItem(pendingKey, '1');
+        } catch (_) {}
+      });
+    });
+
+    const params = new URLSearchParams(window.location.search);
+    const message = params.get('message') || '';
+    const empty = [...document.querySelectorAll('.table-wrap .empty')].some((node) =>
+      node.textContent.trim().startsWith('No selected unmatched')
+    );
+    let pending = false;
+    try {
+      pending = window.sessionStorage.getItem(pendingKey) === '1';
+    } catch (_) {}
+    if (pending && /^Matched\s+\d+/.test(message) && empty && !document.querySelector('.bulk-direct-progress')) {
+      const target = new URL(saved.url, window.location.origin);
+      target.searchParams.set('message', message);
+      try {
+        window.sessionStorage.removeItem(returnKey);
+        window.sessionStorage.removeItem(pendingKey);
+      } catch (_) {}
+      window.location.replace(`${target.pathname}${target.search}${target.hash}`);
+      return {redirecting: true};
+    }
+    return {redirecting: false};
+  })();
+  if (bulkMatchReturn?.redirecting) return;
+
   const accountAvatar = document.querySelector('.account-avatar');
   if (accountAvatar) {
     const fallback = accountAvatar.textContent.trim() || '?';
