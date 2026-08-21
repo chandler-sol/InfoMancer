@@ -5,8 +5,9 @@ InfoMancer is pre-release software that can inspect and, after explicit approval
 ## Deployment boundaries
 
 - Do not expose the InfoMancer origin port directly to the public Internet. Keep the origin private and place an authenticated reverse proxy such as Cloudflare Access in front of any public hostname.
-- Local authentication is the normal server default. `INFOMANCER_AUTH_MODE=disabled` deliberately removes account authentication and is intended only for a trusted private or loopback deployment. Do not use disabled authentication on an untrusted network.
+- Local authentication is the normal server default. `INFOMANCER_AUTH_MODE=disabled` deliberately removes account authentication and is intended only for a trusted private or loopback deployment. Do not use disabled authentication on an untrusted network. Disabled mode still enforces Host/origin checks and requires a valid CSRF token for state-changing requests.
 - The dedicated desktop build starts its bundled local core on loopback only. Remote-server mode should use HTTPS whenever the server leaves a trusted private network.
+- For a long-lived remote, reverse-proxied, or Cloudflare deployment, configure a long random `INFOMANCER_SECRET` and keep it outside the InfoMancer data directory. Settings displays a security warning when remote access is configured without a persistent application secret.
 - Keep media mounts, the application-data directory, backup destinations, and updater credentials accessible only to the operating-system accounts that need them.
 - Keep Read-Only Mode enabled whenever you are evaluating an unfamiliar installation or do not intend InfoMancer to change media files.
 
@@ -30,6 +31,10 @@ Useful reports include:
 
 High-value areas include authentication and session boundaries, CSRF and origin handling, filesystem containment, rename and undo safety, recovery and restore integrity, provider-secret storage, desktop native boundaries, and dependency or update integrity.
 
-## Secrets and diagnostic data
+## Secrets, exports, and diagnostic data
 
-Never commit or attach API keys, tunnel tokens, signing keys, `.env` files, databases, recovery packages, or provider credential stores. Diagnostic and event data can still contain filenames, media paths, hostnames, IP addresses, or other installation-specific details even when credential fields are redacted. Review diagnostic material before sharing it.
+Never commit or attach API keys, tunnel tokens, signing keys, `.env` files, databases, recovery packages, or provider credential stores.
+
+The downloadable Maintenance diagnostic bundle uses the `sanitized-support-v1` privacy profile. It omits raw event messages and technical details and redacts or excludes account names, media titles, filenames, filesystem paths, network addresses, hostnames, credentials, sessions, and provider secrets. Internal application logs remain more detailed and can contain installation-specific information, so review raw logs before sharing them.
+
+Member library exports retain catalog and personal-organization data but omit physical source and file paths. Librarian exports can include those paths for administration and recovery workflows. Database backups and recovery packages remain sensitive because they contain substantially more installation state than a diagnostic bundle.
