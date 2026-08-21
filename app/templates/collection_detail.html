@@ -10,13 +10,25 @@
     <h1>{{ collection.name }}</h1>
     {% if collection.description %}<p>{{ collection.description }}</p>{% endif %}
     <small data-collection-count-meta><span data-collection-item-count>{{ items|length }}</span> item{% if items|length != 1 %}s{% endif %} · {{ 'updates automatically' if collection.collection_type == 'smart' else 'manual order' }}</small>
-    {% if current_user.is_librarian and collection.collection_type == 'manual' %}
-    <div class="collection-header-actions">
-      <button type="button" class="button primary" data-collection-dialog-open="collection-add-dialog">+ Add titles</button>
-      <button type="button" class="button" data-collection-reorder-toggle>Reorder</button>
-      <button type="button" class="button" data-collection-dialog-open="collection-edit-dialog">Edit collection</button>
+    <div class="collection-header-toolbar">
+      {% if current_user.is_librarian and collection.collection_type == 'manual' %}
+      <div class="collection-header-actions">
+        <button type="button" class="button primary" data-collection-dialog-open="collection-add-dialog">+ Add titles</button>
+        <button type="button" class="button" data-collection-reorder-toggle>Reorder</button>
+        <button type="button" class="button" data-collection-dialog-open="collection-edit-dialog">Edit collection</button>
+      </div>
+      {% endif %}
+      {% if items %}
+      <div class="collection-density-control" aria-label="Collection cover density">
+        <span>Density</span>
+        <div class="cover-size-control collection-cover-size-control">
+          <button type="button" class="cover-size-step" data-collection-cover-smaller aria-label="Make collection covers smaller" title="More compact covers">−</button>
+          <label class="cover-size-slider"><span class="sr-only">Collection cover density</span><input type="range" data-collection-cover-size min="120" max="300" step="10" value="{{ default_cover_size }}" aria-label="Collection cover density"></label>
+          <button type="button" class="cover-size-step" data-collection-cover-larger aria-label="Make collection covers larger" title="Larger covers">+</button>
+        </div>
+      </div>
+      {% endif %}
     </div>
-    {% endif %}
   </div>
 </header>
 
@@ -59,7 +71,7 @@
         <form method="post" action="/collections/{{ collection.id }}/delete">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <p>This cannot be undone. The collection itself will be removed, but none of its media will be deleted.</p>
-          <button class="button danger">Delete {{ collection.name }}</button>
+          <div class="collection-delete-actions"><button type="button" class="button" data-collection-delete-cancel>Cancel</button><button class="button danger">Delete {{ collection.name }}</button></div>
         </form>
       </details>
     </div>
@@ -72,17 +84,6 @@
     <span class="collection-order-status" data-collection-order-status aria-live="polite"></span>
     <button type="button" class="button" data-collection-reorder-cancel>Cancel</button>
     <button type="button" class="button primary" data-collection-reorder-save disabled>Save order</button>
-  </div>
-</div>
-{% endif %}
-
-{% if items %}
-<div class="collection-display-toolbar" aria-label="Collection display options">
-  <span>Cover size</span>
-  <div class="cover-size-control collection-cover-size-control">
-    <button type="button" class="cover-size-step" data-collection-cover-smaller aria-label="Make collection covers smaller" title="Smaller covers">−</button>
-    <label class="cover-size-slider"><span class="sr-only">Collection cover size</span><input type="range" data-collection-cover-size min="120" max="300" step="10" value="{{ default_cover_size }}" aria-label="Collection cover size"><output class="cover-size-value" data-collection-cover-size-output aria-live="polite">{{ default_cover_size }}px</output></label>
-    <button type="button" class="cover-size-step" data-collection-cover-larger aria-label="Make collection covers larger" title="Larger covers">+</button>
   </div>
 </div>
 {% endif %}
