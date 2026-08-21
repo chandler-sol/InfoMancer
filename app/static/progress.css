@@ -65,6 +65,24 @@ button:disabled {
               opacity .2s ease, filter .2s ease, transform .2s ease;
 }
 
+/* The task center is server-rendered without an icon and enhanced later. Paint the
+   final bell in this synchronous stylesheet so first paint and enhanced paint are
+   identical instead of briefly showing legacy task chrome before task-widget.css. */
+.topbar .task-widget-toggle {
+  position: relative;
+}
+
+.topbar .task-widget-toggle::before {
+  content: "";
+  display: block;
+  flex: 0 0 auto;
+  width: 19px;
+  height: 19px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6v-5a7 7 0 0 0-6-6.92V3a1 1 0 0 0-2 0v1.08A7 7 0 0 0 5 11v5l-2 2v1h18v-1l-2-2Z'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6v-5a7 7 0 0 0-6-6.92V3a1 1 0 0 0-2 0v1.08A7 7 0 0 0 5 11v5l-2 2v1h18v-1l-2-2Z'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+
 .task-widget:hover .task-widget-toggle,
 .task-widget.is-pinned .task-widget-toggle {
   border-color: rgba(185, 245, 66, .38);
@@ -405,6 +423,11 @@ button:disabled {
     height: 42px;
     padding: 0;
     border-radius: 8px;
+  }
+
+  .topbar .task-widget-toggle::before {
+    width: 20px;
+    height: 20px;
   }
 
   .task-widget-toggle .task-card-copy { display: none; }
