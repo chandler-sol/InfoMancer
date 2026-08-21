@@ -7,8 +7,9 @@
 .cover-size-control.library-density-ready {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-width: min(290px, 100%);
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
   color: var(--muted);
 }
 
@@ -19,64 +20,53 @@
 .library-density-label {
   flex: 0 0 auto;
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 650;
+  font-size: 10px;
+  font-weight: 700;
   letter-spacing: .08em;
   text-transform: uppercase;
 }
 
-.library-density-desktop {
-  display: grid;
-  grid-template-columns: auto minmax(120px, 180px) auto;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.library-density-edge {
-  color: var(--muted);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.library-density-range {
-  width: 100%;
-  min-width: 110px;
-  margin: 0;
-  padding: 0;
-  accent-color: var(--lime);
-  cursor: pointer;
-}
-
-.library-density-range:focus-visible {
-  outline: 2px solid rgba(174,255,48,.55);
-  outline-offset: 4px;
-}
-
+/* Desktop uses five semantic steps instead of a wide slider. This keeps Density
+   visually attached to List/Covers and prevents the control from spilling out of
+   the display-options slot on medium-width windows. */
+.library-density-desktop,
 .library-density-mobile {
-  display: none;
-  grid-template-columns: repeat(3, 42px);
-  gap: 4px;
-  padding: 3px;
+  align-items: center;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(10,15,21,.72);
 }
 
+.library-density-desktop {
+  display: grid;
+  grid-template-columns: repeat(5, 34px);
+  gap: 3px;
+  padding: 3px;
+  flex: 0 0 auto;
+}
+
+.library-density-step,
 .library-density-mobile button {
   display: grid;
   place-items: center;
-  width: 42px;
-  height: 34px;
-  min-width: 42px;
+  margin: 0;
   padding: 0;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, box-shadow 120ms ease;
 }
 
+.library-density-step {
+  width: 34px;
+  height: 32px;
+  min-width: 34px;
+}
+
+.library-density-step:hover,
+.library-density-step:focus-visible,
 .library-density-mobile button:hover,
 .library-density-mobile button:focus-visible {
   color: var(--text);
@@ -84,35 +74,55 @@
   outline: 0;
 }
 
+.library-density-step:focus-visible,
+.library-density-mobile button:focus-visible {
+  box-shadow: 0 0 0 2px rgba(174,255,48,.34);
+}
+
+.library-density-step[aria-pressed="true"],
 .library-density-mobile button[aria-pressed="true"] {
   background: var(--lime);
   color: #10140b;
 }
 
+.library-density-step svg,
 .library-density-mobile svg {
   width: 19px;
   height: 19px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.7;
+  stroke-width: 1.55;
+}
+
+.library-density-mobile {
+  display: none;
+  grid-template-columns: repeat(3, 42px);
+  gap: 4px;
+  padding: 3px;
+}
+
+.library-density-mobile button {
+  width: 42px;
+  height: 34px;
+  min-width: 42px;
 }
 
 /* Never expose the legacy implementation value if the enhancement script is late
-   or unavailable. The range itself remains a functional fallback. */
+   or unavailable. The fallback range remains only for no-JS operation. */
 .cover-size-value {
   display: none !important;
 }
 
 /* Keep display controls as one intentional right-side cluster on desktop. The
-   density control belongs to List/Covers, so it should not float independently in
-   the middle of a wide toolbar. Desktop density still describes visual spacing,
-   not a fixed number of columns. */
+   density selector is compact enough to live beside List/Covers without forcing
+   its parent wider than the available toolbar. */
 @media (min-width: 681px) {
   .library-display-toolbar.has-letter-jump {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
     column-gap: 18px;
+    width: 100%;
   }
 
   .library-display-toolbar.has-letter-jump .library-view-toolbar {
@@ -129,24 +139,36 @@
     width: auto;
     max-width: 100%;
     margin-left: auto;
-    gap: 12px;
+    gap: 10px;
+    flex-wrap: nowrap;
   }
 
   .cover-size-control.library-density-ready {
-    flex: 0 1 auto;
-    min-width: 0;
+    flex: 0 0 auto;
+    width: auto;
+  }
+}
+
+@media (max-width: 920px) and (min-width: 601px) {
+  .library-density-label {
+    display: none;
   }
 
-  .library-density-desktop {
-    grid-template-columns: auto minmax(110px, 160px) auto;
+  .library-display-toolbar.has-letter-jump .library-view-controls {
+    gap: 7px;
   }
 }
 
 @media (max-width: 600px) {
   .cover-size-control.library-density-ready {
     min-width: 0;
-    justify-content: space-between;
-    gap: 8px;
+    width: auto;
+    justify-content: flex-end;
+    gap: 7px;
+  }
+
+  .library-density-label {
+    display: none;
   }
 
   .library-density-desktop {
