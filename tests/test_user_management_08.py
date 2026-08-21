@@ -96,24 +96,34 @@ class UserManagement08Tests(unittest.TestCase):
         self.assertIn("cannot delete", response[1].lower())
         self.assertIsNotNone(self.auth.get_user(self.actor.id))
 
-    def test_template_manages_other_users_with_real_disclosure_and_delete_confirmation(self):
+    def test_template_groups_other_users_with_disclosure_and_guarded_delete(self):
         source = (ROOT / "app/templates/admin_users.html").read_text(encoding="utf-8")
         self.assertIn("rejectattr('id', 'equalto', current_user.id)", source)
-        self.assertIn('class="admin-user-disclosure"', source)
-        self.assertNotIn('class="profile-avatar">{{ user.display_name[:1]|upper }}', source)
+        self.assertIn('class="admin-user"', source)
+        self.assertIn('class="admin-user-identity"', source)
+        self.assertIn('class="admin-user-chevron"', source)
+        self.assertIn("{% set members =", source)
+        self.assertIn("{% set librarians =", source)
+        self.assertIn('id="members-heading">Members', source)
+        self.assertIn('id="librarians-heading">Librarians', source)
         self.assertIn('/admin/users/{{ user.id }}/delete', source)
+        self.assertIn('class="admin-user-delete-toggle"', source)
+        self.assertIn('class="button admin-user-delete-cancel"', source)
         self.assertIn("personal ratings, favorites, tags, saved views, and search history", source)
-        self.assertIn("Other people with access", source)
+        self.assertIn("People with access", source)
+        self.assertNotIn("Other people with access", source)
 
-    def test_status_styles_distinguish_active_pending_and_disabled(self):
-        source = (ROOT / "app/static/settings-polish.css").read_text(encoding="utf-8")
-        self.assertIn("body .account-state.active", source)
-        self.assertIn("background: #162014", source)
-        self.assertIn("color: var(--lime)", source)
-        self.assertIn("body .account-state.pending", source)
-        self.assertIn("body .account-state.disabled", source)
-        self.assertIn(".admin-user[open] .admin-user-disclosure svg", source)
-        self.assertIn("transform: rotate(90deg)", source)
+    def test_status_and_disclosure_styles_distinguish_account_states(self):
+        source = (ROOT / "app/static/user-management.css").read_text(encoding="utf-8")
+        self.assertIn(".account-state.active", source)
+        self.assertIn("background: #162014 !important", source)
+        self.assertIn("color: var(--lime) !important", source)
+        self.assertIn(".account-state.pending", source)
+        self.assertIn(".account-state.disabled", source)
+        self.assertIn(".admin-user[open] .admin-user-chevron", source)
+        self.assertIn("transform: rotate(180deg)", source)
+        self.assertIn("grid-column: 2", source)
+        self.assertIn(".admin-user-delete-confirm[hidden]", source)
 
 
 if __name__ == "__main__":
