@@ -75,13 +75,15 @@
 
   const coreReady = loadScript("workspace-core.js", "workspace-core");
 
-  // Title detail is completely idle outside /titles/<id>. Start its stylesheet
-  // immediately, but do not execute the interaction layer until both CSS and the
+  // Title detail is completely idle outside /titles/<id>. Start its stylesheets
+  // immediately, but do not execute the interaction layers until both CSS and the
   // shared Workspace runtime are ready. This removes a common one-frame layout race.
   if (document.querySelector(".media-dossier")) {
     const styleReady = ensureStyle("title-detail-ux.css", "title-detail-ux");
-    Promise.all([coreReady, styleReady]).then(() => (
-      loadScript("title-detail-ux.js", "title-detail-ux")
-    ));
+    const castStyleReady = ensureStyle("title-cast-dialog.css", "title-cast-dialog");
+    Promise.all([coreReady, styleReady, castStyleReady]).then(() => {
+      loadScript("title-detail-ux.js", "title-detail-ux");
+      loadScript("title-cast-dialog.js", "title-cast-dialog");
+    });
   }
 })();
