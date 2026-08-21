@@ -138,6 +138,7 @@ def build_router(ctx: RouteContext):
     @router.get("/api/tasks")
     def active_tasks() -> dict:
         tasks = []
+        scheduled = []
         with scan_all_lock:
             all_scan = dict(scan_all_job)
         with scan_lock:
@@ -299,7 +300,7 @@ def build_router(ctx: RouteContext):
             hash_counts = media_hashes.counts()
             if hash_counts.get("queued", 0):
                 frequency = app_settings.get("hash_schedule_frequency").capitalize()
-                tasks.append({
+                scheduled.append({
                     "id": "media-fingerprints-queued",
                     "label": "File fingerprints scheduled",
                     "detail": (
@@ -323,8 +324,7 @@ def build_router(ctx: RouteContext):
                 "label": "Cleaning managed trash",
                 "detail": cleanup_job.get("detail") or "Checking retention dates",
             })
-        # Scheduled work can be added here without changing the task-widget contract.
-        return {"tasks": tasks, "scheduled": []}
+        return {"tasks": tasks, "scheduled": scheduled}
 
     @librarian_get("/api/movie-match-analysis")
     def movie_match_analysis_status() -> dict:
