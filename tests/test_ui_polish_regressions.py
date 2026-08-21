@@ -184,8 +184,10 @@ class UiPolishRegressionTests(unittest.TestCase):
         workspace = (STATIC / "workspace.js").read_text(encoding="utf-8")
         self.assertIn('link.fetchPriority = "high"', workspace_ui)
         self.assertIn("libraryStyles.then", workspace_ui)
-        self.assertIn("loadScriptsSequentially", workspace_ui)
-        self.assertIn('"library-selection-polish.js"', workspace_ui)
+        self.assertIn("await loadScript('library-controller.js')", workspace_ui)
+        self.assertIn("].map((path) => loadScript(path))", workspace_ui)
+        self.assertIn("'library-density.js'", workspace_ui)
+        self.assertIn("'library-selection-polish.js'", workspace_ui)
         self.assertIn("globalStyles.then(() => requestAnimationFrame", workspace_ui)
         self.assertIn("Promise.all([coreReady, styleReady])", workspace)
         self.assertIn('link.fetchPriority = "high"', workspace)
@@ -246,11 +248,12 @@ class UiPolishRegressionTests(unittest.TestCase):
 
     def test_account_rail_uses_canonical_avatar_endpoint_as_real_image(self):
         source = (STATIC / "workspace-ui.js").read_text(encoding="utf-8")
-        self.assertIn('document.querySelector(".account-avatar")', source)
-        self.assertIn('avatarImage.src = `/account/avatar/current?v=${Date.now()}`', source)
+        self.assertIn("document.querySelector('.account-avatar')", source)
+        self.assertIn("avatarImage.src = '/account/avatar/current'", source)
+        self.assertNotIn("Date.now()", source)
         self.assertIn("accountAvatar.replaceChildren(avatarImage)", source)
-        self.assertIn('accountAvatar.dataset.profileAvatarPreview === "1"', source)
-        self.assertIn('avatarImage.style.objectFit = "cover"', source)
+        self.assertIn("accountAvatar.dataset.profileAvatarPreview === '1'", source)
+        self.assertIn("avatarImage.style.objectFit = 'cover'", source)
 
     def test_review_overflow_button_uses_canonical_centered_menu_control(self):
         action_menu = (STATIC / "action-menu.css").read_text(encoding="utf-8")
