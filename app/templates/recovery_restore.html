@@ -2,6 +2,7 @@
 {% block title %}Recovery · InfoMancer{% endblock %}
 {% block content %}
 {% set section = 'recovery' %}
+<link rel="stylesheet" href="{{ url_for('static', path='recovery-polish.css') }}?v={{ static_version }}">
 <section class="settings-shell">
   <header class="page-head compact-page-head">
     <div><p class="eyebrow">APP SETTINGS</p><h1>Recovery</h1><p>Verify and restore a portable <code>.infomancer-backup</code> package.</p></div>
