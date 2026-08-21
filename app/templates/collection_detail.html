@@ -5,67 +5,86 @@
 <a class="back" href="/collections">← Collections</a>
 <header class="collection-detail-head">
   <span class="collection-detail-art">{% if collection.artwork_url %}<img src="{{ collection.artwork_url }}" alt="" loading="lazy">{% else %}<span>{{ collection.name[:1]|upper }}</span>{% endif %}</span>
-  <div><p class="eyebrow">{{ 'SMART COLLECTION' if collection.collection_type == 'smart' else 'COLLECTION' }}</p><h1>{{ collection.name }}</h1>{% if collection.description %}<p>{{ collection.description }}</p>{% endif %}<small>{{ items|length }} item{% if items|length != 1 %}s{% endif %} · {{ 'updates automatically from saved filters' if collection.collection_type == 'smart' else 'shown only on the Collections page' }}</small></div>
+  <div class="collection-detail-copy">
+    <p class="eyebrow">{{ 'SMART COLLECTION' if collection.collection_type == 'smart' else 'COLLECTION' }}</p>
+    <h1>{{ collection.name }}</h1>
+    {% if collection.description %}<p>{{ collection.description }}</p>{% endif %}
+    <small data-collection-count-meta><span data-collection-item-count>{{ items|length }}</span> item{% if items|length != 1 %}s{% endif %} · {{ 'updates automatically' if collection.collection_type == 'smart' else 'manual order' }}</small>
+    {% if current_user.is_librarian and collection.collection_type == 'manual' %}
+    <div class="collection-header-actions">
+      <button type="button" class="button primary" data-collection-dialog-open="collection-add-dialog">+ Add titles</button>
+      <button type="button" class="button" data-collection-reorder-toggle>Reorder</button>
+      <button type="button" class="button" data-collection-dialog-open="collection-edit-dialog">Edit collection</button>
+    </div>
+    {% endif %}
+  </div>
 </header>
 
 {% if current_user.is_librarian and collection.collection_type == 'manual' %}
-<details class="panel collection-editor">
-  <summary>Edit collection details and artwork</summary>
-  <form method="post" action="/collections/{{ collection.id }}/edit" enctype="multipart/form-data">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>Name<input name="name" maxlength="80" required value="{{ collection.name }}"></label>
-    <label>Description<textarea name="description" maxlength="1000" rows="3">{{ collection.description }}</textarea></label>
-    <label>Custom thumbnail<input type="file" name="artwork" accept="image/jpeg,image/png,image/webp"><small>Recommended: 1600 × 900 pixels (16:9). JPEG, PNG, or WebP · up to 5 MB. Without one, InfoMancer uses the first title’s cover.</small></label>
-    {% if collection.artwork_filename %}<label class="inline-check"><input type="checkbox" name="remove_artwork" value="1"> Remove the custom thumbnail and use the first title’s cover</label>{% endif %}
-    <div class="actions"><button class="button primary">Save collection</button></div>
-  </form>
-  <div class="collection-danger-zone">
-    <div><strong>Delete collection</strong><small>Deletes this collection only. Movies, TV series, episodes, and media files stay in place.</small></div>
-    <details class="collection-delete-confirm">
-      <summary class="button danger">Delete collection</summary>
-      <form method="post" action="/collections/{{ collection.id }}/delete">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <p>This cannot be undone. The collection itself will be removed, but none of its media will be deleted.</p>
-        <button class="button danger">Delete {{ collection.name }}</button>
+<dialog class="collection-management-dialog" id="collection-add-dialog" aria-labelledby="collection-add-title">
+  <div class="collection-dialog-card">
+    <header class="collection-dialog-head">
+      <div><p class="eyebrow">COLLECTION</p><h2 id="collection-add-title">Add titles</h2><p class="muted">Search your InfoMancer Library. Punctuation is ignored, so “ant man” finds “Ant-Man.”</p></div>
+      <button type="button" class="collection-dialog-close" data-collection-dialog-close aria-label="Close add titles">×</button>
+    </header>
+    <section class="collection-add" data-collection-search-shell data-collection-id="{{ collection.id }}" data-csrf-token="{{ csrf_token }}">
+      <form method="get" action="/collections/{{ collection.id }}" class="search" data-collection-search-form>
+        <input name="q" value="" placeholder="Search library titles" autocomplete="off" autofocus>
+        <button>Search</button>
       </form>
-    </details>
+      <div class="collection-search-state muted" data-collection-search-state aria-live="polite"></div>
+      <div class="collection-search-results" data-collection-search-results hidden></div>
+    </section>
   </div>
-</details>
+</dialog>
 
-<section class="panel collection-add" data-collection-search-shell data-collection-id="{{ collection.id }}" data-csrf-token="{{ csrf_token }}">
-  <div><h2>Add a movie or TV series</h2><p class="muted">Search your existing InfoMancer library. Search ignores punctuation, so “ant man” will find “Ant-Man.”</p></div>
-  <form method="get" action="/collections/{{ collection.id }}" class="search" data-collection-search-form>
-    <input name="q" value="{{ q }}" placeholder="Search library titles" autocomplete="off">
-    <button>Search</button>
-  </form>
-  <div class="collection-search-state muted" data-collection-search-state aria-live="polite"></div>
-  <div class="collection-search-results" data-collection-search-results{% if not q %} hidden{% endif %}>
-    {% if q %}
-      {% for title in candidates %}
-      <form method="post" action="/collections/{{ collection.id }}/titles">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="title_id" value="{{ title.id }}">
-        <span>{% if title.poster_url %}<img src="{{ title.poster_url }}" alt="">{% endif %}<strong>{{ title.display_title }}</strong><small>{{ 'TV series' if title.kind == 'tv' else 'Movie' }}{% if title.display_year %} · {{ title.display_year }}{% endif %}</small></span>
-        <button class="button small">Add</button>
-      </form>
-      {% else %}<p class="muted">No available library titles match “{{ q }}”. Try a shorter or different title.</p>{% endfor %}
-    {% endif %}
+<dialog class="collection-management-dialog" id="collection-edit-dialog" aria-labelledby="collection-edit-title">
+  <div class="collection-dialog-card collection-edit-dialog-card">
+    <header class="collection-dialog-head">
+      <div><p class="eyebrow">COLLECTION</p><h2 id="collection-edit-title">Edit collection</h2></div>
+      <button type="button" class="collection-dialog-close" data-collection-dialog-close aria-label="Close edit collection">×</button>
+    </header>
+    <form class="collection-editor-form" method="post" action="/collections/{{ collection.id }}/edit" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Name<input name="name" maxlength="80" required value="{{ collection.name }}"></label>
+      <label>Description<textarea name="description" maxlength="1000" rows="3">{{ collection.description }}</textarea></label>
+      <label class="collection-artwork-field">Custom thumbnail<input type="file" name="artwork" accept="image/jpeg,image/png,image/webp"><small>Recommended: 1600 × 900 pixels (16:9). JPEG, PNG, or WebP · up to 5 MB. Without one, InfoMancer crops the first title’s cover to fill the thumbnail.</small></label>
+      {% if collection.artwork_filename %}<label class="inline-check collection-artwork-field"><input type="checkbox" name="remove_artwork" value="1"> Remove the custom thumbnail and return to the automatic crop</label>{% endif %}
+      <div class="actions"><button type="button" class="button" data-collection-dialog-close>Cancel</button><button class="button primary">Save collection</button></div>
+    </form>
+    <div class="collection-danger-zone">
+      <div><strong>Delete collection</strong><small>Deletes this collection only. Movies, TV series, episodes, and media files stay in place.</small></div>
+      <details class="collection-delete-confirm">
+        <summary class="button danger">Delete collection</summary>
+        <form method="post" action="/collections/{{ collection.id }}/delete">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <p>This cannot be undone. The collection itself will be removed, but none of its media will be deleted.</p>
+          <button class="button danger">Delete {{ collection.name }}</button>
+        </form>
+      </details>
+    </div>
   </div>
-</section>
+</dialog>
 
-{% if items %}
-<div class="collection-order-toolbar" data-collection-order-toolbar>
-  <div>
-    <strong>Collection order</strong>
-    <small data-collection-order-help>Items are shown in your saved manual order.</small>
-  </div>
+<div class="collection-order-toolbar" data-collection-order-toolbar hidden>
+  <div><strong>Reorder collection</strong><small data-collection-order-help>Drag covers into place or use the arrow controls.</small></div>
   <div class="collection-order-actions">
     <span class="collection-order-status" data-collection-order-status aria-live="polite"></span>
-    <button type="button" class="button" data-collection-reorder-toggle>Reorder</button>
-    <button type="button" class="button" data-collection-reorder-cancel hidden>Cancel</button>
-    <button type="button" class="button primary" data-collection-reorder-save hidden disabled>Save order</button>
+    <button type="button" class="button" data-collection-reorder-cancel>Cancel</button>
+    <button type="button" class="button primary" data-collection-reorder-save disabled>Save order</button>
   </div>
 </div>
 {% endif %}
+
+{% if items %}
+<div class="collection-display-toolbar" aria-label="Collection display options">
+  <span>Cover size</span>
+  <div class="cover-size-control collection-cover-size-control">
+    <button type="button" class="cover-size-step" data-collection-cover-smaller aria-label="Make collection covers smaller" title="Smaller covers">−</button>
+    <label class="cover-size-slider"><span class="sr-only">Collection cover size</span><input type="range" data-collection-cover-size min="120" max="300" step="10" value="{{ default_cover_size }}" aria-label="Collection cover size"><output class="cover-size-value" data-collection-cover-size-output aria-live="polite">{{ default_cover_size }}px</output></label>
+    <button type="button" class="cover-size-step" data-collection-cover-larger aria-label="Make collection covers larger" title="Larger covers">+</button>
+  </div>
+</div>
 {% endif %}
 
 <section class="cover-library collection-cover-library" aria-label="{{ collection.name }} covers" data-collection-grid>
@@ -103,27 +122,8 @@
     {% endif %}
   </article>
 {% else %}
-  <div class="panel empty"><h2>This collection is empty</h2><p>{% if current_user.is_librarian %}Add a movie, TV series, or individual episode to begin.{% else %}A Librarian has not added any items yet.{% endif %}</p></div>
+  <div class="panel empty"><h2>This collection is empty</h2><p>{% if current_user.is_librarian %}Use Add titles to begin this collection.{% else %}A Librarian has not added any items yet.{% endif %}</p></div>
 {% endfor %}
 </section>
-
-{% if items and current_user.is_librarian and collection.collection_type == 'manual' %}
-<script>
-  document.addEventListener("click", event => {
-    if (!window.matchMedia("(hover: none), (pointer: coarse)").matches) return;
-    const coverLink = event.target.closest(".collection-cover-library .cover-card-link");
-    if (coverLink) {
-      const card = coverLink.closest(".cover-card");
-      if (!card.classList.contains("actions-visible")) {
-        event.preventDefault();
-        document.querySelectorAll(".cover-card.actions-visible").forEach(other => other.classList.remove("actions-visible"));
-        card.classList.add("actions-visible");
-      }
-    } else if (!event.target.closest(".cover-card")) {
-      document.querySelectorAll(".cover-card.actions-visible").forEach(card => card.classList.remove("actions-visible"));
-    }
-  });
-</script>
-{% endif %}
 <script src="{{ url_for('static', path='collection-detail.js') }}?v={{ static_version }}" defer></script>
 {% endblock %}
