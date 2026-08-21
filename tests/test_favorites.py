@@ -153,6 +153,45 @@ class FavoriteTests(unittest.TestCase):
         detail = self.client.get(f"/titles/{self.movie_id}")
         self.assertLess(detail.text.index("★ Favorite"), detail.text.index("On Disk"))
 
+    def test_bulk_favorite_action_can_add_and_remove_selected_titles(self):
+        selected = [str(self.movie_id), str(self.show_id)]
+        added = self.client.post(
+            "/titles/favorite-bulk",
+            data={"selected": selected, "favorite": "1"},
+            headers={"X-CSRF-Token": self.csrf, "Accept": "application/json"},
+        )
+        self.assertEqual(added.status_code, 200)
+        self.assertTrue(added.json()["favorite"])
+        self.assertEqual(set(added.json()["title_ids"]), {self.movie_id, self.show_id})
+        with self.database.connect() as conn:
+            favorites = conn.execute(
+                """SELECT title_id,favorite FROM user_title_state
+                   WHERE user_id=? ORDER BY title_id""",
+                (self.user.id,),
+            ).fetchall()
+        self.assertEqual(
+            [(row["title_id"], row["favorite"]) for row in favorites],
+            [(self.movie_id, 1), (self.show_id, 1)],
+        )
+
+        removed = self.client.post(
+            "/titles/favorite-bulk",
+            data={"selected": selected, "favorite": "0"},
+            headers={"X-CSRF-Token": self.csrf, "Accept": "application/json"},
+        )
+        self.assertEqual(removed.status_code, 200)
+        self.assertFalse(removed.json()["favorite"])
+        with self.database.connect() as conn:
+            favorites = conn.execute(
+                """SELECT title_id,favorite FROM user_title_state
+                   WHERE user_id=? ORDER BY title_id""",
+                (self.user.id,),
+            ).fetchall()
+        self.assertEqual(
+            [(row["title_id"], row["favorite"]) for row in favorites],
+            [(self.movie_id, 0), (self.show_id, 0)],
+        )
+
     def test_search_history_is_saved_for_the_account_and_can_be_cleared(self):
         self.client.get("/library?q=David+Krumholtz&record_search=1")
         self.client.get("/library?q=Favorite+Film&record_search=1")
