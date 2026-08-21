@@ -3,6 +3,7 @@
   const body = document.getElementById("organize-dialog-body");
   if (!dialog || !body || typeof dialog.showModal !== "function") return;
 
+  const closeButton = dialog.querySelector(".organize-dialog-close");
   let opener = null;
   let activeRequest = null;
   let requestSerial = 0;
@@ -10,7 +11,11 @@
   let draggedSortRow = null;
   const sortRowAnimations = new WeakMap();
 
-  const csrfToken = () => document.querySelector('input[name="csrf_token"]')?.value || "";
+  const csrfToken = () => (
+    document.querySelector('input[name="csrf_token"]')?.value
+    || document.body?.dataset.csrfToken
+    || ""
+  );
   const requestHeaders = (extra = {}) => {
     const headers = new Headers(extra);
     const token = csrfToken();
@@ -112,6 +117,12 @@
       opener = null;
     }, 350);
   };
+
+  closeButton?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    closeDialog();
+  });
 
   const renderResponse = async (response, request = null) => {
     const html = await response.text();
@@ -319,20 +330,31 @@
     const submitter = event.submitter;
     submitter?.setAttribute("disabled", "");
     setLoading(true);
+    const request = beginRequest();
     try {
       const response = await fetch(form.action, {
         method: "POST",
         credentials: "same-origin",
+        cache: "no-store",
+        signal: request.controller.signal,
         body: new FormData(form),
         headers: requestHeaders({"X-Requested-With": "InfoMancerDialog"}),
       });
+      if (!requestIsCurrent(request.controller, request.serial)) return;
       const destination = new URL(response.url, window.location.href);
+      if (!response.ok) {
+        if (dialogPath.test(destination.pathname) && await renderResponse(response, request)) return;
+        throw new Error(`HTTP ${response.status}`);
+      }
       if (dialogPath.test(destination.pathname)) {
-        await renderResponse(response);
+        if (!(await renderResponse(response, request))) {
+          throw new Error("Dialog response could not be rendered");
+        }
         return;
       }
       const message = destination.searchParams.get("message") || "Organization saved.";
       if (form.matches("[data-organize-bulk]")) {
+        if (activeRequest === request.controller) activeRequest = null;
         closeDialog();
         document.dispatchEvent(new CustomEvent("infomancer:library-bulk-organized", {
           detail: {message},
@@ -342,9 +364,11 @@
       const current = new URL(window.location.href);
       current.searchParams.set("message", message);
       window.location.assign(current.href);
-    } catch (_) {
+    } catch (error) {
+      if (error?.name === "AbortError" || request.controller.signal.aborted) return;
       form.submit();
     } finally {
+      if (activeRequest === request.controller) activeRequest = null;
       delete form.dataset.submitting;
       submitter?.removeAttribute("disabled");
       if (dialog.open && !dialog.classList.contains("closing")) setLoading(false);
