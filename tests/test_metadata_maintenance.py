@@ -30,6 +30,8 @@ class MetadataMaintenanceTests(unittest.TestCase):
     def tearDown(self):
         self.client.close()
         self.auth_patch.stop()
+        with main.imdb_genre_lock:
+            main.imdb_genre_job.clear()
         main.db = self.original_db
         self.temporary.cleanup()
 
@@ -58,6 +60,58 @@ class MetadataMaintenanceTests(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn("Metadata maintenance", page.text)
         self.assertIn("Provider unavailable", page.text)
+
+    def test_title_scoped_refresh_marks_shared_worker_as_local_ui(self):
+        def fake_queue(title_ids, _user_id, label):
+            with main.imdb_genre_lock:
+                main.imdb_genre_job.clear()
+                main.imdb_genre_job.update({
+                    "status": "starting",
+                    "title_ids": list(title_ids),
+                    "scope_label": label,
+                })
+            return "Metadata refresh queued."
+
+        with patch.object(main, "queue_metadata_refresh", side_effect=fake_queue):
+            response = self.client.post(
+                f"/titles/{self.title_id}/imdb-refresh",
+                headers={"Accept": "application/json", "X-InfoMancer-Async": "1"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["ui_scope"], "local")
+        with main.imdb_genre_lock:
+            self.assertEqual(main.imdb_genre_job.get("ui_scope"), "local")
+            self.assertEqual(main.imdb_genre_job.get("ui_title_id"), self.title_id)
+
+    def test_local_metadata_failure_is_not_a_global_task_notification(self):
+        with main.imdb_genre_lock:
+            main.imdb_genre_job.clear()
+            main.imdb_genre_job.update({
+                "status": "failed",
+                "error": "Provider unavailable",
+                "ui_scope": "local",
+                "ui_title_id": self.title_id,
+            })
+        response = self.client.get("/api/task-failures")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("imdb-metadata", {item["id"] for item in response.json()["failures"]})
+
+    def test_metadata_controller_owns_local_progress_and_metric_explanations(self):
+        root = Path(__file__).resolve().parents[1]
+        controller = (root / "app/static/metadata-maintenance.js").read_text(encoding="utf-8")
+        styles = (root / "app/static/metadata-maintenance.css").read_text(encoding="utf-8")
+        task_widget = (root / "app/static/task-widget.js").read_text(encoding="utf-8")
+
+        self.assertIn("metadata-maintenance-inline-task", controller)
+        self.assertIn("metadata-refresh-state", controller)
+        self.assertIn("await loadScope(activeScope)", controller)
+        self.assertIn("metricDescriptions", controller)
+        self.assertIn("Refreshed within the last 30 days.", controller)
+        self.assertIn("metadata-maintenance-inline-task.working", styles)
+        self.assertIn("metadata-maintenance-metric>strong", styles)
+        self.assertIn("const localOnlyTask =", task_widget)
+        self.assertIn("Refreshing metadata for ", task_widget)
 
 
 if __name__ == "__main__":
