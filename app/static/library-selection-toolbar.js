@@ -494,7 +494,9 @@
       shiftPointer = null;
       event.preventDefault();
       event.stopImmediatePropagation();
-      applyRangeState(anchor, titleId, targetChecked);
+      // A cancelled checkbox click can restore its pre-click checked state after the
+      // event finishes. Apply the range on the next task so our state wins reliably.
+      window.setTimeout(() => applyRangeState(anchor, titleId, targetChecked), 0);
       return;
     }
 
