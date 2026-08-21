@@ -75,18 +75,17 @@ body.has-app-sidebar main.shell:has(> .catalog-tabs) > :is(
   max-width: 100%;
 }
 
-/* Cover size is a density target, not a hard card width. Auto-fill keeps the same
-   number of tracks on incomplete rows while 1fr distributes only the leftover row
-   width across those tracks. The first and last tracks therefore share the page
-   axes with the controls above instead of dumping spare space into an outer gutter. */
+/* Density is a stable cover footprint, not a request to stretch every card to fill
+   the row. The Inspector is an overlay, so opening or closing it may cover part of
+   the Library but must not make the posters themselves change size. */
 #cover-library.cover-library {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--cover-size)), 1fr));
-  justify-content: stretch;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--cover-size)), var(--cover-size)));
+  justify-content: space-between;
   column-gap: clamp(12px, 1.15vw, 18px);
 }
 #cover-library.cover-library > .cover-card {
-  width: 100%;
-  max-width: 100%;
+  width: min(var(--cover-size), 100%);
+  max-width: var(--cover-size);
   min-width: 0;
 }
 
