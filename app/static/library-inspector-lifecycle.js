@@ -12,7 +12,7 @@
      prevented workspace-core from seeing the click that should toggle the Inspector
      closed. Handle that one case at window capture, ahead of the selection layer. */
   window.addEventListener('click', (event) => {
-    if (event.button !== 0 || interactive(event.target)) return;
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || interactive(event.target)) return;
     const item = event.target.closest?.('.cover-card, .library-title-row');
     if (!item || !item.classList.contains('workspace-selected')) return;
     if (!document.body.classList.contains('workspace-inspector-open')) return;
