@@ -104,9 +104,12 @@
     if (libraryViewToolbar) libraryViewToolbar.style.marginLeft = 'auto';
   }
 
+  /* Match the enhanced filter-strip geometry during first paint. Using the old
+     fit-content width here caused a brief compressed row before the late Library
+     stylesheet took ownership. */
   if (libraryControls) {
     libraryControls.style.boxSizing = 'border-box';
-    libraryControls.style.width = 'fit-content';
+    libraryControls.style.width = '100%';
     libraryControls.style.maxWidth = '100%';
   }
   if (filterSearch && filterSearchInput && !filterSearch.classList.contains('open')) {
