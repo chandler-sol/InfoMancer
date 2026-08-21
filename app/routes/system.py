@@ -96,11 +96,13 @@ def build_router(ctx: RouteContext):
 
     @router.get("/api/task-failures", dependencies=[Depends(require_librarian)])
     def task_failures() -> dict:
-        """Return current failed background jobs without exposing scheduled backlog work."""
+        """Return current failed background jobs without exposing local or scheduled work."""
         failures: list[dict[str, str]] = []
 
         def add_failure(task_id: str, label: str, job: dict, href: str = "/activity") -> None:
             if job.get("status") not in {"error", "failed"}:
+                return
+            if job.get("ui_scope") == "local":
                 return
             detail = str(job.get("error") or job.get("detail") or "The task stopped unexpectedly.")
             failures.append({"id": task_id, "label": label, "detail": detail[:1200], "href": href})
