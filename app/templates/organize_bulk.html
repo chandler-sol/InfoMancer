@@ -2,6 +2,7 @@
 {% block title %}Organize selected titles · InfoMancer{% endblock %}
 {% block content %}
 <div class="organize-page organize-bulk-page" data-organize-content data-organize-bulk>
+<link rel="stylesheet" href="{{ url_for('static', path='organize-bulk-polish.css') }}?v={{ static_version }}">
 <header class="page-head"><div><p class="eyebrow">PERSONAL LIBRARY</p><h1>Organize selected titles</h1><p>Apply shared organization to {{ titles|length }} selected movie{% if titles|length != 1 %}s or TV series{% endif %}.</p></div><a class="button" href="/tags">Manage tags</a></header>
 <form class="panel organize-form organize-title-form" method="post" action="/titles/organize-bulk" data-organize-bulk>
   <input type="hidden" name="apply" value="1">
@@ -22,10 +23,10 @@
     <label class="organize-tag-new">Create tags while applying<input name="tag_names" placeholder="Family night, Demo content, Holiday"><small>Separate several tags with commas.</small></label>
   </section>
   {% if current_user.is_librarian %}
-  <section>
+  <section class="organize-collections-section">
     <h2>Add to collections</h2>
     <p class="muted">Selected titles are appended to each chosen collection in their current display order.</p>
-    {% if collections %}<div class="organize-tag-grid">{% for collection in collections %}<label><input type="checkbox" name="selected_collections" value="{{ collection.id }}"><span>{{ collection.name }} <small>{{ collection.title_count }}</small></span></label>{% endfor %}</div>{% else %}<p class="muted">No collections exist yet. <a href="/collections">Create the first collection</a>.</p>{% endif %}
+    {% if collections %}<div class="organize-tag-grid organize-collection-grid">{% for collection in collections %}<label class="organize-collection-option"><input type="checkbox" name="selected_collections" value="{{ collection.id }}"><span>{{ collection.name }} <small>{{ collection.title_count }}</small></span></label>{% endfor %}</div>{% else %}<p class="muted">No collections exist yet. <a href="/collections">Create the first collection</a>.</p>{% endif %}
   </section>
   {% endif %}
   <div class="actions"><a class="button" href="/library">Cancel</a><button class="button primary">Save organization</button></div>
