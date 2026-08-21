@@ -39,8 +39,28 @@
       || document.querySelector(`[data-workspace-title-id="${CSS.escape(id)}"]`);
   };
 
+  const visibleItems = () => {
+    const selector = coverLibrary && !coverLibrary.hidden ? '.cover-card' : '.library-title-row';
+    return [...document.querySelectorAll(selector)].filter(item => titleIdFor(item));
+  };
+
+  const rangeIds = (fromId, toId) => {
+    const items = visibleItems();
+    const start = items.findIndex(item => titleIdFor(item) === String(fromId));
+    const finish = items.findIndex(item => titleIdFor(item) === String(toId));
+    if (start < 0 || finish < 0) return [String(toId)];
+    const [low, high] = start < finish ? [start, finish] : [finish, start];
+    return items.slice(low, high + 1).map(item => titleIdFor(item)).filter(Boolean);
+  };
+
   let syntheticInspect = false;
   let inspectorDismissed = false;
+  let rangeAnchorId = '';
+  let checkboxPointer = null;
+  let applyingRange = false;
+  let dragSelection = null;
+  let suppressCardClick = false;
+  const dragThreshold = 7;
 
   const dismissInspectorForBulkSelection = () => {
     if (!document.body.classList.contains('workspace-inspector-open')) return;
@@ -290,11 +310,94 @@
     if (inspected && ids.has(inspected)) select.value = inspected;
   };
 
-  /* Keep cover checkbox clicks from falling through to the older card-click
-     Inspector handler. The label still performs its native checkbox toggle. */
+  const checkboxForPointerTarget = (target) => {
+    if (target?.matches?.('.library-title-choice')) return target;
+    return target?.closest?.('.cover-select-control')?.querySelector('.library-title-choice') || null;
+  };
+
+  /* Remember modifier state before the browser toggles a checkbox. This makes
+     Shift-click on the visible checkbox behave exactly like Shift-click on a card. */
+  document.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    const choice = checkboxForPointerTarget(event.target);
+    if (!choice) return;
+    checkboxPointer = {
+      id: String(choice.value || ''),
+      shift: event.shiftKey,
+    };
+  }, true);
+
+  /* Keep cover checkbox clicks from falling through to the card-click Inspector
+     handler. The checkbox itself still gets its normal click/change behavior. */
   coverLibrary?.addEventListener('click', event => {
     if (event.target.closest('.cover-select-control')) event.stopPropagation();
   });
+
+  /* Desktop pointer sweep selection. A normal click still opens the Inspector.
+     Only movement beyond the threshold turns the gesture into a multi-select drag. */
+  coverLibrary?.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || event.pointerType === 'touch' || interactive(event.target)) return;
+    const card = event.target.closest('.cover-card');
+    const titleId = titleIdFor(card);
+    if (!card || !titleId) return;
+    dragSelection = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startId: titleId,
+      lastId: titleId,
+      active: false,
+      additive: event.ctrlKey || event.metaKey,
+      startSelected: selectedEntries().some(entry => entry.id === titleId),
+    };
+  }, true);
+
+  coverLibrary?.addEventListener('dragstart', (event) => {
+    if (dragSelection && event.target.closest('.cover-card')) event.preventDefault();
+  });
+
+  document.addEventListener('pointermove', (event) => {
+    if (!dragSelection || event.pointerId !== dragSelection.pointerId) return;
+    if (!dragSelection.active) {
+      const distance = Math.hypot(
+        event.clientX - dragSelection.startX,
+        event.clientY - dragSelection.startY,
+      );
+      if (distance < dragThreshold) return;
+      dragSelection.active = true;
+      document.body.classList.add('library-drag-selecting');
+      dismissInspectorForBulkSelection();
+      if (!dragSelection.additive && !dragSelection.startSelected) {
+        selectedEntries().forEach(entry => {
+          if (entry.id !== dragSelection.startId) setTitleChecked(entry.id, false);
+        });
+      }
+      setTitleChecked(dragSelection.startId, true);
+    }
+
+    event.preventDefault();
+    const card = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('.cover-card');
+    const titleId = titleIdFor(card);
+    if (!titleId || titleId === dragSelection.lastId) return;
+    rangeIds(dragSelection.lastId, titleId).forEach(id => setTitleChecked(id, true));
+    dragSelection.lastId = titleId;
+  }, {capture: true, passive: false});
+
+  const finishDragSelection = (event) => {
+    if (!dragSelection || (event.pointerId !== undefined && event.pointerId !== dragSelection.pointerId)) return;
+    const wasActive = dragSelection.active;
+    const lastId = dragSelection.lastId;
+    dragSelection = null;
+    document.body.classList.remove('library-drag-selecting');
+    if (!wasActive) return;
+    rangeAnchorId = lastId;
+    suppressCardClick = true;
+    queueSync();
+    window.setTimeout(() => { suppressCardClick = false; }, 0);
+  };
+
+  document.addEventListener('pointerup', finishDragSelection, true);
+  document.addEventListener('pointercancel', finishDragSelection, true);
 
   /* Normal card clicks own a single selection. Once two or more titles are selected,
      clicking an unselected card adds it to the working set, while clicking a selected
@@ -302,7 +405,14 @@
   document.addEventListener('click', (event) => {
     if (syntheticInspect) return;
     const item = itemFor(event.target);
-    if (!item || interactive(event.target)) return;
+    if (!item) return;
+    if (suppressCardClick) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      suppressCardClick = false;
+      return;
+    }
+    if (interactive(event.target)) return;
     const titleId = titleIdFor(item);
     if (!titleId) return;
 
@@ -311,6 +421,7 @@
       return;
     }
 
+    rangeAnchorId = titleId;
     const entries = selectedEntries();
     const ids = new Set(entries.map(entry => entry.id));
     const isSelected = ids.has(titleId);
@@ -348,8 +459,26 @@
   }, true);
 
   document.addEventListener('change', (event) => {
-    if (!event.target.matches('.library-title-choice')) return;
-    if (event.target.checked && selectedEntries().length > 1) dismissInspectorForBulkSelection();
+    const choice = event.target.matches('.library-title-choice') ? event.target : null;
+    if (!choice) return;
+    const titleId = String(choice.value || '');
+    const pending = checkboxPointer?.id === titleId ? checkboxPointer : null;
+    checkboxPointer = null;
+
+    if (!applyingRange && pending?.shift) {
+      const fallbackAnchor = inspectedTitleId()
+        || selectedEntries().find(entry => entry.id !== titleId)?.id
+        || titleId;
+      const anchor = rangeAnchorId || fallbackAnchor;
+      applyingRange = true;
+      rangeIds(anchor, titleId).forEach(id => setTitleChecked(id, choice.checked));
+      applyingRange = false;
+      rangeAnchorId = titleId;
+    } else if (!applyingRange && !pending?.shift) {
+      rangeAnchorId = titleId;
+    }
+
+    if (choice.checked && selectedEntries().length > 1) dismissInspectorForBulkSelection();
     queueSync();
   });
 
@@ -359,6 +488,10 @@
 
   document.addEventListener('infomancer:library-results-updated', () => {
     factCache.clear();
+    rangeAnchorId = '';
+    checkboxPointer = null;
+    dragSelection = null;
+    document.body.classList.remove('library-drag-selecting');
     queueSync();
   });
 
