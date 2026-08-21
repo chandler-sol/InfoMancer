@@ -3,6 +3,12 @@
 
   const csrfToken = document.body?.dataset.csrfToken || '';
 
+  const asyncHeaders = () => ({
+    'Accept': 'application/json',
+    'X-InfoMancer-Async': '1',
+    ...(csrfToken ? {'X-CSRF-Token': csrfToken} : {}),
+  });
+
   const setupTvdbCredentials = () => {
     const manageLink = document.querySelector('a[href="/getting-started/metadata"]');
     const providerCard = manageLink?.closest('.settings-card');
@@ -32,6 +38,7 @@
     intro.className = 'muted';
     intro.textContent = 'Update the credentials this InfoMancer installation uses for TVDB metadata. Existing secrets are never shown back in the browser.';
     headingCopy.append(eyebrow, heading, intro);
+
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'tvdb-credentials-close';
@@ -104,7 +111,9 @@
         state.classList.add('good');
         state.textContent = 'Configured';
       }
-      providerCard.querySelector('form[action="/settings/metadata/tvdb-test"] button')?.removeAttribute('disabled');
+      providerCard
+        .querySelector('form[action="/settings/metadata/tvdb-test"] button')
+        ?.removeAttribute('disabled');
     };
 
     form.addEventListener('submit', async (event) => {
@@ -116,11 +125,7 @@
         const response = await fetch(form.action, {
           method: 'POST',
           credentials: 'same-origin',
-          headers: {
-            'Accept': 'application/json',
-            'X-InfoMancer-Async': '1',
-            ...(csrfToken ? {'X-CSRF-Token': csrfToken} : {}),
-          },
+          headers: asyncHeaders(),
           body: new FormData(form),
         });
         const data = await response.json().catch(() => ({}));
@@ -180,16 +185,13 @@
   };
 
   card.classList.add('metadata-maintenance-card');
-
   const staleButton = staleForm.querySelector('button');
   if (staleButton) staleButton.textContent = 'Refresh all stale';
 
-  const oldTable = card.querySelector('.settings-table-wrap');
-  oldTable?.remove();
+  card.querySelector('.settings-table-wrap')?.remove();
 
   const actions = staleForm.closest('.actions');
   if (actions) actions.classList.add('metadata-maintenance-actions');
-
   const viewButton = document.createElement('button');
   viewButton.type = 'button';
   viewButton.className = 'button metadata-maintenance-view';
@@ -236,6 +238,7 @@
   subtitle.className = 'muted';
   subtitle.textContent = 'Review titles by maintenance state and refresh individual records.';
   headingCopy.append(eyebrow, title, subtitle);
+
   const closeButton = document.createElement('button');
   closeButton.type = 'button';
   closeButton.className = 'metadata-maintenance-close';
@@ -255,6 +258,7 @@
     scopeButtons.set(scope.key, button);
     scopeBar.append(button);
   });
+
   const summary = document.createElement('div');
   summary.className = 'metadata-maintenance-summary';
   const summaryText = document.createElement('span');
@@ -285,16 +289,26 @@
   dialog.append(shell);
   document.body.append(dialog);
 
-  let activeScope = 'stale';
-  let offset = 0;
-  let total = 0;
-  let loading = false;
-  let requestController = null;
-  const runningTitleIds = new Set();
   const PAGE_SIZE = 100;
+  let activeScope = 'stale';
+  const scopeCache = new Map(
+    scopes.map(({key}) => [key, {
+      items: [],
+      total: 0,
+      offset: 0,
+      loaded: false,
+      done: false,
+      promise: null,
+      scrollTop: 0,
+    }])
+  );
+  const refreshJobs = new Map();
 
-  const sleep = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+  const sleep = (milliseconds) =>
+    new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+
   const formatKind = (kind) => kind === 'tv' ? 'TV Show' : 'Movie';
+
   const phaseLabel = (phase = '') => ({
     basics: 'Checking title records',
     ratings: 'Updating ratings',
@@ -321,123 +335,54 @@
     return chips;
   };
 
-  const setInlineTask = (banner, tone, headingText, detailText = '') => {
-    banner.hidden = false;
-    banner.className = `metadata-maintenance-inline-task ${tone}`;
-    banner.querySelector('strong').textContent = headingText;
-    const detail = banner.querySelector('small');
-    detail.textContent = detailText;
-    detail.hidden = !detailText;
-  };
-
   const updateMetricTotal = (scope, value) => {
-    const metric = metricByScope.get(scope);
-    const number = metric?.querySelector('strong');
+    const number = metricByScope.get(scope)?.querySelector('strong');
     if (number && Number.isFinite(Number(value))) {
       number.textContent = Number(value).toLocaleString();
     }
   };
 
-  const pollTitleRefresh = async (item, row, button, banner) => {
-    try {
-      for (let attempt = 0; attempt < 900; attempt += 1) {
-        if (!row.isConnected) return;
-        await sleep(attempt === 0 ? 450 : 1000);
-        const response = await fetch(`/api/titles/${item.id}/metadata-refresh-state`, {
-          credentials: 'same-origin',
-          cache: 'no-store',
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const state = await response.json();
-        const task = state.task || {};
-        const queue = state.queue || {};
+  const applyJobToRow = (row, job) => {
+    const button = row.querySelector('.metadata-maintenance-row-refresh');
+    const banner = row.querySelector('.metadata-maintenance-inline-task');
+    if (!button || !banner) return;
 
-        if (['starting', 'running'].includes(String(task.status || ''))) {
-          setInlineTask(
-            banner,
-            'working',
-            phaseLabel(task.phase),
-            'This title is refreshing here. It will not create a global notification.'
-          );
-          continue;
-        }
-
-        if (queue.status === 'failed' || state.metadata_refresh_error) {
-          const error = queue.error || state.metadata_refresh_error || 'Metadata refresh failed.';
-          setInlineTask(banner, 'error', 'Refresh could not finish', error);
-          button.disabled = false;
-          button.textContent = 'Retry';
-          return;
-        }
-
-        if (queue.status === 'complete' || state.metadata_refreshed_at) {
-          setInlineTask(banner, 'success', 'Refresh complete', 'Updating this list…');
-          await sleep(650);
-          const previousScroll = list.scrollTop;
-          await loadScope(activeScope);
-          list.scrollTop = Math.min(previousScroll, Math.max(0, list.scrollHeight - list.clientHeight));
-          return;
-        }
-      }
-      setInlineTask(
-        banner,
-        'error',
-        'Refresh is taking longer than expected',
-        'The background worker may still be running. Close and reopen this list to check its state.'
-      );
+    if (!job || job.status === 'idle') {
+      banner.hidden = true;
       button.disabled = false;
-      button.textContent = 'Check again';
-    } catch (error) {
-      setInlineTask(
-        banner,
-        'error',
-        'Refresh status could not be checked',
-        error?.message || 'Try again.'
-      );
-      button.disabled = false;
-      button.textContent = 'Retry';
-    } finally {
-      runningTitleIds.delete(item.id);
+      button.textContent = 'Refresh';
+      return;
     }
+
+    banner.hidden = false;
+    banner.className = `metadata-maintenance-inline-task ${job.tone || 'working'}`;
+    banner.querySelector('strong').textContent = job.heading || 'Refreshing metadata';
+    const detail = banner.querySelector('small');
+    detail.textContent = job.detail || '';
+    detail.hidden = !job.detail;
+
+    const busy = ['starting', 'running'].includes(job.status);
+    button.disabled = busy;
+    button.textContent = busy ? 'Refreshing…' : job.status === 'failed' ? 'Retry' : job.status === 'complete' ? 'Done' : 'Refresh';
   };
 
-  const refreshTitle = async (item, row, button, banner) => {
-    if (runningTitleIds.has(item.id)) return;
-    runningTitleIds.add(item.id);
-    button.disabled = true;
-    button.textContent = 'Starting…';
-    setInlineTask(banner, 'working', 'Starting refresh', 'Preparing this title for metadata refresh.');
-    try {
-      const response = await fetch(`/titles/${item.id}/imdb-refresh`, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: {
-          'Accept': 'application/json',
-          'X-InfoMancer-Async': '1',
-          ...(csrfToken ? {'X-CSRF-Token': csrfToken} : {}),
-        },
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
-      button.textContent = 'Refreshing…';
-      setInlineTask(
-        banner,
-        'working',
-        'Metadata refresh queued',
-        'Progress will stay with this title instead of the notification widget.'
-      );
-      await pollTitleRefresh(item, row, button, banner);
-    } catch (error) {
-      runningTitleIds.delete(item.id);
-      button.textContent = 'Retry';
-      button.disabled = false;
-      setInlineTask(
-        banner,
-        'error',
-        'Refresh could not start',
-        error?.message || 'Try again.'
-      );
-    }
+  const updateVisibleJob = (titleId) => {
+    const row = list.querySelector(`.metadata-maintenance-row[data-title-id="${String(titleId)}"]`);
+    if (row) applyJobToRow(row, refreshJobs.get(titleId));
+  };
+
+  const setJob = (titleId, patch) => {
+    const current = refreshJobs.get(titleId) || {
+      status: 'idle',
+      tone: 'working',
+      heading: '',
+      detail: '',
+      polling: false,
+    };
+    const next = {...current, ...patch};
+    refreshJobs.set(titleId, next);
+    updateVisibleJob(titleId);
+    return next;
   };
 
   const renderItem = (item) => {
@@ -447,18 +392,22 @@
 
     const copy = document.createElement('div');
     copy.className = 'metadata-maintenance-row-copy';
+
     const name = document.createElement('a');
     name.href = `/titles/${item.id}`;
     name.className = 'metadata-maintenance-row-title';
     name.textContent = item.title;
+
     const meta = document.createElement('span');
     meta.className = 'metadata-maintenance-row-meta';
     meta.textContent = [formatKind(item.kind), item.year || null, item.provider || null]
       .filter(Boolean).join(' · ');
+
     const chips = document.createElement('div');
     chips.className = 'metadata-maintenance-row-chips';
     chips.append(...statusChips(item));
     copy.append(name, meta, chips);
+
     if (item.error) {
       const error = document.createElement('small');
       error.className = 'metadata-maintenance-row-error';
@@ -476,24 +425,21 @@
     banner.hidden = true;
     banner.setAttribute('role', 'status');
     banner.setAttribute('aria-live', 'polite');
+
     const indicator = document.createElement('span');
     indicator.className = 'metadata-maintenance-inline-indicator';
     indicator.setAttribute('aria-hidden', 'true');
+
     const bannerCopy = document.createElement('span');
     const bannerHeading = document.createElement('strong');
     const bannerDetail = document.createElement('small');
     bannerCopy.append(bannerHeading, bannerDetail);
     banner.append(indicator, bannerCopy);
 
-    action.addEventListener('click', () => refreshTitle(item, row, action, banner));
+    action.addEventListener('click', () => refreshTitle(item));
     row.append(copy, action, banner);
+    applyJobToRow(row, refreshJobs.get(item.id));
     return row;
-  };
-
-  const setLoading = (value) => {
-    loading = value;
-    loadMore.disabled = value;
-    scopeButtons.forEach((button) => { button.disabled = value; });
   };
 
   const updateBulkAction = () => {
@@ -512,72 +458,257 @@
     }
   };
 
-  const loadScope = async (scope, {append = false} = {}) => {
-    if (loading) requestController?.abort();
-    requestController = new AbortController();
-    if (!append) {
-      activeScope = scopes.some((item) => item.key === scope) ? scope : 'stale';
-      offset = 0;
-      total = 0;
-      list.replaceChildren();
+  const renderActiveScope = () => {
+    const state = scopeCache.get(activeScope);
+    if (!state) return;
+
+    list.replaceChildren();
+    if (!state.loaded) {
+      const loadingRow = document.createElement('div');
+      loadingRow.className = 'metadata-maintenance-loading';
+      loadingRow.textContent = `Loading ${labels[activeScope].toLowerCase()} titles…`;
+      list.append(loadingRow);
+      summaryText.textContent = `Loading ${labels[activeScope].toLowerCase()} titles…`;
+      loadMore.hidden = true;
+      return;
     }
+
+    if (!state.items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'metadata-maintenance-empty';
+      empty.textContent = `No ${labels[activeScope].toLowerCase()} titles.`;
+      list.append(empty);
+    } else {
+      list.append(...state.items.map(renderItem));
+    }
+
+    summaryText.textContent = `${state.total.toLocaleString()} ${labels[activeScope].toLowerCase()} title${state.total === 1 ? '' : 's'}`;
+    updateMetricTotal(activeScope, state.total);
+    loadMore.hidden = state.done;
+    requestAnimationFrame(() => {
+      list.scrollTop = state.scrollTop || 0;
+    });
+  };
+
+  const fetchScope = async (scope, {append = false, force = false} = {}) => {
+    const state = scopeCache.get(scope);
+    if (!state) return;
+    if (state.promise && !force) return state.promise;
+    if (state.loaded && !append && !force) return state;
+    if (append && state.done) return state;
+
+    const offset = append ? state.offset : 0;
+    state.promise = (async () => {
+      try {
+        const url = new URL('/api/metadata/maintenance', window.location.origin);
+        url.searchParams.set('scope', scope);
+        url.searchParams.set('limit', String(PAGE_SIZE));
+        url.searchParams.set('offset', String(offset));
+
+        const response = await fetch(url, {
+          credentials: 'same-origin',
+          cache: 'no-store',
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        const items = Array.isArray(data.items) ? data.items : [];
+        const total = Number(data.total || 0);
+
+        if (append) state.items.push(...items);
+        else state.items = items;
+        state.total = total;
+        state.offset = offset + items.length;
+        state.loaded = true;
+        state.done = state.offset >= total;
+        state.error = '';
+
+        if (scope === activeScope) renderActiveScope();
+        updateMetricTotal(scope, total);
+        return state;
+      } catch (error) {
+        state.error = error?.message || 'Could not load titles.';
+        if (scope === activeScope) {
+          list.replaceChildren();
+          const failure = document.createElement('div');
+          failure.className = 'metadata-maintenance-empty error';
+          failure.textContent = 'Title details could not be loaded. Try again.';
+          list.append(failure);
+          summaryText.textContent = `${labels[scope]} could not be loaded`;
+          loadMore.hidden = true;
+        }
+        return state;
+      } finally {
+        state.promise = null;
+      }
+    })();
+
+    return state.promise;
+  };
+
+  const invalidateScopes = () => {
+    scopeCache.forEach((state) => {
+      state.loaded = false;
+      state.done = false;
+      state.items = [];
+      state.offset = 0;
+      state.total = 0;
+      state.promise = null;
+      state.scrollTop = 0;
+    });
+  };
+
+  const prefetchOtherScopes = () => {
+    scopes
+      .map(({key}) => key)
+      .filter((scope) => scope !== activeScope)
+      .forEach((scope) => window.setTimeout(() => fetchScope(scope), 0));
+  };
+
+  const pollTitleRefresh = async (item) => {
+    const job = refreshJobs.get(item.id);
+    if (!job || job.polling) return;
+
+    setJob(item.id, {polling: true});
+    try {
+      for (let attempt = 0; attempt < 900; attempt += 1) {
+        await sleep(attempt === 0 ? 450 : 1000);
+        const response = await fetch(`/api/titles/${item.id}/metadata-refresh-state`, {
+          credentials: 'same-origin',
+          cache: 'no-store',
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const state = await response.json();
+        const task = state.task || {};
+        const queue = state.queue || {};
+
+        if (['starting', 'running'].includes(String(task.status || ''))) {
+          setJob(item.id, {
+            status: 'running',
+            tone: 'working',
+            heading: phaseLabel(task.phase),
+            detail: 'This refresh stays with the title and does not create a global notification.',
+          });
+          continue;
+        }
+
+        if (queue.status === 'failed' || state.metadata_refresh_error) {
+          setJob(item.id, {
+            status: 'failed',
+            tone: 'error',
+            heading: 'Refresh could not finish',
+            detail: queue.error || state.metadata_refresh_error || 'Metadata refresh failed.',
+            polling: false,
+          });
+          return;
+        }
+
+        if (queue.status === 'complete' || state.metadata_refreshed_at) {
+          setJob(item.id, {
+            status: 'complete',
+            tone: 'success',
+            heading: 'Refresh complete',
+            detail: 'Updating maintenance views…',
+            polling: false,
+          });
+          await sleep(650);
+          invalidateScopes();
+          await fetchScope(activeScope, {force: true});
+          prefetchOtherScopes();
+          return;
+        }
+      }
+
+      setJob(item.id, {
+        status: 'failed',
+        tone: 'error',
+        heading: 'Refresh is taking longer than expected',
+        detail: 'The background worker may still be running. Try Refresh again to check it.',
+        polling: false,
+      });
+    } catch (error) {
+      setJob(item.id, {
+        status: 'failed',
+        tone: 'error',
+        heading: 'Refresh status could not be checked',
+        detail: error?.message || 'Try again.',
+        polling: false,
+      });
+    }
+  };
+
+  const refreshTitle = async (item) => {
+    const existing = refreshJobs.get(item.id);
+    if (existing && ['starting', 'running'].includes(existing.status)) return;
+
+    setJob(item.id, {
+      status: 'starting',
+      tone: 'working',
+      heading: 'Starting refresh',
+      detail: 'Preparing this title for metadata refresh.',
+      polling: false,
+    });
+
+    try {
+      const response = await fetch(`/titles/${item.id}/imdb-refresh`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: asyncHeaders(),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+
+      setJob(item.id, {
+        status: 'running',
+        tone: 'working',
+        heading: 'Metadata refresh queued',
+        detail: 'Progress will stay with this title even if you switch maintenance views.',
+      });
+      pollTitleRefresh(item);
+    } catch (error) {
+      setJob(item.id, {
+        status: 'failed',
+        tone: 'error',
+        heading: 'Refresh could not start',
+        detail: error?.message || 'Try again.',
+        polling: false,
+      });
+    }
+  };
+
+  const switchScope = (scope) => {
+    if (!scopeCache.has(scope) || scope === activeScope) return;
+
+    const current = scopeCache.get(activeScope);
+    if (current) current.scrollTop = list.scrollTop;
+
+    activeScope = scope;
     scopeButtons.forEach((button, key) => {
       const active = key === activeScope;
       button.classList.toggle('active', active);
       button.setAttribute('aria-current', active ? 'true' : 'false');
     });
     updateBulkAction();
-    setLoading(true);
-    if (!append) {
-      const loadingRow = document.createElement('div');
-      loadingRow.className = 'metadata-maintenance-loading';
-      loadingRow.textContent = 'Loading titles…';
-      list.append(loadingRow);
-    }
 
-    try {
-      const url = new URL('/api/metadata/maintenance', window.location.origin);
-      url.searchParams.set('scope', activeScope);
-      url.searchParams.set('limit', String(PAGE_SIZE));
-      url.searchParams.set('offset', String(offset));
-      const response = await fetch(url, {
-        credentials: 'same-origin',
-        cache: 'no-store',
-        signal: requestController.signal,
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      total = Number(data.total || 0);
-      if (!append) list.replaceChildren();
-      const items = Array.isArray(data.items) ? data.items : [];
-      if (!items.length && offset === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'metadata-maintenance-empty';
-        empty.textContent = `No ${labels[activeScope].toLowerCase()} titles.`;
-        list.append(empty);
-      } else {
-        list.append(...items.map(renderItem));
-      }
-      offset += items.length;
-      summaryText.textContent = `${total.toLocaleString()} ${labels[activeScope].toLowerCase()} title${total === 1 ? '' : 's'}`;
-      updateMetricTotal(activeScope, total);
-      loadMore.hidden = offset >= total;
-    } catch (error) {
-      if (error?.name === 'AbortError') return;
-      if (!append) list.replaceChildren();
-      const failure = document.createElement('div');
-      failure.className = 'metadata-maintenance-empty error';
-      failure.textContent = 'Title details could not be loaded. Try again.';
-      list.append(failure);
-      loadMore.hidden = true;
-    } finally {
-      setLoading(false);
-    }
+    const state = scopeCache.get(activeScope);
+    renderActiveScope();
+    if (!state.loaded) fetchScope(activeScope);
   };
 
   const openDialog = (scope = 'stale') => {
+    if (!scopeCache.has(scope)) scope = 'stale';
+    activeScope = scope;
+    scopeButtons.forEach((button, key) => {
+      const active = key === activeScope;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-current', active ? 'true' : 'false');
+    });
+    updateBulkAction();
     dialog.showModal();
-    loadScope(scope);
+
+    const state = scopeCache.get(activeScope);
+    renderActiveScope();
+    if (!state.loaded) fetchScope(activeScope).then(prefetchOtherScopes);
+    else prefetchOtherScopes();
   };
 
   metrics.slice(0, 4).forEach((metric) => {
@@ -589,9 +720,18 @@
       activate();
     });
   });
+
   viewButton.addEventListener('click', () => openDialog('stale'));
-  scopeButtons.forEach((button, scope) => button.addEventListener('click', () => loadScope(scope)));
-  loadMore.addEventListener('click', () => loadScope(activeScope, {append: true}));
+  scopeButtons.forEach((button, scope) => {
+    button.addEventListener('click', () => switchScope(scope));
+  });
+  loadMore.addEventListener('click', async () => {
+    const state = scopeCache.get(activeScope);
+    if (!state || state.done || state.promise) return;
+    loadMore.disabled = true;
+    await fetchScope(activeScope, {append: true});
+    loadMore.disabled = false;
+  });
   closeButton.addEventListener('click', () => dialog.close());
   closeFooter.addEventListener('click', () => dialog.close());
   dialog.addEventListener('click', (event) => {
