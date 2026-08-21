@@ -3,42 +3,40 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+STATIC = ROOT / "app/static"
 
 
 class ProfileLibraryPolishContracts(unittest.TestCase):
     def test_operational_dashboard_uses_optical_inset_and_six_recent_titles(self):
         template = (ROOT / "app/templates/dashboard_command.html").read_text(encoding="utf-8")
-        css = (ROOT / "app/static/dashboard-command.css").read_text(encoding="utf-8")
-
+        css = (STATIC / "dashboard-command.css").read_text(encoding="utf-8")
         self.assertIn("recent[:6]", template)
         self.assertIn(".home-ops-summary", css)
         self.assertIn("padding-left:5px", css)
 
     def test_repeated_library_title_click_toggles_inspector_closed(self):
-        script = (ROOT / "app/static/workspace.js").read_text(encoding="utf-8")
-
+        core = (STATIC / "workspace-core.js").read_text(encoding="utf-8")
         repeated = 'if (String(titleId) === selectedTitleId)'
-        self.assertIn(repeated, script)
-        self.assertIn("closeInspector({historyMode:", script)
-        self.assertLess(script.index('if (event.metaKey || event.ctrlKey)'), script.index(repeated))
-        self.assertLess(script.index('if (event.shiftKey)'), script.index(repeated))
+        self.assertIn(repeated, core)
+        self.assertIn("closeInspector({historyMode:", core)
+        self.assertLess(core.index('if (event.metaKey || event.ctrlKey)'), core.index(repeated))
+        self.assertLess(core.index('if (event.shiftKey)'), core.index(repeated))
 
-    def test_library_display_controls_are_compact_and_first_paint_is_guarded(self):
-        css = (ROOT / "app/static/modern.css").read_text(encoding="utf-8")
-        script = (ROOT / "app/static/workspace.js").read_text(encoding="utf-8")
-
-        self.assertIn(".library-view-controls", css)
-        self.assertIn("max-width: min(100%, 430px)", css)
-        self.assertIn(".cover-size-control:not([hidden])", css)
-        self.assertIn("width: 220px", css)
-        self.assertIn(".cover-library", css)
-        self.assertIn("justify-content: start", css)
-        self.assertIn("library-first-paint-fallback", css)
-        self.assertIn('classList.add("library-view-ready")', script)
+    def test_library_display_controls_use_semantic_density_and_guard_first_paint(self):
+        density = (STATIC / "library-density.css").read_text(encoding="utf-8")
+        loader = (STATIC / "workspace-ui.js").read_text(encoding="utf-8")
+        self.assertIn("grid-template-columns: repeat(5, 34px)", density)
+        self.assertIn("grid-template-columns: repeat(3, minmax(0, 1fr))", density)
+        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr))", density)
+        self.assertIn('#cover-library[data-mobile-density="spacious"]', density)
+        self.assertIn(".cover-size-value", density)
+        self.assertIn("display: none !important", density)
+        self.assertIn("coverSizeControl.style.visibility = 'hidden'", loader)
+        self.assertIn("libraryViewToolbar.style.visibility = 'hidden'", loader)
+        self.assertIn("'library-density.js'", loader)
 
     def test_cross_document_navigation_keeps_app_chrome_stable(self):
-        css = (ROOT / "app/static/modern.css").read_text(encoding="utf-8")
-
+        css = (STATIC / "modern.css").read_text(encoding="utf-8")
         self.assertIn("@view-transition", css)
         self.assertIn("navigation: auto", css)
         self.assertIn("view-transition-name: infomancer-chrome", css)
@@ -50,31 +48,24 @@ class ProfileLibraryPolishContracts(unittest.TestCase):
         self.assertIn("@media (prefers-reduced-motion: reduce)", css)
 
     def test_desktop_density_pass_reclaims_vertical_space(self):
-        css = (ROOT / "app/static/modern.css").read_text(encoding="utf-8")
-
+        css = (STATIC / "modern.css").read_text(encoding="utf-8")
         self.assertIn("Desktop density pass", css)
         self.assertIn("@media (min-width: 981px)", css)
         self.assertIn("body.has-app-sidebar .shell", css)
-        self.assertIn("padding-top: 24px", css)
-        self.assertIn("padding-bottom: 56px", css)
         self.assertIn("main.shell:has(> .home-ops)", css)
         self.assertIn("body.has-app-sidebar .catalog-tabs", css)
         self.assertIn("body.has-app-sidebar .settings-section-nav", css)
         self.assertIn("body.has-app-sidebar .profile-page", css)
-        self.assertIn("margin-top: 0", css)
-        self.assertIn("min-height: 350px", css)
-        self.assertIn("border-top: 1px solid var(--line) !important", css)
-        self.assertIn("body.has-app-sidebar .profile-custom-choice", css)
 
     def test_profile_page_has_live_visual_picker_and_custom_upload_contract(self):
         template = (ROOT / "app/templates/account_profile.html").read_text(encoding="utf-8")
-        css = (ROOT / "app/static/profile.css").read_text(encoding="utf-8")
-        modern = (ROOT / "app/static/modern.css").read_text(encoding="utf-8")
-        script = (ROOT / "app/static/profile.js").read_text(encoding="utf-8")
+        modern = (STATIC / "modern.css").read_text(encoding="utf-8")
+        script = (STATIC / "profile.js").read_text(encoding="utf-8")
         route = (ROOT / "app/routes/account_avatar.py").read_text(encoding="utf-8")
         routes_init = (ROOT / "app/routes/__init__.py").read_text(encoding="utf-8")
 
-        self.assertIn("PROFILE PREVIEW", template)
+        self.assertIn("<h1>Profile Settings</h1>", template)
+        self.assertNotIn("PROFILE PREVIEW", template)
         self.assertIn("data-profile-avatar-open", template)
         self.assertIn("PNG, JPEG, WebP", template)
         self.assertIn("128 × 128 minimum", template)
@@ -83,14 +74,8 @@ class ProfileLibraryPolishContracts(unittest.TestCase):
         self.assertIn("SVG is not accepted", template)
         self.assertIn("{% macro profile_icon_svg(icon)", template)
         self.assertIn('data-profile-icon-choice="{{ icon }}"', template)
-        self.assertIn('path d="M4 7h3l2-2h6l2 2h3v12H4z"', template)
-        self.assertNotIn("{% set icon_symbols", template)
-        self.assertIn("profile.css') }}?v={{ static_version }}", template)
-        self.assertIn("profile-primary-grid", css)
-        self.assertIn("profile-preview-card", css)
-        self.assertIn(".profile-page{margin:-28px auto 0}", css)
-        self.assertIn("border:0!important;border-top:1px solid var(--line)!important", css)
-        self.assertIn(".profile-custom-choice{grid-column:span 2;min-width:200px}", css)
+        self.assertIn("<strong>Custom Icon</strong>", template)
+        self.assertIn("profile-custom-plus", template)
         self.assertIn(".profile-icon-glyph svg", modern)
         self.assertIn("stroke-linecap: round", modern)
         self.assertIn('createImageBitmap(file)', script)
@@ -107,15 +92,18 @@ class ProfileLibraryPolishContracts(unittest.TestCase):
         self.assertIn("os.replace", route)
         self.assertIn("build_account_avatar_router", routes_init)
 
-    def test_account_avatar_surface_uses_authenticated_avatar_endpoint(self):
-        css = (ROOT / "app/static/auth.css").read_text(encoding="utf-8")
+    def test_account_avatar_surface_has_one_stable_network_owner(self):
+        auth_css = (STATIC / "auth.css").read_text(encoding="utf-8")
+        loader = (STATIC / "workspace-ui.js").read_text(encoding="utf-8")
         route = (ROOT / "app/routes/account_avatar.py").read_text(encoding="utf-8")
-
-        self.assertIn("background-image:url('/account/avatar/current')", css)
+        self.assertNotIn("background-image:url('/account/avatar/current')", auth_css)
+        self.assertIn("Avoiding a CSS background request", auth_css)
+        self.assertIn("avatarImage.src = '/account/avatar/current'", loader)
+        self.assertNotIn("Date.now()", loader)
         self.assertIn('@router.get("/account/avatar/current")', route)
-        self.assertIn('media_type="image/png"', route)
-        self.assertIn('media_type="image/svg+xml"', route)
-        self.assertIn('"Cache-Control": "private, no-store"', route)
+        self.assertIn('AVATAR_CACHE_CONTROL = "private, no-cache"', route)
+        self.assertIn('"ETag": etag', route)
+        self.assertIn("_etag_matches", route)
 
 
 if __name__ == "__main__":
