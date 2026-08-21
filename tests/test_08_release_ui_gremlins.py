@@ -195,18 +195,18 @@ class ReleaseUiGremlinContracts(unittest.TestCase):
         self.assertIn("pending[0].then(() =>", source)
         self.assertIn("coverSizeControl?.style.removeProperty('visibility')", source)
 
-    def test_density_stays_with_view_controls_on_desktop(self):
+    def test_density_stays_with_view_controls_on_scope_row(self):
         css = (ROOT / "app/static/library-density.css").read_text(encoding="utf-8")
         script = (ROOT / "app/static/library-density.js").read_text(encoding="utf-8")
 
-        self.assertIn("@media (min-width: 681px)", css)
-        self.assertIn("grid-template-columns: auto minmax(0, 1fr)", css)
-        self.assertIn(".library-display-toolbar.has-letter-jump .library-view-toolbar", css)
-        self.assertIn("justify-self: end", css)
-        self.assertIn(".library-display-toolbar.has-letter-jump .library-view-controls", css)
+        self.assertIn(".catalog-tabs > .library-view-toolbar", css)
+        self.assertIn("order: 100", css)
+        self.assertIn("margin: 0 0 0 auto", css)
+        self.assertIn(".catalog-tabs > .library-view-toolbar .library-view-controls", css)
         self.assertIn("justify-content: flex-end", css)
         self.assertIn("grid-template-columns: repeat(5, 34px)", css)
         self.assertIn("const desktopButtons = desktopSteps.map", script)
+        self.assertIn("catalogTabs.append(viewToolbar)", script)
         self.assertNotIn("range.type = 'range'", script)
         self.assertNotIn("library-density-range", script)
 
