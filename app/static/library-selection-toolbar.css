@@ -74,15 +74,26 @@ body:not(.library-multi-selection) .library-display-toolbar.library-selection-to
 }
 
 .library-bulk-match-menu > summary {
+  display: inline-flex;
+  align-items: center;
   list-style: none;
   cursor: pointer;
 }
 .library-bulk-match-menu > summary::-webkit-details-marker { display: none; }
 .library-bulk-match-menu > summary::after {
-  content: "⌄";
-  margin-left: 7px;
+  content: "";
+  width: 5px;
+  height: 5px;
+  margin-left: 8px;
+  flex: 0 0 auto;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
   color: var(--muted);
-  font-size: 11px;
+  transform: translateY(-1px) rotate(45deg);
+  transform-origin: center;
+}
+.library-bulk-match-menu[open] > summary::after {
+  transform: translateY(1px) rotate(225deg);
 }
 .library-bulk-match-menu[open] > summary,
 .library-bulk-match-menu > summary:hover {
