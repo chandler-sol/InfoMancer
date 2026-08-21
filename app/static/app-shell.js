@@ -3,16 +3,20 @@
   if (!body) return;
 
   const csrfToken = body.dataset.csrfToken || '';
-  if (csrfToken) {
-    document.querySelectorAll('form[method="post" i]').forEach((form) => {
-      if (form.querySelector('input[name="csrf_token"]')) return;
-      const input = document.createElement('input');
-      input.type = 'hidden';
-      input.name = 'csrf_token';
-      input.value = csrfToken;
-      form.prepend(input);
-    });
-  }
+  const ensureCsrf = (form) => {
+    if (!csrfToken || !form?.matches?.('form[method="post" i]')) return;
+    if (form.querySelector('input[name="csrf_token"]')) return;
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'csrf_token';
+    input.value = csrfToken;
+    form.prepend(input);
+  };
+  document.querySelectorAll('form[method="post" i]').forEach(ensureCsrf);
+  /* Library surfaces and dialogs can hydrate forms after initial page setup. Add the
+     token at submit time as the final shell boundary so dynamically inserted native
+     forms receive the same CSRF protection as server-rendered forms. */
+  document.addEventListener('submit', (event) => ensureCsrf(event.target), true);
 
   const flash = document.getElementById('flash-message');
   if (flash) {
