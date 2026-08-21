@@ -2,15 +2,16 @@
   const body = document.body;
   if (!body) return;
 
+  let versionQuery = '';
+  try {
+    versionQuery = new URL(document.currentScript?.src || '', window.location.href).search;
+  } catch (_error) {}
+
   /* Page-specific Settings features get their own owners. Bootstrap only marks the
      page and loads their version-matched assets early enough to avoid a first-paint
      flash of the legacy fallback surface. */
   if (window.location.pathname === '/settings/metadata') {
     body.classList.add('metadata-maintenance-enhanced');
-    let versionQuery = '';
-    try {
-      versionQuery = new URL(document.currentScript?.src || '', window.location.href).search;
-    } catch (_error) {}
 
     const stylesheet = document.createElement('link');
     stylesheet.rel = 'stylesheet';
@@ -20,6 +21,15 @@
     document.addEventListener('DOMContentLoaded', () => {
       const controller = document.createElement('script');
       controller.src = `/static/metadata-maintenance.js${versionQuery}`;
+      controller.async = true;
+      document.head.append(controller);
+    }, {once: true});
+  }
+
+  if (window.location.pathname === '/sources') {
+    document.addEventListener('DOMContentLoaded', () => {
+      const controller = document.createElement('script');
+      controller.src = `/static/source-bulk-actions.js${versionQuery}`;
       controller.async = true;
       document.head.append(controller);
     }, {once: true});
