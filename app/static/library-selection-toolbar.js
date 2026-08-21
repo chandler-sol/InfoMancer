@@ -3,6 +3,8 @@
   const actions = document.getElementById('library-selection-actions');
   if (!toolbar || !actions) return;
 
+  const coverLibrary = document.getElementById('cover-library');
+  const libraryTable = document.querySelector('.library-table');
   const viewToolbar = toolbar.querySelector('.library-view-toolbar');
   if (viewToolbar) toolbar.insertBefore(actions, viewToolbar);
   else toolbar.append(actions);
@@ -16,6 +18,33 @@
     return [...unique.values()];
   };
   const selectedIds = () => selectedChoices().map(choice => String(choice.value || '')).filter(Boolean);
+  const titleIdFor = (item) => String(item?.dataset?.workspaceTitleId || '');
+  const visibleItems = () => {
+    const selector = coverLibrary && !coverLibrary.hidden ? '.cover-card' : '.library-title-row';
+    return [...document.querySelectorAll(selector)].filter(item => titleIdFor(item));
+  };
+  const rangeIds = (fromId, toId) => {
+    const items = visibleItems();
+    const start = items.findIndex(item => titleIdFor(item) === String(fromId));
+    const finish = items.findIndex(item => titleIdFor(item) === String(toId));
+    if (start < 0 || finish < 0) return [String(toId)];
+    const [low, high] = start < finish ? [start, finish] : [finish, start];
+    return items.slice(low, high + 1).map(titleIdFor).filter(Boolean);
+  };
+  const setTitleChecked = (titleId, checked) => {
+    const choices = [...document.querySelectorAll(`.library-title-choice[value="${CSS.escape(String(titleId))}"]`)];
+    if (!choices.length) return;
+    const changed = choices.some(choice => choice.checked !== checked);
+    choices.forEach(choice => { choice.checked = checked; });
+    if (changed) choices[0].dispatchEvent(new Event('change', {bubbles: true}));
+  };
+  const choiceIsChecked = (titleId) => document.querySelector(
+    `.library-title-choice[value="${CSS.escape(String(titleId))}"]:checked`,
+  ) !== null;
+  const csrfToken = () => document.body.dataset.csrfToken
+    || document.querySelector('input[name="csrf_token"]')?.value
+    || '';
+
   const rememberBulkMatchReturn = (kind) => {
     if (!['movie', 'tv'].includes(kind)) return;
     // Live Library filtering updates the browser URL without rerendering the form,
@@ -122,15 +151,24 @@
   actions.replaceChildren(selectionSummary, primaryCommands);
 
   const titleIsFavorite = (titleId) => {
-    const selector = `[data-workspace-title-id="${CSS.escape(String(titleId))}"]`;
+    const id = String(titleId);
+    const choices = [...document.querySelectorAll(`.library-title-choice[value="${CSS.escape(id)}"]`)];
+    const known = choices.find(choice => choice.dataset.favorite === 'true' || choice.dataset.favorite === 'false');
+    if (known) return known.dataset.favorite === 'true';
+    const selector = `[data-workspace-title-id="${CSS.escape(id)}"]`;
     return [...document.querySelectorAll(selector)].some((item) => Boolean(
       item.querySelector('.cover-favorite-button.active, .favorite-action.active, .favorite-star.active')
     ));
   };
 
   const setFavoriteInPlace = (titleId, favorite) => {
-    const selector = `[data-workspace-title-id="${CSS.escape(String(titleId))}"]`;
+    const id = String(titleId);
+    document.querySelectorAll(`.library-title-choice[value="${CSS.escape(id)}"]`).forEach((choice) => {
+      choice.dataset.favorite = String(Boolean(favorite));
+    });
+    const selector = `[data-workspace-title-id="${CSS.escape(id)}"]`;
     document.querySelectorAll(selector).forEach((item) => {
+      item.dataset.favorite = String(Boolean(favorite));
       const title = item.querySelector('.cover-card-link > strong, .title-link')?.textContent?.trim() || 'title';
       item.querySelectorAll('.cover-favorite-button').forEach((button) => {
         button.classList.toggle('active', favorite);
@@ -175,8 +213,7 @@
     });
   };
 
-  const syncFavoriteButton = (choices = selectedChoices()) => {
-    const allFavorite = choices.length >= 2 && choices.every(choice => titleIsFavorite(choice.value));
+  const renderFavoriteButton = (allFavorite) => {
     favoriteButton.classList.toggle('active', allFavorite);
     favoriteButton.setAttribute('aria-pressed', String(allFavorite));
     favoriteButton.title = allFavorite
@@ -184,6 +221,11 @@
       : 'Add selected titles to Favorites';
     const label = favoriteButton.querySelector('small');
     if (label) label.textContent = allFavorite ? 'Unfavorite' : 'Favorite';
+  };
+
+  const syncFavoriteButton = (choices = selectedChoices()) => {
+    const allFavorite = choices.length >= 2 && choices.every(choice => titleIsFavorite(choice.value));
+    renderFavoriteButton(allFavorite);
     return allFavorite;
   };
 
@@ -191,15 +233,14 @@
     const choices = selectedChoices();
     const ids = choices.map(choice => String(choice.value || '')).filter(Boolean);
     if (ids.length < 2 || favoriteButton.disabled) return;
-    const targetFavorite = !choices.every(choice => titleIsFavorite(choice.value));
     favoriteButton.disabled = true;
-    favoriteButton.title = targetFavorite
-      ? 'Adding selected titles to Favorites…'
-      : 'Removing selected titles from Favorites…';
+    favoriteButton.title = 'Updating selected Favorites…';
     const body = new FormData();
     ids.forEach(id => body.append('selected', id));
-    body.append('favorite', targetFavorite ? '1' : '0');
-    const csrf = document.querySelector('input[name="csrf_token"]')?.value || '';
+    // Let the server derive the next state from the persisted favorites. This keeps
+    // the command reversible even if a stale DOM or a live filter briefly disagrees.
+    body.append('favorite', 'toggle');
+    const csrf = csrfToken();
     try {
       const response = await fetch('/titles/favorite-bulk', {
         method: 'POST',
@@ -214,9 +255,11 @@
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
-      const favorite = typeof data.favorite === 'boolean' ? data.favorite : targetFavorite;
+      const favorite = Boolean(data.favorite);
       (data.title_ids || ids).forEach(id => setFavoriteInPlace(id, favorite));
-      syncFavoriteButton(choices);
+      // The endpoint applies one state to the entire selected set, so render that
+      // returned state directly instead of re-inferring it from transient markup.
+      renderFavoriteButton(favorite);
       if (status) status.textContent = data.detail || (
         favorite
           ? `Added ${ids.length} selected titles to Favorites.`
@@ -230,6 +273,34 @@
     }
   });
 
+  const toggleSingleFavorite = async (button, item) => {
+    const titleId = titleIdFor(item);
+    if (!titleId || button.disabled) return;
+    button.disabled = true;
+    const csrf = csrfToken();
+    try {
+      const response = await fetch(`/api/titles/${encodeURIComponent(titleId)}/favorite`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: {
+          'Accept': 'application/json',
+          'X-InfoMancer-Async': '1',
+          ...(csrf ? {'X-CSRF-Token': csrf} : {}),
+        },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+      setFavoriteInPlace(titleId, Boolean(data.favorite));
+      syncFavoriteButton();
+      if (status) status.textContent = data.detail || 'Favorite updated.';
+    } catch (error) {
+      if (status) status.textContent = error.message || 'Favorite could not be updated.';
+    } finally {
+      button.disabled = false;
+    }
+  };
+
   const sync = () => {
     const choices = selectedChoices();
     const count = choices.length;
@@ -240,11 +311,7 @@
     if (!shouldHide) {
       syncFavoriteButton(choices);
     } else {
-      favoriteButton.classList.remove('active');
-      favoriteButton.setAttribute('aria-pressed', 'false');
-      favoriteButton.title = 'Add selected titles to Favorites';
-      const label = favoriteButton.querySelector('small');
-      if (label) label.textContent = 'Favorite';
+      renderFavoriteButton(false);
       moreMenu.removeAttribute('open');
       matchMenu.removeAttribute('open');
     }
@@ -285,12 +352,176 @@
     if (status) status.textContent = event.detail?.message || 'Organization saved for selected titles.';
   });
 
+  /* Selection gestures are owned at the window capture layer so the older Library
+     click/drag handlers never get a chance to reinterpret a range-removal gesture.
+     Dragging from an unselected cover selects; dragging from a selected cover
+     deselects. Shift-click follows the same rule at the target end of the range. */
+  let gestureAnchorId = '';
+  let pointerGesture = null;
+  let shiftPointer = null;
+  let applyingGesture = false;
+  let suppressGestureClick = false;
+  const dragThreshold = 7;
+  const gestureInteractive = (target) => target?.closest?.(
+    'input, button, summary, details, form, select, textarea, .item-action-menu, .cover-select-control',
+  );
+
+  const applyRangeState = (fromId, toId, checked) => {
+    applyingGesture = true;
+    rangeIds(fromId, toId).forEach(id => setTitleChecked(id, checked));
+    applyingGesture = false;
+    gestureAnchorId = String(toId);
+    sync();
+  };
+
+  window.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+
+    const favoriteControl = event.target.closest?.('.cover-favorite-button, .favorite-action');
+    if (favoriteControl) return;
+
+    const checkbox = event.target.matches?.('.library-title-choice')
+      ? event.target
+      : event.target.closest?.('.cover-select-control')?.querySelector('.library-title-choice');
+    if (checkbox && event.shiftKey) {
+      shiftPointer = {
+        id: String(checkbox.value || ''),
+        wasChecked: checkbox.checked,
+      };
+      return;
+    }
+
+    const card = event.target.closest?.('.cover-card');
+    if (!card || gestureInteractive(event.target)) return;
+    const titleId = titleIdFor(card);
+    if (!titleId) return;
+
+    // Prevent the previous cover drag controller from arming itself. A normal click
+    // is still allowed through later if the pointer never crosses the drag threshold.
+    event.stopPropagation();
+    pointerGesture = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startId: titleId,
+      lastId: titleId,
+      startSelected: choiceIsChecked(titleId),
+      targetChecked: !choiceIsChecked(titleId),
+      additive: event.ctrlKey || event.metaKey,
+      active: false,
+    };
+  }, true);
+
+  window.addEventListener('dragstart', (event) => {
+    if (pointerGesture && event.target.closest?.('.cover-card')) event.preventDefault();
+  }, true);
+
+  window.addEventListener('pointermove', (event) => {
+    if (!pointerGesture || event.pointerId !== pointerGesture.pointerId) return;
+    if (!pointerGesture.active) {
+      const distance = Math.hypot(
+        event.clientX - pointerGesture.startX,
+        event.clientY - pointerGesture.startY,
+      );
+      if (distance < dragThreshold) return;
+      pointerGesture.active = true;
+      document.body.classList.add('library-drag-selecting');
+      if (pointerGesture.targetChecked && !pointerGesture.additive && !pointerGesture.startSelected) {
+        selectedIds().forEach(id => {
+          if (id !== pointerGesture.startId) setTitleChecked(id, false);
+        });
+      }
+      setTitleChecked(pointerGesture.startId, pointerGesture.targetChecked);
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const card = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('.cover-card');
+    const titleId = titleIdFor(card);
+    if (!titleId || titleId === pointerGesture.lastId) return;
+    rangeIds(pointerGesture.lastId, titleId).forEach(id => {
+      setTitleChecked(id, pointerGesture.targetChecked);
+    });
+    pointerGesture.lastId = titleId;
+  }, {capture: true, passive: false});
+
+  const finishPointerGesture = (event) => {
+    if (!pointerGesture || event.pointerId !== pointerGesture.pointerId) return;
+    const finished = pointerGesture;
+    pointerGesture = null;
+    document.body.classList.remove('library-drag-selecting');
+    if (!finished.active) return;
+    event.preventDefault();
+    event.stopPropagation();
+    gestureAnchorId = finished.lastId;
+    suppressGestureClick = true;
+    sync();
+    window.setTimeout(() => { suppressGestureClick = false; }, 0);
+  };
+  window.addEventListener('pointerup', finishPointerGesture, true);
+  window.addEventListener('pointercancel', finishPointerGesture, true);
+
+  window.addEventListener('click', (event) => {
+    const favoriteControl = event.target.closest?.('.cover-favorite-button, .favorite-action');
+    if (favoriteControl) {
+      const item = favoriteControl.closest('[data-workspace-title-id]');
+      if (!item) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void toggleSingleFavorite(favoriteControl, item);
+      return;
+    }
+
+    const item = event.target.closest?.('.cover-card, .library-title-row');
+    if (!item) return;
+    const titleId = titleIdFor(item);
+    if (!titleId) return;
+
+    if (suppressGestureClick && item.matches('.cover-card')) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      suppressGestureClick = false;
+      return;
+    }
+
+    const checkbox = event.target.matches?.('.library-title-choice')
+      ? event.target
+      : event.target.closest?.('.cover-select-control')?.querySelector('.library-title-choice');
+    if (event.shiftKey && checkbox) {
+      const pending = shiftPointer?.id === String(checkbox.value || '') ? shiftPointer : null;
+      const targetChecked = pending ? !pending.wasChecked : !checkbox.checked;
+      const anchor = gestureAnchorId || selectedIds().find(id => id !== titleId) || titleId;
+      shiftPointer = null;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      applyRangeState(anchor, titleId, targetChecked);
+      return;
+    }
+
+    if (event.shiftKey && !gestureInteractive(event.target)) {
+      const targetChecked = !choiceIsChecked(titleId);
+      const anchor = gestureAnchorId || selectedIds().find(id => id !== titleId) || titleId;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      applyRangeState(anchor, titleId, targetChecked);
+    }
+  }, true);
+
   document.addEventListener('change', (event) => {
     if (event.target.matches('.library-title-choice, .letter-title-choice, #select-all-titles')) {
+      if (!applyingGesture && event.target.matches('.library-title-choice')) {
+        gestureAnchorId = String(event.target.value || '');
+      }
       queueMicrotask(sync);
     }
   });
-  document.addEventListener('infomancer:library-results-updated', () => queueMicrotask(sync));
+  document.addEventListener('infomancer:library-results-updated', () => {
+    gestureAnchorId = '';
+    pointerGesture = null;
+    shiftPointer = null;
+    document.body.classList.remove('library-drag-selecting');
+    queueMicrotask(sync);
+  });
   document.addEventListener('infomancer:library-selection-updated', () => queueMicrotask(sync));
 
   document.addEventListener('pointerdown', (event) => {
