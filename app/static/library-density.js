@@ -1,7 +1,17 @@
 (() => {
   const control = document.getElementById('cover-size-control');
   const coverLibrary = document.getElementById('cover-library');
+  const viewToolbar = document.querySelector('.library-view-toolbar');
+  const catalogTabs = document.querySelector('.catalog-tabs');
   if (!control || !coverLibrary) return;
+
+  /* View mode and density describe how the current Library scope is displayed,
+     so keep them with All / Movies / TV Shows rather than with alphabet filtering.
+     This is a presentation handoff only; library-surface-lazy.js remains the sole
+     owner of List/Covers behavior. */
+  if (viewToolbar && catalogTabs && viewToolbar.parentElement !== catalogTabs) {
+    catalogTabs.append(viewToolbar);
+  }
 
   const DESKTOP_KEY = 'infomancer-cover-density-desktop';
   const MOBILE_KEY = 'infomancer-cover-density-mobile';
