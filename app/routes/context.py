@@ -88,3 +88,7 @@ class RouteContext:
 
     def live(self, name: str) -> LiveRef:
         return LiveRef(self._namespace, name)
+
+    def set(self, name: str, value: Any) -> None:
+        """Replace one live service while preserving existing LiveRef consumers."""
+        self._namespace[name] = value
