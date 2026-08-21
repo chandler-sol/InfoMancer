@@ -28,15 +28,10 @@
   if (panel) {
     const explainer = document.createElement('div');
     explainer.className = 'saved-view-explainer';
-    explainer.innerHTML = '<strong>Save the Library exactly as you have it</strong><span>A Saved View remembers the current Library scope, filters, and sorting. Pin it to keep a shortcut in Library and on Dashboard.</span>';
+    explainer.innerHTML = list
+      ? '<strong>Your saved Library setups</strong><span>Each view remembers its Library scope, filters, and sorting. Pinned views also stay available in Library and on Dashboard.</span>'
+      : '<strong>No saved views yet</strong><span>A Saved View remembers the current Library scope, filters, and sorting. Name this setup below, and pin it if you want a shortcut in Library and on Dashboard.</span>';
     panel.prepend(explainer);
-
-    if (!list) {
-      const empty = document.createElement('div');
-      empty.className = 'saved-view-inline-empty';
-      empty.innerHTML = '<strong>No saved views yet</strong><span>Your first saved view will appear here.</span>';
-      explainer.after(empty);
-    }
   }
 
   /* <details> is intentionally used for progressive enhancement, but native details
