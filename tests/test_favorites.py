@@ -153,12 +153,39 @@ class FavoriteTests(unittest.TestCase):
         detail = self.client.get(f"/titles/{self.movie_id}")
         self.assertLess(detail.text.index("★ Favorite"), detail.text.index("On Disk"))
 
-    def test_bulk_favorite_action_can_add_and_remove_selected_titles(self):
+    def test_async_single_title_favorite_toggles_without_navigation(self):
+        headers = {
+            "X-CSRF-Token": self.csrf,
+            "Accept": "application/json",
+            "X-InfoMancer-Async": "1",
+        }
+        added = self.client.post(
+            f"/api/titles/{self.movie_id}/favorite",
+            headers=headers,
+        )
+        self.assertEqual(added.status_code, 200)
+        self.assertTrue(added.json()["favorite"])
+
+        removed = self.client.post(
+            f"/api/titles/{self.movie_id}/favorite",
+            headers=headers,
+        )
+        self.assertEqual(removed.status_code, 200)
+        self.assertFalse(removed.json()["favorite"])
+        with self.database.connect() as conn:
+            state = conn.execute(
+                "SELECT favorite FROM user_title_state WHERE user_id=? AND title_id=?",
+                (self.user.id, self.movie_id),
+            ).fetchone()
+        self.assertEqual(state["favorite"], 0)
+
+    def test_bulk_favorite_command_toggles_the_whole_selected_set(self):
         selected = [str(self.movie_id), str(self.show_id)]
+        headers = {"X-CSRF-Token": self.csrf, "Accept": "application/json"}
         added = self.client.post(
             "/titles/favorite-bulk",
-            data={"selected": selected, "favorite": "1"},
-            headers={"X-CSRF-Token": self.csrf, "Accept": "application/json"},
+            data={"selected": selected, "favorite": "toggle"},
+            headers=headers,
         )
         self.assertEqual(added.status_code, 200)
         self.assertTrue(added.json()["favorite"])
@@ -176,8 +203,8 @@ class FavoriteTests(unittest.TestCase):
 
         removed = self.client.post(
             "/titles/favorite-bulk",
-            data={"selected": selected, "favorite": "0"},
-            headers={"X-CSRF-Token": self.csrf, "Accept": "application/json"},
+            data={"selected": selected, "favorite": "toggle"},
+            headers=headers,
         )
         self.assertEqual(removed.status_code, 200)
         self.assertFalse(removed.json()["favorite"])
