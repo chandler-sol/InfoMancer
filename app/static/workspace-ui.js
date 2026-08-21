@@ -87,6 +87,24 @@
     await Promise.all(pending);
   };
 
+  /* The onboarding tour intentionally owns the task widget while it demonstrates a
+     fake running scan. engagement.js initializes before this loader, so replacing
+     that DOM during the demo would strand the tour's live references on a detached
+     element. Wait until the demo releases ownership, then install the real task
+     controller. Outside the tour this resolves immediately. */
+  const loadTaskWidgetWhenReady = () => {
+    const widget = document.getElementById("task-widget");
+    if (!widget || widget.dataset.tourDemo !== "1") return loadScript("task-widget.js");
+    return new Promise((resolve) => {
+      const observer = new MutationObserver(() => {
+        if (widget.dataset.tourDemo === "1") return;
+        observer.disconnect();
+        loadScript("task-widget.js").then(resolve);
+      });
+      observer.observe(widget, {attributes: true, attributeFilter: ["data-tour-demo"]});
+    });
+  };
+
   /* Start all applicable CSS requests immediately. Layout-affecting JavaScript is
      intentionally held until its matching styles settle, which removes the race
      where a controller rearranged a surface a frame before its CSS arrived. */
@@ -197,7 +215,7 @@
      them together once their chrome CSS is ready. */
   globalStyles.then(() => Promise.all([
     loadScript("workspace-ui-core.js"),
-    loadScript("task-widget.js"),
+    loadTaskWidgetWhenReady(),
     loadScript("app-navigation.js"),
   ]));
 
