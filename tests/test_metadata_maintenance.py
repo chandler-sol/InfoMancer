@@ -274,7 +274,7 @@ class MetadataMaintenanceTests(unittest.TestCase):
         self.assertIn("metadata-maintenance-inline-task", controller)
         self.assertIn("metadata-refresh-state", controller)
         self.assertIn("metricDescriptions", controller)
-        self.assertIn("Refreshed within the last 30 days.", controller)
+        self.assertIn("Matched titles refreshed within the last 30 days.", controller)
         self.assertIn("fetchWithTimeout", controller)
         self.assertIn("data.completed === true", controller)
         self.assertIn("attempt < 120", controller)
