@@ -76,19 +76,6 @@
     document.head.append(script);
   });
 
-  const loadTaskWidgetWhenReady = () => {
-    const widget = document.getElementById('task-widget');
-    if (!widget || widget.dataset.tourDemo !== '1') return loadScript('task-widget.js');
-    return new Promise((resolve) => {
-      const observer = new MutationObserver(() => {
-        if (widget.dataset.tourDemo === '1') return;
-        observer.disconnect();
-        loadScript('task-widget.js').then(resolve);
-      });
-      observer.observe(widget, {attributes: true, attributeFilter: ['data-tour-demo']});
-    });
-  };
-
   const globalStyles = Promise.all([
     loadStyle('task-widget.css'),
     loadStyle('app-navigation.css'),
@@ -171,7 +158,7 @@
 
   globalStyles.then(() => Promise.all([
     loadScript('workspace-ui-core.js'),
-    loadTaskWidgetWhenReady(),
+    loadScript('task-widget.js'),
     loadScript('app-navigation.js'),
   ]));
 
