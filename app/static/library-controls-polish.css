@@ -2,7 +2,7 @@
 
 .library-controls {
   box-sizing: border-box;
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
 }
 
@@ -12,11 +12,14 @@
   max-width: 240px;
 }
 
-/* The expanded search should take only the space it needs rather than consuming
-   the remaining filter-strip width. */
+/* An expanded search is a real text field, not a slightly stretched icon slot.
+   Give the placeholder and entered query enough room to remain readable while
+   still allowing the filter row to wrap naturally on narrower desktops. */
 .library-filter-search.open {
-  flex: 0 1 285px;
-  width: min(285px, 100%);
+  flex: 1 1 340px;
+  width: min(420px, 100%);
+  min-width: min(320px, 100%);
+  max-width: 420px;
 }
 
 /* Once collapsed, fully remove the input from the painted/focusable surface. This
@@ -27,7 +30,9 @@
 
 .library-filter-search.open input {
   visibility: visible;
-  padding-right: 44px;
+  box-sizing: border-box;
+  padding-right: 46px;
+  text-overflow: ellipsis;
 }
 
 /* Give the search affordance the same inset breathing room as the other controls,
@@ -58,6 +63,7 @@
   .library-filter-search.open {
     flex-basis: 100%;
     width: 100%;
+    min-width: 0;
     max-width: none;
   }
 }
