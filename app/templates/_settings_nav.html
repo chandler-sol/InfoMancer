@@ -1,5 +1,6 @@
 <nav class="settings-section-nav" aria-label="Application settings">
   <a href="/settings/general" {% if section == 'general' %}class="active" aria-current="page"{% endif %}>General</a>
+  {% if current_user.is_librarian %}<a href="/admin/users" {% if section == 'users' %}class="active" aria-current="page"{% endif %}>Users</a>{% endif %}
   <a href="/settings/metadata" {% if section == 'metadata' %}class="active" aria-current="page"{% endif %}>Metadata</a>
   <a href="/settings/external-search" {% if section == 'external-search' %}class="active" aria-current="page"{% endif %}>Search</a>
   <a href="/sources" {% if section == 'sources' %}class="active" aria-current="page"{% endif %}>Sources</a>
