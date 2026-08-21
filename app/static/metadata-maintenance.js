@@ -9,6 +9,16 @@
     ...(csrfToken ? {'X-CSRF-Token': csrfToken} : {}),
   });
 
+  const fetchWithTimeout = async (url, options = {}, timeoutMs = 10000) => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, {...options, signal: controller.signal});
+    } finally {
+      window.clearTimeout(timer);
+    }
+  };
+
   const setupTvdbCredentials = () => {
     const manageLink = document.querySelector('a[href="/getting-started/metadata"]');
     const providerCard = manageLink?.closest('.settings-card');
@@ -310,6 +320,10 @@
   const formatKind = (kind) => kind === 'tv' ? 'TV Show' : 'Movie';
 
   const phaseLabel = (phase = '') => ({
+    provider: 'Contacting TVDB',
+    details: 'Updating title details',
+    credits: 'Updating credits',
+    save: 'Saving metadata',
     basics: 'Checking title records',
     ratings: 'Updating ratings',
     episodes: 'Updating episode links',
@@ -570,12 +584,13 @@
 
     setJob(item.id, {polling: true});
     try {
-      for (let attempt = 0; attempt < 900; attempt += 1) {
+      for (let attempt = 0; attempt < 120; attempt += 1) {
         await sleep(attempt === 0 ? 450 : 1000);
-        const response = await fetch(`/api/titles/${item.id}/metadata-refresh-state`, {
-          credentials: 'same-origin',
-          cache: 'no-store',
-        });
+        const response = await fetchWithTimeout(
+          `/api/titles/${item.id}/metadata-refresh-state`,
+          {credentials: 'same-origin', cache: 'no-store'},
+          10000,
+        );
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const state = await response.json();
         const task = state.task || {};
@@ -610,7 +625,7 @@
             detail: 'Updating maintenance views…',
             polling: false,
           });
-          await sleep(650);
+          await sleep(250);
           invalidateScopes();
           await fetchScope(activeScope, {force: true});
           prefetchOtherScopes();
@@ -621,16 +636,17 @@
       setJob(item.id, {
         status: 'failed',
         tone: 'error',
-        heading: 'Refresh is taking longer than expected',
-        detail: 'The background worker may still be running. Try Refresh again to check it.',
+        heading: 'Refresh timed out',
+        detail: 'No final status arrived within two minutes. The refresh was stopped from spinning indefinitely.',
         polling: false,
       });
     } catch (error) {
+      const timedOut = error?.name === 'AbortError';
       setJob(item.id, {
         status: 'failed',
         tone: 'error',
-        heading: 'Refresh status could not be checked',
-        detail: error?.message || 'Try again.',
+        heading: timedOut ? 'Refresh status timed out' : 'Refresh status could not be checked',
+        detail: timedOut ? 'InfoMancer did not return refresh status within 10 seconds.' : (error?.message || 'Try again.'),
         polling: false,
       });
     }
@@ -643,33 +659,56 @@
     setJob(item.id, {
       status: 'starting',
       tone: 'working',
-      heading: 'Starting refresh',
-      detail: 'Preparing this title for metadata refresh.',
+      heading: 'Refreshing metadata',
+      detail: 'Contacting TVDB for this title.',
       polling: false,
     });
 
     try {
-      const response = await fetch(`/titles/${item.id}/imdb-refresh`, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: asyncHeaders(),
-      });
+      const response = await fetchWithTimeout(
+        `/titles/${item.id}/imdb-refresh`,
+        {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: asyncHeaders(),
+        },
+        95000,
+      );
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+
+      if (data.completed === true || data.status === 'complete') {
+        setJob(item.id, {
+          status: 'complete',
+          tone: 'success',
+          heading: 'Refresh complete',
+          detail: data.duration_ms
+            ? `TVDB refresh finished in ${(Number(data.duration_ms) / 1000).toFixed(1)} seconds. Updating maintenance views…`
+            : 'Updating maintenance views…',
+          polling: false,
+        });
+        invalidateScopes();
+        await fetchScope(activeScope, {force: true});
+        prefetchOtherScopes();
+        return;
+      }
 
       setJob(item.id, {
         status: 'running',
         tone: 'working',
-        heading: 'Metadata refresh queued',
-        detail: 'Progress will stay with this title even if you switch maintenance views.',
+        heading: 'Metadata refresh started',
+        detail: 'Waiting for the server to report a final result.',
       });
       pollTitleRefresh(item);
     } catch (error) {
+      const timedOut = error?.name === 'AbortError';
       setJob(item.id, {
         status: 'failed',
         tone: 'error',
-        heading: 'Refresh could not start',
-        detail: error?.message || 'Try again.',
+        heading: timedOut ? 'Refresh timed out' : 'Refresh failed',
+        detail: timedOut
+          ? 'TVDB did not finish this title within 95 seconds. Try again or test the TVDB connection in Metadata Settings.'
+          : (error?.message || 'Try again.'),
         polling: false,
       });
     }
