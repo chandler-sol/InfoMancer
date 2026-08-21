@@ -10,3 +10,28 @@
    authenticated avatar image. Avoiding a CSS background request also prevents the
    same avatar endpoint from being fetched twice during application startup. */
 .account-avatar{overflow:hidden}.account-avatar img{width:100%;height:100%;object-fit:cover;border-radius:inherit}
+
+/* User Management uses details for both account expansion and guarded deletion.
+   Scope these selectors to direct children so the nested delete disclosure cannot
+   inherit the full account-row grid. */
+body .user-management-grid .user-list-heading{display:block}
+body .user-management-grid .user-list-heading h2{margin-bottom:4px}
+body .user-management-grid .admin-user>summary{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:12px;padding:16px 0;cursor:pointer;list-style:none}
+body .user-management-grid .admin-user>summary::-webkit-details-marker,body .user-management-grid .admin-user-delete>summary::-webkit-details-marker{display:none}
+body .user-management-grid .admin-user-identity{display:grid;gap:3px;min-width:0}
+body .user-management-grid .admin-user-identity strong{font-size:1.08rem;line-height:1.25;color:var(--text)}
+body .user-management-grid .admin-user-identity small{font-size:.86rem;line-height:1.35;color:#9eafbf}
+body .user-management-grid .admin-user-expand{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:5px 8px;border:1px solid #34414d;border-radius:7px;background:#0e151c;color:#a9bac9;font-size:.76rem;font-weight:750;line-height:1;transition:border-color .14s ease,color .14s ease,background-color .14s ease}
+body .user-management-grid .admin-user-expand svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transition:transform .14s ease}
+body .user-management-grid .admin-user>summary:hover .admin-user-expand,body .user-management-grid .admin-user>summary:focus-visible .admin-user-expand{border-color:#567537;background:#152213;color:var(--lime)}
+body .user-management-grid .admin-user[open] .admin-user-expand svg{transform:rotate(90deg)}
+body .user-management-grid .admin-user-edit .admin-user-save{align-self:flex-end;width:auto;min-width:126px;padding:9px 14px}
+body .user-management-grid .admin-user-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+body .user-management-grid .admin-user-actions .user-invitation-actions{display:flex;flex-wrap:wrap;gap:10px}
+body .user-management-grid .admin-user-actions form{margin:0}
+body .user-management-grid .admin-user-actions .button{display:inline-flex;align-items:center;justify-content:center;min-height:38px;padding:9px 13px}
+body .user-management-grid .admin-user-delete{width:fit-content;max-width:100%}
+body .user-management-grid .admin-user-delete>.admin-user-delete-toggle{display:inline-flex!important;grid-template-columns:none!important;align-items:center;width:auto!important;min-height:38px;padding:9px 13px!important;border:1px solid #703e3d;border-radius:3px;background:transparent;color:var(--danger);font-size:13px;font-weight:700;line-height:1.2;cursor:pointer;list-style:none}
+body .user-management-grid .admin-user-delete>.admin-user-delete-toggle:hover,body .user-management-grid .admin-user-delete>.admin-user-delete-toggle:focus-visible{border-color:#a75552;background:#251417;color:#ff9b96;outline:0}
+@media(max-width:760px){body .user-management-grid .admin-user>summary{grid-template-columns:minmax(0,1fr) auto!important}body .user-management-grid .admin-user-identity{grid-column:1;grid-row:1}body .user-management-grid .admin-user-expand{grid-column:2;grid-row:1}body .user-management-grid .account-state{grid-column:1;grid-row:2;justify-self:start}body .user-management-grid .admin-user-edit .admin-user-save{align-self:stretch;width:100%}body .user-management-grid .admin-user-actions,body .user-management-grid .admin-user-actions .user-invitation-actions{display:grid;grid-template-columns:1fr;width:100%}body .user-management-grid .admin-user-actions form,body .user-management-grid .admin-user-actions .button{width:100%}}
+@media(prefers-reduced-motion:reduce){body .user-management-grid .admin-user-expand,body .user-management-grid .admin-user-expand svg{transition:none}}
