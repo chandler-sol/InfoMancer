@@ -45,6 +45,12 @@ def build_router(ctx: RouteContext):
             started = status in {"starting", "running"} and (
                 active_ids is None or title_id in active_ids
             )
+            if started:
+                # A one-title refresh is owned by the surface that launched it.
+                # The durable worker remains shared, but global task/notification UI
+                # must not light up for this small local action.
+                imdb_genre_job["ui_scope"] = "local"
+                imdb_genre_job["ui_title_id"] = title_id
 
         if async_request(request):
             return JSONResponse(
@@ -53,6 +59,7 @@ def build_router(ctx: RouteContext):
                     "title_id": title_id,
                     "detail": detail,
                     "status": status,
+                    "ui_scope": "local" if started else "",
                 },
                 status_code=200 if started else 409,
             )
@@ -72,6 +79,7 @@ def build_router(ctx: RouteContext):
                     "status", "phase", "scope_label", "title_ids", "records",
                     "matched", "requested", "id_processed", "id_total",
                     "id_found", "id_missing", "id_errors", "error",
+                    "ui_scope", "ui_title_id",
                 )
                 if key in imdb_genre_job
             }
