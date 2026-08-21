@@ -105,6 +105,8 @@
   const libraryControls = document.querySelector('.library-controls');
   const filterSearch = document.getElementById('library-filter-search');
   const filterSearchInput = document.getElementById('live-library-search');
+  const filterSearchSuggestions = document.getElementById('library-search-suggestions');
+  const coverSizeControl = document.getElementById('cover-size-control');
   const letterJump = Boolean(letterJumpAlphabet);
   const library = Boolean(document.querySelector('.library-table') && document.getElementById('cover-library'));
   const detail = Boolean(document.querySelector('.media-dossier'));
@@ -131,6 +133,36 @@
   }
   if (filterSearch && filterSearchInput && !filterSearch.classList.contains('open')) {
     filterSearchInput.style.visibility = 'hidden';
+  }
+
+  /* library.html still contains a compatibility search controller that focuses the
+     field 180ms after opening. If the user closes the control before that timer
+     fires, the stale callback can focus an invisible input and leave focus chrome
+     or suggestions behind. Treat the closed state as authoritative regardless of
+     how or when the legacy callback arrives. */
+  const settleClosedFilterSearch = () => {
+    if (!filterSearch || !filterSearchInput || filterSearch.classList.contains('open')) return;
+    if (filterSearchSuggestions) filterSearchSuggestions.hidden = true;
+    if (document.activeElement === filterSearchInput) filterSearchInput.blur();
+  };
+  if (filterSearch && filterSearchInput) {
+    new MutationObserver(settleClosedFilterSearch).observe(filterSearch, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+    filterSearchInput.addEventListener('focus', () => {
+      if (!filterSearch.classList.contains('open')) filterSearchInput.blur();
+    });
+    settleClosedFilterSearch();
+  }
+
+  /* The server template also contains the pre-0.8 pixel-size slider as a functional
+     fallback. In Covers view that legacy control can paint for a frame before the
+     semantic Density controller replaces it. Preserve its space but suppress the
+     obsolete pixels while the enhancement is being handed off. */
+  if (library && coverSizeControl && !coverSizeControl.hidden) {
+    coverSizeControl.style.visibility = 'hidden';
+    coverSizeControl.setAttribute('aria-hidden', 'true');
   }
 
   const settingsStyles = settingsSystem ? Promise.all([loadStyle("settings-system-nav.css")]) : Promise.resolve();
@@ -192,14 +224,20 @@
     /* These controllers do have execution-order dependencies, but they do not need
        a network waterfall. async=false preserves that order while all fetches start
        together. Density runs before selection because it replaces only the display
-       control's legacy slider markup. */
-    return loadScriptsOrdered([
+       control's legacy slider markup. Reveal that slot as soon as Density itself has
+       executed rather than waiting for the rest of the Library enhancements. */
+    const pending = [
       "library-density.js",
       "library-surface-lazy.js",
       "library-selection-polish.js",
       "library-inspector-lifecycle.js",
       "library-selection-toolbar.js",
-    ]);
+    ].map((path) => loadScript(path));
+    pending[0].then(() => {
+      coverSizeControl?.style.removeProperty('visibility');
+      coverSizeControl?.removeAttribute('aria-hidden');
+    });
+    return Promise.all(pending);
   });
   detailStyles.then(() => {
     if (detail) return loadScript("detail-page-polish.js");
