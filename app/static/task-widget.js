@@ -32,6 +32,7 @@
   let active = [];
   let scheduled = [];
   let activeSignature = null;
+  let scheduledSignature = null;
   let previous = new Map();
   let failures = [];
   let open = widget.classList.contains('is-pinned') && !popover.hidden;
@@ -287,9 +288,14 @@
   const accept = (incoming, incomingScheduled = []) => {
     const next = (Array.isArray(incoming) ? incoming : [])
       .filter((task) => task?.id && task.id !== 'media-fingerprints-queued');
-    scheduled = Array.isArray(incomingScheduled) ? incomingScheduled : [];
+    const nextScheduled = Array.isArray(incomingScheduled) ? incomingScheduled : [];
     const nextSignature = taskSetSignature(next);
+    const nextScheduledSignature = taskSetSignature(nextScheduled);
     const signatureChanged = nextSignature !== activeSignature;
+    const scheduledChanged = nextScheduledSignature !== scheduledSignature;
+    scheduled = nextScheduled;
+    scheduledSignature = nextScheduledSignature;
+
     if (signatureChanged) {
       activeSignature = nextSignature;
       const nextMap = new Map(next.map((task) => [task.id, task]));
@@ -314,7 +320,7 @@
     document.dispatchEvent(new CustomEvent('infomancer:tasks', {
       detail: {active: next.length > 0, tasks: next, scheduled},
     }));
-    if (signatureChanged || scheduled.length) queueMicrotask(render);
+    if (signatureChanged || scheduledChanged) queueMicrotask(render);
   };
 
   const pollTasks = async () => {
