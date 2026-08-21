@@ -45,9 +45,15 @@
 }
 
 .collection-management-dialog {
+  --collection-dialog-top: clamp(24px, 7vh, 64px);
+  top: 0;
+  right: 0;
+  bottom: auto;
+  left: 0;
   width: min(760px, calc(100vw - 36px));
   max-width: none;
-  max-height: min(820px, calc(100vh - 36px));
+  max-height: calc(100vh - var(--collection-dialog-top) - 24px);
+  margin: var(--collection-dialog-top) auto 0;
   padding: 0;
   overflow: visible;
   border: 0;
@@ -61,7 +67,7 @@
 }
 
 .collection-dialog-card {
-  max-height: min(820px, calc(100vh - 36px));
+  max-height: calc(100vh - var(--collection-dialog-top) - 24px);
   overflow: auto;
   border: 1px solid #354353;
   border-radius: 8px;
