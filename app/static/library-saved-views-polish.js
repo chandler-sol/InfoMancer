@@ -25,11 +25,18 @@
 
   const panel = manager.querySelector('.saved-view-panel');
   const list = manager.querySelector('.saved-view-list');
-  if (panel && !list) {
-    const empty = document.createElement('div');
-    empty.className = 'saved-view-inline-empty';
-    empty.innerHTML = '<strong>No saved views yet</strong><span>Choose filters and sorting, then save this view for quick access here.</span>';
-    panel.prepend(empty);
+  if (panel) {
+    const explainer = document.createElement('div');
+    explainer.className = 'saved-view-explainer';
+    explainer.innerHTML = '<strong>Save the Library exactly as you have it</strong><span>A Saved View remembers the current Library scope, filters, and sorting. Pin it to keep a shortcut in Library and on Dashboard.</span>';
+    panel.prepend(explainer);
+
+    if (!list) {
+      const empty = document.createElement('div');
+      empty.className = 'saved-view-inline-empty';
+      empty.innerHTML = '<strong>No saved views yet</strong><span>Your first saved view will appear here.</span>';
+      explainer.after(empty);
+    }
   }
 
   /* <details> is intentionally used for progressive enhancement, but native details
