@@ -19,8 +19,8 @@ class UserManagementGroupingContracts(unittest.TestCase):
         css = (ROOT / "app/static/user-management.css").read_text(encoding="utf-8")
         self.assertIn('class="admin-user-chevron"', template)
         self.assertNotIn("admin-user-expand", template)
-        self.assertIn(".admin-user>summary", css)
-        self.assertIn("border-color:var(--lime)", css)
+        self.assertIn(".admin-user > summary", css)
+        self.assertIn("border-color: var(--lime)", css)
         self.assertIn(".admin-user[open] .admin-user-chevron", css)
 
     def test_expanded_user_actions_have_one_footer(self):
