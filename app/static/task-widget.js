@@ -315,7 +315,14 @@
 
   document.addEventListener("infomancer:tasks", (event) => {
     receivedTaskEvent = true;
-    accept(event.detail?.tasks || []);
+    const tasks = event.detail?.tasks || [];
+    const scheduled = event.detail?.scheduled || [];
+    accept(tasks);
+    /* The legacy base poll still reports scheduled jobs through the same widget and
+       temporarily marks them as attention-worthy. A scheduled job is not an active
+       notification. Reassert the enhanced widget state after that poll finishes so
+       only running, completed, or failed work lights the bell. */
+    if (!tasks.length && scheduled.length) queueMicrotask(render);
   });
 
   const sync = async () => {
