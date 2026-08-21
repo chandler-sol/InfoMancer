@@ -1,6 +1,49 @@
 {% extends "base.html" %}
 {% block title %}User Management · InfoMancer{% endblock %}
+{% macro user_card(user) %}
+<details class="admin-user">
+  <summary>
+    <span class="admin-user-identity"><strong>{{ user.display_name }}</strong><small>@{{ user.username }}</small></span>
+    <span class="account-state {% if not user.active %}disabled{% elif (auth_mode == 'local' and not user.has_password) or (auth_mode == 'cloudflare' and not user.providers) %}pending{% else %}active{% endif %}">
+      {% if not user.active %}Disabled{% elif auth_mode == 'local' and not user.has_password and user.invitation_expires_at %}Pending setup{% elif auth_mode == 'local' and not user.has_password %}Setup link needed{% elif auth_mode == 'cloudflare' and not user.providers %}Awaiting Cloudflare{% else %}Active{% endif %}
+    </span>
+    <span class="admin-user-chevron" aria-hidden="true">⌄</span>
+  </summary>
+  <div class="admin-user-body">
+    <form method="post" action="/admin/users/{{ user.id }}" class="admin-user-edit">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Display name<input name="display_name" value="{{ user.display_name }}" required></label>
+      <label>Email<input type="email" name="email" value="{{ user.email or '' }}"></label>
+      <div class="form-pair">
+        <label>Role<select name="role"><option value="member" {% if user.role == 'member' %}selected{% endif %}>Member</option><option value="librarian" {% if user.role == 'librarian' %}selected{% endif %}>Librarian</option></select></label>
+        <label>Status<select name="active"><option value="1" {% if user.active %}selected{% endif %}>Active</option><option value="0" {% if not user.active %}selected{% endif %}>Disabled</option></select></label>
+      </div>
+      <div class="admin-user-save-row"><button class="button primary admin-user-save">Save changes</button></div>
+    </form>
+    <div class="admin-user-action-footer">
+      <div class="admin-user-action-buttons">
+        {% if auth_mode == 'local' %}
+        <form method="post" action="/admin/users/{{ user.id }}/invitation"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button">{% if user.has_password %}Create password-reset link{% elif user.invitation_expires_at %}Replace setup link{% else %}Create setup link{% endif %}</button></form>
+        {% if user.invitation_expires_at %}<form method="post" action="/admin/users/{{ user.id }}/invitation/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button danger">Revoke setup link</button></form>{% endif %}
+        {% endif %}
+        <form method="post" action="/admin/users/{{ user.id }}/sessions/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button danger">Sign out all sessions</button></form>
+      </div>
+      <details class="admin-user-delete">
+        <summary class="admin-user-delete-toggle">Delete user</summary>
+        <div class="admin-user-delete-confirm">
+          <div><strong>Delete {{ user.display_name }}?</strong><p>This permanently removes the account, its sessions, personal ratings, favorites, tags, saved views, and search history. Shared library data is not deleted.</p></div>
+          <form method="post" action="/admin/users/{{ user.id }}/delete">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button danger">Delete {{ user.display_name }}</button>
+          </form>
+        </div>
+      </details>
+    </div>
+  </div>
+</details>
+{% endmacro %}
 {% block content %}
+<link rel="stylesheet" href="{{ url_for('static', path='user-management.css') }}?v={{ static_version }}">
 <header class="settings-heading app-settings-heading">
   <p class="eyebrow">SETTINGS</p><h1>User Management</h1>
   <p>Manage who can access this InfoMancer installation and what they are allowed to do.</p>
@@ -16,56 +59,24 @@
 </section>
 {% endif %}
 {% set managed_users = users | rejectattr('id', 'equalto', current_user.id) | list %}
+{% set members = managed_users | selectattr('role', 'equalto', 'member') | list %}
+{% set librarians = managed_users | selectattr('role', 'equalto', 'librarian') | list %}
 <section class="settings-page-grid user-management-grid">
   <div class="panel settings-card user-list-panel">
-    <div class="user-list-heading">
-      <div><p class="eyebrow">ACCESS</p><h2>Members &amp; Librarians</h2></div>
-    </div>
-    <div class="admin-user-list">
-    {% for user in managed_users %}
-      <details class="admin-user">
-        <summary>
-          <span class="admin-user-identity"><strong>{{ user.display_name }}</strong><small>@{{ user.username }} · {{ user.role|title }}</small></span>
-          <span class="account-state {% if not user.active %}disabled{% elif (auth_mode == 'local' and not user.has_password) or (auth_mode == 'cloudflare' and not user.providers) %}pending{% else %}active{% endif %}">
-            {% if not user.active %}Disabled{% elif auth_mode == 'local' and not user.has_password and user.invitation_expires_at %}Pending setup{% elif auth_mode == 'local' and not user.has_password %}Setup link needed{% elif auth_mode == 'cloudflare' and not user.providers %}Awaiting Cloudflare{% else %}Active{% endif %}
-          </span>
-          <span class="admin-user-expand" aria-hidden="true"><span>Manage</span><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"></path></svg></span>
-        </summary>
-        <div class="admin-user-body">
-          <form method="post" action="/admin/users/{{ user.id }}" class="stack admin-user-edit">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <label>Display name<input name="display_name" value="{{ user.display_name }}" required></label>
-            <label>Email<input type="email" name="email" value="{{ user.email or '' }}"></label>
-            <div class="form-pair">
-              <label>Role<select name="role"><option value="member" {% if user.role == 'member' %}selected{% endif %}>Member</option><option value="librarian" {% if user.role == 'librarian' %}selected{% endif %}>Librarian</option></select></label>
-              <label>Status<select name="active"><option value="1" {% if user.active %}selected{% endif %}>Active</option><option value="0" {% if not user.active %}selected{% endif %}>Disabled</option></select></label>
-            </div>
-            <button class="button primary admin-user-save">Save changes</button>
-          </form>
-          <div class="admin-user-actions">
-            {% if auth_mode == 'local' %}
-            <div class="user-invitation-actions">
-              <form method="post" action="/admin/users/{{ user.id }}/invitation"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button">{% if user.has_password %}Create password-reset link{% elif user.invitation_expires_at %}Replace setup link{% else %}Create setup link{% endif %}</button></form>
-              {% if user.invitation_expires_at %}<form method="post" action="/admin/users/{{ user.id }}/invitation/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button danger">Revoke setup link</button></form>{% endif %}
-            </div>
-            {% endif %}
-            <form method="post" action="/admin/users/{{ user.id }}/sessions/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button danger">Sign out all sessions</button></form>
-          </div>
-          <details class="admin-user-delete">
-            <summary class="admin-user-delete-toggle">Delete user</summary>
-            <div class="admin-user-delete-confirm">
-              <div><strong>Delete {{ user.display_name }}?</strong><p>This permanently removes the account, its sessions, personal ratings, favorites, tags, saved views, and search history. Shared library data is not deleted.</p></div>
-              <form method="post" action="/admin/users/{{ user.id }}/delete">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <button class="button danger">Delete {{ user.display_name }}</button>
-              </form>
-            </div>
-          </details>
+    <div class="user-list-heading"><div><p class="eyebrow">ACCESS</p><h2>People with access</h2></div></div>
+    <div class="user-role-groups">
+      <section class="user-role-group" aria-labelledby="members-heading">
+        <header class="user-role-heading"><span><strong id="members-heading">Members</strong><small>Browse, search, organize, and review the library.</small></span><span class="user-role-count">{{ members|length }} {{ 'account' if members|length == 1 else 'accounts' }}</span></header>
+        <div class="user-role-list">
+          {% for user in members %}{{ user_card(user) }}{% else %}<div class="user-role-empty">No other Members have access.</div>{% endfor %}
         </div>
-      </details>
-    {% else %}
-      <div class="empty user-management-empty">No other Members or Librarians have access yet.</div>
-    {% endfor %}
+      </section>
+      <section class="user-role-group" aria-labelledby="librarians-heading">
+        <header class="user-role-heading"><span><strong id="librarians-heading">Librarians</strong><small>Manage the catalog, filesystem, settings, and other accounts.</small></span><span class="user-role-count">{{ librarians|length }} {{ 'account' if librarians|length == 1 else 'accounts' }}</span></header>
+        <div class="user-role-list">
+          {% for user in librarians %}{{ user_card(user) }}{% else %}<div class="user-role-empty">No other Librarians have access.</div>{% endfor %}
+        </div>
+      </section>
     </div>
   </div>
   <form class="panel settings-card settings-form create-user-form" method="post" action="/admin/users">
