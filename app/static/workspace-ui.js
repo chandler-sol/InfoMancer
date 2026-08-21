@@ -1,33 +1,29 @@
 (() => {
   const current = document.currentScript;
-  const version = current?.src ? new URL(current.src).search : "";
+  const version = current?.src ? new URL(current.src).search : '';
 
-  /* The account rail uses the canonical avatar endpoint as a real image. Keep the
-     server-rendered symbol in place until the image has actually decoded so a slow
-     avatar request never produces an empty circle. The endpoint is ETag-aware, so
-     keep its URL stable and let the browser cheaply revalidate it across pages. */
-  const accountAvatar = document.querySelector(".account-avatar");
+  const accountAvatar = document.querySelector('.account-avatar');
   if (accountAvatar) {
-    const fallback = accountAvatar.textContent.trim() || "?";
-    const avatarImage = document.createElement("img");
-    avatarImage.className = "account-avatar-image";
-    avatarImage.alt = "";
-    avatarImage.decoding = "async";
-    avatarImage.src = "/account/avatar/current";
-    avatarImage.style.width = "100%";
-    avatarImage.style.height = "100%";
-    avatarImage.style.display = "block";
-    avatarImage.style.objectFit = "cover";
-    avatarImage.style.borderRadius = "inherit";
-    avatarImage.addEventListener("load", () => {
-      if (accountAvatar.dataset.profileAvatarPreview === "1") return;
-      accountAvatar.style.removeProperty("background-image");
+    const fallback = accountAvatar.textContent.trim() || '?';
+    const avatarImage = document.createElement('img');
+    avatarImage.className = 'account-avatar-image';
+    avatarImage.alt = '';
+    avatarImage.decoding = 'async';
+    avatarImage.src = '/account/avatar/current';
+    avatarImage.style.width = '100%';
+    avatarImage.style.height = '100%';
+    avatarImage.style.display = 'block';
+    avatarImage.style.objectFit = 'cover';
+    avatarImage.style.borderRadius = 'inherit';
+    avatarImage.addEventListener('load', () => {
+      if (accountAvatar.dataset.profileAvatarPreview === '1') return;
+      accountAvatar.style.removeProperty('background-image');
       accountAvatar.replaceChildren(avatarImage);
-      accountAvatar.dataset.profileAvatarKind = "image";
+      accountAvatar.dataset.profileAvatarKind = 'image';
     }, {once: true});
-    avatarImage.addEventListener("error", () => {
-      if (accountAvatar.dataset.profileAvatarPreview === "1") return;
-      accountAvatar.style.removeProperty("background-image");
+    avatarImage.addEventListener('error', () => {
+      if (accountAvatar.dataset.profileAvatarPreview === '1') return;
+      accountAvatar.style.removeProperty('background-image');
       delete accountAvatar.dataset.profileAvatarKind;
       accountAvatar.textContent = fallback;
     }, {once: true});
@@ -39,79 +35,64 @@
     const href = assetUrl(path);
     const absolute = new URL(href, window.location.href).href;
     const existing = [...document.querySelectorAll('link[rel="stylesheet"]')]
-      .find(link => link.href === absolute);
+      .find((link) => link.href === absolute);
     if (existing) {
       if (existing.sheet) resolve(existing);
       else {
-        existing.addEventListener("load", () => resolve(existing), {once: true});
-        existing.addEventListener("error", () => resolve(existing), {once: true});
+        existing.addEventListener('load', () => resolve(existing), {once: true});
+        existing.addEventListener('error', () => resolve(existing), {once: true});
       }
       return;
     }
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
     link.href = href;
-    link.fetchPriority = "high";
-    link.addEventListener("load", () => resolve(link), {once: true});
-    link.addEventListener("error", () => resolve(link), {once: true});
+    link.fetchPriority = 'high';
+    link.addEventListener('load', () => resolve(link), {once: true});
+    link.addEventListener('error', () => resolve(link), {once: true});
     document.head.append(link);
   });
 
   const loadScript = (path) => new Promise((resolve) => {
     const src = assetUrl(path);
     const absolute = new URL(src, window.location.href).href;
-    const existing = [...document.scripts].find(script => script.src === absolute);
+    const existing = [...document.scripts].find((script) => script.src === absolute);
     if (existing) {
-      if (existing.dataset.infomancerLoaded === "1") resolve(existing);
+      if (existing.dataset.infomancerLoaded === '1') resolve(existing);
       else {
-        existing.addEventListener("load", () => resolve(existing), {once: true});
-        existing.addEventListener("error", () => resolve(existing), {once: true});
+        existing.addEventListener('load', () => resolve(existing), {once: true});
+        existing.addEventListener('error', () => resolve(existing), {once: true});
       }
       return;
     }
-    const script = document.createElement("script");
+    const script = document.createElement('script');
     script.src = src;
-    /* Dynamic scripts default to async. Setting async=false before insertion keeps
-       execution order while still letting the browser fetch a batch in parallel. */
     script.async = false;
-    script.addEventListener("load", () => {
-      script.dataset.infomancerLoaded = "1";
+    script.addEventListener('load', () => {
+      script.dataset.infomancerLoaded = '1';
       resolve(script);
     }, {once: true});
-    script.addEventListener("error", () => resolve(script), {once: true});
+    script.addEventListener('error', () => resolve(script), {once: true});
     document.head.append(script);
   });
 
-  const loadScriptsOrdered = async (paths) => {
-    const pending = paths.map((path) => loadScript(path));
-    await Promise.all(pending);
-  };
-
-  /* The onboarding tour intentionally owns the task widget while it demonstrates a
-     fake running scan. engagement.js initializes before this loader, so replacing
-     that DOM during the demo would strand the tour's live references on a detached
-     element. Wait until the demo releases ownership, then install the real task
-     controller. Outside the tour this resolves immediately. */
   const loadTaskWidgetWhenReady = () => {
-    const widget = document.getElementById("task-widget");
-    if (!widget || widget.dataset.tourDemo !== "1") return loadScript("task-widget.js");
+    const widget = document.getElementById('task-widget');
+    if (!widget || widget.dataset.tourDemo !== '1') return loadScript('task-widget.js');
     return new Promise((resolve) => {
       const observer = new MutationObserver(() => {
-        if (widget.dataset.tourDemo === "1") return;
+        if (widget.dataset.tourDemo === '1') return;
         observer.disconnect();
-        loadScript("task-widget.js").then(resolve);
+        loadScript('task-widget.js').then(resolve);
       });
-      observer.observe(widget, {attributes: true, attributeFilter: ["data-tour-demo"]});
+      observer.observe(widget, {attributes: true, attributeFilter: ['data-tour-demo']});
     });
   };
 
-  /* Start all applicable CSS requests immediately. Layout-affecting JavaScript is
-     intentionally held until its matching styles settle, which removes the race
-     where a controller rearranged a surface a frame before its CSS arrived. */
   const globalStyles = Promise.all([
-    loadStyle("task-widget.css"),
-    loadStyle("app-navigation.css"),
-    loadStyle("action-menu.css"),
+    loadStyle('task-widget.css'),
+    loadStyle('app-navigation.css'),
+    loadStyle('action-menu.css'),
   ]);
 
   const settingsSystem = Boolean(document.querySelector('.settings-jump-nav'));
@@ -123,18 +104,12 @@
   const libraryControls = document.querySelector('.library-controls');
   const filterSearch = document.getElementById('library-filter-search');
   const filterSearchInput = document.getElementById('live-library-search');
-  const filterSearchSuggestions = document.getElementById('library-search-suggestions');
   const coverSizeControl = document.getElementById('cover-size-control');
   const letterJump = Boolean(letterJumpAlphabet);
   const library = Boolean(document.querySelector('.library-table') && document.getElementById('cover-library'));
   const detail = Boolean(document.querySelector('.media-dossier'));
   const review = Boolean(document.querySelector('.review-workspace'));
 
-  /* The Library ships a fully functional A-Z strip in its server HTML and upgrades
-     it to the compact Jump-to control. Hide only the legacy strip during that brief
-     enhancement window while preserving its flex footprint. This keeps the List /
-     Covers controls in their final right-aligned position and prevents the old
-     alphabet from flashing before the compact menu is ready. */
   if (letterJumpAlphabet) {
     letterJumpAlphabet.style.visibility = 'hidden';
     letterJumpAlphabet.setAttribute('aria-hidden', 'true');
@@ -142,8 +117,6 @@
     if (libraryViewToolbar) libraryViewToolbar.style.marginLeft = 'auto';
   }
 
-  /* Apply the main filter-strip geometry immediately. The dedicated Library polish
-     stylesheet takes ownership as soon as it finishes loading. */
   if (libraryControls) {
     libraryControls.style.boxSizing = 'border-box';
     libraryControls.style.width = 'fit-content';
@@ -153,78 +126,61 @@
     filterSearchInput.style.visibility = 'hidden';
   }
 
-  /* library.html still contains a compatibility search controller that focuses the
-     field 180ms after opening. If the user closes the control before that timer
-     fires, the stale callback can focus an invisible input and leave focus chrome
-     or suggestions behind. Treat the closed state as authoritative regardless of
-     how or when the legacy callback arrives. */
-  const settleClosedFilterSearch = () => {
-    if (!filterSearch || !filterSearchInput || filterSearch.classList.contains('open')) return;
-    if (filterSearchSuggestions) filterSearchSuggestions.hidden = true;
-    if (document.activeElement === filterSearchInput) filterSearchInput.blur();
-  };
-  if (filterSearch && filterSearchInput) {
-    new MutationObserver(settleClosedFilterSearch).observe(filterSearch, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
-    filterSearchInput.addEventListener('focus', () => {
-      if (!filterSearch.classList.contains('open')) filterSearchInput.blur();
-    });
-    settleClosedFilterSearch();
-  }
-
-  /* The server template also contains the pre-0.8 pixel-size slider as a functional
-     fallback. In Covers view that legacy control can paint for a frame before the
-     semantic Density controller replaces it. Preserve its space but suppress the
-     obsolete pixels while the enhancement is being handed off. */
+  /* The server still renders a tiny fallback density control so the page remains
+     usable without enhancement. Hide that fallback only during the handoff to the
+     semantic Density controller, then reveal the same slot after replacement. */
   if (library && coverSizeControl && !coverSizeControl.hidden) {
     coverSizeControl.style.visibility = 'hidden';
     coverSizeControl.setAttribute('aria-hidden', 'true');
   }
 
-  const settingsStyles = settingsSystem ? Promise.all([loadStyle("settings-system-nav.css")]) : Promise.resolve();
-  const savedViewStyles = savedViews ? Promise.all([loadStyle("library-saved-views-polish.css")]) : Promise.resolve();
-  const letterJumpStyles = letterJump ? Promise.all([loadStyle("library-letter-jump.css")]) : Promise.resolve();
+  const settingsStyles = settingsSystem
+    ? Promise.all([loadStyle('settings-system-nav.css')])
+    : Promise.resolve();
+  const savedViewStyles = savedViews
+    ? Promise.all([loadStyle('library-saved-views-polish.css')])
+    : Promise.resolve();
+  const letterJumpStyles = letterJump
+    ? Promise.all([loadStyle('library-letter-jump.css')])
+    : Promise.resolve();
   const libraryStyles = library ? Promise.all([
-    loadStyle("library-controls-polish.css"),
-    loadStyle("library-performance.css"),
-    loadStyle("library-density.css"),
-    loadStyle("library-selection-polish.css"),
-    loadStyle("library-selection-toolbar.css"),
-    loadStyle("library-selection-compact.css"),
+    loadStyle('library-controls-polish.css'),
+    loadStyle('library-performance.css'),
+    loadStyle('library-density.css'),
+    loadStyle('library-selection-polish.css'),
+    loadStyle('library-selection-toolbar.css'),
+    loadStyle('library-selection-compact.css'),
   ]) : Promise.resolve();
-  const detailStyles = detail ? Promise.all([loadStyle("detail-page-polish.css")]) : Promise.resolve();
-  const reviewStyles = review ? Promise.all([loadStyle("review-queue-polish.css")]) : Promise.resolve();
+  const detailStyles = detail
+    ? Promise.all([loadStyle('detail-page-polish.css')])
+    : Promise.resolve();
+  const reviewStyles = review
+    ? Promise.all([loadStyle('review-queue-polish.css')])
+    : Promise.resolve();
   const letterJumpReady = letterJump
-    ? letterJumpStyles.then(() => loadScript("library-letter-jump.js"))
+    ? letterJumpStyles.then(() => loadScript('library-letter-jump.js'))
     : Promise.resolve();
 
-  /* Sidebar geometry is restored synchronously by base.html. Do not turn motion
-     back on until the navigation/action chrome CSS has actually settled. On slower
-     machines this prevents the final sidebar rules from arriving after animation
-     has already been enabled and replaying a visible correction. */
-  if (document.body?.classList.contains("has-app-sidebar")) {
+  /* app-shell-bootstrap.js restores sidebar geometry immediately after <body>.
+     Motion is enabled only after the late chrome CSS has settled. */
+  if (document.body?.classList.contains('has-app-sidebar')) {
     globalStyles.then(() => requestAnimationFrame(() => requestAnimationFrame(() => {
-      document.body.classList.add("sidebar-motion-ready");
+      document.body.classList.add('sidebar-motion-ready');
     })));
   }
 
-  /* These three controllers are independent. They used to load one after another,
-     making the last global controller wait through three network/parse turns. Start
-     them together once their chrome CSS is ready. */
   globalStyles.then(() => Promise.all([
-    loadScript("workspace-ui-core.js"),
+    loadScript('workspace-ui-core.js'),
     loadTaskWidgetWhenReady(),
-    loadScript("app-navigation.js"),
+    loadScript('app-navigation.js'),
   ]));
 
   settingsStyles.then(() => {
-    if (settingsSystem) return loadScript("settings-system-nav.js");
+    if (settingsSystem) return loadScript('settings-system-nav.js');
   });
-  if (settingsCoverDensity) loadScript("settings-cover-density.js");
+  if (settingsCoverDensity) loadScript('settings-cover-density.js');
   savedViewStyles.then(() => {
-    if (savedViews) return loadScript("library-saved-views-polish.js");
+    if (savedViews) return loadScript('library-saved-views-polish.js');
   });
   letterJumpReady.then(() => {
     if (!letterJump) return;
@@ -233,23 +189,24 @@
     letterJumpToolbar?.style.removeProperty('justify-content');
     libraryViewToolbar?.style.removeProperty('margin-left');
   });
-  libraryStyles.then(() => {
+
+  libraryStyles.then(async () => {
     if (!library) return;
     libraryControls?.style.removeProperty('box-sizing');
     libraryControls?.style.removeProperty('width');
     libraryControls?.style.removeProperty('max-width');
     filterSearchInput?.style.removeProperty('visibility');
-    /* These controllers do have execution-order dependencies, but they do not need
-       a network waterfall. async=false preserves that order while all fetches start
-       together. Density runs before selection because it replaces only the display
-       control's legacy slider markup. Reveal that slot as soon as Density itself has
-       executed rather than waiting for the rest of the Library enhancements. */
+
+    /* The base Library controller owns filtering and selection state. Install it
+       before the optional UI layers so every enhancement observes one canonical
+       state source instead of racing the old template controller. */
+    await loadScript('library-controller.js');
     const pending = [
-      "library-density.js",
-      "library-surface-lazy.js",
-      "library-selection-polish.js",
-      "library-inspector-lifecycle.js",
-      "library-selection-toolbar.js",
+      'library-density.js',
+      'library-surface-lazy.js',
+      'library-selection-polish.js',
+      'library-inspector-lifecycle.js',
+      'library-selection-toolbar.js',
     ].map((path) => loadScript(path));
     pending[0].then(() => {
       coverSizeControl?.style.removeProperty('visibility');
@@ -257,8 +214,9 @@
     });
     return Promise.all(pending);
   });
+
   detailStyles.then(() => {
-    if (detail) return loadScript("detail-page-polish.js");
+    if (detail) return loadScript('detail-page-polish.js');
   });
   reviewStyles.then(() => undefined);
 })();
