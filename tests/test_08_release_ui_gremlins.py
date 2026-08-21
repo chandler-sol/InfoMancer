@@ -75,6 +75,15 @@ class ReleaseUiGremlinContracts(unittest.TestCase):
         self.assertIn("input.blur()", source)
         self.assertIn("if (filterSearch.classList.contains('open')) input.focus()", source)
 
+    def test_expanded_library_search_has_readable_width_and_stable_first_paint(self):
+        controls = (ROOT / "app/static/library-controls-polish.css").read_text(encoding="utf-8")
+        loader = (ROOT / "app/static/workspace-ui.js").read_text(encoding="utf-8")
+
+        self.assertIn("max-width: 420px", controls)
+        self.assertIn("min-width: min(320px, 100%)", controls)
+        self.assertIn("libraryControls.style.width = '100%'", loader)
+        self.assertNotIn("libraryControls.style.width = 'fit-content'", loader)
+
     def test_selection_controller_batches_select_all_and_letter_changes(self):
         source = (ROOT / "app/static/library-controller.js").read_text(encoding="utf-8")
 
@@ -187,21 +196,27 @@ class ReleaseUiGremlinContracts(unittest.TestCase):
         self.assertIn("coverSizeControl?.style.removeProperty('visibility')", source)
 
     def test_density_stays_with_view_controls_on_desktop(self):
-        source = (ROOT / "app/static/library-density.css").read_text(encoding="utf-8")
+        css = (ROOT / "app/static/library-density.css").read_text(encoding="utf-8")
+        script = (ROOT / "app/static/library-density.js").read_text(encoding="utf-8")
 
-        self.assertIn("@media (min-width: 681px)", source)
-        self.assertIn("grid-template-columns: auto minmax(0, 1fr)", source)
-        self.assertIn(".library-display-toolbar.has-letter-jump .library-view-toolbar", source)
-        self.assertIn("justify-self: end", source)
-        self.assertIn(".library-display-toolbar.has-letter-jump .library-view-controls", source)
-        self.assertIn("justify-content: flex-end", source)
+        self.assertIn("@media (min-width: 681px)", css)
+        self.assertIn("grid-template-columns: auto minmax(0, 1fr)", css)
+        self.assertIn(".library-display-toolbar.has-letter-jump .library-view-toolbar", css)
+        self.assertIn("justify-self: end", css)
+        self.assertIn(".library-display-toolbar.has-letter-jump .library-view-controls", css)
+        self.assertIn("justify-content: flex-end", css)
+        self.assertIn("grid-template-columns: repeat(5, 34px)", css)
+        self.assertIn("const desktopButtons = desktopSteps.map", script)
+        self.assertNotIn("range.type = 'range'", script)
+        self.assertNotIn("library-density-range", script)
 
-    def test_jump_control_explains_that_it_is_alphabet_navigation(self):
+    def test_alphabet_control_honestly_describes_current_filter_behavior(self):
         source = (ROOT / "app/static/library-letter-jump.js").read_text(encoding="utf-8")
 
-        self.assertIn("label.textContent = 'A–Z Jump'", source)
-        self.assertIn("Jump directly to titles by their first character", source)
-        self.assertIn("Jump to titles starting with", source)
+        self.assertIn("label.textContent = 'Starts with'", source)
+        self.assertIn("Show titles starting with a specific character", source)
+        self.assertIn("heading.textContent = 'Show titles starting with'", source)
+        self.assertNotIn("label.textContent = 'A–Z Jump'", source)
 
 
 if __name__ == "__main__":
