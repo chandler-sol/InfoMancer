@@ -15,6 +15,7 @@ def build_router(ctx: RouteContext):
     def favorite_titles_bulk(
         request: Request,
         selected: list[int] = Form(default=[]),
+        favorite: str = Form("1"),
     ):
         user_id = int(getattr(request.state.user, "id", 0) or 0)
         if user_id <= 0:
@@ -30,6 +31,8 @@ def build_router(ctx: RouteContext):
                 status_code=400,
             )
 
+        should_favorite = str(favorite).strip().casefold() not in {"0", "false", "off", "no"}
+        favorite_value = 1 if should_favorite else 0
         placeholders = ",".join("?" for _ in requested)
         with db.connect() as conn:
             valid_ids = {
@@ -48,24 +51,34 @@ def build_router(ctx: RouteContext):
 
             conn.executemany(
                 """INSERT INTO user_title_state(user_id,title_id,favorite,updated_at)
-                   VALUES (?,?,1,CURRENT_TIMESTAMP)
+                   VALUES (?,?,?,CURRENT_TIMESTAMP)
                    ON CONFLICT(user_id,title_id) DO UPDATE SET
-                     favorite=1,
+                     favorite=excluded.favorite,
                      updated_at=CURRENT_TIMESTAMP""",
-                [(user_id, title_id) for title_id in title_ids],
+                [(user_id, title_id, favorite_value) for title_id in title_ids],
             )
 
+        action = "Added" if should_favorite else "Removed"
+        destination = "to" if should_favorite else "from"
         record_event(
             "library",
-            f"Added {len(title_ids)} selected titles to Favorites.",
+            f"{action} {len(title_ids)} selected titles {destination} Favorites.",
             user_id=user_id,
-            context={"titles": len(title_ids), "operation": "bulk_favorite"},
+            context={
+                "titles": len(title_ids),
+                "operation": "bulk_favorite" if should_favorite else "bulk_unfavorite",
+                "favorite": should_favorite,
+            },
         )
         return JSONResponse({
             "ok": True,
             "title_ids": title_ids,
             "count": len(title_ids),
-            "detail": f"Added {len(title_ids)} selected title{'s' if len(title_ids) != 1 else ''} to Favorites.",
+            "favorite": should_favorite,
+            "detail": (
+                f"{action} {len(title_ids)} selected title"
+                f"{'s' if len(title_ids) != 1 else ''} {destination} Favorites."
+            ),
         })
 
     return router, {"favorite_titles_bulk": favorite_titles_bulk}
