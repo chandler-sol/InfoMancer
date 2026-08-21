@@ -35,10 +35,28 @@
     showPendingSoon();
   };
 
+  const validLibraryView = (value) => ['list', 'covers'].includes(value) ? value : '';
+  const libraryViewCookie = () => {
+    const prefix = 'infomancer_library_view=';
+    const value = document.cookie.split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(prefix))
+      ?.slice(prefix.length) || '';
+    return validLibraryView(decodeURIComponent(value));
+  };
+
+  /* The cookie is the server-visible source of truth, so prefer it when old builds
+     left localStorage and the cookie out of sync. localStorage remains a migration
+     fallback only when no valid cookie exists yet. */
   const savedLibraryView = (() => {
+    const cookieView = libraryViewCookie();
+    if (cookieView) {
+      try { localStorage.setItem('infomancer-library-view', cookieView); } catch (_error) {}
+      return cookieView;
+    }
     try {
-      const saved = localStorage.getItem('infomancer-library-view') || '';
-      if (['list', 'covers'].includes(saved)) {
+      const saved = validLibraryView(localStorage.getItem('infomancer-library-view') || '');
+      if (saved) {
         document.cookie = `infomancer_library_view=${saved}; Path=/; SameSite=Lax; Max-Age=31536000`;
         return saved;
       }
