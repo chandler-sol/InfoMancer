@@ -11,6 +11,7 @@ from .recovery import build_router as build_recovery_router
 from .scheduled_tasks import build_router as build_scheduled_tasks_router
 from .settings import build_router as build_settings_router
 from .account_avatar import build_router as build_account_avatar_router
+from .user_management import build_router as build_user_management_router
 from .collections import build_router as build_collections_router
 from .title_bulk_actions import build_router as build_title_bulk_actions_router
 from .title_media_info import build_router as build_title_media_info_router
@@ -29,6 +30,7 @@ ROUTER_BUILDERS = (
     build_scheduled_tasks_router,
     build_settings_router,
     build_account_avatar_router,
+    build_user_management_router,
     build_collections_router,
     build_title_bulk_actions_router,
     # Keep corrected title actions before the legacy titles bundle while the
