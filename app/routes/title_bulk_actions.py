@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+from difflib import SequenceMatcher
+
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
@@ -148,6 +151,215 @@ def build_router(ctx: RouteContext):
             ),
         })
 
+    @router.get("/api/collections/{collection_id}/search")
+    def search_collection_titles(request: Request, collection_id: int, q: str = ""):
+        """Search local titles for a manual collection without punctuation sensitivity."""
+        if not getattr(request.state.user, "is_librarian", False):
+            return JSONResponse(
+                {"ok": False, "detail": "Librarian access is required to add collection items."},
+                status_code=403,
+            )
+
+        query = " ".join(q.strip().split())[:120]
+        if not query:
+            return JSONResponse({"ok": True, "results": []})
+
+        def normalized(value: str) -> str:
+            return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
+        normalized_query = normalized(query)
+        query_words = re.findall(r"[a-z0-9]+", query.casefold())
+        with db.connect() as conn:
+            collection = conn.execute(
+                "SELECT id,collection_type FROM collections WHERE id=?",
+                (collection_id,),
+            ).fetchone()
+            if not collection:
+                return JSONResponse(
+                    {"ok": False, "detail": "That collection no longer exists."},
+                    status_code=404,
+                )
+            if collection["collection_type"] != "manual":
+                return JSONResponse(
+                    {"ok": False, "detail": "Smart Collections manage their contents automatically."},
+                    status_code=400,
+                )
+            rows = conn.execute(
+                """SELECT t.id,t.kind,t.poster_url,t.title,t.metadata_title,
+                          COALESCE(NULLIF(t.metadata_title,''),t.title) display_title,
+                          COALESCE(t.metadata_year,t.year) display_year
+                   FROM titles t
+                   WHERE NOT EXISTS (
+                     SELECT 1 FROM collection_titles ct
+                     WHERE ct.collection_id=? AND ct.title_id=t.id
+                   )
+                   ORDER BY display_title COLLATE NOCASE""",
+                (collection_id,),
+            ).fetchall()
+
+        ranked: list[tuple[tuple[float, str], dict]] = []
+        for row in rows:
+            candidate = dict(row)
+            names = [candidate.get("display_title") or "", candidate.get("title") or ""]
+            best_rank: float | None = None
+            for name in names:
+                normalized_title = normalized(name)
+                title_words = re.findall(r"[a-z0-9]+", name.casefold())
+                if not normalized_title:
+                    continue
+                if normalized_title == normalized_query:
+                    rank = 0.0
+                elif normalized_title.startswith(normalized_query):
+                    rank = 1.0
+                elif normalized_query and normalized_query in normalized_title:
+                    rank = 2.0
+                elif query_words and all(
+                    any(query_word in title_word for title_word in title_words)
+                    for query_word in query_words
+                ):
+                    rank = 3.0
+                else:
+                    similarity = SequenceMatcher(
+                        None, normalized_query, normalized_title
+                    ).ratio() if normalized_query else 0.0
+                    if similarity < 0.72:
+                        continue
+                    rank = 4.0 + (1.0 - similarity)
+                best_rank = rank if best_rank is None else min(best_rank, rank)
+            if best_rank is None:
+                continue
+            ranked.append((
+                (best_rank, str(candidate["display_title"]).casefold()),
+                {
+                    "id": candidate["id"],
+                    "kind": candidate["kind"],
+                    "poster_url": candidate["poster_url"] or "",
+                    "display_title": candidate["display_title"],
+                    "display_year": candidate["display_year"],
+                },
+            ))
+
+        ranked.sort(key=lambda item: item[0])
+        return JSONResponse({
+            "ok": True,
+            "query": query,
+            "results": [item for _rank, item in ranked[:20]],
+        })
+
+    @router.post("/collections/{collection_id}/reorder")
+    def reorder_collection_items(
+        request: Request,
+        collection_id: int,
+        order: list[str] = Form(default=[]),
+    ):
+        """Persist the exact visible order of a manual mixed-content collection."""
+        if not getattr(request.state.user, "is_librarian", False):
+            return JSONResponse(
+                {"ok": False, "detail": "Librarian access is required to reorder collections."},
+                status_code=403,
+            )
+
+        requested: list[tuple[str, int]] = []
+        seen: set[tuple[str, int]] = set()
+        for token in order[:2000]:
+            try:
+                item_type, raw_id = token.split(":", 1)
+                item_id = int(raw_id)
+            except (TypeError, ValueError):
+                return JSONResponse(
+                    {"ok": False, "detail": "The collection order contained an invalid item."},
+                    status_code=400,
+                )
+            if item_type not in {"title", "episode"} or item_id <= 0:
+                return JSONResponse(
+                    {"ok": False, "detail": "The collection order contained an invalid item."},
+                    status_code=400,
+                )
+            key = (item_type, item_id)
+            if key in seen:
+                return JSONResponse(
+                    {"ok": False, "detail": "The collection order contained the same item twice."},
+                    status_code=400,
+                )
+            seen.add(key)
+            requested.append(key)
+
+        collection_name = ""
+        with db.connect() as conn:
+            collection = conn.execute(
+                "SELECT name,collection_type FROM collections WHERE id=?",
+                (collection_id,),
+            ).fetchone()
+            if not collection:
+                return JSONResponse(
+                    {"ok": False, "detail": "That collection no longer exists."},
+                    status_code=404,
+                )
+            if collection["collection_type"] != "manual":
+                return JSONResponse(
+                    {"ok": False, "detail": "Smart Collections manage their order automatically."},
+                    status_code=400,
+                )
+            collection_name = collection["name"]
+            current = {
+                ("title", int(row["title_id"]))
+                for row in conn.execute(
+                    "SELECT title_id FROM collection_titles WHERE collection_id=?",
+                    (collection_id,),
+                ).fetchall()
+            }
+            current.update({
+                ("episode", int(row["expected_episode_id"]))
+                for row in conn.execute(
+                    "SELECT expected_episode_id FROM collection_episodes WHERE collection_id=?",
+                    (collection_id,),
+                ).fetchall()
+            })
+            if set(requested) != current or len(requested) != len(current):
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "detail": (
+                            "The collection changed while you were reordering it. "
+                            "Reload the page and try again."
+                        ),
+                    },
+                    status_code=409,
+                )
+            for position, (item_type, item_id) in enumerate(requested):
+                if item_type == "title":
+                    conn.execute(
+                        """UPDATE collection_titles SET position=?
+                           WHERE collection_id=? AND title_id=?""",
+                        (position, collection_id, item_id),
+                    )
+                else:
+                    conn.execute(
+                        """UPDATE collection_episodes SET position=?
+                           WHERE collection_id=? AND expected_episode_id=?""",
+                        (position, collection_id, item_id),
+                    )
+            conn.execute(
+                "UPDATE collections SET updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (collection_id,),
+            )
+
+        record_event(
+            "library",
+            f'Collection order updated for "{collection_name}".',
+            user_id=signed_in_user_id(request),
+            context={
+                "collection_id": collection_id,
+                "items": len(requested),
+                "operation": "collection_reorder",
+            },
+        )
+        return JSONResponse({
+            "ok": True,
+            "count": len(requested),
+            "detail": f"Saved the order of {len(requested)} collection item{'s' if len(requested) != 1 else ''}.",
+        })
+
     @router.post("/titles/organize-bulk", response_class=HTMLResponse)
     def organize_titles_bulk_action(
         request: Request,
@@ -285,5 +497,7 @@ def build_router(ctx: RouteContext):
     return router, {
         "toggle_title_favorite_api": toggle_title_favorite_api,
         "favorite_titles_bulk": favorite_titles_bulk,
+        "search_collection_titles": search_collection_titles,
+        "reorder_collection_items": reorder_collection_items,
         "organize_titles_bulk_action": organize_titles_bulk_action,
     }
