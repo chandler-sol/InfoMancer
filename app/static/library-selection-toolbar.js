@@ -16,6 +16,19 @@
     return [...unique.values()];
   };
   const selectedIds = () => selectedChoices().map(choice => String(choice.value || '')).filter(Boolean);
+  const rememberBulkMatchReturn = (kind) => {
+    if (!['movie', 'tv'].includes(kind)) return;
+    const form = document.getElementById('library-bulk-form');
+    const returnTo = form?.querySelector('input[name="return_to"]')?.value
+      || `${window.location.pathname}${window.location.search}`;
+    try {
+      window.sessionStorage.setItem(`infomancer:bulk-match-return:${kind}`, JSON.stringify({
+        url: returnTo,
+        at: Date.now(),
+      }));
+      window.sessionStorage.removeItem(`infomancer:bulk-match-return-pending:${kind}`);
+    } catch (_) {}
+  };
 
   const status = document.getElementById('search-state');
   const selectionCountLabel = document.getElementById('library-selection-count');
@@ -73,7 +86,10 @@
     button.classList.remove('primary');
     button.classList.add('library-selection-secondary-command');
     matchOptions.append(button);
-    button.addEventListener('click', () => matchMenu.removeAttribute('open'));
+    button.addEventListener('click', () => {
+      rememberBulkMatchReturn(button.dataset.matchKind || '');
+      matchMenu.removeAttribute('open');
+    });
   });
 
   const selectionSummary = document.createElement('div');
