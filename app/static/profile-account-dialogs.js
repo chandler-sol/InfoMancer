@@ -49,7 +49,16 @@
     const state = document.createElement('div');
     state.className = 'profile-account-dialog-state error';
     state.setAttribute('role', 'alert');
-    state.textContent = message;
+    const copy = document.createElement('span');
+    copy.textContent = message;
+    state.append(copy);
+    if (activeUrl) {
+      const fallback = document.createElement('a');
+      fallback.className = 'button small';
+      fallback.href = activeUrl;
+      fallback.textContent = 'Open full page';
+      state.append(fallback);
+    }
     body.replaceChildren(state);
   };
 
@@ -136,7 +145,7 @@
       }
     } catch (error) {
       if (error.name !== 'AbortError') {
-        setError('This account panel could not be loaded. You can still open the full page and try again.');
+        setError('This account panel could not be loaded.');
       }
     } finally {
       controller = null;
@@ -202,7 +211,7 @@
         const failed = !response.ok || Boolean(documentCopy.querySelector('.settings-form .form-error'));
         if (failed) {
           if (!installPanel(documentCopy, activeKind)) {
-            setError('The password could not be changed. Open the full Password page and try again.');
+            setError('The password could not be changed.');
           }
           return;
         }
@@ -213,7 +222,7 @@
 
       if (activeKind === 'sessions') {
         if (!installPanel(documentCopy, activeKind)) {
-          setError('Sessions could not be refreshed. Open the full Sessions page and try again.');
+          setError('Sessions could not be refreshed.');
           return;
         }
         showFeedback(url.searchParams.get('message') || 'Sessions updated.');
