@@ -87,7 +87,7 @@
   const savedViews = Boolean(document.querySelector('.saved-view-bar') && document.querySelector('.catalog-tabs'));
   const letterJumpToolbar = document.querySelector('.library-display-toolbar');
   const letterJumpAlphabet = letterJumpToolbar?.querySelector('.alphabet');
-  const libraryViewToolbar = letterJumpToolbar?.querySelector('.library-view-toolbar');
+  const libraryViewToolbar = document.querySelector('.library-view-toolbar');
   const libraryControls = document.querySelector('.library-controls');
   const filterSearch = document.getElementById('library-filter-search');
   const filterSearchInput = document.getElementById('live-library-search');
@@ -100,8 +100,7 @@
   if (letterJumpAlphabet) {
     letterJumpAlphabet.style.visibility = 'hidden';
     letterJumpAlphabet.setAttribute('aria-hidden', 'true');
-    if (letterJumpToolbar) letterJumpToolbar.style.justifyContent = 'space-between';
-    if (libraryViewToolbar) libraryViewToolbar.style.marginLeft = 'auto';
+    if (letterJumpToolbar) letterJumpToolbar.style.justifyContent = 'flex-start';
   }
 
   /* Match the enhanced filter-strip geometry during first paint. Using the old
@@ -116,9 +115,13 @@
     filterSearchInput.style.visibility = 'hidden';
   }
 
-  /* The server still renders a tiny fallback density control so the page remains
-     usable without enhancement. Hide that fallback only during the handoff to the
-     semantic Density controller, then reveal the same slot after replacement. */
+  /* Hide the server-rendered display group during the placement handoff. The
+     Density controller moves it beside the Library scope tabs before it becomes
+     visible, avoiding a flash in the old Starts-with row. */
+  if (library && libraryViewToolbar) {
+    libraryViewToolbar.style.visibility = 'hidden';
+    libraryViewToolbar.setAttribute('aria-hidden', 'true');
+  }
   if (library && coverSizeControl && !coverSizeControl.hidden) {
     coverSizeControl.style.visibility = 'hidden';
     coverSizeControl.setAttribute('aria-hidden', 'true');
@@ -177,7 +180,6 @@
     letterJumpAlphabet.style.removeProperty('visibility');
     letterJumpAlphabet.removeAttribute('aria-hidden');
     letterJumpToolbar?.style.removeProperty('justify-content');
-    libraryViewToolbar?.style.removeProperty('margin-left');
   });
 
   libraryStyles.then(async () => {
@@ -201,6 +203,8 @@
     pending[0].then(() => {
       coverSizeControl?.style.removeProperty('visibility');
       coverSizeControl?.removeAttribute('aria-hidden');
+      libraryViewToolbar?.style.removeProperty('visibility');
+      libraryViewToolbar?.removeAttribute('aria-hidden');
     });
     return Promise.all(pending);
   });
