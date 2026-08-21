@@ -18,9 +18,9 @@
   const selectedIds = () => selectedChoices().map(choice => String(choice.value || '')).filter(Boolean);
   const rememberBulkMatchReturn = (kind) => {
     if (!['movie', 'tv'].includes(kind)) return;
-    const form = document.getElementById('library-bulk-form');
-    const returnTo = form?.querySelector('input[name="return_to"]')?.value
-      || `${window.location.pathname}${window.location.search}`;
+    // Live Library filtering updates the browser URL without rerendering the form,
+    // so the address bar is the authoritative return destination here.
+    const returnTo = `${window.location.pathname}${window.location.search}`;
     try {
       window.sessionStorage.setItem(`infomancer:bulk-match-return:${kind}`, JSON.stringify({
         url: returnTo,
