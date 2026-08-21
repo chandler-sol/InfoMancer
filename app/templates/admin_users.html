@@ -32,10 +32,13 @@
         <summary class="admin-user-delete-toggle">Delete user</summary>
         <div class="admin-user-delete-confirm">
           <div><strong>Delete {{ user.display_name }}?</strong><p>This permanently removes the account, its sessions, personal ratings, favorites, tags, saved views, and search history. Shared library data is not deleted.</p></div>
-          <form method="post" action="/admin/users/{{ user.id }}/delete">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="button danger">Delete {{ user.display_name }}</button>
-          </form>
+          <div class="admin-user-delete-confirm-actions">
+            <button type="button" class="button admin-user-delete-cancel">Cancel</button>
+            <form method="post" action="/admin/users/{{ user.id }}/delete">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="button danger">Delete {{ user.display_name }}</button>
+            </form>
+          </div>
         </div>
       </details>
     </div>
@@ -44,6 +47,7 @@
 {% endmacro %}
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('static', path='user-management.css') }}?v={{ static_version }}">
+<script src="{{ url_for('static', path='user-management.js') }}?v={{ static_version }}" defer></script>
 <header class="settings-heading app-settings-heading">
   <p class="eyebrow">SETTINGS</p><h1>User Management</h1>
   <p>Manage who can access this InfoMancer installation and what they are allowed to do.</p>
@@ -89,5 +93,4 @@
     <button class="button primary">Create user</button>
   </form>
 </section>
-{% if invitation_url %}<script>(()=>{const button=document.getElementById('copy-invitation');const input=document.getElementById('invitation-url');button?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(input.value);button.textContent='Copied';}catch(_){input.select();button.textContent='Press Ctrl+C to copy';}});})();</script>{% endif %}
 {% endblock %}
