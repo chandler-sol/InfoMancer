@@ -10,6 +10,7 @@ from .inspector_media import build_router as build_inspector_media_router
 from .recovery import build_router as build_recovery_router
 from .scheduled_tasks import build_router as build_scheduled_tasks_router
 from .settings import build_router as build_settings_router
+from .settings_quick_actions import build_router as build_settings_quick_actions_router
 from .account_avatar import build_router as build_account_avatar_router
 from .user_management import build_router as build_user_management_router
 from .metadata_maintenance import build_router as build_metadata_maintenance_router
@@ -30,6 +31,7 @@ ROUTER_BUILDERS = (
     build_recovery_router,
     build_scheduled_tasks_router,
     build_settings_router,
+    build_settings_quick_actions_router,
     build_account_avatar_router,
     build_user_management_router,
     build_metadata_maintenance_router,
