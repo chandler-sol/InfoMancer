@@ -105,6 +105,152 @@ body .settings-page-grid.user-management-grid {
 body .settings-page-grid.user-management-grid > .settings-card {
   height: auto;
 }
+body .user-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+body .user-count {
+  display: grid;
+  place-items: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid #34414d;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+body .admin-user-list {
+  margin-top: 2px;
+}
+body .admin-user {
+  border-top: 1px solid #2a3540;
+}
+body .admin-user > summary {
+  display: grid;
+  grid-template-columns: 34px minmax(0,1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+  list-style: none;
+  color: var(--text);
+}
+body .admin-user > summary::-webkit-details-marker,
+body .admin-user-delete > summary::-webkit-details-marker {
+  display: none;
+}
+body .admin-user-disclosure {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #34414d;
+  border-radius: 7px;
+  background: #0e151c;
+  color: #a9bac9;
+  transition: border-color .14s ease, color .14s ease, transform .14s ease;
+}
+body .admin-user-disclosure svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform .14s ease;
+}
+body .admin-user > summary:hover .admin-user-disclosure,
+body .admin-user > summary:focus-visible .admin-user-disclosure {
+  border-color: #567537;
+  color: var(--lime);
+}
+body .admin-user[open] .admin-user-disclosure svg {
+  transform: rotate(90deg);
+}
+body .admin-user-identity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+body .admin-user-identity strong {
+  color: var(--text);
+}
+body .admin-user-identity small {
+  color: var(--muted);
+}
+body .account-state {
+  justify-self: end;
+}
+body .account-state.active {
+  border-color: #4a672d;
+  background: #162014;
+  color: var(--lime);
+}
+body .account-state.pending {
+  border-color: #6d5720;
+  background: #211b0e;
+  color: #ffd166;
+}
+body .account-state.disabled {
+  border-color: #693638;
+  background: #251417;
+  color: #ff8b8b;
+}
+body .admin-user-body {
+  gap: 14px;
+  padding: 2px 0 18px 46px;
+}
+body .admin-user-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+body .admin-user-actions form {
+  margin: 0;
+}
+body .admin-user-delete {
+  width: fit-content;
+  max-width: 100%;
+}
+body .admin-user-delete > summary.button {
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  list-style: none;
+}
+body .admin-user-delete-confirm {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  align-items: end;
+  gap: 16px;
+  width: min(680px, calc(100vw - 160px));
+  max-width: 100%;
+  margin-top: 10px;
+  padding: 14px;
+  border: 1px solid #693638;
+  border-radius: 7px;
+  background: #201316;
+}
+body .admin-user-delete-confirm strong {
+  color: #ffb0ad;
+}
+body .admin-user-delete-confirm p {
+  margin: 4px 0 0;
+  color: #c8a4a4;
+  line-height: 1.45;
+}
+body .admin-user-delete-confirm form {
+  margin: 0;
+}
+body .user-management-empty {
+  padding: 28px 14px;
+  border-top: 1px solid #2a3540;
+}
 
 body .settings-card {
   gap: 14px;
@@ -327,10 +473,30 @@ body .settings-handoff {
   body form.settings-page-grid[action="/settings/general"] > .settings-card:not(.full-width) {
     min-height: 0;
   }
+
+  body .admin-user > summary {
+    grid-template-columns: 32px minmax(0,1fr);
+  }
+  body .account-state {
+    grid-column: 2;
+    justify-self: start;
+  }
+  body .admin-user-body {
+    padding-left: 44px;
+  }
+  body .admin-user-delete-confirm {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+  body .admin-user-delete-confirm .button {
+    width: 100%;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  body .settings-section-nav a {
+  body .settings-section-nav a,
+  body .admin-user-disclosure,
+  body .admin-user-disclosure svg {
     transition: none;
   }
 }
