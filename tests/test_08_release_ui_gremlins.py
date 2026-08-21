@@ -97,6 +97,16 @@ class ReleaseUiGremlinContracts(unittest.TestCase):
         self.assertNotIn("library-list-view", density)
         self.assertNotIn("library-cover-view", density)
 
+    def test_server_cookie_is_canonical_library_view_source(self):
+        surface = (ROOT / "app/static/library-surface-lazy.js").read_text(encoding="utf-8")
+        navigation = (ROOT / "app/static/app-navigation.js").read_text(encoding="utf-8")
+
+        self.assertIn("let preferred = cookieView()", surface)
+        self.assertIn("if (!preferred)", surface)
+        self.assertIn("const cookieView = libraryViewCookie()", navigation)
+        self.assertIn("if (cookieView)", navigation)
+        self.assertIn("localStorage.setItem('infomancer-library-view', cookieView)", navigation)
+
     def test_notification_bell_exists_in_synchronous_first_paint_css(self):
         progress = (ROOT / "app/static/progress.css").read_text(encoding="utf-8")
         enhanced = (ROOT / "app/static/task-widget.css").read_text(encoding="utf-8")
@@ -115,6 +125,17 @@ class ReleaseUiGremlinContracts(unittest.TestCase):
         self.assertNotIn("replaceWith", source)
         self.assertNotIn("document.addEventListener('infomancer:tasks'", source)
         self.assertNotIn("/api/tasks", base)
+
+    def test_task_tour_demo_explicitly_suspends_real_visual_owner(self):
+        source = (ROOT / "app/static/task-widget.js").read_text(encoding="utf-8")
+        loader = (ROOT / "app/static/workspace-ui.js").read_text(encoding="utf-8")
+
+        self.assertIn("let tourDemoActive = widget.dataset.tourDemo === '1'", source)
+        self.assertIn("const syncTourDemoOwnership = () =>", source)
+        self.assertIn("new MutationObserver(syncTourDemoOwnership).observe(widget", source)
+        self.assertIn("if (tourDemoActive) return;", source)
+        self.assertIn("loadScript('task-widget.js')", loader)
+        self.assertNotIn("loadTaskWidgetWhenReady", loader)
 
     def test_scheduled_tasks_do_not_become_notification_attention(self):
         source = (ROOT / "app/static/task-widget.js").read_text(encoding="utf-8")
