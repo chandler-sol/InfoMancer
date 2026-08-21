@@ -2,17 +2,46 @@
   min-width: 0;
 }
 
+.collection-header-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin-top: 16px;
+}
+
 .collection-header-actions {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 16px;
 }
 
 .collection-header-actions .button {
   min-height: 36px;
   padding: 7px 11px;
+}
+
+.collection-density-control {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.collection-density-control > span {
+  padding-right: 10px;
+  border-right: 1px solid var(--line);
+}
+
+.collection-cover-size-control {
+  grid-template-columns: 28px minmax(105px, 160px) 28px;
+}
+
+.collection-cover-size-control .cover-size-slider {
+  min-width: 105px;
 }
 
 .collection-management-dialog {
@@ -257,19 +286,11 @@
   line-height: 1.5;
 }
 
-.collection-display-toolbar {
+.collection-delete-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
-  min-height: 38px;
-  margin: 4px 0 14px;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.collection-cover-size-control {
-  grid-template-columns: 28px minmax(105px, 160px) 28px;
+  gap: 8px;
 }
 
 .collection-order-toolbar {
@@ -327,11 +348,13 @@
 
 .collection-cover-library {
   overflow: visible;
-  justify-content: start;
-  gap: 26px 20px;
+  grid-template-columns: repeat(auto-fill, min(var(--cover-size), 100%));
+  justify-content: space-between;
+  gap: 25px 18px;
 }
 
 .collection-cover-library .cover-card {
+  width: min(var(--cover-size), 100%);
   flex-basis: min(var(--cover-size), 100%);
 }
 
@@ -464,9 +487,11 @@
 
 .collection-cover-library.is-reordering .collection-cover-card {
   cursor: grab;
+  user-select: none;
+  touch-action: none;
 }
 
-.collection-cover-library.is-reordering .collection-cover-card:active {
+.collection-cover-library.is-reordering .collection-cover-card.is-pointer-dragging {
   cursor: grabbing;
 }
 
@@ -493,7 +518,8 @@
 }
 
 .collection-cover-card.collection-dragging {
-  opacity: .38;
+  z-index: 95;
+  opacity: .42;
 }
 
 .collection-cover-card.collection-drop-target .cover-art {
@@ -502,9 +528,10 @@
 }
 
 @media (max-width: 760px) {
+  .collection-header-toolbar,
   .collection-header-actions,
   .collection-header-actions .button,
-  .collection-display-toolbar,
+  .collection-density-control,
   .collection-cover-size-control {
     width: 100%;
   }
@@ -513,9 +540,14 @@
     justify-content: center;
   }
 
-  .collection-display-toolbar {
+  .collection-density-control {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .collection-density-control > span {
+    padding: 0;
+    border: 0;
   }
 
   .collection-cover-size-control {
@@ -539,6 +571,7 @@
 
   .collection-delete-confirm,
   .collection-delete-confirm > summary,
+  .collection-delete-actions,
   .collection-order-actions,
   .collection-order-actions .button {
     width: 100%;
@@ -548,6 +581,11 @@
     position: static;
     width: auto;
     margin-top: 8px;
+  }
+
+  .collection-delete-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
   }
 
   .collection-order-actions {
