@@ -12,6 +12,14 @@
 
   const validView = (value) => ['list', 'covers'].includes(value) ? value : '';
   const currentView = () => coverSurface.hidden ? 'list' : 'covers';
+  const cookieView = () => {
+    const prefix = `${COOKIE_NAME}=`;
+    const value = document.cookie.split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(prefix))
+      ?.slice(prefix.length) || '';
+    return validView(decodeURIComponent(value));
+  };
 
   const setViewCookie = (view) => {
     if (!validView(view)) return;
@@ -172,7 +180,9 @@
     }
   });
 
-  let preferred = '';
-  try { preferred = validView(localStorage.getItem(STORAGE_KEY) || ''); } catch (_error) {}
+  let preferred = cookieView();
+  if (!preferred) {
+    try { preferred = validView(localStorage.getItem(STORAGE_KEY) || ''); } catch (_error) {}
+  }
   applyView(preferred || currentView(), {persist: true, hydrate: true});
 })();
