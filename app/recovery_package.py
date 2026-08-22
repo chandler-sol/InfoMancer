@@ -6,6 +6,7 @@ import os
 import shutil
 import sqlite3
 import tempfile
+import unicodedata
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -29,6 +30,16 @@ class RecoveryPackageService:
     MAX_UNCOMPRESSED_BYTES = 4 * 1024 * 1024 * 1024
     MAX_ENTRIES = 10_000
     MAX_MANIFEST_BYTES = 1024 * 1024
+    MAX_COMPRESSION_RATIO = 250
+    MAX_MEMBER_PATH_LENGTH = 1024
+    MAX_MEMBER_DEPTH = 32
+    MAX_MEMBER_COMPONENT_LENGTH = 255
+    WINDOWS_RESERVED = {
+        "CON", "PRN", "AUX", "NUL",
+        *(f"COM{index}" for index in range(1, 10)),
+        *(f"LPT{index}" for index in range(1, 10)),
+    }
+    WINDOWS_INVALID = set('<>:"|?*')
 
     def __init__(self, database_path: Path, app_version: str) -> None:
         self.database_path = Path(database_path)
@@ -51,12 +62,80 @@ class RecoveryPackageService:
             digest.update(chunk)
         return digest.hexdigest()
 
-    @staticmethod
-    def _safe_member(name: str) -> bool:
-        if not name or "\\" in name or "\x00" in name:
+    @classmethod
+    def _safe_member(cls, name: str) -> bool:
+        if (
+            not name
+            or len(name) > cls.MAX_MEMBER_PATH_LENGTH
+            or "\\" in name
+            or "\x00" in name
+        ):
             return False
         path = PurePosixPath(name)
-        return not path.is_absolute() and ".." not in path.parts
+        if (
+            path.is_absolute()
+            or ".." in path.parts
+            or path.as_posix() != name
+            or len(path.parts) > cls.MAX_MEMBER_DEPTH
+        ):
+            return False
+        for part in path.parts:
+            if (
+                not part
+                or len(part) > cls.MAX_MEMBER_COMPONENT_LENGTH
+                or part.rstrip(" .") != part
+                or any(ord(character) < 32 for character in part)
+                or any(character in cls.WINDOWS_INVALID for character in part)
+                or part.split(".", 1)[0].upper() in cls.WINDOWS_RESERVED
+            ):
+                return False
+        return True
+
+    @staticmethod
+    def _portable_member_key(name: str) -> str:
+        return "/".join(
+            unicodedata.normalize("NFC", part).casefold()
+            for part in PurePosixPath(name).parts
+        )
+
+    @classmethod
+    def _validate_zip_info(cls, info: zipfile.ZipInfo) -> None:
+        if info.is_dir() or not cls._safe_member(info.filename):
+            raise RecoveryPackageError("The recovery package contains an unsafe archive path.")
+        if info.flag_bits & 0x1:
+            raise RecoveryPackageError("Encrypted recovery package entries are not supported.")
+        if info.compress_type not in {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED}:
+            raise RecoveryPackageError("The recovery package uses an unsupported compression method.")
+        if info.file_size > 0:
+            if info.compress_size <= 0:
+                raise RecoveryPackageError("The recovery package contains an invalid compressed file.")
+            if info.file_size > info.compress_size * cls.MAX_COMPRESSION_RATIO:
+                raise RecoveryPackageError(
+                    "The recovery package contains a file with an unsafe compression ratio."
+                )
+
+    @staticmethod
+    def _manifest_size(record: dict, name: str) -> int:
+        value = record.get("size")
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise RecoveryPackageError(
+                f"The recovery package has an invalid size value for {name}."
+            )
+        return value
+
+    @staticmethod
+    def _manifest_hash(record: dict, name: str) -> str:
+        value = record.get("sha256")
+        if not isinstance(value, str):
+            raise RecoveryPackageError(
+                f"The recovery package checksum is invalid for {name}."
+            )
+        value = value.casefold()
+        if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+            raise RecoveryPackageError(
+                f"The recovery package checksum is invalid for {name}."
+            )
+        return value
 
     @staticmethod
     def _replace(source: Path, destination: Path) -> None:
@@ -183,7 +262,7 @@ class RecoveryPackageService:
             raise RecoveryPackageError("The recovery package manifest is too large.")
         try:
             manifest = json.loads(archive.read(manifest_info))
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        except (json.JSONDecodeError, UnicodeDecodeError, RuntimeError, NotImplementedError) as exc:
             raise RecoveryPackageError("The recovery package manifest is unreadable.") from exc
         if not isinstance(manifest, dict) or manifest.get("format") != self.FORMAT:
             raise RecoveryPackageError("This is not an InfoMancer recovery package.")
@@ -209,11 +288,16 @@ class RecoveryPackageService:
                 infos = archive.infolist()
                 if not infos or len(infos) > self.MAX_ENTRIES:
                     raise RecoveryPackageError("The recovery package has an invalid number of files.")
+                for info in infos:
+                    self._validate_zip_info(info)
                 names = [item.filename for item in infos]
                 if len(names) != len(set(names)):
                     raise RecoveryPackageError("The recovery package contains duplicate archive paths.")
-                if any(not self._safe_member(name) for name in names):
-                    raise RecoveryPackageError("The recovery package contains an unsafe archive path.")
+                portable_names = [self._portable_member_key(name) for name in names]
+                if len(portable_names) != len(set(portable_names)):
+                    raise RecoveryPackageError(
+                        "The recovery package contains archive paths that collide on another supported platform."
+                    )
                 total = sum(int(item.file_size) for item in infos)
                 if total > self.MAX_UNCOMPRESSED_BYTES:
                     raise RecoveryPackageError("The recovery package expands beyond the 4 GB safety limit.")
@@ -226,7 +310,10 @@ class RecoveryPackageService:
                 for record in file_records:
                     if not isinstance(record, dict):
                         raise RecoveryPackageError("The recovery package manifest contains an invalid file record.")
-                    name = str(record.get("path") or "")
+                    raw_name = record.get("path")
+                    if not isinstance(raw_name, str):
+                        raise RecoveryPackageError("The recovery package manifest contains an unsafe file path.")
+                    name = raw_name
                     if not self._safe_member(name) or name == "manifest.json":
                         raise RecoveryPackageError("The recovery package manifest contains an unsafe file path.")
                     if name in expected_names:
@@ -236,11 +323,10 @@ class RecoveryPackageService:
                         info = archive.getinfo(name)
                     except KeyError as exc:
                         raise RecoveryPackageError(f"The recovery package is missing {name}.") from exc
-                    if int(record.get("size", -1)) != int(info.file_size):
+                    expected_size = self._manifest_size(record, name)
+                    if expected_size != int(info.file_size):
                         raise RecoveryPackageError(f"The recovery package size check failed for {name}.")
-                    expected_hash = str(record.get("sha256") or "").casefold()
-                    if len(expected_hash) != 64:
-                        raise RecoveryPackageError(f"The recovery package checksum is invalid for {name}.")
+                    expected_hash = self._manifest_hash(record, name)
                     with archive.open(info, "r") as stream:
                         actual_hash = self._sha256_stream(stream)
                     if actual_hash != expected_hash:
@@ -276,12 +362,12 @@ class RecoveryPackageService:
                 "created_at": str(manifest.get("created_at") or ""),
                 "files": len(file_records),
                 "artwork_files": artwork_count,
-                "database_size": int(database_record["size"]),
+                "database_size": self._manifest_size(database_record, "database/infomancer.db"),
                 "contains_media": bool(manifest.get("contains_media", False)),
                 "excluded": list(manifest.get("excluded") or []),
                 "notes": str(manifest.get("notes") or ""),
             }
-        except zipfile.BadZipFile as exc:
+        except (zipfile.BadZipFile, RuntimeError, NotImplementedError, EOFError) as exc:
             raise RecoveryPackageError("The selected file is not a readable recovery package.") from exc
         finally:
             if temp_database:
@@ -290,28 +376,69 @@ class RecoveryPackageService:
     def _extract_for_restore(self, package_path: Path, staging: Path) -> tuple[dict, Path, Path]:
         """Verify first, then re-check every extracted payload before it can be used."""
         summary = self.verify(package_path)
+        staging = staging.resolve(strict=False)
         database = staging / "database" / "infomancer.db"
         artwork = staging / "collection-art"
         database.parent.mkdir(parents=True, exist_ok=True)
         artwork.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(package_path, "r") as archive:
-            manifest = self._read_manifest(archive)
-            records = manifest["files"]
-            for record in records:
-                name = str(record["path"])
-                role = record["role"]
-                if role == "database":
-                    destination = database
-                else:
-                    relative = PurePosixPath(name).relative_to("collection-art")
-                    destination = artwork.joinpath(*relative.parts)
+        try:
+            with zipfile.ZipFile(package_path, "r") as archive:
+                manifest = self._read_manifest(archive)
+                records = manifest.get("files")
+                if not isinstance(records, list) or not records:
+                    raise RecoveryPackageError("The recovery package manifest has no files to restore.")
+                for record in records:
+                    if not isinstance(record, dict):
+                        raise RecoveryPackageError("The recovery package manifest contains an invalid file record.")
+                    raw_name = record.get("path")
+                    if not isinstance(raw_name, str) or not self._safe_member(raw_name):
+                        raise RecoveryPackageError("The recovery package manifest contains an unsafe file path.")
+                    name = raw_name
+                    role = record.get("role")
+                    try:
+                        info = archive.getinfo(name)
+                    except KeyError as exc:
+                        raise RecoveryPackageError(f"The recovery package is missing {name}.") from exc
+                    self._validate_zip_info(info)
+                    expected_size = self._manifest_size(record, name)
+                    expected_hash = self._manifest_hash(record, name)
+                    if expected_size != int(info.file_size):
+                        raise RecoveryPackageError(f"The recovery package size check failed for {name}.")
+                    if role == "database":
+                        if name != "database/infomancer.db":
+                            raise RecoveryPackageError("The recovery package has an invalid database entry.")
+                        destination = database
+                    elif role == "collection-artwork":
+                        if not name.startswith("collection-art/"):
+                            raise RecoveryPackageError("The recovery package has an invalid artwork entry.")
+                        relative = PurePosixPath(name).relative_to("collection-art")
+                        destination = artwork.joinpath(*relative.parts)
+                    else:
+                        raise RecoveryPackageError("The recovery package contains an unsupported file role.")
+                    try:
+                        destination.resolve(strict=False).relative_to(staging)
+                    except ValueError as exc:
+                        raise RecoveryPackageError(
+                            "The recovery package contains an unsafe extraction destination."
+                        ) from exc
                     destination.parent.mkdir(parents=True, exist_ok=True)
-                with archive.open(name, "r") as source, destination.open("wb") as target:
-                    shutil.copyfileobj(source, target, length=1024 * 1024)
-                if destination.stat().st_size != int(record["size"]):
-                    raise RecoveryPackageError(f"The staged restore size check failed for {name}.")
-                if self._sha256_file(destination) != str(record["sha256"]).casefold():
-                    raise RecoveryPackageError(f"The staged restore checksum failed for {name}.")
+                    with archive.open(info, "r") as source, destination.open("wb") as target:
+                        digest = hashlib.sha256()
+                        written = 0
+                        while chunk := source.read(1024 * 1024):
+                            written += len(chunk)
+                            if written > expected_size:
+                                raise RecoveryPackageError(
+                                    f"The staged restore size check failed for {name}."
+                                )
+                            target.write(chunk)
+                            digest.update(chunk)
+                    if written != expected_size:
+                        raise RecoveryPackageError(f"The staged restore size check failed for {name}.")
+                    if digest.hexdigest() != expected_hash:
+                        raise RecoveryPackageError(f"The staged restore checksum failed for {name}.")
+        except (zipfile.BadZipFile, RuntimeError, NotImplementedError, EOFError) as exc:
+            raise RecoveryPackageError("The selected file is not a readable recovery package.") from exc
         try:
             validate_database_backup(database)
         except MaintenanceError as exc:
