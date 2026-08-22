@@ -1,0 +1,54 @@
+/* Mobile-only header geometry. Keep account and announcement controls optically
+   centered and prevent WebKit tap/focus chrome from painting stray rings. */
+@media (max-width: 760px) {
+  .topbar .account-menu {
+    flex: 0 0 42px;
+    width: 42px;
+    min-width: 42px;
+  }
+
+  .topbar .account-menu > summary {
+    position: relative;
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
+    min-height: 42px;
+    padding: 0;
+    overflow: hidden;
+    border-color: #45641f;
+    outline: 0;
+    box-shadow: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .topbar .account-menu > summary:focus {
+    outline: 0;
+  }
+
+  .topbar .account-menu > summary:focus-visible {
+    overflow: visible;
+    box-shadow: 0 0 0 3px rgba(81, 214, 230, .28);
+  }
+
+  .topbar .account-avatar {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    border-radius: inherit;
+    background: var(--lime);
+    color: #081008;
+  }
+
+  .topbar .announcement-button {
+    overflow: visible;
+  }
+
+  .topbar .announcement-button svg {
+    width: 18px;
+    height: 18px;
+    overflow: visible;
+    transform: translateX(1px);
+  }
+}
