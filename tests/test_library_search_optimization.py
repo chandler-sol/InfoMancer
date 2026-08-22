@@ -80,7 +80,7 @@ class LibrarySearchOptimizationTests(unittest.TestCase):
                 conn.execute(
                     """INSERT INTO title_credits(title_id,imdb_person_id,person_name,role)
                        VALUES (?,?,?,?)""",
-                    (title_id, "nm0000001", "Sigourney Weaver", "Actor"),
+                    (title_id, "nm0000001", "Sigourney Weaver", "actor"),
                 )
 
             calls = []
