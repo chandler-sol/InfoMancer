@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.db import Database
+from app.request_security import LOCAL_CSRF_COOKIE
 
 
 class FakeTVDB:
@@ -84,6 +85,10 @@ class MetadataMaintenanceTests(unittest.TestCase):
         )
         self.auth_patch.start()
         self.client = TestClient(main.app)
+        self.client.get("/")
+        csrf_token = self.client.cookies.get(LOCAL_CSRF_COOKIE)
+        self.assertTrue(csrf_token)
+        self.client.headers.update({"X-CSRF-Token": csrf_token})
 
     def tearDown(self):
         self.client.close()
