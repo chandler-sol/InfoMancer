@@ -80,20 +80,27 @@ body:not(.library-multi-selection) .library-display-toolbar.library-selection-to
   cursor: pointer;
 }
 .library-bulk-match-menu > summary::-webkit-details-marker { display: none; }
+/* Use a text disclosure glyph rather than a rotated 5px border box. Mobile Safari
+   can clip one leg of the border-drawn chevron, leaving a stray vertical stroke
+   beside “Match”. The glyph is both more robust and easier to align in nested menus. */
 .library-bulk-match-menu > summary::after {
-  content: "";
-  width: 5px;
-  height: 5px;
-  margin-left: 8px;
+  content: "⌄";
+  width: auto;
+  height: auto;
+  margin-left: auto;
+  padding-left: 10px;
   flex: 0 0 auto;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
+  border: 0;
   color: var(--muted);
-  transform: translateY(-1px) rotate(45deg);
+  font-size: 14px;
+  line-height: 1;
+  transform: translateY(-1px);
   transform-origin: center;
+  transition: transform .14s ease, color .14s ease;
 }
 .library-bulk-match-menu[open] > summary::after {
-  transform: translateY(1px) rotate(225deg);
+  color: currentColor;
+  transform: translateY(1px) rotate(180deg);
 }
 .library-bulk-match-menu[open] > summary,
 .library-bulk-match-menu > summary:hover {
