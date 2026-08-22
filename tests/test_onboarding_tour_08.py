@@ -92,6 +92,21 @@ class OnboardingTour08ContractTests(unittest.TestCase):
         self.assertIn("target.bottom + gap", source)
         self.assertIn("target.top - height - gap", source)
 
+    def test_library_view_demo_waits_for_library_controller(self) -> None:
+        source = (STATIC / "onboarding-tour.js").read_text(encoding="utf-8")
+        self.assertIn("libraryControllerReady", source)
+        self.assertIn('library-surface-lazy.js', source)
+        self.assertIn("pendingLibraryView", source)
+        self.assertIn('document.addEventListener("infomancer:library-view-changed"', source)
+        self.assertIn("requestAnimationFrame(() => applyTourLibraryView(requested))", source)
+
+    def test_failed_tour_state_save_restores_current_step(self) -> None:
+        source = (STATIC / "onboarding-tour.js").read_text(encoding="utf-8")
+        self.assertRegex(
+            source,
+            r'catch \(error\) \{\s*window\.alert\(error\.message\);\s*render\(\);\s*return;',
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
