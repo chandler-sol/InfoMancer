@@ -20,14 +20,14 @@ class MetadataMaintenanceModalTests(unittest.TestCase):
                 "INSERT INTO roots(path,kind,label) VALUES ('/movies','movie','Movies')"
             ).lastrowid
             self.stale_id = conn.execute(
-                """INSERT INTO titles(root_id,kind,title,folder_path,imdb_id)
-                   VALUES (?,'movie','Stale Movie','/movies/stale','tt0000001')""",
+                """INSERT INTO titles(root_id,kind,title,folder_path,imdb_id,tvdb_movie_id)
+                   VALUES (?,'movie','Stale Movie','/movies/stale','tt0000001',77)""",
                 (root,),
             ).lastrowid
             self.fresh_id = conn.execute(
                 """INSERT INTO titles
-                   (root_id,kind,title,folder_path,imdb_id,poster_url,metadata_refreshed_at)
-                   VALUES (?,'movie','Fresh Movie','/movies/fresh','tt0000002',
+                   (root_id,kind,title,folder_path,imdb_id,tvdb_movie_id,poster_url,metadata_refreshed_at)
+                   VALUES (?,'movie','Fresh Movie','/movies/fresh','tt0000002',78,
                            'https://example.test/poster.jpg',CURRENT_TIMESTAMP)""",
                 (root,),
             ).lastrowid
@@ -99,7 +99,7 @@ class MetadataMaintenanceModalTests(unittest.TestCase):
         self.assertIn("metadata-maintenance-enhanced", bootstrap)
         self.assertIn("metadata-maintenance.css", bootstrap)
         self.assertIn("metadata-maintenance.js", bootstrap)
-        self.assertIn("oldTable?.remove()", controller)
+        self.assertIn("card.querySelector('.settings-table-wrap')?.remove()", controller)
         self.assertIn("View titles", controller)
         self.assertIn("Refresh all stale", controller)
         self.assertIn("/api/metadata/maintenance", controller)
