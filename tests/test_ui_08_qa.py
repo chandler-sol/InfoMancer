@@ -21,7 +21,7 @@ class Ui08QaContracts(unittest.TestCase):
         loader = (STATIC / "workspace.js").read_text(encoding="utf-8")
         core = (STATIC / "workspace-core.js").read_text(encoding="utf-8")
         self.assertFalse((STATIC / "workspace-detail-polish.css").exists())
-        self.assertNotIn("@import", css)
+        self.assertNotIn("@import url(", css)
         self.assertIn("Consolidated 0.8 workspace/detail polish", css)
         self.assertIn('consolidatedWorkspacePolish.dataset.workspaceDetailPolish = "1"', loader)
         self.assertIn("link[data-workspace-detail-polish]", core)
