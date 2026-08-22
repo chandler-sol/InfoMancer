@@ -7,6 +7,20 @@
     versionQuery = new URL(document.currentScript?.src || '', window.location.href).search;
   } catch (_error) {}
 
+  /* Final release polish is loaded from bootstrap so structural mobile fixes are
+     present before the Settings and task controllers perform their late handoff. */
+  const polishStylesheet = document.createElement('link');
+  polishStylesheet.rel = 'stylesheet';
+  polishStylesheet.href = `/static/final-mobile-polish.css${versionQuery}`;
+  document.head.append(polishStylesheet);
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const polishController = document.createElement('script');
+    polishController.src = `/static/final-mobile-polish.js${versionQuery}`;
+    polishController.async = false;
+    document.head.append(polishController);
+  }, {once: true});
+
   /* Page-specific Settings features get their own owners. Bootstrap only marks the
      page and loads their version-matched assets early enough to avoid a first-paint
      flash of the legacy fallback surface. */
