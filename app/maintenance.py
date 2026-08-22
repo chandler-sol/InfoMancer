@@ -25,6 +25,21 @@ def backup_directory(database_path: Path) -> Path:
     return path
 
 
+def _safe_backup_file(directory: Path, candidate: Path) -> Path | None:
+    """Return a contained regular backup file without following directory symlinks."""
+    try:
+        directory_resolved = directory.resolve(strict=True)
+        if candidate.is_symlink():
+            return None
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(directory_resolved)
+        if not resolved.is_file():
+            return None
+        return resolved
+    except (OSError, ValueError):
+        return None
+
+
 def create_database_backup(database_path: Path, suffix: str = "") -> Path:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     cleaned_suffix = re.sub(r"[^a-z]+", "-", suffix.casefold()).strip("-")
@@ -34,7 +49,7 @@ def create_database_backup(database_path: Path, suffix: str = "") -> Path:
     directory = backup_directory(database_path)
     destination = directory / f"{name}.db"
     counter = 2
-    while destination.exists():
+    while destination.exists() or destination.is_symlink():
         destination = directory / f"{name}-{counter}.db"
         counter += 1
     source = None
@@ -200,10 +215,17 @@ def validate_database_paths(
 
 def list_database_backups(database_path: Path) -> list[dict]:
     rows = []
-    for path in backup_directory(database_path).glob("infomancer-backup-*.db"):
+    directory = backup_directory(database_path)
+    for path in directory.glob("infomancer-backup-*.db"):
         if not SAFE_BACKUP_NAME.fullmatch(path.name):
             continue
-        stat = path.stat()
+        safe_path = _safe_backup_file(directory, path)
+        if safe_path is None:
+            continue
+        try:
+            stat = safe_path.stat()
+        except OSError:
+            continue
         rows.append({
             "name": path.name,
             "size": stat.st_size,
@@ -217,12 +239,11 @@ def list_database_backups(database_path: Path) -> list[dict]:
 def resolve_backup(database_path: Path, name: str) -> Path:
     if not SAFE_BACKUP_NAME.fullmatch(name):
         raise MaintenanceError("That backup name is not valid.")
-    path = next((
-        candidate for candidate in backup_directory(database_path).iterdir()
-        if candidate.is_file() and candidate.name == name
-    ), None)
+    directory = backup_directory(database_path)
+    candidate = directory / name
+    path = _safe_backup_file(directory, candidate)
     if path is None:
-        raise MaintenanceError("That database backup no longer exists.")
+        raise MaintenanceError("That database backup no longer exists or is not safe to use.")
     return path
 
 
