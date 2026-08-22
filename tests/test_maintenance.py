@@ -52,7 +52,7 @@ class MaintenanceTests(unittest.TestCase):
         validate_database_backup(first)
         self.assertNotEqual(first.name, second.name)
         self.assertEqual(len(list_database_backups(self.path)), 2)
-        self.assertEqual(resolve_backup(self.path, first.name), first)
+        self.assertEqual(resolve_backup(self.path, first.name), first.resolve())
         with self.assertRaisesRegex(MaintenanceError, "not valid"):
             resolve_backup(self.path, "../infomancer.db")
 
