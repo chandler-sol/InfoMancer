@@ -100,6 +100,13 @@
   top: calc(10px + env(safe-area-inset-top));
 }
 
+/* Duplicate Review has a hover/focus explanation that was wider than the narrowest
+   supported phone viewport. Keep its existing alignment but cap its footprint. */
+.duplicate-fingerprint-tooltip {
+  width: min(310px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+}
+
 @media (max-width: 760px) {
   /* Metric values and labels were inheriting an inline layout on narrow screens,
      producing strings such as 503Fresh. Give every metric an explicit stack. */
@@ -164,6 +171,17 @@
     -webkit-overflow-scrolling: touch;
   }
 
+  .task-popover-controls button,
+  .source-browser-close,
+  .collection-dialog-close,
+  .workspace-drawer-chrome button,
+  .title-overview-dialog .overview-dialog-close {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
   .source-browser {
     max-height: calc(100dvh - 16px);
   }
@@ -207,7 +225,7 @@
   body .settings-section-nav a {
     display: flex;
     align-items: center;
-    min-height: 42px;
+    min-height: 44px;
     scroll-snap-align: center;
   }
 
@@ -314,6 +332,28 @@
     width: 100%;
     box-sizing: border-box;
     text-align: center;
+  }
+}
+
+@media (max-width: 520px) {
+  .workspace-dialog-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .workspace-dialog-actions .button,
+  .workspace-dialog-actions button {
+    width: 100%;
+  }
+
+  .page-head .search {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .page-head .search .button,
+  .page-head .search button {
+    width: 100%;
   }
 }
 
