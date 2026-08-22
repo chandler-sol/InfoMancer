@@ -1,0 +1,175 @@
+/* Final 0.8 mobile polish. Keep these overrides narrow and structural so the
+   desktop workspace design remains unchanged. */
+
+/* Fingerprint cadence has one owner: Scheduled Tasks. Keep these controls in the
+   form for backwards-compatible submission, but do not present a second editor. */
+#hashing-settings-form label:has([name="hash_schedule_frequency"]),
+#hashing-settings-form label:has([name="hash_schedule_day"]),
+#hashing-settings-form label:has([name="hash_schedule_time"]) {
+  display: none !important;
+}
+
+.fingerprint-schedule-handoff {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid #2d3945;
+  border-radius: 7px;
+  background: #0e151c;
+}
+
+.fingerprint-schedule-handoff span {
+  min-width: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.fingerprint-schedule-handoff a {
+  flex: 0 0 auto;
+}
+
+.task-active .task-cancel-action {
+  display: flex;
+  width: max-content;
+  margin: 10px 0 0 auto;
+  border-color: #704244;
+  color: #ff9b96;
+}
+
+.task-active .task-cancel-action:hover,
+.task-active .task-cancel-action:focus-visible {
+  border-color: #a75c59;
+  color: #ffc0bc;
+  background: #231619;
+}
+
+.task-active .task-cancel-action[disabled] {
+  cursor: wait;
+  opacity: .7;
+}
+
+@media (max-width: 760px) {
+  /* Metric values and labels were inheriting an inline layout on narrow screens,
+     producing strings such as 503Fresh. Give every metric an explicit stack. */
+  body .settings-metrics > div {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    align-content: center;
+    align-items: start;
+    gap: 4px !important;
+    min-width: 0;
+    padding: 14px 16px;
+  }
+
+  body .settings-metrics strong,
+  body .settings-metrics span {
+    display: block !important;
+    width: 100%;
+    margin: 0;
+    text-align: left;
+  }
+
+  body .settings-metrics strong {
+    line-height: 1.05;
+  }
+
+  body .settings-metrics span {
+    line-height: 1.28;
+  }
+
+  /* The mobile search expands into header real estate. Temporarily yielding the
+     two secondary header actions gives the field useful width without covering
+     interactive controls. Navigation and account controls remain available. */
+  .topbar .task-widget,
+  .topbar .announcement-button {
+    transition: opacity .14s ease, visibility .14s ease;
+  }
+
+  .topbar:has(.global-search.open) .task-widget,
+  .topbar:has(.global-search.open) .announcement-button {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .topbar .global-search.open {
+    left: 58px;
+    right: 108px;
+    width: auto;
+    max-width: none;
+  }
+
+  /* File-protection choices are two-column rows: control plus copy. This removes
+     the detached radio/centered-copy appearance seen on iOS. */
+  body .safety-mode-choice {
+    display: grid !important;
+    grid-template-columns: 24px minmax(0, 1fr) !important;
+    align-items: start !important;
+    justify-items: stretch;
+    gap: 14px !important;
+    text-align: left !important;
+  }
+
+  body .safety-mode-choice > input[type="radio"] {
+    width: 20px !important;
+    height: 20px !important;
+    margin: 3px 0 0 !important;
+    justify-self: start;
+  }
+
+  body .safety-mode-choice > span {
+    display: grid !important;
+    gap: 4px;
+    min-width: 0;
+    text-align: left !important;
+  }
+
+  body .safety-mode-choice strong,
+  body .safety-mode-choice small {
+    display: block;
+    text-align: left !important;
+  }
+
+  /* Header actions on long System cards need their own row on phones. */
+  body #logging .settings-card-head {
+    flex-direction: column;
+    align-items: stretch;
+    min-height: 0;
+  }
+
+  body #logging .settings-card-head > .button-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    width: 100%;
+  }
+
+  body #logging .settings-card-head > .button-row .button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+  }
+
+  .fingerprint-schedule-handoff {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .fingerprint-schedule-handoff .button {
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar .task-widget,
+  .topbar .announcement-button {
+    transition: none;
+  }
+}
