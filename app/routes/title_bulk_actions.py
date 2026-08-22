@@ -3,9 +3,10 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from ..access import require_librarian
 from .context import RouteContext
 
 
@@ -246,7 +247,10 @@ def build_router(ctx: RouteContext):
             "results": [item for _rank, item in ranked[:20]],
         })
 
-    @router.post("/collections/{collection_id}/reorder")
+    @router.post(
+        "/collections/{collection_id}/reorder",
+        dependencies=[Depends(require_librarian)],
+    )
     def reorder_collection_items(
         request: Request,
         collection_id: int,
