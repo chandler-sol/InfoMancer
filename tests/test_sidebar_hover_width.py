@@ -7,8 +7,8 @@ class SidebarHoverWidthTests(unittest.TestCase):
         styles = Path("app/static/app-navigation.css").read_text(encoding="utf-8")
 
         self.assertIn("body.has-app-sidebar.sidebar-collapsed .site-menu:hover", styles)
-        self.assertIn("width:258px;", styles)
-        self.assertIn("left:243px;", styles)
+        self.assertIn("width:224px;", styles)
+        self.assertIn("left:209px;", styles)
         hover_block = styles.split("body.has-app-sidebar.sidebar-collapsed .site-menu:hover", 1)[1]
         self.assertNotIn("width:var(--app-sidebar-width", hover_block.split("/* Activity", 1)[0])
 
