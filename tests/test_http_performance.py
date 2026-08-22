@@ -144,7 +144,7 @@ class HttpPerformanceTests(unittest.TestCase):
         )
         self.assertIn("toolbar.insertBefore(actions, viewToolbar)", script)
         self.assertIn("has-selection-actions", script)
-        self.assertIn("grid-template-columns: minmax(120px, 1fr) auto minmax(280px, 1fr)", styles)
+        self.assertIn("grid-template-columns: minmax(120px, auto) minmax(0, 1fr) minmax(260px, auto)", styles)
         self.assertIn("position: sticky", styles)
         self.assertIn("library-selection-toolbar.css", workspace)
         self.assertIn("library-selection-toolbar.js", workspace)
@@ -162,8 +162,8 @@ class HttpPerformanceTests(unittest.TestCase):
         source = (Path(__file__).resolve().parents[1] / "app/static/task-widget.js").read_text(
             encoding="utf-8"
         )
-        self.assertIn("window.setTimeout(pollFailures, 30000)", source)
-        self.assertIn("window.setTimeout(pollFailures, 60000)", source)
+        self.assertIn("document.hidden ? 60000 : active.length ? 5000 : open ? 15000 : 30000", source)
+        self.assertIn("failureTimer = window.setTimeout", source)
         self.assertIn("if (failureRequest) return failureRequest", source)
 
     def test_title_detail_assets_are_not_loaded_on_every_page(self):
