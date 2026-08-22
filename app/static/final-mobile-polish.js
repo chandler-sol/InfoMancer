@@ -7,6 +7,7 @@
   ]);
   const stopping = new Set();
   let liveTasks = [];
+  let settingsRevealFrame = 0;
 
   const installFingerprintScheduleHandoff = () => {
     const form = document.getElementById('hashing-settings-form');
@@ -25,6 +26,18 @@
     link.textContent = 'Open Scheduled Tasks';
     handoff.append(copy, link);
     grid.after(handoff);
+  };
+
+  const revealActiveSettingsTab = () => {
+    window.cancelAnimationFrame(settingsRevealFrame);
+    settingsRevealFrame = window.requestAnimationFrame(() => {
+      settingsRevealFrame = 0;
+      const nav = document.querySelector('.settings-section-nav');
+      const active = nav?.querySelector('[aria-current="page"]');
+      if (!nav || !active || nav.scrollWidth <= nav.clientWidth) return;
+      const target = active.offsetLeft - Math.max(0, (nav.clientWidth - active.offsetWidth) / 2);
+      nav.scrollLeft = Math.max(0, target);
+    });
   };
 
   const cancelTask = async (task, button, row) => {
@@ -97,8 +110,12 @@
       });
     }
     installFingerprintScheduleHandoff();
+    revealActiveSettingsTab();
     decorateTaskRows();
   };
+
+  window.addEventListener('resize', revealActiveSettingsTab, {passive: true});
+  window.visualViewport?.addEventListener('resize', revealActiveSettingsTab, {passive: true});
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', installDomEnhancements, {once: true});
