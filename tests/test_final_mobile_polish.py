@@ -28,12 +28,17 @@ class FinalMobilePolishTests(unittest.TestCase):
         self.assertIn("media-fingerprints", script)
         self.assertIn("/api/tasks/${encodeURIComponent(task.id)}/cancel", script)
         self.assertIn("X-CSRF-Token", script)
+        self.assertIn("role-librarian", script)
 
         self.assertIn("final-mobile-polish.css", bootstrap)
         self.assertIn("final-mobile-polish.js", bootstrap)
 
     def test_scan_all_cancellation_stops_before_next_source(self):
         calls = []
+        with main.scan_all_lock:
+            previous_scan_all = dict(main.scan_all_job)
+        with main.scan_lock:
+            previous_scan_jobs = dict(main.scan_jobs)
 
         def fake_run_scan(root_id: int, *, hash_after: bool = True, force_cleanup: bool = False):
             calls.append(root_id)
@@ -47,15 +52,23 @@ class FinalMobilePolishTests(unittest.TestCase):
                 self.assertTrue(result["ok"])
             return []
 
-        with patch.object(main, "run_scan", side_effect=fake_run_scan), \
-             patch.object(main, "record_event"):
-            main.run_scan_all([(1, "One"), (2, "Two")])
+        try:
+            with patch.object(main, "run_scan", side_effect=fake_run_scan), \
+                 patch.object(main, "record_event"):
+                main.run_scan_all([(1, "One"), (2, "Two")])
 
-        self.assertEqual(calls, [1])
-        with main.scan_all_lock:
-            self.assertEqual(main.scan_all_job["status"], "cancelled")
-            self.assertEqual(main.scan_all_job["completed"], 1)
-            self.assertEqual(main.scan_all_job["total"], 2)
+            self.assertEqual(calls, [1])
+            with main.scan_all_lock:
+                self.assertEqual(main.scan_all_job["status"], "cancelled")
+                self.assertEqual(main.scan_all_job["completed"], 1)
+                self.assertEqual(main.scan_all_job["total"], 2)
+        finally:
+            with main.scan_all_lock:
+                main.scan_all_job.clear()
+                main.scan_all_job.update(previous_scan_all)
+            with main.scan_lock:
+                main.scan_jobs.clear()
+                main.scan_jobs.update(previous_scan_jobs)
 
     def test_fingerprint_cancellation_uses_existing_cooperative_event(self):
         with main.media_hash_lock:
