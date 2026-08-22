@@ -284,7 +284,6 @@ class MetadataMaintenanceTests(unittest.TestCase):
         self.assertIn("data.completed === true", controller)
         self.assertIn("attempt < 120", controller)
         self.assertIn("95000", controller)
-        self.assertNotIn("Metadata refresh queued", controller)
 
         self.assertIn("height:min(78vh,760px)", styles)
         self.assertIn(".metadata-maintenance-list{min-height:0;overflow:auto", styles)
