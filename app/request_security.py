@@ -40,6 +40,18 @@ def _hostname(value: str) -> str:
         return ""
 
 
+def _request_hostname(value: str) -> str:
+    """Parse an HTTP Host authority without accepting generic-URL userinfo/path syntax."""
+    candidate = value.strip()
+    if (
+        not candidate
+        or any(ord(character) <= 32 or ord(character) == 127 for character in candidate)
+        or any(character in candidate for character in "/\\?#@")
+    ):
+        return ""
+    return _hostname(candidate)
+
+
 def allowed_hosts(settings) -> set[str]:
     allowed = set(LOCAL_HOSTS)
     for value in settings.trusted_hosts:
@@ -62,7 +74,7 @@ def host_is_allowed(request: Request, settings) -> bool:
     )
     if not enforce:
         return True
-    host = _hostname(request.headers.get("host", ""))
+    host = _request_hostname(request.headers.get("host", ""))
     # Starlette's TestClient uses these two sentinels. Neither value is
     # accepted from a real network peer solely because Host says testserver.
     if (
@@ -70,7 +82,7 @@ def host_is_allowed(request: Request, settings) -> bool:
         and request.client.host == "testclient"
     ):
         return True
-    return host in allowed_hosts(settings)
+    return bool(host) and host in allowed_hosts(settings)
 
 
 def _origin(value: str) -> tuple[str, str, int | None] | None:
@@ -79,7 +91,15 @@ def _origin(value: str) -> tuple[str, str, int | None] | None:
     try:
         parsed = urlsplit(value)
         host = (parsed.hostname or "").casefold().rstrip(".")
-        if parsed.scheme not in {"http", "https"} or not host:
+        if (
+            parsed.scheme.casefold() not in {"http", "https"}
+            or not host
+            or parsed.username is not None
+            or parsed.password is not None
+            or bool(parsed.path)
+            or bool(parsed.query)
+            or bool(parsed.fragment)
+        ):
             return None
         return parsed.scheme.casefold(), host, parsed.port
     except ValueError:
@@ -99,7 +119,11 @@ def browser_request_is_same_origin(request: Request, settings) -> bool:
         return False
     expected: set[tuple[str, str, int | None]] = set()
     host = request.headers.get("host", "").strip()
-    current = _origin(f"{request.url.scheme}://{host}")
+    current_host = _request_hostname(host)
+    current = _origin(
+        f"{request.url.scheme}://{host}"
+        if current_host else ""
+    )
     if current:
         expected.add(current)
     public = _origin(settings.public_url)
