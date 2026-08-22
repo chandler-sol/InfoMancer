@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .security_hardening import build_router as build_security_hardening_router
+from .final_polish import build_router as build_final_polish_router
 from .performance import build_router as build_performance_router
 from .system import build_router as build_system_router
 from .operations import build_router as build_operations_router
@@ -25,6 +26,9 @@ ROUTER_BUILDERS = (
     # Install cross-cutting security hooks before domain routers capture their
     # live helpers or Jinja templates.
     build_security_hardening_router,
+    # Small release-polish hooks replace live helpers before the domain routes use
+    # them, while keeping the existing public route contracts intact.
+    build_final_polish_router,
     # The single-title metadata action must own its URL before any broader or
     # legacy route bundle is registered. The Metadata maintenance UI expects this
     # handler to finish the bounded TVDB refresh inside the request and return a
