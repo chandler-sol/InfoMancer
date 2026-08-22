@@ -12,6 +12,8 @@ class ResponsiveSweepTests(unittest.TestCase):
         self.assertIn("100dvh", css)
         self.assertIn("env(safe-area-inset-top)", css)
         self.assertIn("env(safe-area-inset-bottom)", css)
+        self.assertIn("env(safe-area-inset-left)", css)
+        self.assertIn("env(safe-area-inset-right)", css)
         for selector in (
             ".global-search-suggestions",
             ".task-popover",
@@ -89,6 +91,22 @@ class ResponsiveSweepTests(unittest.TestCase):
             ".mie-history-table",
         ):
             self.assertIn(selector, css)
+
+    def test_short_landscape_viewports_respect_cutouts_and_reclaim_height(self):
+        css = (ROOT / "app/static/final-mobile-polish.css").read_text(encoding="utf-8")
+
+        self.assertIn("@media (orientation: landscape) and (max-height: 500px)", css)
+        self.assertIn("padding-left: max(24px, env(safe-area-inset-left))", css)
+        self.assertIn("padding-right: max(24px, env(safe-area-inset-right))", css)
+        self.assertIn(
+            "max-height: calc(100dvh - 76px - env(safe-area-inset-bottom))",
+            css,
+        )
+        self.assertIn(
+            "max-width: calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 16px)",
+            css,
+        )
+        self.assertIn("right: env(safe-area-inset-right)", css)
 
 
 if __name__ == "__main__":
