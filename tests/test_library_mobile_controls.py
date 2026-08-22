@@ -44,7 +44,7 @@ class LibraryMobileControlTests(unittest.TestCase):
         self.assertIn("hidden.value = String(step.size)", script)
         self.assertIn("output.value = step.name", script)
         self.assertIn("settingsCoverDensity", loader)
-        self.assertIn('loadScript("settings-cover-density.js")', loader)
+        self.assertIn("loadScript('settings-cover-density.js')", loader)
 
     def test_multi_selection_promotes_common_actions_and_collapses_secondary_work(self):
         script = (ROOT / "app/static/library-selection-toolbar.js").read_text(encoding="utf-8")
@@ -63,10 +63,10 @@ class LibraryMobileControlTests(unittest.TestCase):
     def test_workspace_loader_requests_density_and_compact_selection_assets(self):
         loader = (ROOT / "app/static/workspace-ui.js").read_text(encoding="utf-8")
 
-        self.assertIn('loadStyle("library-density.css")', loader)
-        self.assertIn('loadStyle("library-selection-compact.css")', loader)
-        self.assertIn('"library-density.js"', loader)
-        self.assertLess(loader.index('"library-density.js"'), loader.index('"library-selection-toolbar.js"'))
+        self.assertIn("loadStyle('library-density.css')", loader)
+        self.assertIn("loadStyle('library-selection-compact.css')", loader)
+        self.assertIn("'library-density.js'", loader)
+        self.assertLess(loader.index("'library-density.js'"), loader.index("'library-selection-toolbar.js'"))
 
 
 if __name__ == "__main__":
