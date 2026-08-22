@@ -51,6 +51,22 @@ class ResponsiveSweepTests(unittest.TestCase):
         )
         self.assertIn("-webkit-overflow-scrolling: touch", css)
 
+    def test_mobile_header_profile_and_announcement_chrome_are_bounded(self):
+        css = (ROOT / "app/static/mobile-header.css").read_text(encoding="utf-8")
+        bootstrap = (ROOT / "app/static/app-shell-bootstrap.js").read_text(encoding="utf-8")
+
+        self.assertIn("/static/mobile-header.css", bootstrap)
+        self.assertIn(".topbar .account-menu", css)
+        self.assertIn("flex: 0 0 42px", css)
+        self.assertIn("-webkit-tap-highlight-color: transparent", css)
+        self.assertIn(".topbar .account-menu > summary:focus-visible", css)
+        self.assertIn("box-shadow: 0 0 0 3px rgba(81, 214, 230, .28)", css)
+        self.assertIn(".topbar .announcement-button svg", css)
+        self.assertIn("width: 18px", css)
+        self.assertIn("height: 18px", css)
+        self.assertIn("overflow: visible", css)
+        self.assertIn("transform: translateX(1px)", css)
+
     def test_active_settings_tab_is_revealed_only_after_width_changes(self):
         script = (ROOT / "app/static/final-mobile-polish.js").read_text(encoding="utf-8")
 
