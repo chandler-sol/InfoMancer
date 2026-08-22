@@ -1,0 +1,214 @@
+/* 0.8 walkthrough ownership. engagement.css keeps announcement and historical
+   engagement styles; this file owns the guided tour's current geometry. */
+
+.tour-layer {
+  isolation: isolate;
+}
+
+.tour-card {
+  box-sizing: border-box;
+  width: min(460px, calc(100vw - 36px));
+  max-height: calc(100dvh - 36px);
+  padding: clamp(22px, 3vw, 30px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 10px;
+  border-color: #33404d;
+  background: #111820;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .68);
+  transition: left .16s ease, top .16s ease, transform .16s ease;
+  scrollbar-width: thin;
+}
+
+.tour-card:focus {
+  outline: none;
+}
+
+.tour-card .eyebrow {
+  margin-bottom: 4px;
+}
+
+.tour-card h2 {
+  max-width: 14ch;
+  margin: .35rem 0 .8rem;
+  font-size: clamp(1.7rem, 3.5vw, 2.35rem);
+  line-height: 1.05;
+}
+
+.tour-card > p:not(.eyebrow) {
+  margin: 0;
+  color: var(--muted);
+  font-size: .98rem;
+  line-height: 1.6;
+}
+
+.tour-progress {
+  gap: .75rem;
+  margin-bottom: 1.15rem;
+  padding-bottom: .55rem;
+}
+
+.tour-progress::after,
+.tour-progress i {
+  height: 3px;
+  border-radius: 999px;
+}
+
+.tour-progress span {
+  min-width: max-content;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.tour-actions {
+  align-items: center;
+  margin-top: 1.25rem;
+}
+
+.tour-actions .button {
+  min-height: 42px;
+}
+
+.tour-secondary-actions {
+  align-items: center;
+}
+
+.tour-highlight {
+  scroll-margin: 96px 20px 48px;
+  box-shadow: 0 0 0 3px var(--lime), 0 0 0 9px rgba(185,245,66,.18) !important;
+}
+
+.tour-scrim span {
+  background: rgba(2, 5, 8, .76);
+  backdrop-filter: blur(2px);
+  transition: inset .14s ease, width .14s ease, height .14s ease;
+}
+
+.tour-layer.tour-intro .tour-card {
+  left: 50%;
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  width: min(540px, calc(100vw - 36px));
+}
+
+.tour-layer.tour-intro .tour-card h2 {
+  max-width: 18ch;
+}
+
+/* Keep the fake task demonstration readable inside the compact header widget. */
+.tour-task-demo .task-widget-toggle {
+  overflow: visible;
+}
+
+.tour-task-demo-progress {
+  border-radius: 999px;
+}
+
+/* Mobile uses a stable bottom sheet. Trying to chase each highlighted control with
+   an absolutely positioned card was the source of several old Safari overlaps. */
+@media (max-width: 760px), (hover: none) and (pointer: coarse) {
+  .tour-card {
+    left: max(12px, env(safe-area-inset-left)) !important;
+    right: max(12px, env(safe-area-inset-right)) !important;
+    top: auto !important;
+    bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+    width: auto;
+    max-height: min(46dvh, 410px);
+    padding: 18px;
+    transform: none !important;
+    border-radius: 12px;
+    transition: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tour-layer.tour-intro .tour-card {
+    top: 50% !important;
+    bottom: auto !important;
+    max-height: calc(100dvh - 32px);
+    transform: translateY(-50%) !important;
+  }
+
+  .tour-card h2 {
+    max-width: none;
+    font-size: clamp(1.55rem, 7vw, 2rem);
+  }
+
+  .tour-card > p:not(.eyebrow) {
+    font-size: .93rem;
+    line-height: 1.5;
+  }
+
+  .tour-progress {
+    margin-bottom: .9rem;
+  }
+
+  .tour-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-top: 1rem;
+  }
+
+  .tour-actions > .primary {
+    order: -1;
+    width: 100%;
+  }
+
+  .tour-secondary-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .tour-actions .button {
+    min-height: 44px;
+    width: 100%;
+  }
+
+  .tour-highlight {
+    scroll-margin-top: 88px;
+    scroll-margin-bottom: min(50dvh, 430px);
+    box-shadow: 0 0 0 3px var(--lime), 0 0 0 7px rgba(185,245,66,.16) !important;
+  }
+
+  .tour-scrim span {
+    backdrop-filter: blur(1.5px);
+    transition: none;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .tour-card {
+    left: max(12px, env(safe-area-inset-left)) !important;
+    right: max(12px, env(safe-area-inset-right)) !important;
+    bottom: calc(8px + env(safe-area-inset-bottom)) !important;
+    max-height: calc(100dvh - 16px);
+  }
+
+  .tour-layer.tour-intro .tour-card {
+    top: max(8px, env(safe-area-inset-top)) !important;
+    bottom: auto !important;
+    transform: none !important;
+    max-height: calc(100dvh - 16px);
+  }
+
+  .tour-card h2 {
+    font-size: 1.5rem;
+  }
+
+  .tour-card > p:not(.eyebrow) {
+    line-height: 1.42;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-card,
+  .tour-scrim span,
+  .tour-progress i,
+  .tour-task-demo-progress i {
+    transition: none !important;
+  }
+}
