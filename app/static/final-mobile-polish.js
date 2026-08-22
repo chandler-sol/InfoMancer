@@ -8,6 +8,7 @@
   const stopping = new Set();
   let liveTasks = [];
   let settingsRevealFrame = 0;
+  let settingsViewportWidth = window.visualViewport?.width || window.innerWidth;
 
   const installFingerprintScheduleHandoff = () => {
     const form = document.getElementById('hashing-settings-form');
@@ -38,6 +39,13 @@
       const target = active.offsetLeft - Math.max(0, (nav.clientWidth - active.offsetWidth) / 2);
       nav.scrollLeft = Math.max(0, target);
     });
+  };
+
+  const revealSettingsTabAfterWidthChange = () => {
+    const width = window.visualViewport?.width || window.innerWidth;
+    if (Math.abs(width - settingsViewportWidth) < 1) return;
+    settingsViewportWidth = width;
+    revealActiveSettingsTab();
   };
 
   const cancelTask = async (task, button, row) => {
@@ -114,8 +122,8 @@
     decorateTaskRows();
   };
 
-  window.addEventListener('resize', revealActiveSettingsTab, {passive: true});
-  window.visualViewport?.addEventListener('resize', revealActiveSettingsTab, {passive: true});
+  window.addEventListener('resize', revealSettingsTabAfterWidthChange, {passive: true});
+  window.visualViewport?.addEventListener('resize', revealSettingsTabAfterWidthChange, {passive: true});
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', installDomEnhancements, {once: true});
