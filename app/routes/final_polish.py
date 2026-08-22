@@ -14,7 +14,6 @@ _SCAN_ALL_CANCEL = threading.Event()
 def build_router(ctx: RouteContext):
     router = APIRouter()
     JSONResponse = ctx.get("JSONResponse")
-    db = ctx.live("db")
     handle_import_hashing = ctx.live("handle_import_hashing")
     media_hash_cancel = ctx.live("media_hash_cancel")
     media_hash_job = ctx.live("media_hash_job")
@@ -32,9 +31,9 @@ def build_router(ctx: RouteContext):
 
         A source scan is allowed to finish once it has started so Source Guard and
         catalog transactions are never interrupted halfway through. A cancellation
-        request prevents the next source from starting.
+        request prevents the next source from starting. A request made while the
+        worker is still starting is preserved rather than cleared by thread startup.
         """
-        _SCAN_ALL_CANCEL.clear()
         total = len(roots)
         with scan_all_lock:
             scan_all_job.clear()
@@ -50,55 +49,61 @@ def build_router(ctx: RouteContext):
         changed_files: list[int] = []
         record_event("scan", f"Scan all started for {total:,} sources.")
 
-        for root_id, label in roots:
-            if _SCAN_ALL_CANCEL.is_set():
-                break
+        try:
+            for root_id, label in roots:
+                if _SCAN_ALL_CANCEL.is_set():
+                    break
+                with scan_all_lock:
+                    scan_all_job.update({
+                        "current_root_id": root_id, "current_label": label,
+                        "completed": completed_count, "files": 0, "titles": 0,
+                    })
+                changed_files.extend(run_scan(root_id, hash_after=False))
+                completed_count += 1
+                with scan_lock:
+                    job = scan_jobs.get(root_id, {})
+                    if job.get("status") == "error":
+                        errors += 1
+                    elif job.get("source_status") == "degraded":
+                        protected += 1
+                with scan_all_lock:
+                    scan_all_job.update({
+                        "completed": completed_count, "errors": errors,
+                        "protected": protected,
+                    })
+
+            cancelled = _SCAN_ALL_CANCEL.is_set()
             with scan_all_lock:
                 scan_all_job.update({
-                    "current_root_id": root_id, "current_label": label,
-                    "completed": completed_count, "files": 0, "titles": 0,
-                })
-            changed_files.extend(run_scan(root_id, hash_after=False))
-            completed_count += 1
-            with scan_lock:
-                job = scan_jobs.get(root_id, {})
-                if job.get("status") == "error":
-                    errors += 1
-                elif job.get("source_status") == "degraded":
-                    protected += 1
-            with scan_all_lock:
-                scan_all_job.update({
-                    "completed": completed_count, "errors": errors,
-                    "protected": protected,
-                })
-
-        cancelled = _SCAN_ALL_CANCEL.is_set()
-        with scan_all_lock:
-            scan_all_job.update({
-                "status": "cancelled" if cancelled else "complete",
-                "completed": completed_count,
-                "errors": errors,
-                "current_root_id": None,
-                "current_label": "",
-            })
-
-        if changed_files:
-            handle_import_hashing(
-                changed_files,
-                "Fingerprinting new or changed media from all sources",
-            )
-
-        if cancelled:
-            record_event(
-                "scan",
-                f"Scan all stopped after {completed_count:,} of {total:,} sources.",
-                level="warning",
-                context={
-                    "operation": "scan_all_cancel",
+                    "status": "cancelled" if cancelled else "complete",
                     "completed": completed_count,
-                    "total": total,
-                },
-            )
+                    "errors": errors,
+                    "current_root_id": None,
+                    "current_label": "",
+                })
+
+            if changed_files:
+                handle_import_hashing(
+                    changed_files,
+                    "Fingerprinting new or changed media from all sources",
+                )
+
+            if cancelled:
+                record_event(
+                    "scan",
+                    f"Scan all stopped after {completed_count:,} of {total:,} sources.",
+                    level="warning",
+                    context={
+                        "operation": "scan_all_cancel",
+                        "completed": completed_count,
+                        "total": total,
+                    },
+                )
+        finally:
+            # A completed worker owns and clears the request. This also allows a
+            # cancellation submitted during the 'starting' state to survive until
+            # the worker sees it for the first time.
+            _SCAN_ALL_CANCEL.clear()
 
     # Main's existing /scan-all handler resolves this global at execution time, so
     # replacing it here adds cancellation without duplicating the public scan route.
@@ -131,8 +136,16 @@ def build_router(ctx: RouteContext):
 
         if task_id == "media-fingerprints":
             with media_hash_lock:
-                running = media_hash_job.get("status") in {"starting", "running"}
-            if not running:
+                status = str(media_hash_job.get("status") or "")
+            if status == "starting":
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "detail": "Fingerprinting is still starting. Try cancel again in a moment.",
+                    },
+                    status_code=409,
+                )
+            if status != "running":
                 return JSONResponse(
                     {"ok": False, "detail": "Fingerprinting is no longer running."},
                     status_code=409,
