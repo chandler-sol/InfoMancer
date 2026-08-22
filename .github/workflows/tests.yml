@@ -41,6 +41,22 @@ jobs:
           cargo install cargo-audit --version 0.22.2 --locked
           cargo audit --file desktop/src-tauri/Cargo.lock
 
+      - name: Preserve audit source snapshot
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: audit-source-snapshot
+          path: |
+            app
+            tests
+            scripts
+            desktop
+            requirements.txt
+            README.md
+            SECURITY.md
+          if-no-files-found: error
+          retention-days: 1
+
   test:
     name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
