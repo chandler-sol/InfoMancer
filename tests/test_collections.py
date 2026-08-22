@@ -9,6 +9,7 @@ os.environ.setdefault("INFOMANCER_AUTH_MODE", "disabled")
 
 import app.main as main
 from app.db import Database
+from app.request_security import LOCAL_CSRF_COOKIE
 
 
 class CollectionTests(unittest.TestCase):
@@ -63,6 +64,10 @@ class CollectionTests(unittest.TestCase):
         main.COLLECTION_ART_DIR = self.base / "collection-art"
         main.COLLECTION_ART_DIR.mkdir()
         self.client = TestClient(main.app)
+        self.client.get("/")
+        csrf_token = self.client.cookies.get(LOCAL_CSRF_COOKIE)
+        self.assertTrue(csrf_token)
+        self.client.headers.update({"X-CSRF-Token": csrf_token})
 
     def tearDown(self):
         main.db = self.original_database
