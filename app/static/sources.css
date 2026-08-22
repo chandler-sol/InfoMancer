@@ -18,7 +18,7 @@
 .root-name-form label { display:block; color:var(--muted); font-size:12px; }
 .root-name-form .actions { justify-content:flex-end; margin-top:13px; }
 
-.source-browser { width:min(940px,calc(100vw - 30px)); max-height:min(880px,calc(100vh - 30px)); padding:0; color:var(--text); background:var(--surface); border:1px solid #465363; border-radius:5px; box-shadow:0 28px 90px rgba(0,0,0,.72); }
+.source-browser { width:min(940px,calc(100vw - 30px)); max-height:min(880px,calc(100dvh - 30px)); padding:0; color:var(--text); background:var(--surface); border:1px solid #465363; border-radius:5px; box-shadow:0 28px 90px rgba(0,0,0,.72); }
 .source-browser::backdrop { background:rgba(3,6,9,.76); backdrop-filter:blur(4px); }
 .source-browser-shell { padding:26px; }
 .source-browser-head,.source-browser-nav,.source-current,.source-preview-head,.source-final-form { display:flex; align-items:center; justify-content:space-between; gap:18px; }
