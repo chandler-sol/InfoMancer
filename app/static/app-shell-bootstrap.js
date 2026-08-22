@@ -21,6 +21,13 @@
   mobileHeaderStylesheet.href = `/static/mobile-header.css${versionQuery}`;
   document.head.append(mobileHeaderStylesheet);
 
+  /* Detail-page phone layout has a dedicated owner so the mobile dossier can be
+     simplified without weakening the richer desktop/tablet presentation. */
+  const mobileDetailStylesheet = document.createElement('link');
+  mobileDetailStylesheet.rel = 'stylesheet';
+  mobileDetailStylesheet.href = `/static/mobile-detail.css${versionQuery}`;
+  document.head.append(mobileDetailStylesheet);
+
   const polishController = document.createElement('script');
   polishController.src = `/static/final-mobile-polish.js${versionQuery}`;
   polishController.async = false;
