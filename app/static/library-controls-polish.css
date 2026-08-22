@@ -10,6 +10,15 @@
   flex: 0 1 220px;
   width: 220px;
   max-width: 240px;
+  height: 44px;
+  padding: 8px 12px;
+  line-height: 1.25;
+}
+
+.library-controls .more-filters-panel select {
+  height: 44px;
+  padding: 8px 12px;
+  line-height: 1.25;
 }
 
 /* An expanded search is a real text field, not a slightly stretched icon slot.
@@ -58,6 +67,14 @@
     flex: 1 1 calc(50% - 8px);
     width: auto;
     max-width: none;
+    touch-action: manipulation;
+  }
+
+  /* Width and flex-basis transitions force Safari to relayout the entire filter
+     matrix and cover surface on every animation frame. Phones do one layout jump
+     instead, while opacity remains available as a cheap compositor-only cue. */
+  .library-filter-search {
+    transition: none;
   }
 
   .library-filter-search.open {
@@ -65,5 +82,24 @@
     width: 100%;
     min-width: 0;
     max-width: none;
+  }
+
+  .library-filter-search input {
+    transform: none;
+    transition: opacity .08s ease;
+  }
+
+  .library-filter-search-toggle {
+    transition: none;
+    touch-action: manipulation;
+  }
+
+  .library-filter-search.open .library-filter-search-toggle {
+    right: 4px;
+    left: auto;
+  }
+
+  .more-filters-menu > summary {
+    touch-action: manipulation;
   }
 }

@@ -75,15 +75,24 @@
 
   const coreReady = loadScript("workspace-core.js", "workspace-core");
 
+  // The Inspector is rendered dynamically after the shared Workspace runtime loads.
+  // Keep high-frequency actions adjacent to the selected title summary so touch users
+  // do not have to scroll through diagnostic sections before reaching them.
+  if (document.querySelector(".library-table, #cover-library")) {
+    coreReady.then(() => loadScript("inspector-quick-actions.js", "inspector-quick-actions"));
+  }
+
   // Title detail is completely idle outside /titles/<id>. Start its stylesheets
   // immediately, but do not execute the interaction layers until both CSS and the
   // shared Workspace runtime are ready. This removes a common one-frame layout race.
   if (document.querySelector(".media-dossier")) {
     const styleReady = ensureStyle("title-detail-ux.css", "title-detail-ux");
     const castStyleReady = ensureStyle("title-cast-dialog.css", "title-cast-dialog");
-    Promise.all([coreReady, styleReady, castStyleReady]).then(() => {
-      loadScript("title-detail-ux.js", "title-detail-ux");
-      loadScript("title-cast-dialog.js", "title-cast-dialog");
+    Promise.all([coreReady, styleReady, castStyleReady]).then(() => Promise.all([
+      loadScript("title-detail-ux.js", "title-detail-ux"),
+      loadScript("title-cast-dialog.js", "title-cast-dialog"),
+    ])).then(() => {
+      loadScript("title-catalog-cleanup.js", "title-catalog-cleanup");
     });
   }
 })();

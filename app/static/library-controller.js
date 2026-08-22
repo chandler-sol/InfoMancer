@@ -21,6 +21,7 @@
   const appendSortTitles = document.getElementById('append-sort-titles');
   const isLibrarian = document.body.classList.contains('role-librarian');
   const kind = table.dataset.libraryKind || 'all';
+  const mobileControls = window.matchMedia('(max-width: 760px), (hover: none), (pointer: coarse)');
   const FILTER_KEYS = [
     'q', 'genre', 'title_type', 'root', 'match', 'gaps', 'person', 'person_name',
     'credit_role', 'favorite', 'tag', 'sort',
@@ -128,6 +129,17 @@
       if (document.activeElement === input) input.blur();
       return;
     }
+
+    /* Mobile Safari needs focus inside the original tap to bring up the keyboard
+       reliably. The mobile layout now opens in one layout tick, so there is no
+       animation to wait for. Desktop keeps the small focus delay used by its width
+       transition. */
+    if (mobileControls.matches) {
+      try { input.focus({preventScroll: true}); }
+      catch (_error) { input.focus(); }
+      return;
+    }
+
     focusTimer = window.setTimeout(() => {
       focusTimer = 0;
       if (filterSearch.classList.contains('open')) input.focus();
