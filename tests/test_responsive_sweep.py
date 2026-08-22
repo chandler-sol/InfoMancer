@@ -43,14 +43,20 @@ class ResponsiveSweepTests(unittest.TestCase):
         )
         self.assertIn("-webkit-overflow-scrolling: touch", css)
 
-    def test_active_settings_tab_is_revealed_after_viewport_changes(self):
+    def test_active_settings_tab_is_revealed_only_after_width_changes(self):
         script = (ROOT / "app/static/final-mobile-polish.js").read_text(encoding="utf-8")
 
         self.assertIn("revealActiveSettingsTab", script)
+        self.assertIn("revealSettingsTabAfterWidthChange", script)
+        self.assertIn("settingsViewportWidth", script)
         self.assertIn(".settings-section-nav", script)
         self.assertIn('[aria-current="page"]', script)
         self.assertIn("nav.scrollLeft", script)
-        self.assertIn("window.visualViewport?.addEventListener('resize'", script)
+        self.assertIn("Math.abs(width - settingsViewportWidth) < 1", script)
+        self.assertIn(
+            "window.visualViewport?.addEventListener('resize', revealSettingsTabAfterWidthChange",
+            script,
+        )
 
     def test_mobile_metadata_results_put_commit_action_on_its_own_row(self):
         css = (ROOT / "app/static/final-mobile-polish.css").read_text(encoding="utf-8")
@@ -59,6 +65,17 @@ class ResponsiveSweepTests(unittest.TestCase):
         self.assertIn("grid-template-columns: 70px minmax(0, 1fr)", css)
         self.assertIn(".results > .result > form", css)
         self.assertIn("grid-column: 1 / -1", css)
+
+    def test_mobile_touch_controls_and_shared_actions_have_room(self):
+        css = (ROOT / "app/static/final-mobile-polish.css").read_text(encoding="utf-8")
+
+        self.assertIn(".task-popover-controls button", css)
+        self.assertIn(".source-browser-close", css)
+        self.assertIn(".collection-dialog-close", css)
+        self.assertIn("min-width: 44px", css)
+        self.assertIn("min-height: 44px", css)
+        self.assertIn(".workspace-dialog-actions", css)
+        self.assertIn("flex-direction: column-reverse", css)
 
     def test_settings_and_tables_keep_touch_scrolling_contained(self):
         css = (ROOT / "app/static/final-mobile-polish.css").read_text(encoding="utf-8")
