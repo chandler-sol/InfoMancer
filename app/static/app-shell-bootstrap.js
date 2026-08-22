@@ -14,12 +14,10 @@
   polishStylesheet.href = `/static/final-mobile-polish.css${versionQuery}`;
   document.head.append(polishStylesheet);
 
-  document.addEventListener('DOMContentLoaded', () => {
-    const polishController = document.createElement('script');
-    polishController.src = `/static/final-mobile-polish.js${versionQuery}`;
-    polishController.async = false;
-    document.head.append(polishController);
-  }, {once: true});
+  const polishController = document.createElement('script');
+  polishController.src = `/static/final-mobile-polish.js${versionQuery}`;
+  polishController.async = false;
+  document.head.append(polishController);
 
   /* Page-specific Settings features get their own owners. Bootstrap only marks the
      page and loads their version-matched assets early enough to avoid a first-paint
