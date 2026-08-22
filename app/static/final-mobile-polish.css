@@ -33,9 +33,11 @@
 .task-active .task-cancel-action {
   display: flex;
   width: max-content;
+  max-width: 100%;
   margin: 10px 0 0 auto;
   border-color: #704244;
   color: #ff9b96;
+  white-space: normal;
 }
 
 .task-active .task-cancel-action:hover,
@@ -48,6 +50,54 @@
 .task-active .task-cancel-action[disabled] {
   cursor: wait;
   opacity: .7;
+}
+
+/* Background panels, modal cards, and suggestion lists must stay inside the live
+   browser viewport. Mobile Safari's visible height changes as its address/tool bars
+   move, so use dynamic viewport units for these application-chrome surfaces. */
+.global-search-suggestions {
+  max-height: min(60dvh, 480px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.task-popover {
+  max-height: min(70dvh, 560px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.source-browser {
+  max-height: min(880px, calc(100dvh - 24px));
+}
+
+.collection-management-dialog {
+  max-height: calc(100dvh - var(--collection-dialog-top, 24px) - 12px);
+}
+
+.collection-dialog-card {
+  max-height: calc(100dvh - var(--collection-dialog-top, 24px) - 12px);
+}
+
+.collection-floating-menu {
+  max-height: min(520px, calc(100dvh - 24px));
+}
+
+.workspace-confirm-dialog,
+.workspace-command-palette,
+.title-overview-dialog,
+.cast-dialog,
+.tour-card,
+.announcement-popup,
+.setup-choice-card {
+  box-sizing: border-box;
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.workspace-toast-host {
+  top: calc(10px + env(safe-area-inset-top));
 }
 
 @media (max-width: 760px) {
@@ -99,6 +149,106 @@
     right: 108px;
     width: auto;
     max-width: none;
+  }
+
+  /* Popovers attached to the 62px mobile header need their own scroll container.
+     Without this, a long task list or navigation menu can disappear under Safari's
+     bottom chrome and leave its final actions unreachable. */
+  .topbar .global-search-suggestions,
+  .topbar .task-popover,
+  .topbar .site-menu-panel,
+  .topbar .account-menu-popover {
+    max-height: calc(100dvh - 84px - env(safe-area-inset-bottom));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .source-browser {
+    max-height: calc(100dvh - 16px);
+  }
+
+  .source-browser-shell {
+    padding-bottom: calc(17px + env(safe-area-inset-bottom));
+  }
+
+  .root-name-form {
+    max-height: calc(100dvh - 30px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .collection-management-dialog {
+    --collection-dialog-top: max(12px, env(safe-area-inset-top));
+    max-height: calc(100dvh - var(--collection-dialog-top) - 12px);
+  }
+
+  .collection-dialog-card {
+    max-height: calc(100dvh - var(--collection-dialog-top) - 12px);
+  }
+
+  .workspace-drawer-panel {
+    top: max(62px, 12dvh);
+  }
+
+  .workspace-toast-host {
+    top: calc(8px + env(safe-area-inset-top));
+  }
+
+  /* Settings navigation is intentionally horizontal on phones. Give it predictable
+     touch scrolling and let the active page snap to a useful resting position. */
+  body .settings-section-nav {
+    scroll-padding-inline: 12px;
+    scroll-snap-type: x proximity;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body .settings-section-nav a {
+    display: flex;
+    align-items: center;
+    min-height: 42px;
+    scroll-snap-align: center;
+  }
+
+  .table-wrap,
+  .settings-history,
+  .settings-table-wrap,
+  .mie-history-table {
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Metadata search results are useful cards on desktop but too crowded when the
+     poster, copy, and action all compete for one phone-width flex row. Keep artwork
+     beside the copy and move the commit action onto its own full-width row. */
+  .results > .result {
+    display: grid;
+    grid-template-columns: 70px minmax(0, 1fr);
+    align-items: start;
+    gap: 12px 14px;
+    width: 100%;
+  }
+
+  .results > .result > div:first-child {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .results > .result > .grow {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .results > .result > form {
+    grid-column: 1 / -1;
+    width: 100%;
+    margin: 0;
+  }
+
+  .results > .result > form .button,
+  .results > .result > form button {
+    width: 100%;
   }
 
   /* File-protection choices are two-column rows: control plus copy. This removes
@@ -164,6 +314,18 @@
     width: 100%;
     box-sizing: border-box;
     text-align: center;
+  }
+}
+
+@media (max-width: 420px) {
+  .results > .result {
+    grid-template-columns: 58px minmax(0, 1fr);
+    padding-inline: 14px;
+  }
+
+  .results > .result img {
+    width: 58px;
+    height: 87px;
   }
 }
 
