@@ -14,6 +14,13 @@
   polishStylesheet.href = `/static/final-mobile-polish.css${versionQuery}`;
   document.head.append(polishStylesheet);
 
+  /* Header-specific mobile chrome has its own small owner so account/focus geometry
+     and announcement icon sizing do not get buried inside broader responsive rules. */
+  const mobileHeaderStylesheet = document.createElement('link');
+  mobileHeaderStylesheet.rel = 'stylesheet';
+  mobileHeaderStylesheet.href = `/static/mobile-header.css${versionQuery}`;
+  document.head.append(mobileHeaderStylesheet);
+
   const polishController = document.createElement('script');
   polishController.src = `/static/final-mobile-polish.js${versionQuery}`;
   polishController.async = false;
