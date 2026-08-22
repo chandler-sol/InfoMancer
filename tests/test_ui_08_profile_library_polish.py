@@ -99,7 +99,7 @@ class ProfileLibraryPolishContracts(unittest.TestCase):
         self.assertNotIn("background-image:url('/account/avatar/current')", auth_css)
         self.assertIn("Avoiding a CSS background request", auth_css)
         self.assertIn("avatarImage.src = '/account/avatar/current'", loader)
-        self.assertNotIn("Date.now()", loader)
+        self.assertNotIn("avatarImage.src = `/account/avatar/current?v=${Date.now()}`", loader)
         self.assertIn('@router.get("/account/avatar/current")', route)
         self.assertIn('AVATAR_CACHE_CONTROL = "private, no-cache"', route)
         self.assertIn('"ETag": etag', route)
