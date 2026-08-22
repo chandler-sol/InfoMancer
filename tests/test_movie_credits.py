@@ -2,7 +2,9 @@ import json
 import os
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -16,7 +18,28 @@ from app.main import (
 )
 
 
+def _disabled_client():
+    client = TestClient(main.app)
+    client.get("/")
+    token = client.cookies.get("infomancer_local_csrf")
+    if not token:
+        raise AssertionError("disabled-auth CSRF cookie was not issued")
+    client.headers.update({"X-CSRF-Token": token})
+    return client
+
+
 class MovieCreditViewTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._settings_patch = patch.object(
+            main, "settings", replace(main.settings, auth_mode="disabled")
+        )
+        cls._settings_patch.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._settings_patch.stop()
+
     def test_tvdb_title_localization_prefers_english_and_preserves_cached_title(self):
         translated = {
             "name": "今際の国のアリス",
@@ -92,7 +115,7 @@ class MovieCreditViewTests(unittest.TestCase):
             main.db = database
             main.tvdb = FakeTVDB()
             try:
-                client = TestClient(main.app)
+                client = _disabled_client()
                 picker = client.get(f"/titles/{title_id}/cover")
                 response = client.post(
                     f"/titles/{title_id}/cover",
@@ -163,7 +186,7 @@ class MovieCreditViewTests(unittest.TestCase):
             original_database = main.db
             main.db = database
             try:
-                client = TestClient(main.app)
+                client = _disabled_client()
                 preview = client.get(f"/titles/{title_id}/rename-episodes")
                 response = client.post(
                     f"/titles/{title_id}/rename-episodes",
@@ -215,11 +238,11 @@ class MovieCreditViewTests(unittest.TestCase):
             main.db = database
             main.tvdb = fake_tvdb
             try:
-                search_response = TestClient(main.app).get(
+                search_response = _disabled_client().get(
                     f"/titles/{title_id}/tvdb",
                     params={"q": "https://thetvdb.com/dereferrer/series/416491"},
                 )
-                response = TestClient(main.app).post(
+                response = _disabled_client().post(
                     f"/titles/{title_id}/tvdb-manual",
                     data={
                         "tvdb_reference": "https://thetvdb.com/series/1923",
@@ -228,7 +251,7 @@ class MovieCreditViewTests(unittest.TestCase):
                     },
                     follow_redirects=False,
                 )
-                success_page = TestClient(main.app).get(response.headers["location"])
+                success_page = _disabled_client().get(response.headers["location"])
             finally:
                 main.db = original_database
                 main.tvdb = original_tvdb
@@ -360,7 +383,7 @@ class MovieCreditViewTests(unittest.TestCase):
             original_database = main.db
             main.db = database
             try:
-                client = TestClient(main.app)
+                client = _disabled_client()
                 detail = client.get(f"/titles/{movie_id}")
                 filtered = client.get(
                     "/movies?person=nm0000002&credit_role=actor"
@@ -562,7 +585,7 @@ class MovieCreditViewTests(unittest.TestCase):
             original_database = main.db
             main.db = database
             try:
-                client = TestClient(main.app)
+                client = _disabled_client()
                 response = client.get(f"/titles/{title_id}")
                 shows = client.get("/shows")
                 unmatched_shows = client.get("/shows?match=unmatched")
