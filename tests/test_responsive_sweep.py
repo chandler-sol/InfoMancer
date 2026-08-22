@@ -29,6 +29,12 @@ class ResponsiveSweepTests(unittest.TestCase):
             self.assertIn(selector, css)
         self.assertIn("overscroll-behavior: contain", css)
 
+    def test_source_browser_owns_dynamic_viewport_height(self):
+        css = (ROOT / "app/static/sources.css").read_text(encoding="utf-8")
+
+        self.assertIn("calc(100dvh - 30px)", css)
+        self.assertNotIn("calc(100vh - 30px)", css)
+
     def test_mobile_header_popovers_have_scrollable_height_budget(self):
         css = (ROOT / "app/static/final-mobile-polish.css").read_text(encoding="utf-8")
 
