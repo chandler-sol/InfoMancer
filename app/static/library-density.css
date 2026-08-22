@@ -220,8 +220,13 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  /* library-performance.css intentionally caps desktop cards at --cover-size.
+     Mobile density is column-driven instead, so remove that cap and let each card
+     actually grow or shrink with the selected one/two/three-column layout. */
   #cover-library[data-mobile-density] .cover-card {
     min-width: 0;
-    width: auto;
+    width: 100%;
+    max-width: none;
+    justify-self: stretch;
   }
 }
