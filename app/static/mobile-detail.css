@@ -94,6 +94,7 @@
   body.has-app-sidebar .media-dossier.detail-kind-movie .dossier-on-disk .panel-head {
     margin-inline: 0;
     padding: 12px 0;
+    row-gap: 0;
   }
 
   body.has-app-sidebar .media-dossier .dossier-on-disk .on-disk-copy {
@@ -109,5 +110,14 @@
   body.has-app-sidebar .media-dossier .dossier-on-disk .series-controls {
     grid-column: 1 / -1;
     justify-self: stretch;
+  }
+
+  /* The template keeps a shared series-controls host for movies and TV. Movies with
+     files do not put anything in that host, so the generic mobile margin used to turn
+     the empty element into a large blank row between the On Disk title and divider. */
+  body.has-app-sidebar .media-dossier.detail-kind-movie
+  .dossier-on-disk .series-controls:not(:has(> *)) {
+    display: none;
+    margin: 0;
   }
 }
