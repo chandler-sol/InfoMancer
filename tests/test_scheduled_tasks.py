@@ -30,8 +30,8 @@ class ScheduledTaskWorkspaceContracts(unittest.TestCase):
 
     def test_task_widget_links_to_schedule_center_without_showing_backlog(self):
         script = (ROOT / "app/static/task-widget.js").read_text(encoding="utf-8")
-        self.assertIn('link.href = "/settings/scheduled-tasks"', script)
-        self.assertIn('task.id !== "media-fingerprints-queued"', script)
+        self.assertIn("link.href = '/settings/scheduled-tasks'", script)
+        self.assertIn("task.id !== 'media-fingerprints-queued'", script)
         self.assertIn("No Tasks Currently Active", script)
 
 
