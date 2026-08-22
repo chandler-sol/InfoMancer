@@ -158,35 +158,52 @@ class TitleBackgroundActionTests(unittest.TestCase):
         self.assertEqual(facts["Audio"], "DTS · 6ch")
         self.assertIn("24.6 Mbps", snapshot["files"][0]["summary"])
 
-    def test_metadata_refresh_async_contract_does_not_redirect(self):
-        def fake_queue(title_ids, user_id, label):
-            self.assertEqual(title_ids, [self.title_id])
-            self.assertEqual(user_id, self.user.id)
-            self.assertIn("Background Action Film", label)
-            main.imdb_genre_job.update({
-                "status": "running",
-                "title_ids": [self.title_id],
-                "scope_label": label,
-            })
-            return "Metadata refresh queued for 1 title."
+    def test_metadata_refresh_async_contract_completes_without_redirect(self):
+        class FakeTVDB:
+            api_key = "test-key"
 
-        main.queue_metadata_refresh = fake_queue
-        response = self.client.post(
-            f"/titles/{self.title_id}/imdb-refresh",
-            data={"csrf_token": self.csrf},
-            headers={"Accept": "application/json", "X-InfoMancer-Async": "1"},
-        )
+            def movie(self, movie_id):
+                self.requested = movie_id
+                return {
+                    "id": movie_id,
+                    "name": "Background Action Film",
+                    "year": "2025",
+                    "overview": "Refreshed synopsis",
+                    "genres": [{"name": "Drama"}],
+                    "characters": [],
+                }
+
+        with self.database.connect() as conn:
+            conn.execute(
+                "UPDATE titles SET tvdb_movie_id=77 WHERE id=?",
+                (self.title_id,),
+            )
+
+        original_tvdb = main.tvdb
+        fake_tvdb = FakeTVDB()
+        main.tvdb = fake_tvdb
+        try:
+            response = self.client.post(
+                f"/titles/{self.title_id}/imdb-refresh",
+                data={"csrf_token": self.csrf},
+                headers={"Accept": "application/json", "X-InfoMancer-Async": "1"},
+            )
+        finally:
+            main.tvdb = original_tvdb
+
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertTrue(payload["started"])
+        self.assertTrue(payload["completed"])
         self.assertEqual(payload["title_id"], self.title_id)
-        self.assertEqual(payload["status"], "running")
+        self.assertEqual(payload["status"], "complete")
+        self.assertEqual(fake_tvdb.requested, 77)
 
         state = self.client.get(
             f"/api/titles/{self.title_id}/metadata-refresh-state"
         )
         self.assertEqual(state.status_code, 200)
-        self.assertEqual(state.json()["task"]["status"], "running")
+        self.assertEqual(state.json()["queue"]["status"], "complete")
 
 
 if __name__ == "__main__":
