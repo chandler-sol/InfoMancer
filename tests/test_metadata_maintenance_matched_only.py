@@ -45,6 +45,10 @@ class MetadataMaintenanceMatchedOnlyTests(unittest.TestCase):
         )
         self.auth_patch.start()
         self.client = TestClient(main.app)
+        self.client.get("/")
+        csrf = self.client.cookies.get("infomancer_local_csrf")
+        self.assertTrue(csrf)
+        self.client.headers.update({"X-CSRF-Token": csrf})
 
     def tearDown(self):
         self.client.close()
