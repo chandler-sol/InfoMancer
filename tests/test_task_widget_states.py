@@ -12,9 +12,9 @@ class TaskWidgetStateContracts(unittest.TestCase):
         routes = (ROOT / "app/routes/system.py").read_text(encoding="utf-8")
         loader = (ROOT / "app/static/workspace-ui.js").read_text(encoding="utf-8")
 
-        self.assertIn('task.id !== "media-fingerprints-queued"', script)
+        self.assertIn("task.id !== 'media-fingerprints-queued'", script)
         self.assertIn("COMPLETE_TTL_MS = 600000", script)
-        self.assertIn('progress ? "determinate" : "indeterminate"', script)
+        self.assertIn("progress ? 'determinate' : 'indeterminate'", script)
         self.assertIn('aria-valuenow', script)
         self.assertIn('/api/task-failures', script)
         self.assertIn('has-failure', script)
@@ -42,10 +42,10 @@ class TaskWidgetStateContracts(unittest.TestCase):
         script = (ROOT / "app/static/task-widget.js").read_text(encoding="utf-8")
 
         self.assertIn("open = !open", script)
-        self.assertIn('document.getElementById("task-minimize")', script)
-        self.assertIn('document.getElementById("task-dismiss")', script)
+        self.assertIn("widget.querySelector('#task-minimize')", script)
+        self.assertIn("widget.querySelector('#task-dismiss')", script)
         self.assertIn("if (!open || widget.contains(event.target)) return", script)
-        self.assertIn('event.key !== "Escape"', script)
+        self.assertIn("event.key !== 'Escape'", script)
         self.assertIn("toggle.focus()", script)
 
 
