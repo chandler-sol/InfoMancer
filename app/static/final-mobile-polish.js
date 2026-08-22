@@ -1,5 +1,6 @@
 (() => {
   const csrfToken = document.body?.dataset.csrfToken || '';
+  const canCancelTasks = document.body?.classList.contains('role-librarian') === true;
   const cancelableTasks = new Map([
     ['scan-all', 'Cancel scan'],
     ['media-fingerprints', 'Cancel fingerprinting'],
@@ -27,7 +28,7 @@
   };
 
   const cancelTask = async (task, button, row) => {
-    if (!task?.id || stopping.has(task.id)) return;
+    if (!canCancelTasks || !task?.id || stopping.has(task.id)) return;
     stopping.add(task.id);
     button.disabled = true;
     button.textContent = 'Stopping…';
@@ -55,6 +56,7 @@
   };
 
   const decorateTaskRows = () => {
+    if (!canCancelTasks) return;
     const list = document.getElementById('task-list');
     if (!list) return;
     const rows = [...list.querySelectorAll('.task-row.task-active')];
