@@ -9,6 +9,7 @@ from pathlib import Path
 from app.db import Database
 from app.maintenance import (
     MaintenanceError,
+    backup_directory,
     create_database_backup,
     install_database_backup,
     list_database_backups,
@@ -54,6 +55,47 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(resolve_backup(self.path, first.name), first)
         with self.assertRaisesRegex(MaintenanceError, "not valid"):
             resolve_backup(self.path, "../infomancer.db")
+
+    def test_backup_listing_and_resolver_reject_symlinked_database(self):
+        outside = self.base / "outside.db"
+        outside.write_bytes(self.path.read_bytes())
+        directory = backup_directory(self.path)
+        linked = directory / "infomancer-backup-20260821-120000.db"
+        try:
+            linked.symlink_to(outside)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlinks are unavailable in this test environment: {exc}")
+        self.assertNotIn(linked.name, {item["name"] for item in list_database_backups(self.path)})
+        with self.assertRaisesRegex(MaintenanceError, "not safe"):
+            resolve_backup(self.path, linked.name)
+
+    def test_backup_creation_does_not_follow_dangling_symlink_collision(self):
+        directory = backup_directory(self.path)
+        real_exists = Path.exists
+        real_is_symlink = Path.is_symlink
+        collision_seen = {"value": False}
+
+        def fake_exists(candidate: Path) -> bool:
+            if candidate.parent == directory and candidate.name.startswith("infomancer-backup-"):
+                return False
+            return real_exists(candidate)
+
+        def fake_is_symlink(candidate: Path) -> bool:
+            if (
+                candidate.parent == directory
+                and candidate.name.startswith("infomancer-backup-")
+                and not candidate.name.endswith("-2.db")
+            ):
+                collision_seen["value"] = True
+                return True
+            return real_is_symlink(candidate)
+
+        from unittest.mock import patch
+        with patch.object(Path, "exists", fake_exists), patch.object(Path, "is_symlink", fake_is_symlink):
+            backup = create_database_backup(self.path)
+        self.assertTrue(collision_seen["value"])
+        self.assertTrue(backup.name.endswith("-2.db"))
+        validate_database_backup(backup)
 
     def test_restore_replaces_database_and_retains_safety_backup(self):
         backup = create_database_backup(self.path)
