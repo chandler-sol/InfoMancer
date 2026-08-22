@@ -85,13 +85,22 @@
     queueMicrotask(decorateTaskRows);
   });
 
-  const taskList = document.getElementById('task-list');
-  if (taskList) {
-    new MutationObserver(() => queueMicrotask(decorateTaskRows)).observe(taskList, {
-      childList: true,
-      subtree: true,
-    });
-  }
+  const installDomEnhancements = () => {
+    const taskList = document.getElementById('task-list');
+    if (taskList && taskList.dataset.cancelObserver !== '1') {
+      taskList.dataset.cancelObserver = '1';
+      new MutationObserver(() => queueMicrotask(decorateTaskRows)).observe(taskList, {
+        childList: true,
+        subtree: true,
+      });
+    }
+    installFingerprintScheduleHandoff();
+    decorateTaskRows();
+  };
 
-  installFingerprintScheduleHandoff();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', installDomEnhancements, {once: true});
+  } else {
+    installDomEnhancements();
+  }
 })();
