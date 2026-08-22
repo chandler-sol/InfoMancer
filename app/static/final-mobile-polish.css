@@ -98,6 +98,7 @@
 
 .workspace-toast-host {
   top: calc(10px + env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
 }
 
 /* Duplicate Review has a hover/focus explanation that was wider than the narrowest
@@ -108,6 +109,19 @@
 }
 
 @media (max-width: 760px) {
+  /* Preserve content around display cutouts as well as the top/bottom Safari chrome.
+     Portrait devices normally report zero side insets; in landscape these values
+     keep the header and app shell clear of a notch or Dynamic Island cutout. */
+  .topbar {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+
+  .shell {
+    padding-left: max(15px, env(safe-area-inset-left));
+    padding-right: max(15px, env(safe-area-inset-right));
+  }
+
   /* Metric values and labels were inheriting an inline layout on narrow screens,
      producing strings such as 503Fresh. Give every metric an explicit stack. */
   body .settings-metrics > div {
@@ -211,6 +225,7 @@
 
   .workspace-toast-host {
     top: calc(8px + env(safe-area-inset-top));
+    right: max(10px, env(safe-area-inset-right));
   }
 
   /* Settings navigation is intentionally horizontal on phones. Give it predictable
@@ -332,6 +347,58 @@
     width: 100%;
     box-sizing: border-box;
     text-align: center;
+  }
+}
+
+/* Short landscape viewports are a different failure mode from narrow portrait
+   screens: there is plenty of width, but only a few hundred vertical pixels once
+   browser chrome is present. Preserve the side cutouts and reclaim vertical space
+   for sheets, drawers, and anchored popovers without changing desktop geometry. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .topbar {
+    padding-left: max(24px, env(safe-area-inset-left));
+    padding-right: max(24px, env(safe-area-inset-right));
+  }
+
+  .shell {
+    padding-left: max(24px, env(safe-area-inset-left));
+    padding-right: max(24px, env(safe-area-inset-right));
+  }
+
+  .topbar .global-search-suggestions,
+  .topbar .task-popover,
+  .topbar .site-menu-panel,
+  .topbar .account-menu-popover {
+    max-height: calc(100dvh - 76px - env(safe-area-inset-bottom));
+  }
+
+  .source-browser,
+  .workspace-confirm-dialog,
+  .workspace-command-palette,
+  .title-overview-dialog,
+  .cast-dialog,
+  .tour-card,
+  .announcement-popup,
+  .setup-choice-card {
+    max-width: calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 16px);
+    max-height: calc(100dvh - 12px);
+  }
+
+  .source-browser {
+    max-height: calc(100dvh - 8px);
+  }
+
+  .workspace-drawer-panel {
+    top: max(8px, env(safe-area-inset-top));
+    right: env(safe-area-inset-right);
+  }
+
+  .workspace-dialog-card {
+    padding: 18px;
+  }
+
+  .source-browser-shell {
+    padding-top: 18px;
   }
 }
 
