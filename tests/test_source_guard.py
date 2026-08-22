@@ -10,6 +10,7 @@ os.environ.setdefault("INFOMANCER_AUTH_MODE", "disabled")
 import app.main as main
 from app.db import Database
 from app.mie import MediaIntelligenceEngine
+from app.request_security import LOCAL_CSRF_COOKIE
 
 
 class SourceGuardTests(unittest.TestCase):
@@ -62,21 +63,26 @@ class SourceGuardTests(unittest.TestCase):
 
         self.assertEqual({item["key"] for item in context["actions"]}, {"check", "reconcile"})
         self.assertIn("12", context["actions"][1]["changes"])
-        page = TestClient(main.app).get(
+
+        client = TestClient(main.app)
+        page = client.get(
             f"/library-health/findings/{finding['id']}/remediate"
         )
         self.assertEqual(page.status_code, 200)
         self.assertIn("Preview proposed action", page.text)
         self.assertIn("RECONCILE", page.text)
 
-        sources = TestClient(main.app).get("/sources")
+        sources = client.get("/sources")
         self.assertEqual(sources.status_code, 200)
         self.assertIn("Degraded", sources.text)
         self.assertIn("Source Guard is protecting", sources.text)
 
-        batch = TestClient(main.app).post(
+        csrf_token = client.cookies.get(LOCAL_CSRF_COOKIE)
+        self.assertTrue(csrf_token)
+        batch = client.post(
             "/library-health/remediate-batch",
             data={"findings": str(finding["id"]), "action": "check_sources", "confirm": "CHECK"},
+            headers={"X-CSRF-Token": csrf_token},
             follow_redirects=False,
         )
         self.assertEqual(batch.status_code, 303)
