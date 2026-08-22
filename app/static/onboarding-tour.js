@@ -120,17 +120,40 @@
   let menuSnapshot = null;
   let profileWasOpen = false;
   let layoutFrame = 0;
+  let pendingLibraryView = "";
   const tourViewStorageKey = "infomancer-tour-original-library-view";
 
   const currentStep = () => steps[index];
   const isLibraryPath = (path) => libraryPaths.has(path);
+  const libraryControllerReady = () => Boolean(
+    document.querySelector('script[src*="library-surface-lazy.js"][data-infomancer-loaded="1"]'),
+  );
+  const libraryViewButton = (view) => document.getElementById(
+    view === "covers" ? "library-cover-view" : "library-list-view",
+  );
+  const applyTourLibraryView = (view) => {
+    if (!view) return;
+    pendingLibraryView = "";
+    libraryViewButton(view)?.click();
+    document.querySelector(".tour-library-demo")?.setAttribute("data-view", view);
+  };
+
+  /* The Library controller is loaded by app-shell.js after the base tour script.
+     Queue the requested demo view until that controller announces its first view,
+     rather than making the tour's behavior depend on device or network speed. */
+  document.addEventListener("infomancer:library-view-changed", () => {
+    if (!pendingLibraryView) return;
+    const requested = pendingLibraryView;
+    requestAnimationFrame(() => applyTourLibraryView(requested));
+  });
 
   const restoreLibraryView = () => {
     const saved = sessionStorage.getItem(tourViewStorageKey);
     if (saved === null) return;
     try {
       const original = JSON.parse(saved);
-      document.getElementById(original.view === "covers" ? "library-cover-view" : "library-list-view")?.click();
+      pendingLibraryView = "";
+      if (libraryControllerReady()) libraryViewButton(original.view)?.click();
       if (original.persisted === null) localStorage.removeItem("infomancer-library-view");
       else localStorage.setItem("infomancer-library-view", original.persisted);
     } catch (_error) {
@@ -147,8 +170,12 @@
         view: document.getElementById("library-cover-view")?.getAttribute("aria-pressed") === "true" ? "covers" : "list",
       }));
     }
-    document.getElementById(view === "covers" ? "library-cover-view" : "library-list-view")?.click();
     document.querySelector(".tour-library-demo")?.setAttribute("data-view", view);
+    if (libraryControllerReady()) {
+      applyTourLibraryView(view);
+      return;
+    }
+    pendingLibraryView = view;
   };
 
   const goToStep = (stepIndex, replace = false) => {
@@ -463,7 +490,11 @@
   const close = async (state) => {
     clearHighlight();
     try { await post("/engagement/tour", tour.dataset.csrfToken, {state}); }
-    catch (error) { window.alert(error.message); return; }
+    catch (error) {
+      window.alert(error.message);
+      render();
+      return;
+    }
     window.removeEventListener("resize", updateTourLayout);
     window.removeEventListener("scroll", updateTourLayout, true);
     window.visualViewport?.removeEventListener("resize", updateTourLayout);
