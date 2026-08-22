@@ -22,7 +22,7 @@ class DetailInteractionPolishTests(unittest.TestCase):
         self.assertIn('overflow-y: auto', css)
 
     def test_person_hover_preview_cancels_pending_open_on_leave(self):
-        script = (ROOT / "app/static/workspace.js").read_text(encoding="utf-8")
+        script = (ROOT / "app/static/workspace-core.js").read_text(encoding="utf-8")
         schedule = script.split('const scheduleClose = () => {', 1)[1].split('};', 1)[0]
         self.assertIn('window.clearTimeout(openTimer);', schedule)
         self.assertIn('window.setTimeout(closeNow, 120)', schedule)
