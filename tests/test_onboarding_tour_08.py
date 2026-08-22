@@ -48,7 +48,7 @@ class OnboardingTour08ContractTests(unittest.TestCase):
             'id="site-menu-panel"',
             'class="global-search-toggle"',
             'id="task-widget"',
-            'class="account-menu"',
+            'class="account-menu series-menu"',
         ):
             self.assertIn(marker, base)
         for marker in (
