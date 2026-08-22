@@ -1,0 +1,33 @@
+/* Mobile title pages should read as one continuous dossier rather than an outer
+   hero card containing several smaller cards. Desktop/tablet keep the richer
+   three-column treatment; phones flatten Overview and Cast & crew into aligned
+   sections separated by quiet rules. */
+@media (max-width: 620px) {
+  body.has-app-sidebar .media-dossier .title-hero-aside {
+    gap: 0;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+
+  body.has-app-sidebar .media-dossier .title-synopsis,
+  body.has-app-sidebar .media-dossier .movie-credits {
+    margin: 0;
+    padding: 16px 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  body.has-app-sidebar .media-dossier .movie-credits {
+    border-top: 1px solid var(--line);
+  }
+
+  body.has-app-sidebar .media-dossier .title-synopsis h2,
+  body.has-app-sidebar .media-dossier .movie-credits h2 {
+    margin-top: 0;
+  }
+
+  body.has-app-sidebar .media-dossier .title-overview {
+    margin-bottom: 0;
+  }
+}
