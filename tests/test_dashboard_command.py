@@ -6,14 +6,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DashboardCommandContracts(unittest.TestCase):
-    def test_operational_dashboard_is_default_with_old_layout_preview(self):
+    def test_operational_dashboard_is_the_single_supported_home_surface(self):
         route = (ROOT / "app/routes/dashboard.py").read_text(encoding="utf-8")
         template = (ROOT / "app/templates/dashboard_command.html").read_text(encoding="utf-8")
-        old_wrapper = (ROOT / "app/templates/dashboard_old_test.html").read_text(encoding="utf-8")
 
-        self.assertIn('home_template = "dashboard_command.html"', route)
-        self.assertIn('requested_layout == "old"', route)
-        self.assertIn('home_template = "dashboard_old_test.html"', route)
+        self.assertIn('"dashboard_command.html"', route)
+        self.assertIn("single supported Home surface", route)
+        self.assertNotIn('dashboard_old_test.html', route)
         self.assertIn("event_log.activity(user_id, unread_only=True", route)
         self.assertIn("activity_unread_display", route)
 
@@ -22,8 +21,7 @@ class DashboardCommandContracts(unittest.TestCase):
         self.assertIn("NEEDS ATTENTION", template)
         self.assertIn("RECENTLY CHANGED", template)
         self.assertIn('data-home-live-task', template)
-        self.assertIn('href="/?layout=old"', template)
-        self.assertIn('href="/?layout=new"', old_wrapper)
+        self.assertNotIn('layout=old', template)
 
     def test_operational_dashboard_has_scoped_responsive_styles(self):
         styles = (ROOT / "app/static/dashboard-command.css").read_text(encoding="utf-8")
