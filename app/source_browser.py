@@ -16,8 +16,22 @@ class SourceBrowserError(ValueError):
 
 def _resolved(path: Path | str) -> Path:
     # Browser input is rejected by validate_browse_path unless the resolved
-    # result remains inside a configured media-browse root.
-    return Path(path).expanduser().resolve(strict=False)
+    # result remains inside a configured media-browse root. Windows can raise
+    # here for disconnected or policy-blocked mapped drives, so translate that
+    # into a normal source-browser error instead of letting the API return 500.
+    try:
+        return Path(path).expanduser().resolve(strict=False)
+    except OSError as exc:
+        raise SourceBrowserError(f"InfoMancer cannot access that folder: {exc}") from exc
+
+
+def _root_is_accessible(path: Path) -> bool:
+    """Return whether a configured browse root can actually be opened now."""
+    try:
+        with os.scandir(path):
+            return True
+    except OSError:
+        return False
 
 
 def _inside(path: Path, roots: tuple[Path, ...]) -> bool:
@@ -31,14 +45,28 @@ def _inside(path: Path, roots: tuple[Path, ...]) -> bool:
 
 
 def allowed_roots(values: tuple[Path, ...]) -> tuple[Path, ...]:
-    return tuple(_resolved(value) for value in values)
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for value in values:
+        try:
+            root = _resolved(value)
+        except SourceBrowserError:
+            continue
+        if not _root_is_accessible(root):
+            continue
+        key = os.path.normcase(os.path.abspath(os.fspath(root))).casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(root)
+    return tuple(roots)
 
 
 def validate_browse_path(path: Path | str, roots: tuple[Path, ...]) -> Path:
     resolved = _resolved(path)
     if not _inside(resolved, roots):
         raise SourceBrowserError("That folder is outside the allowed media locations")
-    if not resolved.is_dir():
+    if not _root_is_accessible(resolved):
         raise SourceBrowserError("That folder is not accessible to InfoMancer")
     return resolved
 
@@ -60,7 +88,7 @@ def list_folders(path: str, configured_roots: tuple[Path, ...]) -> dict:
         for root in roots:
             locations.append({
                 "name": root.name or str(root), "path": str(root),
-                "accessible": root.is_dir(),
+                "accessible": True,
             })
         return {"locations": locations, "current": "", "parent": None, "folders": []}
 
@@ -73,7 +101,10 @@ def list_folders(path: str, configured_roots: tuple[Path, ...]) -> dict:
     for entry in entries:
         if not _visible_directory(entry):
             continue
-        child = _resolved(entry.path)
+        try:
+            child = _resolved(entry.path)
+        except SourceBrowserError:
+            continue
         if not _inside(child, roots):
             continue
         folders.append({"name": entry.name, "path": str(child)})
@@ -127,7 +158,10 @@ def preview_folder(
                 if entry.is_dir(follow_symlinks=False):
                     if not _visible_directory(entry):
                         continue
-                    child = _resolved(entry.path)
+                    try:
+                        child = _resolved(entry.path)
+                    except SourceBrowserError:
+                        continue
                     if not _inside(child, roots):
                         continue
                     if entry.name.casefold().startswith("season "):
