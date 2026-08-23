@@ -1,6 +1,7 @@
 (() => {
   const current = document.currentScript;
   const version = current?.src ? new URL(current.src).search : "";
+  const tourVersion = `${version}${version ? "&" : "?"}tour_assets=20260822c`;
 
   const post = async (url, csrfToken, values = {}) => {
     const body = new URLSearchParams(values);
@@ -12,8 +13,8 @@
     if (!response.ok) throw new Error("InfoMancer could not save that choice. Refresh the page and try again.");
   };
 
-  const loadStyle = (path) => new Promise((resolve) => {
-    const href = `/static/${path}${version}`;
+  const loadStyle = (path, assetVersion = version) => new Promise((resolve) => {
+    const href = `/static/${path}${assetVersion}`;
     const absolute = new URL(href, window.location.href).href;
     const existing = [...document.querySelectorAll('link[rel="stylesheet"]')]
       .find((link) => link.href === absolute);
@@ -33,8 +34,8 @@
     document.head.append(link);
   });
 
-  const loadScript = (path) => new Promise((resolve) => {
-    const src = `/static/${path}${version}`;
+  const loadScript = (path, assetVersion = version) => new Promise((resolve) => {
+    const src = `/static/${path}${assetVersion}`;
     const script = document.createElement("script");
     script.src = src;
     script.async = false;
@@ -48,12 +49,14 @@
     // The server-rendered copy intentionally stays generic. Do not paint it with a
     // stale step count while the dedicated 0.8 tour controller is loading.
     tour.hidden = true;
-    loadStyle("onboarding-tour.css");
-    loadStyle("onboarding-tour-inspector-preview.css");
-    loadStyle("onboarding-tour-mobile-polish.css");
-    loadScript("onboarding-tour.js")
-      .then(() => loadScript("onboarding-tour-inspector-preview.js"))
-      .then(() => loadScript("onboarding-tour-mobile-polish.js"));
+    Promise.all([
+      loadStyle("onboarding-tour.css", tourVersion),
+      loadStyle("onboarding-tour-inspector-preview.css", tourVersion),
+      loadStyle("onboarding-tour-mobile-polish.css", tourVersion),
+    ])
+      .then(() => loadScript("onboarding-tour.js", tourVersion))
+      .then(() => loadScript("onboarding-tour-inspector-preview.js", tourVersion))
+      .then(() => loadScript("onboarding-tour-mobile-polish.js", tourVersion));
   }
 
   const popup = document.getElementById("announcement-popup");
