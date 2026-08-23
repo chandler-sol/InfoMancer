@@ -76,6 +76,19 @@
   font-size: 14px;
 }
 
+/* The bulk Organize action belongs to the same visual block as the framed form.
+   On desktop, let Manage Tags align to the form's true right edge instead of
+   inheriting the old close-button padding from the generic dialog header. */
+@media (min-width: 761px) {
+  .organize-dialog .organize-bulk-page .page-head {
+    padding-right: 0;
+  }
+
+  .organize-dialog .organize-bulk-page .page-head > .button {
+    margin-left: auto;
+  }
+}
+
 /* An expanded search is a real text field, not a slightly stretched icon slot.
    Give the placeholder and entered query enough room to remain readable while
    still allowing the filter row to wrap naturally on narrower desktops. */
