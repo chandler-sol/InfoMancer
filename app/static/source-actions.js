@@ -171,3 +171,38 @@
     });
   });
 })();
+
+(() => {
+  const editors = [...document.querySelectorAll(".root-name-editor")];
+  const closeEditors = (except = null) => {
+    editors.forEach((editor) => {
+      if (editor !== except) editor.removeAttribute("open");
+    });
+  };
+
+  editors.forEach((editor) => {
+    editor.addEventListener("toggle", () => {
+      if (editor.open) closeEditors(editor);
+    });
+  });
+
+  document.querySelectorAll("[data-cancel-root-name]").forEach((button) => {
+    button.addEventListener("click", () => button.closest("details")?.removeAttribute("open"));
+  });
+
+  document.addEventListener("click", (event) => {
+    editors.forEach((editor) => {
+      if (editor.open && !editor.contains(event.target)) editor.removeAttribute("open");
+    });
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeEditors();
+  });
+
+  document.querySelectorAll(".root-library-link[data-source-id]").forEach((link) => {
+    const key = `infomancer-source-opened:${link.dataset.sourceId}`;
+    if (sessionStorage.getItem(key)) link.classList.add("session-opened");
+    link.addEventListener("click", () => sessionStorage.setItem(key, "1"));
+  });
+})();
