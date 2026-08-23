@@ -1,5 +1,0 @@
-/* Pre-release Settings cleanup. Sources already participates in the Settings shell,
-   so a migration notice about controls having moved is unnecessary before 0.8 ships. */
-.sources-page-head ~ .settings-handoff {
-  display: none !important;
-}
