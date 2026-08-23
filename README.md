@@ -20,7 +20,7 @@ InfoMancer is deliberately broader than a file renamer and deliberately safer th
 - **Personal library organization:** Saved Views, pinned views, Favorites, ratings, tags, Collections, Custom Libraries, Smart Collections, custom ordering, and Sort Titles sit alongside the shared physical catalog.
 - **Technical media intelligence:** FFprobe-backed runtime, resolution, codec, channel, bitrate, container, and HDR/dynamic-range inspection feeds both title details and MIE quality analysis.
 - **Local-first recovery and ownership:** SQLite backups, exports, settings portability, and verified `.infomancer-backup` packages are designed around self-hosted data ownership. Media files are never copied into InfoMancer backups.
-- **Native Windows direction without a separate update server:** the 0.8 alpha includes a Tauri Windows application, installer/uninstaller testing, a zero-residue uninstall policy, optional final recovery backup, and a GitHub Releases-based signed updater architecture.
+- **Native desktop previews:** the 0.8 alpha packages InfoMancer for Windows, macOS, and Linux while preserving Docker as the server/headless installation path.
 
 For the long-form inventory, see **[the complete feature catalog](docs/reference/FEATURE_CATALOG.md)**. The 0.8 Workspace architecture and completed W1-W6 phases are documented in **[docs/WORKSPACE.md](docs/WORKSPACE.md)**.
 
@@ -82,24 +82,21 @@ For the long-form inventory, see **[the complete feature catalog](docs/reference
 
 ## Install
 
-Docker remains the recommended self-hosted installation on Windows, macOS, and Linux. It keeps InfoMancer and FFprobe consistent while allowing each operating system to map its own disks, mounted volumes, and network shares beneath `/media` inside the container.
+InfoMancer 0.8 alpha has **native desktop preview packages** as well as the Docker server package.
 
-See **[Install InfoMancer](docs/INSTALLATION.md)** for the complete platform-specific walkthrough, storage examples, updates, backups, and troubleshooting.
+For a personal desktop installation, download the package for your platform from the GitHub release:
 
-The short version is:
+- **Windows 10/11 x64:** `InfoMancer_0.8.0-alpha.1_x64-setup.exe`
+- **macOS Apple silicon:** `InfoMancer_0.8.0-alpha.1_aarch64.dmg`
+- **Linux x86-64:** `InfoMancer_0.8.0-alpha.1_amd64.deb` or `InfoMancer_0.8.0-alpha.1_amd64.AppImage`
 
-1. Install Docker Desktop, or Docker Engine with Compose on Linux.
-2. Copy `.env.example` to `.env`.
-3. Copy the matching example from `deploy/` to `compose.media.yaml` and replace its example media paths.
-4. Run:
+The native launcher can either **Run on this computer** with its bundled local InfoMancer core or **Connect to a server** that is already running InfoMancer. Docker is not required for the native desktop app.
 
-   ```bash
-   docker compose -f compose.yaml -f compose.media.yaml up -d --build
-   ```
+Docker remains the recommended path for a headless server, shared household installation, or machine that should run InfoMancer independently of a desktop login. The server/source ZIP contains the Compose files and platform storage examples.
 
-5. Open `http://127.0.0.1:8787` and follow Guided Setup.
+See **[Install InfoMancer](docs/INSTALLATION.md)** for complete native and Docker instructions, platform security warnings, FFprobe requirements, storage examples, updates, backups, and troubleshooting.
 
-On the first visit, InfoMancer asks you to create the initial **Librarian** account. Librarians can scan, match, change metadata, review filesystem proposals, perform permitted media operations, and administer users. **Members** can browse and organize permitted personal state without receiving Librarian filesystem or administrative authority.
+On first setup, InfoMancer asks you to create the initial **Librarian** account. Librarians can scan, match, change metadata, review filesystem proposals, perform permitted media operations, and administer users. **Members** can browse and organize permitted personal state without receiving Librarian filesystem or administrative authority.
 
 ## Authentication
 
@@ -155,13 +152,15 @@ Portable settings exports deliberately omit accounts, passwords, sessions, provi
 
 The `.infomancer-backup` recovery package contains a versioned manifest, a consistent SQLite snapshot, collection artwork where present, and SHA-256 verification. The Recovery settings page verifies an uploaded package and shows its source version and contents before any live data is changed. Restore creates and verifies a fresh safety package of the current installation, stages the recovered database and artwork, and rolls them back together if commit fails. Provider credentials, provider-secret encryption keys, movie/TV files, deployment environment files, application binaries, and caches are never restored from the archive. This is also the format produced by the native Windows uninstall recovery flow, so it can be used after a clean reinstall once the same media paths or shares are available.
 
-## Native Windows alpha
+## Native desktop alpha
 
-The repository now contains an alpha Tauri-based Windows application and CI that builds the InfoMancer core, builds the installer, performs an actual install/uninstall smoke test, and checks known InfoMancer-owned locations for residue.
+The repository contains a Tauri-based native shell with preview packages for Windows, macOS, and Linux. The desktop shell bundles the InfoMancer Python core for standalone use and can also operate as a client for an existing server.
 
-The Windows uninstall policy is intentionally strict: uninstall should remove InfoMancer-owned local state rather than leaving caches/configuration behind. Before destructive local-data cleanup, the uninstaller can offer to create and verify a recovery package at a user-selected location. User media is never part of uninstall cleanup.
+Windows uses an NSIS current-user installer with zero-residue uninstall testing and an optional final recovery backup before local application data is removed. User media is never part of uninstall cleanup.
 
-The Windows updater architecture uses **GitHub Releases** as the distribution host, so InfoMancer does not require a separately hosted update server. Tauri updater signatures are used to verify update artifacts. Production updater signing keys and Windows publisher/AuthentiCode signing are release gates rather than secrets stored in the repository.
+The Windows updater architecture uses **GitHub Releases** as the distribution host, so InfoMancer does not require a separately hosted update server. Tauri updater signatures are used to verify update artifacts. Production updater signing keys and Windows publisher/AuthentiCode signing remain release gates rather than secrets stored in the repository.
+
+The current macOS alpha is Apple-silicon only and is not yet notarized. The Linux alpha provides DEB and AppImage packages for x86-64 systems. These are preview builds and should be treated as test software while packaging qualification continues.
 
 See **[Packaging](docs/PACKAGING.md)** and **[Updating InfoMancer](docs/UPDATES.md)** for the current architecture.
 
