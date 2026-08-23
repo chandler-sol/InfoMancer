@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .security_hardening import build_router as build_security_hardening_router
+from .resilience import build_router as build_resilience_router
 from .final_polish import build_router as build_final_polish_router
 from .performance import build_router as build_performance_router
 from .system import build_router as build_system_router
@@ -23,9 +24,10 @@ from .title_metadata_async import build_router as build_title_metadata_async_rou
 from .titles import build_router as build_titles_router
 
 ROUTER_BUILDERS = (
-    # Install cross-cutting security hooks before domain routers capture their
-    # live helpers or Jinja templates.
+    # Install cross-cutting security and error-shaping hooks before domain routers
+    # capture their live helpers or Jinja templates.
     build_security_hardening_router,
+    build_resilience_router,
     # Small release-polish hooks replace live helpers before the domain routes use
     # them, while keeping the existing public route contracts intact.
     build_final_polish_router,
