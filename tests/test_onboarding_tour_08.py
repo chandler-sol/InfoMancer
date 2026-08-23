@@ -22,6 +22,11 @@ class OnboardingTour08ContractTests(unittest.TestCase):
                 "display",
                 "inspector",
                 "review",
+                "sources",
+                "safety",
+                "scheduled-tasks",
+                "recovery",
+                "operations",
                 "tasks",
                 "global-search",
                 "profile",
@@ -31,18 +36,43 @@ class OnboardingTour08ContractTests(unittest.TestCase):
             "Saved Views",
             "Inspector",
             "Review is your decision inbox",
+            "persisted rename proposals",
+            "Source Guard",
+            "Read-Only Mode",
+            "Scheduled Tasks",
+            "recovery package",
+            "Safe Undo",
             "cancelled safely",
-            "search history",
+            "command palette",
+            "recent searches",
         ):
             self.assertIn(copy, source)
         self.assertNotIn("Choose the library you need", source)
         self.assertNotIn("Never miss what changed", source)
         self.assertNotIn("announcement-heading", source)
 
+    def test_librarian_only_steps_are_role_scoped(self) -> None:
+        source = (STATIC / "onboarding-tour.js").read_text(encoding="utf-8")
+        self.assertIn("...(isLibrarian ? [", source)
+        for path in (
+            'path: "/sources"',
+            'path: "/settings/system"',
+            'path: "/settings/scheduled-tasks"',
+            'path: "/settings/recovery"',
+            'path: "/operations"',
+        ):
+            self.assertIn(path, source)
+        self.assertIn("] : []),", source)
+
     def test_tour_targets_exist_in_current_templates(self) -> None:
         base = (TEMPLATES / "base.html").read_text(encoding="utf-8")
         library = (TEMPLATES / "library.html").read_text(encoding="utf-8")
         review = (TEMPLATES / "review.html").read_text(encoding="utf-8")
+        sources = (TEMPLATES / "sources.html").read_text(encoding="utf-8")
+        settings = (TEMPLATES / "settings.html").read_text(encoding="utf-8")
+        scheduled = (TEMPLATES / "scheduled_tasks.html").read_text(encoding="utf-8")
+        recovery = (TEMPLATES / "recovery_restore.html").read_text(encoding="utf-8")
+        operations = (TEMPLATES / "operations.html").read_text(encoding="utf-8")
 
         for marker in (
             'id="site-menu-panel"',
@@ -60,6 +90,13 @@ class OnboardingTour08ContractTests(unittest.TestCase):
         ):
             self.assertIn(marker, library)
         self.assertIn('class="review-summary-strip"', review)
+        self.assertIn('class="page-head sources-page-head"', sources)
+        self.assertIn('class="panel add-root source-add-panel"', sources)
+        self.assertIn('class="panel settings-card system-safety-card full-width" id="safety"', settings)
+        self.assertIn('class="scheduled-task-layout"', scheduled)
+        self.assertIn('id="recovery-upload-form"', recovery)
+        self.assertIn('class="page-head compact-page-head"', recovery)
+        self.assertIn('class="operation-history-summary"', operations)
 
     def test_engagement_runtime_delegates_tour_to_dedicated_owner(self) -> None:
         source = (STATIC / "engagement.js").read_text(encoding="utf-8")
