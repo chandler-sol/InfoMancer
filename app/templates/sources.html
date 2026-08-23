@@ -7,7 +7,7 @@
 <div class="page-head sources-page-head"><div><p class="eyebrow">CONFIGURATION</p><h1>Sources</h1><p class="muted">Manage the folders InfoMancer is allowed to catalog.</p></div></div>
 {% if setup_assistant_active %}<section class="setup-handoff-banner"><div><p class="eyebrow">GUIDED SETUP · SOURCE STEP</p><strong>Add every Movie and TV Shows folder you want InfoMancer to catalog.</strong><span>You can return to the assistant after adding one or several sources.</span></div><a class="button primary" href="/getting-started/sources">Continue guided setup</a></section>{% endif %}
 <div class="split">
-  <section class="panel grow"><div class="panel-head"><div><p class="eyebrow">CONFIGURED</p><h2>Library roots</h2></div><div class="actions sources-global-actions"><form method="post" action="/scan-all"><button class="button primary">Scan all sources</button></form></div></div>
+  <section class="panel grow"><div class="panel-head"><div><p class="eyebrow">CONFIGURED</p><h2>Library roots</h2></div><div class="actions sources-global-actions"><form method="post" action="/roots/check-all"><button class="button">Check all connections</button></form><form method="post" action="/scan-all"><button class="button primary">Scan all sources</button></form></div></div>
     {% if roots %}<div class="root-list">{% for root in roots %}
       <article class="root-row">
         <span class="kind {{ root.kind }}">{{ root.kind }}</span>
@@ -49,35 +49,6 @@
 </div>
 {% set source_return_to = '/sources' %}
 {% include '_source_browser.html' %}
-<section class="panel settings-handoff">
-  <div><p class="eyebrow">APPLICATION SETTINGS</p><h2>Metadata and maintenance have moved</h2><p class="muted">Source Management now stays focused on storage folders and scans. Provider status, IMDb updates, database tools, and restart controls live in App Settings.</p></div>
-  <div class="actions"><a class="button" href="/settings/metadata">Metadata settings</a><a class="button" href="/settings/system">System settings</a></div>
-</section>
-<script>
-(() => {
-  const editors = [...document.querySelectorAll(".root-name-editor")];
-  const closeEditors = except => editors.forEach(editor => { if (editor !== except) editor.removeAttribute("open"); });
-  editors.forEach(editor => editor.addEventListener("toggle", () => { if (editor.open) closeEditors(editor); }));
-  document.querySelectorAll("[data-cancel-root-name]").forEach(button => {
-    button.addEventListener("click", () => button.closest("details")?.removeAttribute("open"));
-  });
-  document.addEventListener("click", event => {
-    editors.forEach(editor => { if (editor.open && !editor.contains(event.target)) editor.removeAttribute("open"); });
-  });
-  document.addEventListener("keydown", event => {
-    if (event.key === "Escape") closeEditors(null);
-  });
-})();
-</script>
-<script>
-(() => {
-  document.querySelectorAll('.root-library-link[data-source-id]').forEach(link => {
-    const key = `infomancer-source-opened:${link.dataset.sourceId}`;
-    if (sessionStorage.getItem(key)) link.classList.add('session-opened');
-    link.addEventListener('click', () => sessionStorage.setItem(key, '1'));
-  });
-})();
-</script>
 <script src="{{ url_for('static', path='source-browser.js') }}?v={{ static_version }}" defer></script>
 <script src="{{ url_for('static', path='source-actions.js') }}?v={{ static_version }}" defer></script>
 {% endblock %}
