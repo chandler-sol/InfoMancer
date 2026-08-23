@@ -83,16 +83,19 @@ class ProviderSecretStore:
     def update(self, values: dict[str, str]) -> None:
         current = self.load()
         current.update({key: value.strip() for key, value in values.items()})
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(self.path.suffix + ".tmp")
         try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
             temporary.write_bytes(
                 self._cipher().encrypt(json.dumps(current, sort_keys=True).encode("utf-8"))
             )
             temporary.chmod(0o600)
             temporary.replace(self.path)
         except OSError as exc:
-            temporary.unlink(missing_ok=True)
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
             raise ProviderSecretError(
                 "InfoMancer verified the credentials but could not save them. Check that the "
                 "application data folder is writable, then try again."
