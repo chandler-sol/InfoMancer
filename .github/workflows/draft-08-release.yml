@@ -11,10 +11,11 @@ on:
 permissions:
   actions: read
   contents: write
+  issues: write
 
 concurrency:
   group: draft-08-release
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   source-package:
@@ -281,3 +282,28 @@ jobs:
 
           gh release upload "$TAG" publish/* --clobber
           echo "Draft release $TAG assembled from commit $GITHUB_SHA."
+
+  status-report:
+    name: Report packaging status
+    if: ${{ always() }}
+    needs:
+      - source-package
+      - native-package
+      - draft-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SOURCE_RESULT: ${{ needs.source-package.result }}
+      NATIVE_RESULT: ${{ needs.native-package.result }}
+      RELEASE_RESULT: ${{ needs.draft-release.result }}
+    steps:
+      - name: Report result to packaging issue
+        shell: bash
+        run: |
+          RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ "$SOURCE_RESULT" = "success" ] && [ "$NATIVE_RESULT" = "success" ] && [ "$RELEASE_RESULT" = "success" ]; then
+            gh issue close 30 --reason completed --comment "0.8.0-alpha.1 packaging succeeded. Server/source, Windows, macOS, and Linux artifacts were assembled into the draft prerelease with SHA-256 checksums. Run: $RUN_URL"
+          else
+            gh issue comment 30 --body "0.8.0-alpha.1 packaging did not complete successfully. source=$SOURCE_RESULT, native=$NATIVE_RESULT, draft-release=$RELEASE_RESULT. Run: $RUN_URL"
+          fi
