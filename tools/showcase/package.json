@@ -1,0 +1,12 @@
+{
+  "name": "infomancer-showcase-capture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "capture": "node capture.mjs",
+    "install-browser": "playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "1.62.1"
+  }
+}
