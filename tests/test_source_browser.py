@@ -126,6 +126,17 @@ class SourceBrowserUiContracts(unittest.TestCase):
         self.assertNotIn('const fetchJson = async (url) => {', sources)
         self.assertNotIn('<dialog class="source-browser"', sources)
 
+    def test_sources_page_has_no_inline_or_dom_injected_control_workarounds(self):
+        sources = (TEMPLATES / "sources.html").read_text(encoding="utf-8")
+        bootstrap = (STATIC / "app-shell-bootstrap.js").read_text(encoding="utf-8")
+        controller = (STATIC / "source-actions.js").read_text(encoding="utf-8")
+        self.assertIn('action="/roots/check-all"', sources)
+        self.assertNotIn("<script>\n", sources)
+        self.assertFalse((STATIC / "source-bulk-actions.js").exists())
+        self.assertNotIn("source-bulk-actions.js", bootstrap)
+        self.assertIn(".root-name-editor", controller)
+        self.assertIn("infomancer-source-opened", controller)
+
     def test_browser_client_never_assumes_error_responses_are_json(self):
         script = (STATIC / "source-browser.js").read_text(encoding="utf-8")
         self.assertIn("const text = await response.text()", script)
