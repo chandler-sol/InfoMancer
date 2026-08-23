@@ -57,6 +57,18 @@ async function waitForStableFrame(page) {
   await sleep(180);
 }
 
+async function dismissShowcaseOverlays(page) {
+  const announcement = page.locator("#announcement-popup");
+  const dismiss = page.locator("#announcement-dismiss");
+  if (await dismiss.isVisible().catch(() => false)) {
+    await dismiss.click();
+    await announcement.waitFor({ state: "detached", timeout: 3000 }).catch(async () => {
+      await announcement.waitFor({ state: "hidden", timeout: 1000 }).catch(() => {});
+    });
+    await sleep(120);
+  }
+}
+
 async function signInIfNeeded(page) {
   await page.goto(absolute("/"), { waitUntil: "domcontentloaded" });
   const identity = page.locator('input[name="identity"]');
@@ -78,11 +90,13 @@ async function signInIfNeeded(page) {
     throw new Error("This InfoMancer instance is still in first-run setup. Complete setup before capturing showcase screenshots.");
   }
   await waitForStableFrame(page);
+  await dismissShowcaseOverlays(page);
 }
 
 async function prepareLibrary(page) {
   await page.goto(absolute("/library"), { waitUntil: "domcontentloaded" });
   await waitForStableFrame(page);
+  await dismissShowcaseOverlays(page);
   const covers = page.locator("#cover-library");
   if (!(await covers.count())) return false;
   return true;
@@ -108,6 +122,7 @@ async function openFirstTitle(page) {
   if (!href) return false;
   await page.goto(new URL(href, BASE_URL).href, { waitUntil: "domcontentloaded" });
   await waitForStableFrame(page);
+  await dismissShowcaseOverlays(page);
   return true;
 }
 
@@ -118,6 +133,7 @@ const states = [
     prepare: async (page) => {
       await page.goto(absolute("/"), { waitUntil: "domcontentloaded" });
       await waitForStableFrame(page);
+      await dismissShowcaseOverlays(page);
       return true;
     },
   },
@@ -130,6 +146,7 @@ const states = [
     prepare: async (page) => {
       await page.goto(absolute("/review"), { waitUntil: "domcontentloaded" });
       await waitForStableFrame(page);
+      await dismissShowcaseOverlays(page);
       return true;
     },
   },
