@@ -26,6 +26,12 @@
 - Aggregate gaps at title/series scope so a TV season does not create hundreds of noisy findings.
 - Grow toward Atmos/DTS:X detection, external subtitle awareness, forced-subtitle logic, and per-library/source policy overrides.
 
+## P1: Task Context & Deep Linking
+
+- Make active task rows in the **Tasks & notifications** widget clickable so selecting a task opens the InfoMancer surface where that work is running or was started.
+- Preserve useful task context in the destination when practical, such as the affected source, title, maintenance tool, review queue, or scheduled-task definition.
+- When a task has no dedicated live surface, fall back to the most relevant Activity, Operations, or Scheduled Tasks view instead of making the row a dead end.
+
 ## P2: Appearance & Themes
 
 Keep InfoMancer's canonical appearance dark and OLED-first while making the UI adaptable to different environments and accessibility needs.
