@@ -90,8 +90,7 @@
       {
         id: "sources",
         path: "/sources",
-        target: ".sources-page-head",
-        group: [".source-add-panel"],
+        target: ".source-add-panel",
         title: "Sources stay explicit and guarded",
         copy: "Add Movie and TV folders through the browser or a trusted path, check connections, and scan them independently. Source Guard preserves catalog records when storage is offline or a scan fails, and removing a Source never deletes its media files.",
       },
@@ -113,7 +112,6 @@
         id: "recovery",
         path: "/settings/recovery",
         target: "#recovery-upload-form",
-        group: [".compact-page-head"],
         title: "Recovery is preview-first too",
         copy: "Portable .infomancer-backup packages are verified before restore, then InfoMancer shows what will be restored before touching the live installation. Recovery creates a safety package first and restores catalog data and collection artwork, never your media files, provider credentials, or deployment secrets.",
       },
