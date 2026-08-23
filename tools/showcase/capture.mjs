@@ -15,6 +15,7 @@ const OUTPUT_DIR = path.resolve(
 );
 const HEADLESS = process.env.INFOMANCER_SHOWCASE_HEADLESS !== "0";
 const REDACT_SELECTORS = process.env.INFOMANCER_SHOWCASE_REDACT_SELECTORS || "";
+const DEVICE_SCALE = Number.parseFloat(process.env.INFOMANCER_SHOWCASE_SCALE || "2");
 const ONLY = new Set(
   (process.env.INFOMANCER_SHOWCASE_ONLY || "")
     .split(",")
@@ -154,11 +155,15 @@ const states = [
 
 async function capture() {
   if (!variants.length) throw new Error("No screenshot variants selected.");
+  if (!Number.isFinite(DEVICE_SCALE) || DEVICE_SCALE <= 0) {
+    throw new Error("INFOMANCER_SHOWCASE_SCALE must be a positive number.");
+  }
   await mkdir(OUTPUT_DIR, { recursive: true });
   const browser = await chromium.launch({ headless: HEADLESS });
   const manifest = {
     generated_at: new Date().toISOString(),
     base_url: BASE_URL,
+    device_scale: DEVICE_SCALE,
     files: [],
     skipped: [],
   };
@@ -167,7 +172,7 @@ async function capture() {
     for (const variant of variants) {
       const context = await browser.newContext({
         viewport: { width: variant.width, height: variant.height },
-        deviceScaleFactor: 1,
+        deviceScaleFactor: DEVICE_SCALE,
         isMobile: variant.isMobile,
         hasTouch: variant.hasTouch,
         colorScheme: "dark",
@@ -204,7 +209,7 @@ async function capture() {
           fullPage: false,
           animations: "disabled",
           caret: "hide",
-          scale: "css",
+          scale: "device",
         };
         if (REDACT_SELECTORS) {
           screenshotOptions.mask = [page.locator(REDACT_SELECTORS)];
@@ -215,8 +220,10 @@ async function capture() {
           filename,
           variant: variant.name,
           state: state.slug,
-          width: variant.width,
-          height: variant.height,
+          width: Math.round(variant.width * DEVICE_SCALE),
+          height: Math.round(variant.height * DEVICE_SCALE),
+          logical_width: variant.width,
+          logical_height: variant.height,
           page: new URL(page.url()).pathname,
         });
         console.log(`[showcase] wrote ${path.relative(REPO_ROOT, target)}`);
@@ -232,7 +239,7 @@ async function capture() {
     `${JSON.stringify(manifest, null, 2)}\n`,
     "utf8",
   );
-  console.log(`[showcase] ${manifest.files.length} screenshot(s) captured.`);
+  console.log(`[showcase] ${manifest.files.length} screenshot(s) captured at ${DEVICE_SCALE}x scale.`);
   if (manifest.skipped.length) console.log(`[showcase] ${manifest.skipped.length} state(s) skipped because content was unavailable.`);
 }
 
