@@ -21,7 +21,12 @@ SAFE_ARTWORK_NAME = re.compile(r"^[0-9a-f]{40}\.(?:jpg|png|webp)$")
 
 def backup_directory(database_path: Path) -> Path:
     path = database_path.parent / "backups"
-    path.mkdir(parents=True, exist_ok=True)
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise MaintenanceError(
+            "InfoMancer could not access its database backup folder. Check application-data permissions and available disk space."
+        ) from exc
     return path
 
 
@@ -65,7 +70,10 @@ def create_database_backup(database_path: Path, suffix: str = "") -> Path:
         target = None
         validate_database_backup(destination)
     except (sqlite3.Error, OSError, MaintenanceError) as exc:
-        destination.unlink(missing_ok=True)
+        try:
+            destination.unlink(missing_ok=True)
+        except OSError:
+            pass
         raise MaintenanceError(
             "InfoMancer could not create a readable database backup. "
             "The live database was not changed."
@@ -112,9 +120,18 @@ def validate_database_backup(path: Path) -> None:
         )
 
 
+def _resolved(path: Path) -> Path:
+    try:
+        return path.resolve(strict=False)
+    except OSError as exc:
+        raise MaintenanceError(
+            "InfoMancer could not verify a filesystem path because its storage location is unavailable or unreadable. Reconnect the storage and try again."
+        ) from exc
+
+
 def _inside(path: Path, parent: Path) -> bool:
     try:
-        path.resolve(strict=False).relative_to(parent.resolve(strict=False))
+        _resolved(path).relative_to(_resolved(parent))
         return True
     except ValueError:
         return False
@@ -140,8 +157,8 @@ def validate_database_paths(
     existing_roots: tuple[Path, ...] = (),
 ) -> None:
     """Reject restored catalog paths that escape already-trusted storage."""
-    allowed_parents = tuple(root.resolve(strict=False) for root in media_browse_roots)
-    grandfathered = {root.resolve(strict=False) for root in existing_roots}
+    allowed_parents = tuple(_resolved(root) for root in media_browse_roots)
+    grandfathered = {_resolved(root) for root in existing_roots}
     connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
@@ -153,7 +170,7 @@ def validate_database_paths(
         roots: dict[int, Path] = {}
         for row in connection.execute("SELECT id,path FROM roots"):
             root = Path(row["path"] or "")
-            resolved = root.resolve(strict=False)
+            resolved = _resolved(root)
             if not root.is_absolute() or (
                 resolved not in grandfathered
                 and not any(_inside(resolved, parent) for parent in allowed_parents)
@@ -276,7 +293,10 @@ def install_database_backup(
             Path(f"{database_path}{suffix}").unlink(missing_ok=True)
         os.replace(staged, database_path)
     except (sqlite3.Error, OSError, MaintenanceError) as exc:
-        staged.unlink(missing_ok=True)
+        try:
+            staged.unlink(missing_ok=True)
+        except OSError:
+            pass
         raise MaintenanceError(
             "The restore could not be completed. A safety backup of the "
             "current database was retained and the uploaded file was not used."
@@ -311,12 +331,26 @@ def read_update_status(database_path: Path) -> dict:
         }
 
 
-def write_update_status(database_path: Path, value: dict) -> Path:
-    path = update_status_path(database_path)
+def _write_json_atomically(path: Path, value: dict, error_message: str) -> Path:
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(value, indent=2), encoding="utf-8")
-    os.replace(temporary, path)
+    try:
+        temporary.write_text(json.dumps(value, indent=2), encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError as exc:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise MaintenanceError(error_message) from exc
     return path
+
+
+def write_update_status(database_path: Path, value: dict) -> Path:
+    return _write_json_atomically(
+        update_status_path(database_path),
+        value,
+        "InfoMancer could not write the updater status file. Check application-data permissions and free disk space.",
+    )
 
 
 def write_update_request(database_path: Path, tag: str, requested_by: str) -> Path:
@@ -340,12 +374,12 @@ def write_update_request(database_path: Path, tag: str, requested_by: str) -> Pa
         or not valid_suffix
     ):
         raise MaintenanceError("The selected release tag is not valid.")
-    request_path = update_request_path(database_path)
-    temporary = request_path.with_suffix(".tmp")
-    temporary.write_text(json.dumps({
-        "tag": tag,
-        "requested_by": requested_by,
-        "requested_at": datetime.now(timezone.utc).isoformat(),
-    }, indent=2), encoding="utf-8")
-    os.replace(temporary, request_path)
-    return request_path
+    return _write_json_atomically(
+        update_request_path(database_path),
+        {
+            "tag": tag,
+            "requested_by": requested_by,
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+        },
+        "InfoMancer could not write the updater request. Check application-data permissions and free disk space.",
+    )
