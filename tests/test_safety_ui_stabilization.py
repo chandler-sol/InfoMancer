@@ -12,14 +12,16 @@ class SafetyUiStabilizationContractTests(unittest.TestCase):
 
     def test_sources_use_standard_confirmation_and_one_edit_surface(self):
         template = (ROOT / "app" / "templates" / "sources.html").read_text(encoding="utf-8")
+        actions = (ROOT / "app" / "static" / "source-actions.js").read_text(encoding="utf-8")
         routes = (ROOT / "app" / "routes" / "settings.py").read_text(encoding="utf-8")
         self.assertIn("source-action-rail", template)
         self.assertIn("source-trash-button", template)
         self.assertIn("data-workspace-confirm", template)
         self.assertIn("media files will not be deleted", template)
         self.assertNotIn("Type REMOVE", template)
-        self.assertIn("closeEditors(editor)", template)
-        self.assertIn('event.key === "Escape"', template)
+        self.assertNotIn("<script>", template)
+        self.assertIn("closeEditors(editor)", actions)
+        self.assertIn('event.key === "Escape"', actions)
         self.assertIn('@librarian_post("/roots/{root_id}/delete")', routes)
         self.assertNotIn('confirm != "REMOVE"', routes)
         self.assertIn("Media source removed from InfoMancer", routes)
