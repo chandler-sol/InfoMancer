@@ -142,6 +142,12 @@ def inspect_media(path: Path, timeout: int = 90) -> dict:
             "again. A consistently slow or failing file may need to be recopied.",
             headline="Media inspection timed out",
         ) from exc
+    except OSError as exc:
+        raise MediaInspectionError(
+            "InfoMancer could not start FFprobe for this file. Check that the media storage is connected and readable and that FFmpeg can run on this system, then try again.",
+            headline="Media inspection could not start",
+            technical_detail=str(exc),
+        ) from exc
     if result.returncode:
         technical = (result.stderr or "").strip()
         raise _ffprobe_error(path, technical[:1000])
