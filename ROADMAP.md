@@ -172,6 +172,8 @@ Potential directions after MIE has enough real-world feedback:
 - calibrate finding thresholds and confidence using observed false-positive/false-negative feedback;
 - improve recommendation quality and prioritization;
 - make related findings easier to understand as one remediation story;
+- add title-scoped media issue drill-down from summary health cards such as **“1 needs attention”**: selecting the summary should open an in-place modal/drawer listing only the affected files or episodes for the current Movie/TV title, grouped by issue with enough evidence to understand why each item needs attention;
+- for TV titles, keep that drill-down scoped to the current series so a title such as *Full House* shows only the affected *Full House* episodes, with direct actions/navigation to the problem episode or file rather than sending the user into a whole-library Review queue;
 - expand safe, explicitly approved batch remediation where filesystem protection modes and rollback semantics make that trustworthy;
 - improve source-level and whole-library trend visibility without reducing explainability to one opaque score.
 
