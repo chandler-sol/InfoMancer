@@ -1,24 +1,4 @@
 (() => {
-  const workspaceScript = document.currentScript;
-  const workspaceAssetVersion = (() => {
-    if (!workspaceScript?.src) return "";
-    try {
-      return new URL(workspaceScript.src, window.location.href).searchParams.get("v") || "";
-    } catch (_error) {
-      return "";
-    }
-  })();
-
-  const ensureWorkspacePolishStyles = () => {
-    if (document.querySelector('link[data-workspace-detail-polish]')) return;
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    const version = workspaceAssetVersion ? `?v=${encodeURIComponent(workspaceAssetVersion)}` : "";
-    link.href = `/static/workspace-detail-polish.css${version}`;
-    link.dataset.workspaceDetailPolish = "1";
-    document.head.append(link);
-  };
-
   const enhanceWorkspaceNavigation = () => {
     const panel = document.getElementById("site-menu-panel");
     if (!panel) return;
@@ -46,7 +26,7 @@
     inspector.innerHTML = `
       <div class="workspace-inspector-head">
         <span>Inspector</span>
-        <button class="workspace-inspector-close" type="button" aria-label="Close inspector">×</button>
+        <button class="workspace-inspector-close" type="button" aria-label="Close inspector"></button>
       </div>
       <div class="workspace-inspector-body"></div>`;
     document.body.append(inspector);
@@ -575,7 +555,6 @@
     if (document.querySelector(".library-table, #cover-library")) {
       document.documentElement.classList.add("library-view-ready");
     }
-    ensureWorkspacePolishStyles();
     enhanceWorkspaceNavigation();
     enhanceLibraryInspector();
     enhanceCreditHoverCards();
