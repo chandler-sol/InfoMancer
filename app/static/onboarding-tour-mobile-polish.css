@@ -1,0 +1,40 @@
+/* Tour-only chrome fixes for compact/mobile layouts. Keep long walkthrough copy
+   scrollable without painting Safari's transient scrollbar into the information card. */
+.tour-card {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.tour-card::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* The task demo adds a progress track to the header bell. Keep that track out of
+   the button's grid flow so the bell remains mathematically centered in its normal
+   42px header control instead of being pushed upward by a second grid row. */
+.tour-task-demo .task-widget-toggle {
+  position: relative;
+  grid-template-rows: none !important;
+}
+
+.tour-task-demo .tour-task-demo-progress {
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  bottom: 4px;
+  width: auto;
+  height: 2px;
+  margin: 0;
+  grid-column: auto;
+  pointer-events: none;
+}
+
+@media (max-width: 760px), (hover: none) and (pointer: coarse) {
+  .tour-task-demo .tour-task-demo-progress {
+    left: 8px;
+    right: 8px;
+    bottom: 4px;
+  }
+}
