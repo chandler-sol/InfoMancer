@@ -31,6 +31,13 @@ class EngagementTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_official_release_is_seeded_once_and_due_once(self):
+        # This test models an account that existed before the release notes. New
+        # accounts intentionally treat older official announcements as historical
+        # so first-run setup is not interrupted by the entire announcement archive.
+        with self.database.connect() as conn:
+            conn.execute(
+                "UPDATE users SET created_at='2020-01-01 00:00:00' WHERE id=2"
+            )
         self.service.seed_official()
         self.service.seed_official()
         with self.database.connect() as conn:
@@ -61,6 +68,12 @@ class EngagementTests(unittest.TestCase):
         self.assertEqual(updated_at, "2000-01-01 00:00:00")
 
     def test_shared_page_engagement_reads_use_one_database_connection(self):
+        # Keep one due announcement in this cache-coalescing test by modeling an
+        # existing Librarian rather than a newly created first-run account.
+        with self.database.connect() as conn:
+            conn.execute(
+                "UPDATE users SET created_at='2020-01-01 00:00:00' WHERE id=1"
+            )
         self.service.seed_official()
         original_connect = self.database.connect
         connection_count = 0
