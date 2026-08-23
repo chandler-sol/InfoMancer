@@ -29,12 +29,13 @@ class SettingsFinalPolishContracts(unittest.TestCase):
     def test_settings_spacing_assets_are_owned_by_their_surfaces(self):
         recovery = (TEMPLATES / "recovery_restore.html").read_text(encoding="utf-8")
         settings_nav = (TEMPLATES / "_settings_nav.html").read_text(encoding="utf-8")
-        settings_final = (STATIC / "settings-final-polish.css").read_text(encoding="utf-8")
+        sources = (TEMPLATES / "sources.html").read_text(encoding="utf-8")
 
         self.assertIn("recovery-polish.css", recovery)
-        self.assertIn("settings-final-polish.css", settings_nav)
-        self.assertIn(".sources-page-head ~ .settings-handoff", settings_final)
-        self.assertIn("display: none !important", settings_final)
+        self.assertNotIn("settings-final-polish.css", settings_nav)
+        self.assertFalse((STATIC / "settings-final-polish.css").exists())
+        self.assertNotIn("settings-handoff", sources)
+        self.assertNotIn("Metadata and maintenance have moved", sources)
 
     def test_saved_views_explain_the_saved_state_and_keep_checkbox_aligned(self):
         script = (STATIC / "library-saved-views-polish.js").read_text(encoding="utf-8")
