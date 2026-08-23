@@ -42,6 +42,17 @@
 - Keep every tour record unmistakably synthetic internally, deterministic between runs, isolated from the real database/filesystem, and safe for screenshots, demos, automated tests, and first-run onboarding.
 - Prefer a reusable fixture generator over one-off hard-coded titles so future tour steps can request consistent fake movies, series, seasons, episodes, and media variants.
 
+## P1: Tour Viewport & Target Positioning
+
+- Make every tour step deliberately position the page so the feature being explained is fully visible instead of inheriting an arbitrary scroll position from the previous step.
+- Scroll the target section into view with enough top and bottom breathing room to keep headings, controls, status cards, and explanatory text visible at the same time.
+- Account for the tour card itself when choosing a scroll position so the overlay does not cover the control or section it is describing.
+- Prefer stable anchor/target-based positioning over fixed pixel offsets, since panel heights and content can change as features evolve.
+- Recalculate placement for different viewport sizes and desktop-window dimensions rather than assuming a single screenshot-sized layout.
+- Avoid jumps that leave section headings clipped at the top edge or position the highlighted feature partially off-screen, especially on longer settings and maintenance pages.
+- Preserve or restore the user's previous scroll position when the tour is skipped, closed, or completed where doing so does not create confusing navigation.
+- Add tour regression coverage for representative short and long pages so future layout changes cannot silently break step positioning.
+
 ## P2: Appearance & Themes
 
 Keep InfoMancer's canonical appearance dark and OLED-first while making the UI adaptable to different environments and accessibility needs.
