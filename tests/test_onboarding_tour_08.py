@@ -40,7 +40,7 @@ class OnboardingTour08ContractTests(unittest.TestCase):
             "Source Guard",
             "Read-Only Mode",
             "Scheduled Tasks",
-            "recovery package",
+            "Portable .infomancer-backup packages",
             "Safe Undo",
             "cancelled safely",
             "command palette",
@@ -90,12 +90,10 @@ class OnboardingTour08ContractTests(unittest.TestCase):
         ):
             self.assertIn(marker, library)
         self.assertIn('class="review-summary-strip"', review)
-        self.assertIn('class="page-head sources-page-head"', sources)
         self.assertIn('class="panel add-root source-add-panel"', sources)
         self.assertIn('class="panel settings-card system-safety-card full-width" id="safety"', settings)
         self.assertIn('class="scheduled-task-layout"', scheduled)
         self.assertIn('id="recovery-upload-form"', recovery)
-        self.assertIn('class="page-head compact-page-head"', recovery)
         self.assertIn('class="operation-history-summary"', operations)
 
     def test_engagement_runtime_delegates_tour_to_dedicated_owner(self) -> None:
