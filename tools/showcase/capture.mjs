@@ -64,7 +64,7 @@ async function waitForStableFrame(page) {
       Promise.all(pending),
       new Promise((resolve) => setTimeout(resolve, 2200)),
     ]);
-    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    window.scrollTo(0, 0);
   });
   await sleep(180);
 }
@@ -168,14 +168,11 @@ async function capture() {
         colorScheme: "dark",
         reducedMotion: "reduce",
       });
-      const origin = new URL(BASE_URL);
       await context.addCookies([{
         name: "infomancer_library_view",
         value: "covers",
-        domain: origin.hostname,
-        path: "/",
+        url: `${BASE_URL}/`,
         httpOnly: false,
-        secure: origin.protocol === "https:",
         sameSite: "Lax",
       }]);
       const page = await context.newPage();
