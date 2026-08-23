@@ -18,11 +18,13 @@ class LibraryControlRegressionTests(unittest.TestCase):
         self.assertIn("height: 44px", css)
         self.assertIn("font: inherit", css)
 
-    def test_library_organize_dialog_has_visible_open_state(self) -> None:
+    def test_library_organize_dialog_has_visible_open_and_loading_states(self) -> None:
         css = (STATIC / "library-controls-polish.css").read_text(encoding="utf-8")
         self.assertIn(".organize-dialog[open]", css)
         self.assertIn("opacity: 1", css)
         self.assertIn("transform: translateY(0) scale(1)", css)
+        self.assertIn(".organize-dialog.loading[open] .organize-dialog-body:empty::before", css)
+        self.assertIn('content: "Loading organization tools…"', css)
 
     def test_bulk_organize_still_uses_shared_dialog_contract(self) -> None:
         toolbar = (STATIC / "library-selection-toolbar.js").read_text(encoding="utf-8")
