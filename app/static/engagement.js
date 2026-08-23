@@ -49,7 +49,9 @@
     // stale step count while the dedicated 0.8 tour controller is loading.
     tour.hidden = true;
     loadStyle("onboarding-tour.css");
-    loadScript("onboarding-tour.js");
+    loadStyle("onboarding-tour-inspector-preview.css");
+    loadScript("onboarding-tour.js")
+      .then(() => loadScript("onboarding-tour-inspector-preview.js"));
   }
 
   const popup = document.getElementById("announcement-popup");

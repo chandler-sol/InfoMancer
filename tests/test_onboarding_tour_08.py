@@ -99,10 +99,28 @@ class OnboardingTour08ContractTests(unittest.TestCase):
     def test_engagement_runtime_delegates_tour_to_dedicated_owner(self) -> None:
         source = (STATIC / "engagement.js").read_text(encoding="utf-8")
         self.assertIn('loadStyle("onboarding-tour.css")', source)
+        self.assertIn('loadStyle("onboarding-tour-inspector-preview.css")', source)
         self.assertIn('loadScript("onboarding-tour.js")', source)
+        self.assertIn('loadScript("onboarding-tour-inspector-preview.js")', source)
         self.assertIn("tour.hidden = true", source)
         self.assertNotIn("const steps = [", source)
         self.assertIn('document.getElementById("announcement-popup")', source)
+
+    def test_inspector_step_has_visual_preview_on_mobile_and_desktop(self) -> None:
+        source = (STATIC / "onboarding-tour-inspector-preview.js").read_text(encoding="utf-8")
+        css = (STATIC / "onboarding-tour-inspector-preview.css").read_text(encoding="utf-8")
+        self.assertIn('step === "5"', source)
+        self.assertIn('"Inspect first, act second"', source)
+        self.assertIn('workspace-inspector tour-inspector-preview', source)
+        self.assertIn('tour.classList.add("tour-inspector-active")', source)
+        self.assertIn('preview.setAttribute("aria-hidden", "true")', source)
+        self.assertIn("tour-inspector-preview-facts", source)
+        self.assertNotIn("/library/inspector/", source)
+        self.assertNotIn("workspaceInspectorTitleId", source)
+        self.assertIn(".tour-layer.tour-inspector-active .tour-card", css)
+        self.assertIn("@media (max-width: 760px)", css)
+        self.assertIn("width: auto", css)
+        self.assertIn("pointer-events: none", css)
 
     def test_mobile_tour_uses_stable_safe_area_bottom_sheet(self) -> None:
         css = (STATIC / "onboarding-tour.css").read_text(encoding="utf-8")
