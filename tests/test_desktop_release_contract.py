@@ -15,12 +15,38 @@ class DesktopReleaseContractTests(unittest.TestCase):
             source,
         )
 
+    def test_windows_launcher_surfaces_and_logs_startup_failures(self):
+        source = (ROOT / "desktop" / "src-tauri" / "src" / "main.rs").read_text(
+            encoding="utf-8"
+        )
+        for expected in (
+            "desktop-launcher.log",
+            "install_panic_logger",
+            "InfoMancer startup error",
+            "Tauri startup failed",
+            "Tauri application built successfully; entering the desktop event loop.",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, source)
+
     def test_draft_windows_sidecar_is_built_without_console(self):
         workflow = (ROOT / ".github" / "workflows" / "draft-08-release.yml").read_text(
             encoding="utf-8"
         )
         self.assertIn("PyInstaller --noconfirm --clean --onefile --noconsole", workflow)
         self.assertIn("Verify Windows launcher uses GUI subsystem", workflow)
+
+    def test_draft_release_launches_installed_windows_app(self):
+        workflow = (ROOT / ".github" / "workflows" / "draft-08-release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Smoke-test installed Windows desktop launch", workflow)
+        self.assertIn("Start-Process -FilePath $launcher.FullName -PassThru", workflow)
+        self.assertIn("desktop-launcher.log", workflow)
+        self.assertIn(
+            "Tauri application built successfully; entering the desktop event loop.",
+            workflow,
+        )
 
     def test_installation_guide_documents_native_packages(self):
         guide = (ROOT / "docs" / "INSTALLATION.md").read_text(encoding="utf-8")
