@@ -90,7 +90,7 @@ async function prepareLibrary(page) {
 
 async function openInspector(page) {
   if (!(await prepareLibrary(page))) return false;
-  const card = page.locator(".cover-card, .library-title-row").first();
+  const card = page.locator(".cover-card:visible, .library-title-row:visible").first();
   if (!(await card.count())) return false;
   await card.click();
   const inspector = page.locator("#workspace-inspector");
@@ -102,7 +102,7 @@ async function openInspector(page) {
 
 async function openFirstTitle(page) {
   if (!(await prepareLibrary(page))) return false;
-  const titleLink = page.locator(".cover-card-link, .title-link").first();
+  const titleLink = page.locator(".cover-card-link:visible, .title-link:visible").first();
   if (!(await titleLink.count())) return false;
   const href = await titleLink.getAttribute("href");
   if (!href) return false;
