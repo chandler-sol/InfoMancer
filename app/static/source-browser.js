@@ -28,8 +28,23 @@
   };
   const fetchJson = async (url) => {
     const response = await fetch(url, {cache: "no-store"});
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || "InfoMancer could not read that folder. Check the server permissions and try again.");
+    const text = await response.text();
+    let data = null;
+    if (text) {
+      try { data = JSON.parse(text); }
+      catch (_) {
+        if (!response.ok) {
+          throw new Error("InfoMancer could not read that folder. One of the available drives may be disconnected, unavailable, or blocked by Windows permissions.");
+        }
+        throw new Error("InfoMancer received an invalid response while reading that folder. Refresh the page and try again.");
+      }
+    }
+    if (!response.ok) {
+      throw new Error(data?.detail || "InfoMancer could not read that folder. Check the server permissions and try again.");
+    }
+    if (!data || typeof data !== "object") {
+      throw new Error("InfoMancer received an empty response while reading that folder. Refresh the page and try again.");
+    }
     return data;
   };
   const folderButton = (folder, location = false) => {
@@ -72,7 +87,7 @@
       }
       const choices = data.locations?.length ? data.locations : data.folders;
       list.replaceChildren(...choices.map(item => folderButton(item, Boolean(data.locations?.length))));
-      if (!choices.length) list.innerHTML = '<div class="empty">No subfolders are available here.</div>';
+      if (!choices.length) list.innerHTML = '<div class="empty">No accessible media locations are available here.</div>';
       currentPanel.hidden = !current;
       if (current) {
         currentName.textContent = data.name;
