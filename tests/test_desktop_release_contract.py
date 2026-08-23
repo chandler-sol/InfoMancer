@@ -62,6 +62,18 @@ class DesktopReleaseContractTests(unittest.TestCase):
             workflow,
         )
 
+    def test_draft_release_uses_least_privilege_and_retargets_existing_draft_tag(self):
+        workflow = (ROOT / ".github" / "workflows" / "draft-08-release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("permissions:\n  actions: read\n  contents: read", workflow)
+        self.assertIn("permissions:\n      actions: read\n      contents: write", workflow)
+        self.assertIn("permissions:\n      issues: write", workflow)
+        self.assertNotIn("permissions:\n  actions: read\n  contents: write", workflow)
+        self.assertIn('git/refs/tags/$TAG', workflow)
+        self.assertIn('-f sha="$RELEASE_SHA"', workflow)
+        self.assertIn("-F force=true", workflow)
+
     def test_installation_guide_documents_native_packages(self):
         guide = (ROOT / "docs" / "INSTALLATION.md").read_text(encoding="utf-8")
         for expected in (
