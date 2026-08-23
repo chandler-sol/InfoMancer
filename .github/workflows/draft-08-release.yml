@@ -12,6 +12,11 @@ on:
       - testing/0.8-alpha
     paths:
       - .github/workflows/draft-08-release.yml
+      - desktop/**
+      - app/**
+      - requirements.txt
+      - docs/INSTALLATION.md
+      - README.md
 
 permissions:
   actions: read
@@ -149,7 +154,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          python -m PyInstaller --noconfirm --clean --onefile --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" desktop/sidecar.py
+          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" desktop/sidecar.py
           $triple = (rustc --print host-tuple).Trim()
           New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
           Copy-Item dist/infomancer-core.exe "desktop/src-tauri/binaries/infomancer-core-$triple.exe"
@@ -179,6 +184,13 @@ jobs:
       - name: Build native desktop package
         working-directory: desktop
         run: npm run tauri -- build --bundles ${{ matrix.bundles }}
+
+      - name: Verify Windows launcher uses GUI subsystem
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:INFOMANCER_PE = (Resolve-Path 'desktop/src-tauri/target/release/infomancer-desktop.exe').Path
+          python -c "import os,struct; data=open(os.environ['INFOMANCER_PE'],'rb').read(); pe=struct.unpack_from('<I',data,0x3c)[0]; subsystem=struct.unpack_from('<H',data,pe+24+68)[0]; print(f'Windows PE subsystem={subsystem}'); assert subsystem == 2, 'InfoMancer launcher was built as a console application'"
 
       - name: Collect native release assets
         shell: bash
@@ -314,7 +326,7 @@ jobs:
         run: |
           RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           if [ "$SOURCE_RESULT" = "success" ] && [ "$NATIVE_RESULT" = "success" ] && [ "$RELEASE_RESULT" = "success" ]; then
-            gh issue close 30 --reason completed --comment "0.8.0-alpha.1 packaging succeeded. Server/source, Windows, macOS, and Linux artifacts were assembled into the draft prerelease with SHA-256 checksums. Run: $RUN_URL"
+            gh issue close 30 --repo "$GITHUB_REPOSITORY" --reason completed --comment "0.8.0-alpha.1 packaging succeeded. Server/source, Windows, macOS, and Linux artifacts were assembled into the draft prerelease with SHA-256 checksums. Run: $RUN_URL"
           else
-            gh issue comment 30 --body "0.8.0-alpha.1 packaging did not complete successfully. source=$SOURCE_RESULT, native=$NATIVE_RESULT, draft-release=$RELEASE_RESULT. Run: $RUN_URL"
+            gh issue comment 30 --repo "$GITHUB_REPOSITORY" --body "0.8.0-alpha.1 packaging did not complete successfully. source=$SOURCE_RESULT, native=$NATIVE_RESULT, draft-release=$RELEASE_RESULT. Run: $RUN_URL"
           fi
