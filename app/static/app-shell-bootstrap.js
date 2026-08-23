@@ -7,6 +7,22 @@
     versionQuery = new URL(document.currentScript?.src || '', window.location.href).search;
   } catch (_error) {}
 
+  /* record_search is a one-shot server marker used by a committed global search.
+     The server has already persisted that search before this page renders. Remove
+     it immediately so live Library filtering, view hydration, and other partial
+     requests cannot replay the same marker for every subsequent keypress. */
+  try {
+    const currentUrl = new URL(window.location.href);
+    if (currentUrl.searchParams.has('record_search')) {
+      currentUrl.searchParams.delete('record_search');
+      window.history.replaceState(
+        window.history.state,
+        '',
+        currentUrl.pathname + currentUrl.search + currentUrl.hash,
+      );
+    }
+  } catch (_error) {}
+
   /* Final release polish is loaded from bootstrap so structural mobile fixes are
      present before the Settings and task controllers perform their late handoff. */
   const polishStylesheet = document.createElement('link');
