@@ -9,6 +9,7 @@ on:
       - .github/workflows/draft-08-release.yml
 
 permissions:
+  actions: read
   contents: write
 
 concurrency:
@@ -222,11 +223,13 @@ jobs:
           persist-credentials: false
 
       - name: Download build artifacts
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          path: release-assets
+
+      - name: Inspect downloaded artifacts
         shell: bash
-        run: |
-          mkdir -p release-assets
-          gh run download "$GITHUB_RUN_ID" --dir release-assets
-          find release-assets -type f -maxdepth 3 -print
+        run: find release-assets -maxdepth 3 -type f -print
 
       - name: Flatten release assets and generate checksums
         shell: bash
@@ -262,6 +265,7 @@ jobs:
               exit 1
             fi
             gh release edit "$TAG" \
+              --target "$GITHUB_SHA" \
               --title "$TITLE" \
               --notes-file "$NOTES" \
               --draft \
