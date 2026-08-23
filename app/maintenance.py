@@ -231,25 +231,37 @@ def validate_database_paths(
 
 
 def list_database_backups(database_path: Path) -> list[dict]:
+    """Return readable backups without letting an unavailable backup folder break callers.
+
+    Backup listing is informational on Settings, verification, and diagnostics
+    surfaces. If the application-data backup folder itself cannot be opened,
+    report no readable backups rather than turning those otherwise-safe routes
+    into a server error. Operations that create, resolve, restore, or download a
+    specific backup remain strict and continue to raise MaintenanceError.
+    """
     rows = []
-    directory = backup_directory(database_path)
-    for path in directory.glob("infomancer-backup-*.db"):
-        if not SAFE_BACKUP_NAME.fullmatch(path.name):
-            continue
-        safe_path = _safe_backup_file(directory, path)
-        if safe_path is None:
-            continue
-        try:
-            stat = safe_path.stat()
-        except OSError:
-            continue
-        rows.append({
-            "name": path.name,
-            "size": stat.st_size,
-            "modified_at": datetime.fromtimestamp(
-                stat.st_mtime, timezone.utc
-            ).isoformat(),
-        })
+    try:
+        directory = backup_directory(database_path)
+        candidates = directory.glob("infomancer-backup-*.db")
+        for path in candidates:
+            if not SAFE_BACKUP_NAME.fullmatch(path.name):
+                continue
+            safe_path = _safe_backup_file(directory, path)
+            if safe_path is None:
+                continue
+            try:
+                stat = safe_path.stat()
+            except OSError:
+                continue
+            rows.append({
+                "name": path.name,
+                "size": stat.st_size,
+                "modified_at": datetime.fromtimestamp(
+                    stat.st_mtime, timezone.utc
+                ).isoformat(),
+            })
+    except (MaintenanceError, OSError):
+        return []
     return sorted(rows, key=lambda item: item["modified_at"], reverse=True)
 
 
