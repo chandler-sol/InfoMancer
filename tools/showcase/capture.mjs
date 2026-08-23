@@ -83,7 +83,7 @@ async function signInIfNeeded(page) {
     await page.locator('input[name="password"]').fill(PASSWORD);
     await Promise.all([
       page.waitForLoadState("domcontentloaded"),
-      page.locator('button[type="submit"]').filter({ hasText: "Sign in" }).click(),
+      page.locator("button.auth-submit").click(),
     ]);
   }
   if (new URL(page.url()).pathname.startsWith("/setup")) {
