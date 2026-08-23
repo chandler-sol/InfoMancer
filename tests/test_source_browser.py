@@ -9,6 +9,11 @@ from app import source_browser
 from app.source_browser import SourceBrowserError, list_folders, preview_folder
 
 
+ROOT = Path(__file__).resolve().parents[1]
+STATIC = ROOT / "app" / "static"
+TEMPLATES = ROOT / "app" / "templates"
+
+
 class SourceBrowserTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -111,6 +116,30 @@ class SourceBrowserTests(unittest.TestCase):
         result = preview_folder(str(self.root), self.allowed)
         self.assertEqual(result["recommended_kind"], "mixed")
         self.assertTrue(result["warning"])
+
+
+class SourceBrowserUiContracts(unittest.TestCase):
+    def test_sources_page_uses_the_shared_browser_owner(self):
+        sources = (TEMPLATES / "sources.html").read_text(encoding="utf-8")
+        self.assertIn("{% include '_source_browser.html' %}", sources)
+        self.assertIn("path='source-browser.js'", sources)
+        self.assertNotIn('const fetchJson = async (url) => {', sources)
+        self.assertNotIn('<dialog class="source-browser"', sources)
+
+    def test_browser_client_never_assumes_error_responses_are_json(self):
+        script = (STATIC / "source-browser.js").read_text(encoding="utf-8")
+        self.assertIn("const text = await response.text()", script)
+        self.assertIn("JSON.parse(text)", script)
+        self.assertNotIn("await response.json()", script)
+
+    def test_close_button_uses_font_independent_geometry(self):
+        partial = (TEMPLATES / "_source_browser.html").read_text(encoding="utf-8")
+        styles = (STATIC / "sources.css").read_text(encoding="utf-8")
+        self.assertIn('class="source-browser-close"', partial)
+        self.assertIn(".source-browser-close::before,.source-browser-close::after", styles)
+        self.assertIn("font-size:0!important", styles)
+        self.assertIn("translate(-50%,-50%) rotate(45deg)", styles)
+        self.assertIn("translate(-50%,-50%) rotate(-45deg)", styles)
 
 
 if __name__ == "__main__":
