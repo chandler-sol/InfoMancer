@@ -177,6 +177,14 @@ Potential directions after MIE has enough real-world feedback:
 - expand safe, explicitly approved batch remediation where filesystem protection modes and rollback semantics make that trustworthy;
 - improve source-level and whole-library trend visibility without reducing explainability to one opaque score.
 
+### Library filtering and discovery
+
+Expand the Library filters as the catalog gains richer metadata:
+
+- add a TV series-status filter with **Continuing** and **Ended** options;
+- make the status filter compose normally with search, genre, source, favorites, tags, match state, episode-gap, and sorting filters rather than behaving as a separate mode;
+- persist TV status as part of Saved Views so users can create reusable views such as “Continuing Shows” or “Ended Shows.”
+
 ### Native application maturity
 
 After the Windows alpha and 0.8 release pipeline are proven:
