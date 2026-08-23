@@ -246,6 +246,8 @@ class DuplicateTrashService:
             )
         try:
             snapshot = json.loads(row["file_snapshot"])
+            if not isinstance(snapshot, dict):
+                raise TypeError("file_snapshot must be a JSON object")
         except (TypeError, json.JSONDecodeError) as exc:
             raise DuplicateTrashError(
                 "InfoMancer could not restore this item because its managed Trash record is unreadable. No file was changed."
