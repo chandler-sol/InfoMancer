@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -13,6 +15,17 @@ class ShowcaseScreenshotToolingTests(unittest.TestCase):
         package = json.loads((ROOT / "tools" / "showcase" / "package.json").read_text(encoding="utf-8"))
         self.assertEqual(package["dependencies"]["playwright"], "1.62.1")
         self.assertEqual(package["scripts"]["capture"], "node capture.mjs")
+
+    def test_capture_script_has_valid_javascript_syntax_when_node_is_available(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("Node.js is not installed on this test host")
+        subprocess.run(
+            [node, "--check", str(ROOT / "tools" / "showcase" / "capture.mjs")],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
     def test_capture_script_has_core_showcase_states_and_sizes(self) -> None:
         script = (ROOT / "tools" / "showcase" / "capture.mjs").read_text(encoding="utf-8")
