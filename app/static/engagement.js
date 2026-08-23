@@ -61,6 +61,14 @@
 
   const popup = document.getElementById("announcement-popup");
   if (popup) {
+    // Guided setup already owns the user's attention. Keep legitimate notices due
+    // so they can appear afterward, but do not stack announcement modals on every
+    // setup step.
+    if (window.location.pathname.startsWith("/getting-started/")) {
+      popup.remove();
+      return;
+    }
+
     const dismiss = document.getElementById("announcement-dismiss");
     const seen = () => post(
       `/engagement/announcements/${popup.dataset.announcementId}/seen`,
