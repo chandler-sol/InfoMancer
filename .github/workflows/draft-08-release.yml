@@ -7,11 +7,19 @@ on:
       - testing/0.8-alpha
     paths:
       - .github/workflows/draft-08-release.yml
+  pull_request:
+    branches:
+      - testing/0.8-alpha
+    paths:
+      - .github/workflows/draft-08-release.yml
 
 permissions:
   actions: read
   contents: write
   issues: write
+
+env:
+  RELEASE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 concurrency:
   group: draft-08-release
@@ -26,6 +34,7 @@ jobs:
       - name: Check out release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
 
       - name: Set up Python
@@ -99,6 +108,7 @@ jobs:
       - name: Check out release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
 
       - name: Set up Python
@@ -221,6 +231,7 @@ jobs:
       - name: Check out release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
 
       - name: Download build artifacts
@@ -266,14 +277,14 @@ jobs:
               exit 1
             fi
             gh release edit "$TAG" \
-              --target "$GITHUB_SHA" \
+              --target "$RELEASE_SHA" \
               --title "$TITLE" \
               --notes-file "$NOTES" \
               --draft \
               --prerelease
           else
             gh release create "$TAG" \
-              --target "$GITHUB_SHA" \
+              --target "$RELEASE_SHA" \
               --title "$TITLE" \
               --notes-file "$NOTES" \
               --draft \
@@ -281,7 +292,7 @@ jobs:
           fi
 
           gh release upload "$TAG" publish/* --clobber
-          echo "Draft release $TAG assembled from commit $GITHUB_SHA."
+          echo "Draft release $TAG assembled from commit $RELEASE_SHA."
 
   status-report:
     name: Report packaging status
