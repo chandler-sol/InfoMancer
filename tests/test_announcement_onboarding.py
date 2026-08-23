@@ -5,6 +5,9 @@ import unittest
 from app.db import Database
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class AnnouncementOnboardingTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
@@ -84,9 +87,7 @@ class AnnouncementOnboardingTests(unittest.TestCase):
         self.assertEqual(self._receipt_count(), 0)
 
     def test_guided_setup_defers_popup_without_marking_it_seen(self):
-        script = (Path(__file__).resolve().parents[1] / "app" / "static" / "engagement.js").read_text(
-            encoding="utf-8"
-        )
+        script = (ROOT / "app" / "static" / "engagement.js").read_text(encoding="utf-8")
         self.assertIn('window.location.pathname.startsWith("/getting-started/")', script)
         setup_guard = script.index('window.location.pathname.startsWith("/getting-started/")')
         remove_call = script.index("popup.remove();", setup_guard)
@@ -95,6 +96,14 @@ class AnnouncementOnboardingTests(unittest.TestCase):
         self.assertLess(setup_guard, remove_call)
         self.assertLess(remove_call, return_call)
         self.assertLess(return_call, seen_call)
+
+    def test_guided_setup_does_not_render_announcement_popup(self):
+        template = (ROOT / "app" / "templates" / "base.html").read_text(encoding="utf-8")
+        self.assertIn(
+            "next_announcement and not request.url.path.startswith('/getting-started/')",
+            template,
+        )
+        self.assertIn('id="announcement-popup"', template)
 
 
 if __name__ == "__main__":
