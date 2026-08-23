@@ -30,13 +30,18 @@ class DesktopReleaseContractTests(unittest.TestCase):
             with self.subTest(expected=expected):
                 self.assertIn(expected, source)
 
-    def test_updater_plugin_configuration_is_not_null(self):
+    def test_preview_updater_plugin_configuration_deserializes(self):
         config = json.loads(
             (ROOT / "desktop" / "src-tauri" / "tauri.conf.json").read_text(
                 encoding="utf-8"
             )
         )
-        self.assertEqual(config.get("plugins", {}).get("updater"), {})
+        updater = config.get("plugins", {}).get("updater")
+        self.assertIsInstance(updater, dict)
+        self.assertIn("pubkey", updater)
+        self.assertIsInstance(updater["pubkey"], str)
+        self.assertEqual(updater["pubkey"], "")
+        self.assertEqual(updater.get("endpoints"), [])
 
     def test_draft_windows_sidecar_is_built_without_console(self):
         workflow = (ROOT / ".github" / "workflows" / "draft-08-release.yml").read_text(
