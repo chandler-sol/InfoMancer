@@ -36,7 +36,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -86,6 +86,8 @@ jobs:
 
       - name: Publish curated README screenshots
         if: github.event_name == 'pull_request' && github.head_ref == 'tooling/showcase-screenshots-20260823'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           mkdir -p docs/assets/showcase
           cp showcase/screenshots/01-dashboard-social.png docs/assets/showcase/dashboard.png
@@ -101,7 +103,7 @@ jobs:
             exit 0
           fi
           git commit -m "docs: refresh showcase screenshots [skip ci]"
-          git push origin "HEAD:${{ github.head_ref }}"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_HEAD_REF}"
 
       - name: Show capture manifest
         if: always()
