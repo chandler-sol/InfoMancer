@@ -9,6 +9,7 @@
 .title-cast-dialog-close,
 .profile-account-dialog-close,
 .profile-avatar-dialog-close,
+.workspace-inspector-close,
 #task-dismiss {
   position: relative;
   display: grid;
@@ -30,6 +31,8 @@
 .profile-account-dialog-close::after,
 .profile-avatar-dialog-close::before,
 .profile-avatar-dialog-close::after,
+.workspace-inspector-close::before,
+.workspace-inspector-close::after,
 #task-dismiss::before,
 #task-dismiss::after {
   content: "";
@@ -50,6 +53,7 @@
 .title-cast-dialog-close::before,
 .profile-account-dialog-close::before,
 .profile-avatar-dialog-close::before,
+.workspace-inspector-close::before,
 #task-dismiss::before {
   transform: translate(-50%, -50%) rotate(45deg);
 }
@@ -60,6 +64,7 @@
 .title-cast-dialog-close::after,
 .profile-account-dialog-close::after,
 .profile-avatar-dialog-close::after,
+.workspace-inspector-close::after,
 #task-dismiss::after {
   transform: translate(-50%, -50%) rotate(-45deg);
 }
