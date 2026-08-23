@@ -50,8 +50,10 @@
     tour.hidden = true;
     loadStyle("onboarding-tour.css");
     loadStyle("onboarding-tour-inspector-preview.css");
+    loadStyle("onboarding-tour-mobile-polish.css");
     loadScript("onboarding-tour.js")
-      .then(() => loadScript("onboarding-tour-inspector-preview.js"));
+      .then(() => loadScript("onboarding-tour-inspector-preview.js"))
+      .then(() => loadScript("onboarding-tour-mobile-polish.js"));
   }
 
   const popup = document.getElementById("announcement-popup");
