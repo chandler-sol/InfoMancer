@@ -41,13 +41,13 @@ On the first run the helper installs the small Playwright tooling package plus i
 ## macOS and Linux
 
 ```bash
-./scripts/capture-showcase.sh --username YOUR_USERNAME
+bash scripts/capture-showcase.sh --username YOUR_USERNAME
 ```
 
 For another InfoMancer URL:
 
 ```bash
-./scripts/capture-showcase.sh \
+bash scripts/capture-showcase.sh \
   --url "https://infomancer.example.com" \
   --username YOUR_USERNAME
 ```
@@ -71,7 +71,7 @@ Limit the output sizes with `-Variants` on Windows or `--variants` on macOS/Linu
 ```
 
 ```bash
-./scripts/capture-showcase.sh --username YOUR_USERNAME --variants "desktop,social"
+bash scripts/capture-showcase.sh --username YOUR_USERNAME --variants "desktop,social"
 ```
 
 ## Privacy masking
