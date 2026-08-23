@@ -26,18 +26,30 @@ class LibraryControlRegressionTests(unittest.TestCase):
         self.assertIn("rotate(-45deg)", css)
         self.assertNotIn(".organize-dialog-close", bulk_css)
 
-    def test_more_filters_matches_filter_row_and_stacks_above_selection_bar(self) -> None:
+    def test_more_filters_uses_same_owned_chrome_as_neighboring_selects(self) -> None:
+        css = (STATIC / "library-controls-polish.css").read_text(encoding="utf-8")
+        self.assertIn("--library-filter-chevron", css)
+        self.assertIn(".library-controls > select,", css)
+        self.assertIn(".more-filters-menu > summary", css)
+        self.assertIn("appearance: none", css)
+        self.assertIn("-webkit-appearance: none", css)
+        self.assertIn("background-image: var(--library-filter-chevron)", css)
+        self.assertIn("background-position: right 13px center", css)
+        self.assertIn("height: 44px", css)
+        self.assertIn("padding: 8px 36px 8px 12px", css)
+        self.assertIn("border: 1px solid var(--line)", css)
+        self.assertIn("border-radius: 3px", css)
+        self.assertIn("background-color: #0c1117", css)
+        self.assertIn("font: inherit", css)
+        self.assertIn(".more-filters-menu > summary::after", css)
+        self.assertIn("content: none !important", css)
+
+    def test_more_filters_stacks_above_selection_bar(self) -> None:
         css = (STATIC / "library-controls-polish.css").read_text(encoding="utf-8")
         self.assertIn(".more-filters-menu[open]", css)
         self.assertIn("z-index: 40", css)
         self.assertIn(".more-filters-panel", css)
         self.assertIn("z-index: 41", css)
-        self.assertIn(".more-filters-menu > summary", css)
-        self.assertIn("height: 44px", css)
-        self.assertIn("border: 1px solid var(--line)", css)
-        self.assertIn("border-radius: 3px", css)
-        self.assertIn("background: #0c1117", css)
-        self.assertIn("font: inherit", css)
 
     def test_library_organize_dialog_has_visible_open_and_loading_states(self) -> None:
         css = (STATIC / "library-controls-polish.css").read_text(encoding="utf-8")
