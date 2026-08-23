@@ -183,7 +183,8 @@ Expand the Library filters as the catalog gains richer metadata:
 
 - add a TV series-status filter with **Continuing** and **Ended** options;
 - make the status filter compose normally with search, genre, source, favorites, tags, match state, episode-gap, and sorting filters rather than behaving as a separate mode;
-- persist TV status as part of Saved Views so users can create reusable views such as “Continuing Shows” or “Ended Shows.”
+- persist TV status as part of Saved Views so users can create reusable views such as “Continuing Shows” or “Ended Shows”;
+- let users remove individual entries from account-synced recent-search history without clearing the entire history, while retaining the existing **Clear search history** action for a full reset.
 
 ### Visual system and interaction polish
 
