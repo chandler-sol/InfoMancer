@@ -23,6 +23,25 @@
     }
   } catch (_error) {}
 
+  /* Modal close controls are shared shell chrome. Load one versioned owner for
+     every native dialog instead of letting individual fetched modal bodies patch
+     their own X glyphs. */
+  const dialogControlsStylesheet = document.createElement('link');
+  dialogControlsStylesheet.rel = 'stylesheet';
+  dialogControlsStylesheet.href = `/static/dialog-controls-polish.css${versionQuery}`;
+  document.head.append(dialogControlsStylesheet);
+
+  /* Library control polish was split into its own stylesheet during the 0.8 cleanup.
+     Load it explicitly on every catalog surface. Keeping the version query attached
+     makes the file participate in the same deployment cache-busting contract as the
+     rest of the shell assets. */
+  if (['/library', '/movies', '/shows'].includes(window.location.pathname)) {
+    const libraryControlsStylesheet = document.createElement('link');
+    libraryControlsStylesheet.rel = 'stylesheet';
+    libraryControlsStylesheet.href = `/static/library-controls-polish.css${versionQuery}`;
+    document.head.append(libraryControlsStylesheet);
+  }
+
   /* Final release polish is loaded from bootstrap so structural mobile fixes are
      present before the Settings and task controllers perform their late handoff. */
   const polishStylesheet = document.createElement('link');

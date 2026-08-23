@@ -8,6 +8,24 @@ TEMPLATES = ROOT / "app" / "templates"
 
 
 class LibraryControlRegressionTests(unittest.TestCase):
+    def test_library_control_polish_is_loaded_on_catalog_pages(self) -> None:
+        bootstrap = (STATIC / "app-shell-bootstrap.js").read_text(encoding="utf-8")
+        self.assertIn("['/library', '/movies', '/shows']", bootstrap)
+        self.assertIn("library-controls-polish.css", bootstrap)
+        self.assertIn("versionQuery", bootstrap)
+
+    def test_shared_dialog_close_controls_are_loaded_and_font_independent(self) -> None:
+        bootstrap = (STATIC / "app-shell-bootstrap.js").read_text(encoding="utf-8")
+        css = (STATIC / "dialog-controls-polish.css").read_text(encoding="utf-8")
+        bulk_css = (STATIC / "organize-bulk-polish.css").read_text(encoding="utf-8")
+        self.assertIn("dialog-controls-polish.css", bootstrap)
+        self.assertIn(".organize-dialog-close", css)
+        self.assertIn(".source-browser-close", css)
+        self.assertIn("font-size: 0 !important", css)
+        self.assertIn("rotate(45deg)", css)
+        self.assertIn("rotate(-45deg)", css)
+        self.assertNotIn(".organize-dialog-close", bulk_css)
+
     def test_more_filters_matches_filter_row_and_stacks_above_selection_bar(self) -> None:
         css = (STATIC / "library-controls-polish.css").read_text(encoding="utf-8")
         self.assertIn(".more-filters-menu[open]", css)
@@ -16,6 +34,9 @@ class LibraryControlRegressionTests(unittest.TestCase):
         self.assertIn("z-index: 41", css)
         self.assertIn(".more-filters-menu > summary", css)
         self.assertIn("height: 44px", css)
+        self.assertIn("border: 1px solid var(--line)", css)
+        self.assertIn("border-radius: 3px", css)
+        self.assertIn("background: #0c1117", css)
         self.assertIn("font: inherit", css)
 
     def test_library_organize_dialog_has_visible_open_and_loading_states(self) -> None:
@@ -25,6 +46,13 @@ class LibraryControlRegressionTests(unittest.TestCase):
         self.assertIn("transform: translateY(0) scale(1)", css)
         self.assertIn(".organize-dialog.loading[open] .organize-dialog-body:empty::before", css)
         self.assertIn('content: "Loading organization tools…"', css)
+
+    def test_bulk_organize_manage_tags_aligns_with_form_on_desktop(self) -> None:
+        css = (STATIC / "library-controls-polish.css").read_text(encoding="utf-8")
+        self.assertIn(".organize-dialog .organize-bulk-page .page-head", css)
+        self.assertIn("padding-right: 0", css)
+        self.assertIn(".organize-dialog .organize-bulk-page .page-head > .button", css)
+        self.assertIn("margin-left: auto", css)
 
     def test_bulk_organize_still_uses_shared_dialog_contract(self) -> None:
         toolbar = (STATIC / "library-selection-toolbar.js").read_text(encoding="utf-8")

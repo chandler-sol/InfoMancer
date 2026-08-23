@@ -22,8 +22,8 @@
 }
 
 /* More Filters is part of the same control row as the native selects. Keep its
-   trigger on the same 44px geometry and give an actively opened menu priority over
-   the sticky multi-selection command bar below it. */
+   trigger on the same geometry and visual treatment, and give an actively opened
+   menu priority over the sticky multi-selection command bar below it. */
 .more-filters-menu {
   flex: 0 1 220px;
   width: 220px;
@@ -36,11 +36,22 @@
 
 .more-filters-menu > summary {
   box-sizing: border-box;
+  display: flex;
+  align-items: center;
   width: 100%;
   height: 44px;
   padding: 8px 36px 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #0c1117;
+  color: var(--text);
   font: inherit;
   line-height: 1.25;
+}
+
+.more-filters-menu > summary:hover,
+.more-filters-menu > summary:focus-visible {
+  border-color: #6c7d90;
 }
 
 .more-filters-panel {
@@ -63,6 +74,19 @@
   place-items: center;
   color: var(--muted);
   font-size: 14px;
+}
+
+/* The bulk Organize action belongs to the same visual block as the framed form.
+   On desktop, let Manage Tags align to the form's true right edge instead of
+   inheriting the old close-button padding from the generic dialog header. */
+@media (min-width: 761px) {
+  .organize-dialog .organize-bulk-page .page-head {
+    padding-right: 0;
+  }
+
+  .organize-dialog .organize-bulk-page .page-head > .button {
+    margin-left: auto;
+  }
 }
 
 /* An expanded search is a real text field, not a slightly stretched icon slot.
