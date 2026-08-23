@@ -1,0 +1,65 @@
+/* Canonical close-mark rendering for application chrome.
+   Close buttons must not depend on font glyph metrics: the multiplication sign
+   renders at visibly different optical centers across Segoe UI, San Francisco,
+   Linux system fonts, and WebView hosts. Keep component styles responsible for
+   button size/placement while this file owns the mark itself. */
+.organize-dialog-close,
+.source-browser-close,
+.overview-dialog-close,
+.title-cast-dialog-close,
+.profile-account-dialog-close,
+.profile-avatar-dialog-close,
+#task-dismiss {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  font-size: 0 !important;
+  line-height: 0 !important;
+}
+
+.organize-dialog-close::before,
+.organize-dialog-close::after,
+.source-browser-close::before,
+.source-browser-close::after,
+.overview-dialog-close::before,
+.overview-dialog-close::after,
+.title-cast-dialog-close::before,
+.title-cast-dialog-close::after,
+.profile-account-dialog-close::before,
+.profile-account-dialog-close::after,
+.profile-avatar-dialog-close::before,
+.profile-avatar-dialog-close::after,
+#task-dismiss::before,
+#task-dismiss::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 17px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  transform-origin: center;
+  pointer-events: none;
+}
+
+.organize-dialog-close::before,
+.source-browser-close::before,
+.overview-dialog-close::before,
+.title-cast-dialog-close::before,
+.profile-account-dialog-close::before,
+.profile-avatar-dialog-close::before,
+#task-dismiss::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.organize-dialog-close::after,
+.source-browser-close::after,
+.overview-dialog-close::after,
+.title-cast-dialog-close::after,
+.profile-account-dialog-close::after,
+.profile-avatar-dialog-close::after,
+#task-dismiss::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
