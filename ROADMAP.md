@@ -185,6 +185,17 @@ Expand the Library filters as the catalog gains richer metadata:
 - make the status filter compose normally with search, genre, source, favorites, tags, match state, episode-gap, and sorting filters rather than behaving as a separate mode;
 - persist TV status as part of Saved Views so users can create reusable views such as “Continuing Shows” or “Ended Shows.”
 
+### Visual system and interaction polish
+
+Strengthen InfoMancer's own control language instead of converging on generic web-app buttons:
+
+- promote the outlined, squared-off control treatment already used by controls such as **Expand all** and **Collapse all** into a reusable first-class button/control style;
+- use the treatment more consistently for secondary actions, mode selectors, filters, compact toolbars, dialog actions, and other places where a clear tactile control is more appropriate than a text link or generic pill;
+- preserve the characteristic muted border, dark surface, restrained corner radius, generous padding, and lime active/selected accent as part of InfoMancer's visual identity;
+- define consistent hover, focus-visible, active, selected, disabled, warning, and destructive variants so expanding the style does not create one-off CSS copies;
+- keep primary/high-emphasis actions visually distinct so the outlined treatment does not flatten the interface hierarchy;
+- evaluate controls screen by screen rather than mechanically converting every button, with accessibility, touch target size, responsive behavior, and information density treated as constraints.
+
 ### Native application maturity
 
 After the Windows alpha and 0.8 release pipeline are proven:
