@@ -34,24 +34,12 @@ const variants = [
   { name: "mobile", width: 390, height: 844, isMobile: true, hasTouch: true },
 ].filter((variant) => VARIANT_FILTER.has(variant.name));
 
-const quietCss = `
-  html { scroll-behavior: auto !important; }
-  *, *::before, *::after {
-    animation: none !important;
-    transition: none !important;
-    scroll-behavior: auto !important;
-    caret-color: transparent !important;
-  }
-  :focus { outline-offset: 0 !important; }
-`;
-
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const absolute = (pathname) => new URL(pathname, `${BASE_URL}/`).href;
 
 async function waitForStableFrame(page) {
   await page.waitForLoadState("domcontentloaded");
   await page.waitForLoadState("networkidle", { timeout: 2500 }).catch(() => {});
-  await page.addStyleTag({ content: quietCss });
   await page.evaluate(async () => {
     if (document.fonts?.ready) await document.fonts.ready;
     const pending = [...document.images]
