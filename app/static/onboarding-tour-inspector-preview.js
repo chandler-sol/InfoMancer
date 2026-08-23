@@ -31,12 +31,15 @@
   const openPreview = () => {
     if (preview || !isInspectorStep()) return;
 
+    /* Keep this preview tour-owned. Reusing .workspace-inspector pulled the real
+       fixed drawer's transforms, overflow, and compositing rules into the modal
+       tour layer, which is fragile in mobile Safari and can leave the demo hidden. */
     preview = document.createElement("aside");
-    preview.className = "workspace-inspector tour-inspector-preview";
+    preview.className = "tour-inspector-preview";
     preview.setAttribute("aria-hidden", "true");
 
     const head = document.createElement("div");
-    head.className = "workspace-inspector-head";
+    head.className = "tour-inspector-preview-head";
     const heading = document.createElement("span");
     heading.textContent = "Inspector";
     const close = document.createElement("span");
@@ -46,7 +49,7 @@
     head.append(heading, close);
 
     const body = document.createElement("div");
-    body.className = "workspace-inspector-body tour-inspector-preview-body";
+    body.className = "tour-inspector-preview-body";
 
     const identity = document.createElement("section");
     identity.className = "tour-inspector-preview-identity";
@@ -108,7 +111,6 @@
   const observer = new MutationObserver(syncPreview);
   observer.observe(tourTitle, {childList: true, characterData: true, subtree: true});
   window.addEventListener("popstate", syncPreview);
-  window.addEventListener("pagehide", closePreview);
 
   syncPreview();
 })();
