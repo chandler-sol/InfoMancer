@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import os
+import time
 from collections import deque
 from pathlib import Path
+from threading import RLock
 
 from .scanner import EPISODE_RE, MOVIE_BUCKET_RE, VIDEO_EXTENSIONS
 
 
 IGNORED_DIRECTORIES = {"lost+found", "$recycle.bin", "system volume information"}
+ALLOWED_ROOTS_CACHE_TTL_SECONDS = 15.0
+_allowed_roots_cache: dict[tuple[str, ...], tuple[float, tuple[Path, ...]]] = {}
+_allowed_roots_cache_lock = RLock()
 
 
 class SourceBrowserError(ValueError):
@@ -34,6 +39,20 @@ def _root_is_accessible(path: Path) -> bool:
         return False
 
 
+def _root_cache_key(values: tuple[Path, ...]) -> tuple[str, ...]:
+    """Build an OS-appropriate lexical key without touching the filesystem."""
+    return tuple(
+        os.path.normcase(os.path.abspath(os.fspath(value)))
+        for value in values
+    )
+
+
+def _clear_allowed_roots_cache() -> None:
+    """Clear the short-lived browse-root cache, primarily for tests and reconfiguration."""
+    with _allowed_roots_cache_lock:
+        _allowed_roots_cache.clear()
+
+
 def _inside(path: Path, roots: tuple[Path, ...]) -> bool:
     for root in roots:
         try:
@@ -45,6 +64,13 @@ def _inside(path: Path, roots: tuple[Path, ...]) -> bool:
 
 
 def allowed_roots(values: tuple[Path, ...]) -> tuple[Path, ...]:
+    cache_key = _root_cache_key(values)
+    now = time.monotonic()
+    with _allowed_roots_cache_lock:
+        cached = _allowed_roots_cache.get(cache_key)
+        if cached and cached[0] >= now:
+            return cached[1]
+
     roots: list[Path] = []
     seen: set[str] = set()
     for value in values:
@@ -54,12 +80,28 @@ def allowed_roots(values: tuple[Path, ...]) -> tuple[Path, ...]:
             continue
         if not _root_is_accessible(root):
             continue
-        key = os.path.normcase(os.path.abspath(os.fspath(root))).casefold()
+        # normcase performs case folding on Windows while leaving POSIX paths
+        # case-sensitive. Do not add casefold(), because /media/Movies and
+        # /media/movies can legitimately be different Linux directories.
+        key = os.path.normcase(os.path.abspath(os.fspath(root)))
         if key in seen:
             continue
         seen.add(key)
         roots.append(root)
-    return tuple(roots)
+
+    result = tuple(roots)
+    with _allowed_roots_cache_lock:
+        _allowed_roots_cache[cache_key] = (
+            time.monotonic() + ALLOWED_ROOTS_CACHE_TTL_SECONDS,
+            result,
+        )
+        if len(_allowed_roots_cache) > 64:
+            expired = [key for key, value in _allowed_roots_cache.items() if value[0] < now]
+            for key in expired:
+                _allowed_roots_cache.pop(key, None)
+            while len(_allowed_roots_cache) > 64:
+                _allowed_roots_cache.pop(next(iter(_allowed_roots_cache)))
+    return result
 
 
 def validate_browse_path(path: Path | str, roots: tuple[Path, ...]) -> Path:
