@@ -19,11 +19,19 @@ class LibraryControlRegressionTests(unittest.TestCase):
         css = (STATIC / "dialog-controls-polish.css").read_text(encoding="utf-8")
         bulk_css = (STATIC / "organize-bulk-polish.css").read_text(encoding="utf-8")
         self.assertIn("dialog-controls-polish.css", bootstrap)
-        self.assertIn(".organize-dialog-close", css)
-        self.assertIn(".source-browser-close", css)
+        for selector in (
+            ".organize-dialog-close",
+            ".source-browser-close",
+            ".overview-dialog-close",
+            ".title-cast-dialog-close",
+            ".profile-account-dialog-close",
+            ".profile-avatar-dialog-close",
+            "#task-dismiss",
+        ):
+            self.assertIn(selector, css)
         self.assertIn("font-size: 0 !important", css)
-        self.assertIn("rotate(45deg)", css)
-        self.assertIn("rotate(-45deg)", css)
+        self.assertIn("translate(-50%, -50%) rotate(45deg)", css)
+        self.assertIn("translate(-50%, -50%) rotate(-45deg)", css)
         self.assertNotIn(".organize-dialog-close", bulk_css)
 
     def test_more_filters_uses_same_owned_chrome_as_neighboring_selects(self) -> None:
