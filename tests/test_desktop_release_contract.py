@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import unittest
 
@@ -28,6 +29,14 @@ class DesktopReleaseContractTests(unittest.TestCase):
         ):
             with self.subTest(expected=expected):
                 self.assertIn(expected, source)
+
+    def test_updater_plugin_configuration_is_not_null(self):
+        config = json.loads(
+            (ROOT / "desktop" / "src-tauri" / "tauri.conf.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(config.get("plugins", {}).get("updater"), {})
 
     def test_draft_windows_sidecar_is_built_without_console(self):
         workflow = (ROOT / ".github" / "workflows" / "draft-08-release.yml").read_text(
