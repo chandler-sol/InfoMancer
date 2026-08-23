@@ -21,6 +21,32 @@
   line-height: 1.25;
 }
 
+/* More Filters is part of the same control row as the native selects. Keep its
+   trigger on the same 44px geometry and give an actively opened menu priority over
+   the sticky multi-selection command bar below it. */
+.more-filters-menu {
+  flex: 0 1 220px;
+  width: 220px;
+  max-width: 240px;
+}
+
+.more-filters-menu[open] {
+  z-index: 40;
+}
+
+.more-filters-menu > summary {
+  box-sizing: border-box;
+  width: 100%;
+  height: 44px;
+  padding: 8px 36px 8px 12px;
+  font: inherit;
+  line-height: 1.25;
+}
+
+.more-filters-panel {
+  z-index: 41;
+}
+
 /* An expanded search is a real text field, not a slightly stretched icon slot.
    Give the placeholder and entered query enough room to remain readable while
    still allowing the filter row to wrap naturally on narrower desktops. */
@@ -63,7 +89,8 @@
     width: 100%;
   }
 
-  .library-controls > select {
+  .library-controls > select,
+  .more-filters-menu {
     flex: 1 1 calc(50% - 8px);
     width: auto;
     max-width: none;
