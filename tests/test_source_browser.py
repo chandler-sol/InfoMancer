@@ -3,7 +3,9 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from app import source_browser
 from app.source_browser import SourceBrowserError, list_folders, preview_folder
 
 
@@ -36,6 +38,47 @@ class SourceBrowserTests(unittest.TestCase):
             self.skipTest("Directory symlinks are unavailable on this platform")
         with self.assertRaises(SourceBrowserError):
             list_folders(str(link), self.allowed)
+
+    def test_inaccessible_configured_root_does_not_break_location_listing(self):
+        blocked = (self.root.parent / "Blocked network drive").resolve()
+        real_accessible = source_browser._root_is_accessible
+
+        def accessible(path: Path) -> bool:
+            if path == blocked:
+                return False
+            return real_accessible(path)
+
+        with mock.patch.object(source_browser, "_root_is_accessible", side_effect=accessible):
+            result = list_folders("", (self.root, blocked))
+
+        self.assertEqual(len(result["locations"]), 1)
+        self.assertEqual(result["locations"][0]["path"], str(self.root))
+
+    def test_windows_style_resolution_error_becomes_source_browser_error(self):
+        with mock.patch.object(
+            Path,
+            "resolve",
+            side_effect=OSError(1272, "Guest access is blocked"),
+        ):
+            with self.assertRaises(SourceBrowserError) as caught:
+                source_browser._resolved(Path("B:/"))
+        self.assertIn("cannot access", str(caught.exception))
+
+    def test_unresolvable_child_folder_is_skipped(self):
+        (self.root / "Movies").mkdir()
+        (self.root / "Blocked").mkdir()
+        real_resolved = source_browser._resolved
+
+        def resolve_path(value):
+            path = Path(value)
+            if path.name == "Blocked":
+                raise SourceBrowserError("blocked")
+            return real_resolved(value)
+
+        with mock.patch.object(source_browser, "_resolved", side_effect=resolve_path):
+            result = list_folders(str(self.root), self.allowed)
+
+        self.assertEqual([row["name"] for row in result["folders"]], ["Movies"])
 
     def test_movie_preview_understands_alphabet_and_number_buckets(self):
         for bucket in ("A", "# 0-9"):
