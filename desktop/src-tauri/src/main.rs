@@ -2,10 +2,12 @@
 
 use serde::Serialize;
 use std::{
+    fs::OpenOptions,
+    io::Write,
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream},
     path::PathBuf,
-    sync::Mutex,
-    time::Duration,
+    sync::{Mutex, OnceLock},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::Manager;
 use tauri_plugin_shell::{process::CommandChild, process::CommandEvent, ShellExt};
@@ -15,6 +17,8 @@ use uuid::Uuid;
 
 const UPDATE_ENDPOINT: &str =
     "https://github.com/chandler-sol/InfoMancer/releases/download/desktop-alpha/latest.json";
+
+static LAUNCH_LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 #[derive(Clone, Serialize)]
 struct LocalStartup {
@@ -38,6 +42,74 @@ struct UpdateStatus {
 struct DesktopState {
     child: Mutex<Option<CommandChild>>,
     startup: Mutex<Option<LocalStartup>>,
+}
+
+fn launcher_log_path() -> PathBuf {
+    LAUNCH_LOG_PATH
+        .get_or_init(|| {
+            let mut path = std::env::var_os("APPDATA")
+                .map(PathBuf::from)
+                .unwrap_or_else(std::env::temp_dir);
+            if std::env::var_os("APPDATA").is_some() {
+                path.push("cloud.arsenik.infomancer");
+            } else {
+                path.push("InfoMancer");
+            }
+            path.push("logs");
+            path.push("desktop-launcher.log");
+            path
+        })
+        .clone()
+}
+
+fn log_launcher(message: &str) {
+    let path = launcher_log_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or_default();
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "[{timestamp}] {message}");
+    }
+}
+
+fn install_panic_logger() {
+    std::panic::set_hook(Box::new(|panic_info| {
+        log_launcher(&format!("fatal panic: {panic_info}"));
+    }));
+}
+
+#[cfg(target_os = "windows")]
+fn show_startup_error(message: &str) {
+    use std::ffi::c_void;
+    use std::ptr::null_mut;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn MessageBoxW(
+            hwnd: *mut c_void,
+            text: *const u16,
+            caption: *const u16,
+            kind: u32,
+        ) -> i32;
+    }
+
+    let text: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
+    let caption: Vec<u16> = "InfoMancer startup error"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        let _ = MessageBoxW(null_mut(), text.as_ptr(), caption.as_ptr(), 0x00000010);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn show_startup_error(message: &str) {
+    eprintln!("{message}");
 }
 
 fn reserve_loopback_port() -> Result<u16, String> {
@@ -145,9 +217,11 @@ async fn start_local(app: tauri::AppHandle) -> Result<LocalStartup, String> {
             match event {
                 CommandEvent::Stderr(line) => {
                     let message = String::from_utf8_lossy(&line);
-                    eprintln!("InfoMancer core: {message}");
+                    log_launcher(&format!("InfoMancer core stderr: {message}"));
                 }
-                CommandEvent::Error(error) => eprintln!("InfoMancer core error: {error}"),
+                CommandEvent::Error(error) => {
+                    log_launcher(&format!("InfoMancer core process error: {error}"));
+                }
                 _ => {}
             }
         }
@@ -176,6 +250,7 @@ async fn start_local(app: tauri::AppHandle) -> Result<LocalStartup, String> {
     }
 
     if let Err(error) = wait_for_local_core(port).await {
+        log_launcher(&format!("Local core startup failed: {error}"));
         stop_local_core(state.inner());
         if let Ok(mut startup_slot) = state.startup.lock() {
             *startup_slot = None;
@@ -183,6 +258,7 @@ async fn start_local(app: tauri::AppHandle) -> Result<LocalStartup, String> {
         return Err(error);
     }
 
+    log_launcher(&format!("Local InfoMancer core is ready on 127.0.0.1:{port}."));
     Ok(startup)
 }
 
@@ -263,7 +339,10 @@ async fn install_update(app: tauri::AppHandle) -> Result<bool, String> {
 }
 
 fn main() {
-    let app = tauri::Builder::default()
+    install_panic_logger();
+    log_launcher("InfoMancer Desktop launcher starting.");
+
+    let result = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(DesktopState::default())
@@ -273,11 +352,26 @@ fn main() {
             check_for_update,
             install_update
         ])
-        .build(tauri::generate_context!())
-        .expect("failed to build InfoMancer Desktop");
+        .build(tauri::generate_context!());
 
+    let app = match result {
+        Ok(app) => app,
+        Err(error) => {
+            let log_path = launcher_log_path();
+            let message = format!(
+                "InfoMancer could not start.\n\n{error}\n\nA diagnostic log was written to:\n{}",
+                log_path.display()
+            );
+            log_launcher(&format!("Tauri startup failed: {error}"));
+            show_startup_error(&message);
+            return;
+        }
+    };
+
+    log_launcher("Tauri application built successfully; entering the desktop event loop.");
     app.run(|app_handle, event| {
         if matches!(event, tauri::RunEvent::Exit) {
+            log_launcher("InfoMancer Desktop is exiting.");
             let state = app_handle.state::<DesktopState>();
             stop_local_core(state.inner());
         }
