@@ -32,6 +32,16 @@
 - Preserve useful task context in the destination when practical, such as the affected source, title, maintenance tool, review queue, or scheduled-task definition.
 - When a task has no dedicated live surface, fall back to the most relevant Activity, Operations, or Scheduled Tasks view instead of making the row a dead end.
 
+## P1: Realistic Tour Demo Media
+
+- Replace sparse tour placeholders with a richer synthetic media fixture set that looks like a believable populated InfoMancer library without exposing or depending on real user media.
+- Give tour titles realistic fake metadata such as year, runtime, genres, overview, studio/network, content rating, provider IDs, poster/backdrop references, series/season/episode structure, and match confidence.
+- Generate believable technical media facts including container, codecs, resolution, HDR/SDR state, bitrate, file size, audio tracks, subtitle tracks, runtime, and sample source/file paths.
+- Include realistic InfoMancer-specific state such as tags, collections, favorites, organization status, source assignment, MIE findings, health history, duplicate hints, and operation history where the tour demonstrates those surfaces.
+- Seed a mix of healthy and intentionally imperfect examples so Inspector, Review, MIE, organization tools, filters, and quick actions can demonstrate meaningful states instead of empty cards.
+- Keep every tour record unmistakably synthetic internally, deterministic between runs, isolated from the real database/filesystem, and safe for screenshots, demos, automated tests, and first-run onboarding.
+- Prefer a reusable fixture generator over one-off hard-coded titles so future tour steps can request consistent fake movies, series, seasons, episodes, and media variants.
+
 ## P2: Appearance & Themes
 
 Keep InfoMancer's canonical appearance dark and OLED-first while making the UI adaptable to different environments and accessibility needs.
