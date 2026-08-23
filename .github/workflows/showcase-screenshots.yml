@@ -1,0 +1,122 @@
+name: Showcase Screenshots
+
+on:
+  pull_request:
+    branches:
+      - testing/0.8-alpha
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    if: github.event_name == 'workflow_dispatch' || (github.head_ref == 'tooling/showcase-screenshots-20260823' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      INFOMANCER_DATABASE: data/showcase.db
+      INFOMANCER_SECRET: showcase-screenshot-ci-secret
+      INFOMANCER_AUTH_MODE: local
+      INFOMANCER_SESSION_DAYS: 1
+      INFOMANCER_COOKIE_SECURE: 'false'
+      INFOMANCER_SANDBOX: '1'
+      TVDB_API_KEY: ''
+      TVDB_PIN: ''
+      SEARCH_URL_TEMPLATE: https://example.invalid/search?q={query}
+      MEDIA_BROWSE_ROOTS: /media
+      INFOMANCER_SHOWCASE_URL: http://127.0.0.1:8787
+      INFOMANCER_SHOWCASE_USERNAME: sandbox
+      INFOMANCER_SHOWCASE_PASSWORD: sandbox librarian password
+      INFOMANCER_SHOWCASE_OUTPUT: showcase/screenshots
+      INFOMANCER_SHOWCASE_VARIANTS: desktop,social,mobile
+
+    steps:
+      - name: Check out screenshot branch
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: Install application dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Create disposable media fixtures
+        run: |
+          sudo mkdir -p /media
+          sudo chown -R "$USER":"$USER" /media
+          python scripts/create_sandbox_media.py /media
+
+      - name: Seed disposable InfoMancer catalog
+        run: python -m app.sandbox_seed
+
+      - name: Start disposable InfoMancer server
+        run: |
+          uvicorn app.main:app --host 127.0.0.1 --port 8787 --no-proxy-headers > /tmp/infomancer-showcase.log 2>&1 &
+          echo $! > /tmp/infomancer-showcase.pid
+          for attempt in {1..40}; do
+            if curl --fail --silent http://127.0.0.1:8787/ >/dev/null; then
+              exit 0
+            fi
+            sleep 0.5
+          done
+          cat /tmp/infomancer-showcase.log
+          exit 1
+
+      - name: Install Playwright capture browser
+        working-directory: tools/showcase
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Capture showcase screenshots
+        working-directory: tools/showcase
+        run: node capture.mjs
+
+      - name: Publish curated README screenshots
+        if: github.event_name == 'pull_request' && github.head_ref == 'tooling/showcase-screenshots-20260823'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p docs/assets/showcase
+          cp showcase/screenshots/01-dashboard-social.png docs/assets/showcase/dashboard.png
+          cp showcase/screenshots/02-library-social.png docs/assets/showcase/library.png
+          cp showcase/screenshots/03-library-inspector-social.png docs/assets/showcase/library-inspector.png
+          cp showcase/screenshots/04-title-detail-social.png docs/assets/showcase/title-detail.png
+          cp showcase/screenshots/05-review-social.png docs/assets/showcase/review.png
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/assets/showcase/*.png
+          if git diff --cached --quiet; then
+            echo "Curated screenshots are already current."
+            exit 0
+          fi
+          git commit -m "docs: refresh showcase screenshots [skip ci]"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_HEAD_REF}"
+
+      - name: Show capture manifest
+        if: always()
+        run: |
+          cat showcase/screenshots/manifest.json || true
+          echo '--- server log ---'
+          tail -n 120 /tmp/infomancer-showcase.log || true
+
+      - name: Upload PNG showcase set
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: infomancer-0.8-showcase-screenshots
+          path: showcase/screenshots/
+          if-no-files-found: error
+          retention-days: 14

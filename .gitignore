@@ -28,6 +28,9 @@ node_modules/
 desktop/src-tauri/target/
 desktop/src-tauri/binaries/infomancer-core-*
 
+# Generated product screenshots are local posting assets, not repository source.
+showcase/screenshots/
+
 # Operating-system metadata is never part of an InfoMancer build.
 .DS_Store
 Thumbs.db
