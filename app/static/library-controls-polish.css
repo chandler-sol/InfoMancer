@@ -47,6 +47,15 @@
   z-index: 41;
 }
 
+/* The shared dialog's base CSS starts transparent so it can animate in. A failed or
+   suppressed animation must never leave the top-layer backdrop visible while the
+   actual Organize surface remains transparent. On Library pages, the open state is
+   authoritative and animation is only enhancement. */
+.organize-dialog[open] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
 /* An expanded search is a real text field, not a slightly stretched icon slot.
    Give the placeholder and entered query enough room to remain readable while
    still allowing the filter row to wrap naturally on narrower desktops. */
