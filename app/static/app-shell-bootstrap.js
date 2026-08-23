@@ -87,15 +87,6 @@
     }, {once: true});
   }
 
-  if (window.location.pathname === '/sources') {
-    document.addEventListener('DOMContentLoaded', () => {
-      const controller = document.createElement('script');
-      controller.src = `/static/source-bulk-actions.js${versionQuery}`;
-      controller.async = true;
-      document.head.append(controller);
-    }, {once: true});
-  }
-
   if (!body.classList.contains('has-app-sidebar')) return;
   try {
     const stored = Number.parseInt(localStorage.getItem('infomancer-sidebar-width') || '258', 10);
