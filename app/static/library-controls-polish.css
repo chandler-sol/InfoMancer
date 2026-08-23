@@ -56,6 +56,15 @@
   transform: translateY(0) scale(1);
 }
 
+.organize-dialog.loading[open] .organize-dialog-body:empty::before {
+  content: "Loading organization tools…";
+  display: grid;
+  min-height: 176px;
+  place-items: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
 /* An expanded search is a real text field, not a slightly stretched icon slot.
    Give the placeholder and entered query enough room to remain readable while
    still allowing the filter row to wrap naturally on narrower desktops. */
