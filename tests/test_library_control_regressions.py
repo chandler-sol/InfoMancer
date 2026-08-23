@@ -26,6 +26,7 @@ class LibraryControlRegressionTests(unittest.TestCase):
             ".title-cast-dialog-close",
             ".profile-account-dialog-close",
             ".profile-avatar-dialog-close",
+            ".workspace-inspector-close",
             "#task-dismiss",
         ):
             self.assertIn(selector, css)
