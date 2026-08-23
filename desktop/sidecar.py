@@ -10,32 +10,46 @@ from pathlib import Path
 DESKTOP_VERSION = "0.8.0-alpha.1"
 
 
-def _default_media_roots() -> list[Path]:
-    roots: list[Path] = []
-    home = Path.home()
-    if home.exists():
-        roots.append(home)
-    if os.name == "nt":
-        for letter in string.ascii_uppercase:
-            drive = Path(f"{letter}:/")
-            if drive.exists():
-                roots.append(drive)
-    elif sys.platform == "darwin":
-        volumes = Path("/Volumes")
-        if volumes.exists():
-            roots.append(volumes)
-    else:
-        for candidate in (Path("/media"), Path("/mnt")):
-            if candidate.exists():
-                roots.append(candidate)
+def _root_is_accessible(root: Path) -> bool:
+    """Return whether a browse root can actually be opened by this process."""
+    try:
+        with os.scandir(root):
+            return True
+    except OSError:
+        return False
+
+
+def _dedupe_media_roots(roots: list[Path]) -> list[Path]:
+    """Deduplicate roots without resolving them through the filesystem."""
     deduped: list[Path] = []
     seen: set[str] = set()
     for root in roots:
-        key = str(root.resolve()).casefold()
+        key = os.path.normcase(os.path.abspath(os.fspath(root))).casefold()
         if key not in seen:
             seen.add(key)
             deduped.append(root)
     return deduped
+
+
+def _default_media_roots() -> list[Path]:
+    roots: list[Path] = []
+    home = Path.home()
+    if _root_is_accessible(home):
+        roots.append(home)
+    if os.name == "nt":
+        for letter in string.ascii_uppercase:
+            drive = Path(f"{letter}:/")
+            if _root_is_accessible(drive):
+                roots.append(drive)
+    elif sys.platform == "darwin":
+        volumes = Path("/Volumes")
+        if _root_is_accessible(volumes):
+            roots.append(volumes)
+    else:
+        for candidate in (Path("/media"), Path("/mnt")):
+            if _root_is_accessible(candidate):
+                roots.append(candidate)
+    return _dedupe_media_roots(roots)
 
 
 def _inside(candidate: Path, parent: Path) -> bool:
