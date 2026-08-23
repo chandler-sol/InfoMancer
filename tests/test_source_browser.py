@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,11 +17,13 @@ TEMPLATES = ROOT / "app" / "templates"
 
 class SourceBrowserTests(unittest.TestCase):
     def setUp(self):
+        source_browser._clear_allowed_roots_cache()
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name).resolve()
         self.allowed = (self.root,)
 
     def tearDown(self):
+        source_browser._clear_allowed_roots_cache()
         self.temp.cleanup()
 
     def test_lists_only_visible_child_folders(self):
@@ -58,6 +61,21 @@ class SourceBrowserTests(unittest.TestCase):
 
         self.assertEqual(len(result["locations"]), 1)
         self.assertEqual(result["locations"][0]["path"], str(self.root))
+
+    def test_configured_root_accessibility_probe_is_short_lived_cached(self):
+        with mock.patch.object(source_browser, "_root_is_accessible", return_value=True) as probe:
+            first = source_browser.allowed_roots(self.allowed)
+            second = source_browser.allowed_roots(self.allowed)
+        self.assertEqual(first, second)
+        self.assertEqual(probe.call_count, 1)
+
+    @unittest.skipIf(os.name == "nt", "POSIX roots are intentionally case-sensitive")
+    def test_posix_roots_that_differ_only_by_case_remain_distinct(self):
+        roots = (Path("/media/Movies"), Path("/media/movies"))
+        with mock.patch.object(source_browser, "_resolved", side_effect=lambda value: Path(value)), \
+             mock.patch.object(source_browser, "_root_is_accessible", return_value=True):
+            result = source_browser.allowed_roots(roots)
+        self.assertEqual(result, roots)
 
     def test_windows_style_resolution_error_becomes_source_browser_error(self):
         with mock.patch.object(
