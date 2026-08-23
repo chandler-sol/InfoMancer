@@ -29,16 +29,10 @@
   line-height: 1.25;
 }
 
-.library-controls > select,
-.library-controls .more-filters-panel select {
-  appearance: none;
-  -webkit-appearance: none;
-}
-
 /* Keep these baseline declarations local as well as in the shared rule. Existing
    mobile contracts intentionally verify that both select families reserve enough
-   height and vertical padding for descenders. The second padding declaration adds
-   only the right-side room required by our owned chevron. */
+   height and vertical padding for descenders. The right-side override adds only the
+   room required by our owned chevron. */
 .library-controls > select {
   flex: 0 1 220px;
   width: 220px;
@@ -47,6 +41,8 @@
   padding: 8px 12px;
   padding-right: 36px;
   line-height: 1.25;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 .library-controls .more-filters-panel select {
@@ -54,6 +50,8 @@
   padding: 8px 12px;
   padding-right: 36px;
   line-height: 1.25;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 /* More Filters is part of the same control row as the selects. Its trigger now uses
