@@ -132,14 +132,18 @@ class SourceBrowserUiContracts(unittest.TestCase):
         self.assertIn("JSON.parse(text)", script)
         self.assertNotIn("await response.json()", script)
 
-    def test_close_button_uses_font_independent_geometry(self):
+    def test_close_button_uses_shared_font_independent_geometry(self):
         partial = (TEMPLATES / "_source_browser.html").read_text(encoding="utf-8")
-        styles = (STATIC / "sources.css").read_text(encoding="utf-8")
+        shared = (STATIC / "dialog-controls-polish.css").read_text(encoding="utf-8")
+        local = (STATIC / "sources.css").read_text(encoding="utf-8")
         self.assertIn('class="source-browser-close"', partial)
-        self.assertIn(".source-browser-close::before,.source-browser-close::after", styles)
-        self.assertIn("font-size:0!important", styles)
-        self.assertIn("translate(-50%,-50%) rotate(45deg)", styles)
-        self.assertIn("translate(-50%,-50%) rotate(-45deg)", styles)
+        self.assertIn(".source-browser-close::before", shared)
+        self.assertIn(".source-browser-close::after", shared)
+        self.assertIn("font-size: 0 !important", shared)
+        self.assertIn("translate(-50%, -50%) rotate(45deg)", shared)
+        self.assertIn("translate(-50%, -50%) rotate(-45deg)", shared)
+        self.assertNotIn(".source-browser-close::before", local)
+        self.assertNotIn(".source-browser-close::after", local)
 
 
 if __name__ == "__main__":
