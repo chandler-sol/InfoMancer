@@ -100,8 +100,10 @@ class OnboardingTour08ContractTests(unittest.TestCase):
         source = (STATIC / "engagement.js").read_text(encoding="utf-8")
         self.assertIn('loadStyle("onboarding-tour.css")', source)
         self.assertIn('loadStyle("onboarding-tour-inspector-preview.css")', source)
+        self.assertIn('loadStyle("onboarding-tour-mobile-polish.css")', source)
         self.assertIn('loadScript("onboarding-tour.js")', source)
         self.assertIn('loadScript("onboarding-tour-inspector-preview.js")', source)
+        self.assertIn('loadScript("onboarding-tour-mobile-polish.js")', source)
         self.assertIn("tour.hidden = true", source)
         self.assertNotIn("const steps = [", source)
         self.assertIn('document.getElementById("announcement-popup")', source)
@@ -130,6 +132,20 @@ class OnboardingTour08ContractTests(unittest.TestCase):
         self.assertIn("max-height: min(46dvh, 410px)", css)
         self.assertIn("transition: none", css)
         self.assertIn("prefers-reduced-motion", css)
+
+    def test_mobile_tour_polish_keeps_late_steps_stable(self) -> None:
+        source = (STATIC / "onboarding-tour-mobile-polish.js").read_text(encoding="utf-8")
+        css = (STATIC / "onboarding-tour-mobile-polish.css").read_text(encoding="utf-8")
+        self.assertIn("card.scrollTop = 0", source)
+        self.assertIn('profileTitle = "Your account and preferences"', source)
+        self.assertIn('account.setAttribute("open", "")', source)
+        self.assertIn("window.requestAnimationFrame", source)
+        self.assertIn("scrollbar-width: none", css)
+        self.assertIn(".tour-card::-webkit-scrollbar", css)
+        self.assertIn("grid-template-rows: none !important", css)
+        self.assertIn(".tour-task-demo .tour-task-demo-progress", css)
+        self.assertIn("position: absolute", css)
+        self.assertIn("pointer-events: none", css)
 
     def test_tour_preserves_real_background_tasks(self) -> None:
         source = (STATIC / "onboarding-tour.js").read_text(encoding="utf-8")
