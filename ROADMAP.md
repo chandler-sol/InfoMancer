@@ -214,7 +214,11 @@ Use the 0.8 benchmark data to guide targeted work rather than optimizing specula
 - more efficient large Review queues and Inspector aggregations;
 - reduced memory pressure during metadata, hashing, and analysis jobs;
 - improved behavior on slow NAS/network storage;
-- clearer operator visibility into long-running work.
+- clearer operator visibility into long-running work;
+- tighten onboarding-tour performance so step changes, target highlighting, and temporary UI setup do not visibly stall while a target surface or element is being prepared;
+- profile tour step activation and target-reveal latency, reduce repeated DOM discovery/layout work, and eliminate avoidable reflows or transition jank;
+- pre-warm or preload likely next-step assets, partials, and UI state where safe so the next tour element is ready before the user advances;
+- add lightweight performance budgets or regression checks for representative tour steps, including mobile and modest hardware, while preserving reduced-motion behavior.
 
 ### Integration and workflow expansion
 
