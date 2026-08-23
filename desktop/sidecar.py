@@ -46,6 +46,21 @@ def _inside(candidate: Path, parent: Path) -> bool:
         return False
 
 
+def _ensure_runtime_streams(data_dir: Path) -> None:
+    """Give windowed Windows builds a diagnostic stream without opening a console."""
+    if os.name != "nt" or (sys.stdout is not None and sys.stderr is not None):
+        return
+    log_dir = data_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stream = (log_dir / "desktop-core.log").open(
+        "a", encoding="utf-8", buffering=1
+    )
+    if sys.stdout is None:
+        sys.stdout = stream
+    if sys.stderr is None:
+        sys.stderr = stream
+
+
 def create_recovery_package(data_dir: Path, output: Path) -> None:
     data_dir = data_dir.expanduser().resolve()
     database = data_dir / "infomancer.db"
@@ -86,6 +101,7 @@ def main() -> None:
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir).expanduser().resolve()
+    _ensure_runtime_streams(data_dir)
     if args.recovery_output:
         try:
             create_recovery_package(data_dir, Path(args.recovery_output))
