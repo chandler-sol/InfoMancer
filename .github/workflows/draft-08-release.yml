@@ -192,6 +192,50 @@ jobs:
           $env:INFOMANCER_PE = (Resolve-Path 'desktop/src-tauri/target/release/infomancer-desktop.exe').Path
           python -c "import os,struct; data=open(os.environ['INFOMANCER_PE'],'rb').read(); pe=struct.unpack_from('<I',data,0x3c)[0]; subsystem=struct.unpack_from('<H',data,pe+24+68)[0]; print(f'Windows PE subsystem={subsystem}'); assert subsystem == 2, 'InfoMancer launcher was built as a console application'"
 
+      - name: Smoke-test installed Windows desktop launch
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem 'desktop/src-tauri/target/release/bundle/nsis/*-setup.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'NSIS installer was not produced.' }
+
+          $install = Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Silent install failed: $($install.ExitCode)" }
+
+          $installDir = Join-Path $env:LOCALAPPDATA 'InfoMancer'
+          if (-not (Test-Path $installDir)) { throw "InfoMancer install directory was not created: $installDir" }
+          $launcher = Get-ChildItem $installDir -Filter '*.exe' |
+            Where-Object { $_.Name -ne 'uninstall.exe' -and $_.Name -ne 'infomancer-core.exe' } |
+            Select-Object -First 1
+          if (-not $launcher) { throw "Installed InfoMancer launcher was not found under $installDir" }
+
+          $log = Join-Path $env:APPDATA 'cloud.arsenik.infomancer\logs\desktop-launcher.log'
+          Remove-Item $log -Force -ErrorAction SilentlyContinue
+          $process = Start-Process -FilePath $launcher.FullName -PassThru
+          Start-Sleep -Seconds 8
+          $process.Refresh()
+          if ($process.HasExited) {
+            if (Test-Path $log) { Get-Content $log | Write-Host }
+            throw "Installed InfoMancer exited during startup with code $($process.ExitCode)."
+          }
+          if (-not (Test-Path $log)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw "InfoMancer stayed alive but did not create its launcher diagnostic log at $log."
+          }
+          $logText = Get-Content $log -Raw
+          $logText | Write-Host
+          if (-not $logText.Contains('Tauri application built successfully; entering the desktop event loop.')) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw 'InfoMancer process stayed alive but never completed Tauri desktop startup.'
+          }
+          Stop-Process -Id $process.Id -Force
+          Start-Sleep -Seconds 1
+
+          $uninstaller = Join-Path $installDir 'uninstall.exe'
+          if (-not (Test-Path $uninstaller)) { throw 'Installed uninstaller was not found.' }
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "Silent uninstall failed: $($uninstall.ExitCode)" }
+
       - name: Collect native release assets
         shell: bash
         env:
