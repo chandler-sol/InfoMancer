@@ -20,8 +20,7 @@ on:
 
 permissions:
   actions: read
-  contents: write
-  issues: write
+  contents: read
 
 env:
   RELEASE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -281,6 +280,9 @@ jobs:
       - native-package
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -332,8 +334,14 @@ jobs:
               echo "Release $TAG already exists and is published; refusing to replace it." >&2
               exit 1
             fi
+            # gh release edit --target does not retarget an existing Git tag.
+            # Move the draft tag explicitly so its source commit always matches
+            # the artifacts that were just built and verified.
+            gh api --method PATCH \
+              "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" \
+              -f sha="$RELEASE_SHA" \
+              -F force=true >/dev/null
             gh release edit "$TAG" \
-              --target "$RELEASE_SHA" \
               --title "$TITLE" \
               --notes-file "$NOTES" \
               --draft \
@@ -359,6 +367,8 @@ jobs:
       - draft-release
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      issues: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       SOURCE_RESULT: ${{ needs.source-package.result }}
