@@ -1,0 +1,279 @@
+name: Draft 0.8 Multi-Platform Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - testing/0.8-alpha
+    paths:
+      - .github/workflows/draft-08-release.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: draft-08-release
+  cancel-in-progress: false
+
+jobs:
+  source-package:
+    name: Server and source package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Verify release versions agree
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          main = Path('app/main.py').read_text(encoding='utf-8')
+          app_version = re.search(r'^APP_VERSION\s*=\s*"([^"]+)"', main, re.MULTILINE).group(1)
+          tauri_version = json.loads(Path('desktop/src-tauri/tauri.conf.json').read_text(encoding='utf-8'))['version']
+          package_version = json.loads(Path('desktop/package.json').read_text(encoding='utf-8'))['version']
+          versions = {app_version, tauri_version, package_version}
+          if len(versions) != 1:
+              raise SystemExit(f'Release version mismatch: app={app_version}, tauri={tauri_version}, package={package_version}')
+          print(f'Packaging InfoMancer {app_version}')
+          PY
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run application tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Build credential-free release ZIP
+        run: python scripts/build_release.py
+
+      - name: Stage source package
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          cp dist/InfoMancer-*.zip release-assets/
+
+      - name: Upload source package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: infomancer-source
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+  native-package:
+    name: ${{ matrix.label }} desktop package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+            slug: windows
+            bundles: nsis
+          - os: macos-latest
+            label: macOS
+            slug: macos
+            bundles: dmg
+          - os: ubuntu-latest
+            label: Linux
+            slug: linux
+            bundles: deb,appimage
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Linux desktop build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Verify toolchain
+        shell: bash
+        run: |
+          python --version
+          node --version
+          npm --version
+          rustc --version
+          cargo --version
+
+      - name: Install Python build dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller==6.21.0
+
+      - name: Run application tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Build Windows bundled core
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" desktop/sidecar.py
+          $triple = (rustc --print host-tuple).Trim()
+          New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
+          Copy-Item dist/infomancer-core.exe "desktop/src-tauri/binaries/infomancer-core-$triple.exe"
+
+      - name: Build Unix bundled core
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --name infomancer-core --add-data "app/templates:app/templates" --add-data "app/static:app/static" desktop/sidecar.py
+          triple="$(rustc --print host-tuple)"
+          mkdir -p desktop/src-tauri/binaries
+          cp dist/infomancer-core "desktop/src-tauri/binaries/infomancer-core-$triple"
+          chmod +x "desktop/src-tauri/binaries/infomancer-core-$triple"
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Audit desktop dependencies
+        working-directory: desktop
+        run: npm audit --audit-level=high
+
+      - name: Generate native icons
+        working-directory: desktop
+        run: npm run icon
+
+      - name: Build native desktop package
+        working-directory: desktop
+        run: npm run tauri -- build --bundles ${{ matrix.bundles }}
+
+      - name: Collect native release assets
+        shell: bash
+        env:
+          RELEASE_OS: ${{ matrix.slug }}
+        run: |
+          python - <<'PY'
+          import os
+          import shutil
+          from pathlib import Path
+
+          release_os = os.environ['RELEASE_OS']
+          bundle = Path('desktop/src-tauri/target/release/bundle')
+          patterns = {
+              'windows': ['nsis/*.exe'],
+              'macos': ['dmg/*.dmg'],
+              'linux': ['deb/*.deb', 'appimage/*.AppImage'],
+          }[release_os]
+          matches = []
+          for pattern in patterns:
+              matches.extend(bundle.glob(pattern))
+          if not matches:
+              raise SystemExit(f'No {release_os} native package found under {bundle}')
+          output = Path('release-assets')
+          output.mkdir(exist_ok=True)
+          for source in matches:
+              destination = output / source.name
+              shutil.copy2(source, destination)
+              print(f'Staged {destination}')
+          PY
+
+      - name: Upload native package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: infomancer-${{ matrix.slug }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+  draft-release:
+    name: Assemble draft GitHub release
+    needs:
+      - source-package
+      - native-package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download build artifacts
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          gh run download "$GITHUB_RUN_ID" --dir release-assets
+          find release-assets -type f -maxdepth 3 -print
+
+      - name: Flatten release assets and generate checksums
+        shell: bash
+        run: |
+          mkdir -p publish
+          find release-assets -type f -print0 | while IFS= read -r -d '' asset; do
+            cp "$asset" "publish/$(basename "$asset")"
+          done
+          find publish -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -print0 \
+            | sort -z \
+            | xargs -0 sha256sum \
+            | sed 's#  publish/#  #' > publish/SHA256SUMS.txt
+          cat publish/SHA256SUMS.txt
+
+      - name: Create or refresh draft prerelease
+        shell: bash
+        run: |
+          VERSION="$(python - <<'PY'
+          import re
+          from pathlib import Path
+          text = Path('app/main.py').read_text(encoding='utf-8')
+          print(re.search(r'^APP_VERSION\s*=\s*"([^"]+)"', text, re.MULTILINE).group(1))
+          PY
+          )"
+          TAG="v$VERSION"
+          TITLE="InfoMancer $VERSION"
+          NOTES="docs/releases/$VERSION.md"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            IS_DRAFT="$(gh release view "$TAG" --json isDraft --jq '.isDraft')"
+            if [ "$IS_DRAFT" != "true" ]; then
+              echo "Release $TAG already exists and is published; refusing to replace it." >&2
+              exit 1
+            fi
+            gh release edit "$TAG" \
+              --title "$TITLE" \
+              --notes-file "$NOTES" \
+              --draft \
+              --prerelease
+          else
+            gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "$TITLE" \
+              --notes-file "$NOTES" \
+              --draft \
+              --prerelease
+          fi
+
+          gh release upload "$TAG" publish/* --clobber
+          echo "Draft release $TAG assembled from commit $GITHUB_SHA."
