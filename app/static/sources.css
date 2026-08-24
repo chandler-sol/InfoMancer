@@ -18,7 +18,9 @@
 .source-browser-head,.source-browser-nav,.source-current,.source-preview-head,.source-final-form { display:flex; align-items:center; justify-content:space-between; gap:18px; }
 .source-browser-head { padding-bottom:20px; border-bottom:1px solid var(--line); }
 .source-browser-head h2 { font-size:30px; }
-.source-browser-close { width:42px; height:42px; display:grid; place-items:center; padding:0; border-radius:50%; font-size:26px; font-weight:400; }
+.source-browser-close { flex:0 0 42px; width:42px; height:42px; display:grid; place-items:center; padding:0; border-radius:50%; line-height:0; }
+.source-browser-close-icon { display:block; width:18px; height:18px; overflow:visible; pointer-events:none; }
+.source-browser-close-icon path { fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; vector-effect:non-scaling-stroke; }
 .source-browser-nav { justify-content:flex-start; min-height:58px; }
 .source-browser-crumbs { display:flex; align-items:center; gap:4px; min-width:0; overflow:auto; }
 .source-browser-crumbs button { border:0; background:transparent; color:var(--muted); padding:7px; }
