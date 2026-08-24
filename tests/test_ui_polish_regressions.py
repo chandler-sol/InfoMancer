@@ -99,7 +99,7 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn("restoreFocus", source)
 
     def test_library_inspector_is_opaque(self):
-        source = (STATIC / "library-selection-polish.css").read_text(encoding="utf-8")
+        source = (STATIC / "library-selection.css").read_text(encoding="utf-8")
         self.assertIn(".workspace-inspector {\n  background: #0d1218;", source)
         self.assertIn(".library-inspector-selection-bar {", source)
         self.assertIn("-webkit-backdrop-filter: none", source)
@@ -116,7 +116,7 @@ class UiPolishRegressionTests(unittest.TestCase):
 
     def test_library_bulk_bar_starts_at_two_and_stays_single_line_on_desktop(self):
         script = (STATIC / "library-selection-toolbar.js").read_text(encoding="utf-8")
-        styles = (STATIC / "library-selection-toolbar.css").read_text(encoding="utf-8")
+        styles = (STATIC / "library-selection.css").read_text(encoding="utf-8")
         self.assertIn("const shouldHide = count < 2", script)
         self.assertIn("if (actions.hidden !== shouldHide) actions.hidden = shouldHide", script)
         self.assertNotIn("new MutationObserver(sync).observe(actions", script)
@@ -129,7 +129,7 @@ class UiPolishRegressionTests(unittest.TestCase):
 
     def test_library_bulk_bar_exposes_favorite_compare_and_grouped_match(self):
         toolbar = (STATIC / "library-selection-toolbar.js").read_text(encoding="utf-8")
-        styles = (STATIC / "library-selection-toolbar.css").read_text(encoding="utf-8")
+        styles = (STATIC / "library-selection.css").read_text(encoding="utf-8")
         self.assertIn("workspace-inspector-favorite library-bulk-favorite", toolbar)
         self.assertIn("fetch('/titles/favorite-bulk'", toolbar)
         self.assertIn("library-bulk-compare", toolbar)
@@ -143,7 +143,7 @@ class UiPolishRegressionTests(unittest.TestCase):
 
     def test_library_cover_grid_fills_both_page_edges_and_captions_are_inset(self):
         grid = (STATIC / "library-performance.css").read_text(encoding="utf-8")
-        styles = (STATIC / "library-selection-toolbar.css").read_text(encoding="utf-8")
+        styles = (STATIC / "library-selection.css").read_text(encoding="utf-8")
         self.assertIn("#cover-library.cover-library {", grid)
         self.assertIn("repeat(auto-fill, minmax(min(100%, var(--cover-size)), var(--cover-size)))", grid)
         self.assertIn("justify-content: space-between", grid)
@@ -173,7 +173,7 @@ class UiPolishRegressionTests(unittest.TestCase):
 
     def test_sort_titles_keeps_grid_slot_when_poster_is_missing(self):
         template = (TEMPLATES / "sort_titles_dialog.html").read_text(encoding="utf-8")
-        styles = (STATIC / "library-selection-toolbar.css").read_text(encoding="utf-8")
+        styles = (STATIC / "library-selection.css").read_text(encoding="utf-8")
         self.assertIn("sort-title-poster-placeholder", template)
         self.assertIn("title.display_title[:1]", template)
         self.assertIn(".sort-title-poster-placeholder", styles)

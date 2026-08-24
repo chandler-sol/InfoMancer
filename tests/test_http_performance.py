@@ -136,7 +136,7 @@ class HttpPerformanceTests(unittest.TestCase):
         script = (Path(__file__).resolve().parents[1] / "app/static/library-selection-toolbar.js").read_text(
             encoding="utf-8"
         )
-        styles = (Path(__file__).resolve().parents[1] / "app/static/library-selection-toolbar.css").read_text(
+        styles = (Path(__file__).resolve().parents[1] / "app/static/library-selection.css").read_text(
             encoding="utf-8"
         )
         workspace = (Path(__file__).resolve().parents[1] / "app/static/workspace-ui.js").read_text(
@@ -146,7 +146,7 @@ class HttpPerformanceTests(unittest.TestCase):
         self.assertIn("has-selection-actions", script)
         self.assertIn("grid-template-columns: minmax(120px, auto) minmax(0, 1fr) minmax(260px, auto)", styles)
         self.assertIn("position: sticky", styles)
-        self.assertIn("library-selection-toolbar.css", workspace)
+        self.assertIn("library-selection.css", workspace)
         self.assertIn("library-selection-toolbar.js", workspace)
 
     def test_canonical_action_menu_glyph_is_absolutely_centered(self):

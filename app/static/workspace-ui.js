@@ -205,9 +205,7 @@
     loadStyle('library-controls-polish.css'),
     loadStyle('library-performance.css'),
     loadStyle('library-density.css'),
-    loadStyle('library-selection-polish.css'),
-    loadStyle('library-selection-toolbar.css'),
-    loadStyle('library-selection-compact.css'),
+    loadStyle('library-selection.css'),
   ]) : Promise.resolve();
   const detailStyles = detail
     ? Promise.all([loadStyle('detail-page-polish.css')])

@@ -10,7 +10,7 @@ STATIC = ROOT / "app" / "static"
 
 class MobileInspectorRegressionTests(unittest.TestCase):
     def test_mobile_inspector_uses_deterministic_header_to_bottom_track(self):
-        styles = (STATIC / "library-selection-polish.css").read_text(encoding="utf-8")
+        styles = (STATIC / "library-selection.css").read_text(encoding="utf-8")
         self.assertIn("top: 68px !important", styles)
         self.assertIn("top: 62px !important", styles)
         self.assertIn("bottom: 0", styles)
