@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -31,13 +33,16 @@ class DesktopSidecarDriveDiscoveryTests(unittest.TestCase):
             ["C:\\", "N:\\", "Z:\\"],
         )
 
-    def test_windows_default_roots_use_drive_table_without_exists_probe(self):
-        network_roots = [Path("N:/"), Path("Z:/")]
-        with patch.object(self.sidecar.os, "name", "nt"), patch.object(
-            self.sidecar, "_windows_logical_drives", return_value=network_roots
-        ):
-            roots = self.sidecar._default_media_roots()
-        self.assertTrue(all(root in roots for root in network_roots))
+    def test_windows_logical_drives_use_win32_drive_table(self):
+        mask = (1 << 2) | (1 << 13)  # C, N
+        fake_ctypes = SimpleNamespace(
+            windll=SimpleNamespace(
+                kernel32=SimpleNamespace(GetLogicalDrives=lambda: mask)
+            )
+        )
+        with patch.dict(sys.modules, {"ctypes": fake_ctypes}):
+            drives = self.sidecar._windows_logical_drives()
+        self.assertEqual([str(path) for path in drives], ["C:\\", "N:\\"])
 
     def test_root_deduplication_does_not_resolve_filesystem(self):
         missing = Path("definitely-not-mounted")
