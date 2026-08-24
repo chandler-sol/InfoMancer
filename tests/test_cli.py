@@ -73,8 +73,9 @@ class CliTests(unittest.TestCase):
             minimum_password_length=1,
         )
         service = AuthService(self.database, settings)
+        previous_password = "previous-password-value"
         user = service.create_user(
-            "recover-me", "recover@example.com", "Recover Me", "old",
+            "recover-me", "recover@example.com", "Recover Me", previous_password,
             role="librarian",
         )
         output = StringIO()
@@ -87,7 +88,7 @@ class CliTests(unittest.TestCase):
         rendered = output.getvalue()
         self.assertIn("https://infomancer.example.test/activate/", rendered)
         self.assertIn("can be used only once", rendered)
-        self.assertNotIn("old", rendered)
+        self.assertNotIn(previous_password, rendered)
         token = rendered.split("/activate/", 1)[1].splitlines()[0]
         invitation = service.invitation_for_token(token)
         self.assertEqual(invitation["user_id"], user.id)

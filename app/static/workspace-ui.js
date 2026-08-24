@@ -161,7 +161,6 @@
   const letterJump = Boolean(letterJumpAlphabet);
   const library = Boolean(document.querySelector('.library-table') && document.getElementById('cover-library'));
   const detail = Boolean(document.querySelector('.media-dossier'));
-  const review = Boolean(document.querySelector('.review-workspace'));
 
   if (letterJumpAlphabet) {
     letterJumpAlphabet.style.visibility = 'hidden';
@@ -212,9 +211,6 @@
   ]) : Promise.resolve();
   const detailStyles = detail
     ? Promise.all([loadStyle('detail-page-polish.css')])
-    : Promise.resolve();
-  const reviewStyles = review
-    ? Promise.all([loadStyle('review-queue-polish.css')])
     : Promise.resolve();
   const letterJumpReady = letterJump
     ? letterJumpStyles.then(() => loadScript('library-letter-jump.js'))
@@ -278,5 +274,4 @@
   detailStyles.then(() => {
     if (detail) return loadScript('detail-page-polish.js');
   });
-  reviewStyles.then(() => undefined);
 })();
