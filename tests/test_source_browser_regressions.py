@@ -13,9 +13,8 @@ TEMPLATES = ROOT / "app" / "templates"
 class SourceBrowserRegressionTests(unittest.TestCase):
     def test_windows_browse_normalization_does_not_resolve_network_drive(self):
         blocked = OSError(1272, "Guest access is blocked")
-        with mock.patch.object(source_browser.os, "name", "nt"), \
-             mock.patch.object(Path, "resolve", side_effect=blocked) as resolver:
-            result = source_browser._resolved("X:/")
+        with mock.patch.object(Path, "resolve", side_effect=blocked) as resolver:
+            result = source_browser._windows_browse_path("X:/")
         resolver.assert_not_called()
         self.assertTrue(str(result))
 
