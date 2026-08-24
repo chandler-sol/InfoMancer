@@ -19,6 +19,12 @@ class SourceBrowserError(ValueError):
     pass
 
 
+def _windows_browse_path(path: Path | str) -> Path:
+    """Lexically normalize a Windows browse path without network resolution."""
+    expanded = Path(path).expanduser()
+    return Path(os.path.abspath(os.path.normpath(os.fspath(expanded))))
+
+
 def _resolved(path: Path | str) -> Path:
     """Normalize a browse path without forcing mapped Windows drives to resolve.
 
@@ -29,9 +35,9 @@ def _resolved(path: Path | str) -> Path:
     rely on explicit root containment plus non-followed directory entries. POSIX
     keeps realpath-style resolution so symlink escapes remain rejected there.
     """
-    expanded = Path(path).expanduser()
     if os.name == "nt":
-        return Path(os.path.abspath(os.path.normpath(os.fspath(expanded))))
+        return _windows_browse_path(path)
+    expanded = Path(path).expanduser()
     try:
         return expanded.resolve(strict=False)
     except OSError as exc:
