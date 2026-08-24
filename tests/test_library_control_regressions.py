@@ -18,10 +18,11 @@ class LibraryControlRegressionTests(unittest.TestCase):
         bootstrap = (STATIC / "app-shell-bootstrap.js").read_text(encoding="utf-8")
         css = (STATIC / "dialog-controls-polish.css").read_text(encoding="utf-8")
         bulk_css = (STATIC / "organize-bulk-polish.css").read_text(encoding="utf-8")
+        source_css = (STATIC / "sources.css").read_text(encoding="utf-8")
+        source_partial = (TEMPLATES / "_source_browser.html").read_text(encoding="utf-8")
         self.assertIn("dialog-controls-polish.css", bootstrap)
         for selector in (
             ".organize-dialog-close",
-            ".source-browser-close",
             ".overview-dialog-close",
             ".title-cast-dialog-close",
             ".profile-account-dialog-close",
@@ -34,6 +35,14 @@ class LibraryControlRegressionTests(unittest.TestCase):
         self.assertIn("translate(-50%, -50%) rotate(45deg)", css)
         self.assertIn("translate(-50%, -50%) rotate(-45deg)", css)
         self.assertNotIn(".organize-dialog-close", bulk_css)
+
+        # The source browser deliberately owns one inline SVG mark instead of
+        # participating in the shared pseudo-element close geometry. This avoids
+        # WebView cascade collisions that previously rendered multiple marks.
+        self.assertNotIn(".source-browser-close::before", css)
+        self.assertNotIn(".source-browser-close::after", css)
+        self.assertIn('class="source-browser-close-icon"', source_partial)
+        self.assertIn("content:none!important", source_css)
 
     def test_more_filters_uses_same_owned_chrome_as_neighboring_selects(self) -> None:
         css = (STATIC / "library-controls-polish.css").read_text(encoding="utf-8")
