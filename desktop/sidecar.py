@@ -10,16 +10,51 @@ from pathlib import Path
 DESKTOP_VERSION = "0.8.0-alpha.1"
 
 
+def _windows_drive_strings_from_mask(mask: int) -> list[str]:
+    return [
+        f"{letter}:\\"
+        for index, letter in enumerate(string.ascii_uppercase)
+        if mask & (1 << index)
+    ]
+
+
+def _windows_logical_drives() -> list[Path]:
+    """Enumerate Windows drive letters without touching their filesystems.
+
+    Mapped SMB/NFS drives can exist in the user's Windows session while a live
+    filesystem probe is slow, disconnected, or temporarily denied. Asking the
+    Win32 drive table first keeps those locations visible to InfoMancer and
+    leaves accessibility checks to the folder browser.
+    """
+    try:
+        import ctypes
+
+        mask = int(ctypes.windll.kernel32.GetLogicalDrives())
+    except (AttributeError, OSError, TypeError, ValueError):
+        return []
+    return [Path(value) for value in _windows_drive_strings_from_mask(mask)]
+
+
+def _dedupe_media_roots(roots: list[Path]) -> list[Path]:
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        # Deliberately do not call Path.resolve() here. Resolving a mapped or
+        # NFS-backed Windows drive can perform network I/O during app startup.
+        key = os.path.normcase(os.path.abspath(os.fspath(root))).casefold()
+        if key not in seen:
+            seen.add(key)
+            deduped.append(root)
+    return deduped
+
+
 def _default_media_roots() -> list[Path]:
     roots: list[Path] = []
     home = Path.home()
     if home.exists():
         roots.append(home)
     if os.name == "nt":
-        for letter in string.ascii_uppercase:
-            drive = Path(f"{letter}:/")
-            if drive.exists():
-                roots.append(drive)
+        roots.extend(_windows_logical_drives())
     elif sys.platform == "darwin":
         volumes = Path("/Volumes")
         if volumes.exists():
@@ -28,14 +63,7 @@ def _default_media_roots() -> list[Path]:
         for candidate in (Path("/media"), Path("/mnt")):
             if candidate.exists():
                 roots.append(candidate)
-    deduped: list[Path] = []
-    seen: set[str] = set()
-    for root in roots:
-        key = str(root.resolve()).casefold()
-        if key not in seen:
-            seen.add(key)
-            deduped.append(root)
-    return deduped
+    return _dedupe_media_roots(roots)
 
 
 def _inside(candidate: Path, parent: Path) -> bool:
