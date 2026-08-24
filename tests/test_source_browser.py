@@ -16,6 +16,19 @@ class SourceBrowserTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_root_chooser_keeps_unavailable_configured_locations_visible(self):
+        unavailable = self.root / "offline-network-share"
+        result = list_folders("", (self.root, unavailable))
+        locations = {row["name"]: row for row in result["locations"]}
+        self.assertTrue(locations[self.root.name]["accessible"])
+        self.assertIn("offline-network-share", locations)
+        self.assertFalse(locations["offline-network-share"]["accessible"])
+
+    def test_unavailable_configured_location_cannot_be_browsed(self):
+        unavailable = self.root / "offline-network-share"
+        with self.assertRaises(SourceBrowserError):
+            list_folders(str(unavailable), (unavailable,))
+
     def test_lists_only_visible_child_folders(self):
         (self.root / "Movies").mkdir()
         (self.root / "TV").mkdir()
