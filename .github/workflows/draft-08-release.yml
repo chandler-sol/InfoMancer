@@ -334,13 +334,19 @@ jobs:
               echo "Release $TAG already exists and is published; refusing to replace it." >&2
               exit 1
             fi
-            # gh release edit --target does not retarget an existing Git tag.
-            # Move the draft tag explicitly so its source commit always matches
-            # the artifacts that were just built and verified.
-            gh api --method PATCH \
-              "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" \
-              -f sha="$RELEASE_SHA" \
-              -F force=true >/dev/null
+            # Draft releases can exist before GitHub materializes their tag ref.
+            # Create that ref when needed, otherwise move it to the verified build.
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+              gh api --method PATCH \
+                "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" \
+                -f sha="$RELEASE_SHA" \
+                -F force=true >/dev/null
+            else
+              gh api --method POST \
+                "repos/$GITHUB_REPOSITORY/git/refs" \
+                -f ref="refs/tags/$TAG" \
+                -f sha="$RELEASE_SHA" >/dev/null
+            fi
             gh release edit "$TAG" \
               --title "$TITLE" \
               --notes-file "$NOTES" \
