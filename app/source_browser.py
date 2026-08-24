@@ -20,12 +20,20 @@ class SourceBrowserError(ValueError):
 
 
 def _resolved(path: Path | str) -> Path:
-    # Browser input is rejected by validate_browse_path unless the resolved
-    # result remains inside a configured media-browse root. Windows can raise
-    # here for disconnected or policy-blocked mapped drives, so translate that
-    # into a normal source-browser error instead of letting the API return 500.
+    """Normalize a browse path without forcing mapped Windows drives to resolve.
+
+    pathlib.Path.resolve() can perform network-provider I/O on Windows. A mapped
+    drive may be perfectly browsable with scandir while resolve() fails with
+    WinError 1272 because Windows refuses the provider's unauthenticated UNC
+    resolution. For Windows we therefore use lexical absolute normalization and
+    rely on explicit root containment plus non-followed directory entries. POSIX
+    keeps realpath-style resolution so symlink escapes remain rejected there.
+    """
+    expanded = Path(path).expanduser()
+    if os.name == "nt":
+        return Path(os.path.abspath(os.path.normpath(os.fspath(expanded))))
     try:
-        return Path(path).expanduser().resolve(strict=False)
+        return expanded.resolve(strict=False)
     except OSError as exc:
         raise SourceBrowserError(f"InfoMancer cannot access that folder: {exc}") from exc
 
