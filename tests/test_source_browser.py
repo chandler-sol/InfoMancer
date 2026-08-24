@@ -87,7 +87,8 @@ class SourceBrowserTests(unittest.TestCase):
             result = source_browser.allowed_roots(roots)
         self.assertEqual(result, roots)
 
-    def test_windows_style_resolution_error_becomes_source_browser_error(self):
+    @unittest.skipIf(os.name == "nt", "Windows deliberately avoids Path.resolve for mapped drives")
+    def test_posix_resolution_error_becomes_source_browser_error(self):
         with mock.patch.object(
             Path,
             "resolve",
