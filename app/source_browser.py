@@ -17,7 +17,15 @@ class SourceBrowserError(ValueError):
 def _resolved(path: Path | str) -> Path:
     # Browser input is rejected by validate_browse_path unless the resolved
     # result remains inside a configured media-browse root.
-    return Path(path).expanduser().resolve(strict=False)
+    try:
+        return Path(path).expanduser().resolve(strict=False)
+    except OSError as exc:
+        raise SourceBrowserError("That folder is not accessible to InfoMancer") from exc
+
+
+def _absolute_without_io(path: Path | str) -> Path:
+    expanded = Path(path).expanduser()
+    return Path(os.path.abspath(os.fspath(expanded)))
 
 
 def _inside(path: Path, roots: tuple[Path, ...]) -> bool:
@@ -30,8 +38,47 @@ def _inside(path: Path, roots: tuple[Path, ...]) -> bool:
     return False
 
 
+def _root_is_accessible(root: Path) -> bool:
+    try:
+        with os.scandir(root):
+            return True
+    except OSError:
+        return False
+
+
+def configured_roots(values: tuple[Path, ...]) -> tuple[Path, ...]:
+    """Return configured locations without resolving or probing them.
+
+    Network-backed Windows drive letters must remain visible in the chooser
+    even when the share is temporarily unavailable. Resolution is deferred
+    until the user actually browses an accessible location.
+    """
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for value in values:
+        try:
+            root = _absolute_without_io(value)
+        except (OSError, RuntimeError):
+            root = Path(value)
+        key = os.path.normcase(os.fspath(root)).casefold()
+        if key not in seen:
+            seen.add(key)
+            roots.append(root)
+    return tuple(roots)
+
+
 def allowed_roots(values: tuple[Path, ...]) -> tuple[Path, ...]:
-    return tuple(_resolved(value) for value in values)
+    roots: list[Path] = []
+    for root in configured_roots(values):
+        if not _root_is_accessible(root):
+            continue
+        try:
+            resolved = _resolved(root)
+        except SourceBrowserError:
+            continue
+        if resolved not in roots:
+            roots.append(resolved)
+    return tuple(roots)
 
 
 def validate_browse_path(path: Path | str, roots: tuple[Path, ...]) -> Path:
@@ -53,17 +100,17 @@ def _visible_directory(entry: os.DirEntry[str]) -> bool:
         return False
 
 
-def list_folders(path: str, configured_roots: tuple[Path, ...]) -> dict:
-    roots = allowed_roots(configured_roots)
+def list_folders(path: str, configured_root_values: tuple[Path, ...]) -> dict:
     if not path:
         locations = []
-        for root in roots:
+        for root in configured_roots(configured_root_values):
             locations.append({
                 "name": root.name or str(root), "path": str(root),
-                "accessible": root.is_dir(),
+                "accessible": _root_is_accessible(root),
             })
         return {"locations": locations, "current": "", "parent": None, "folders": []}
 
+    roots = allowed_roots(configured_root_values)
     current = validate_browse_path(path, roots)
     folders = []
     try:
@@ -96,11 +143,11 @@ def list_folders(path: str, configured_roots: tuple[Path, ...]) -> dict:
 
 def preview_folder(
     path: str,
-    configured_roots: tuple[Path, ...],
+    configured_root_values: tuple[Path, ...],
     max_directories: int = 2500,
     max_video_files: int = 100000,
 ) -> dict:
-    roots = allowed_roots(configured_roots)
+    roots = allowed_roots(configured_root_values)
     root = validate_browse_path(path, roots)
     queue: deque[tuple[Path, int]] = deque([(root, 0)])
     directories = 0
