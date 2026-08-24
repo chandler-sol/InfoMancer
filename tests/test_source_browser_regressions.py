@@ -18,12 +18,14 @@ class SourceBrowserRegressionTests(unittest.TestCase):
         resolver.assert_not_called()
         self.assertTrue(str(result))
 
-    def test_source_browser_close_is_svg_and_blocks_pseudo_marks(self):
+    def test_source_browser_close_is_exactly_one_svg_and_blocks_pseudo_marks(self):
         partial = (TEMPLATES / "_source_browser.html").read_text(encoding="utf-8")
         local = (STATIC / "sources.css").read_text(encoding="utf-8")
         shared = (STATIC / "dialog-controls-polish.css").read_text(encoding="utf-8")
 
-        self.assertIn('class="source-browser-close-icon"', partial)
+        self.assertEqual(partial.count('class="source-browser-close-icon"'), 1)
+        self.assertEqual(partial.count('<svg class="source-browser-close-icon"'), 1)
+        self.assertNotIn("×", partial)
         self.assertIn('d="M6 6L18 18M18 6L6 18"', partial)
         self.assertIn(".source-browser-close::before,.source-browser-close::after", local)
         self.assertIn("content:none!important", local)
