@@ -28,7 +28,7 @@
      their own X glyphs. */
   const dialogControlsStylesheet = document.createElement('link');
   dialogControlsStylesheet.rel = 'stylesheet';
-  dialogControlsStylesheet.href = `/static/dialog-controls-polish.css${versionQuery}`;
+  dialogControlsStylesheet.href = `/static/dialog-controls.css${versionQuery}`;
   document.head.append(dialogControlsStylesheet);
 
   /* Library control polish was split into its own stylesheet during the 0.8 cleanup.
@@ -38,7 +38,7 @@
   if (['/library', '/movies', '/shows'].includes(window.location.pathname)) {
     const libraryControlsStylesheet = document.createElement('link');
     libraryControlsStylesheet.rel = 'stylesheet';
-    libraryControlsStylesheet.href = `/static/library-controls-polish.css${versionQuery}`;
+    libraryControlsStylesheet.href = `/static/library-controls.css${versionQuery}`;
     document.head.append(libraryControlsStylesheet);
   }
 

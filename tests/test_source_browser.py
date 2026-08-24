@@ -173,7 +173,7 @@ class SourceBrowserUiContracts(unittest.TestCase):
 
     def test_close_button_uses_shared_font_independent_geometry(self):
         partial = (TEMPLATES / "_source_browser.html").read_text(encoding="utf-8")
-        shared = (STATIC / "dialog-controls-polish.css").read_text(encoding="utf-8")
+        shared = (STATIC / "dialog-controls.css").read_text(encoding="utf-8")
         local = (STATIC / "sources.css").read_text(encoding="utf-8")
         self.assertIn('class="source-browser-close"', partial)
         self.assertIn(".source-browser-close::before", shared)

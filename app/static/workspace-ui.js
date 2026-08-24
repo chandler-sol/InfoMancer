@@ -202,7 +202,7 @@
     ? Promise.all([loadStyle('library-letter-jump.css')])
     : Promise.resolve();
   const libraryStyles = library ? Promise.all([
-    loadStyle('library-controls-polish.css'),
+    loadStyle('library-controls.css'),
     loadStyle('library-performance.css'),
     loadStyle('library-density.css'),
     loadStyle('library-selection.css'),
