@@ -171,18 +171,17 @@ class SourceBrowserUiContracts(unittest.TestCase):
         self.assertIn("JSON.parse(text)", script)
         self.assertNotIn("await response.json()", script)
 
-    def test_close_button_uses_shared_font_independent_geometry(self):
+    def test_close_button_owns_one_svg_mark_and_suppresses_pseudo_content(self):
         partial = (TEMPLATES / "_source_browser.html").read_text(encoding="utf-8")
         shared = (STATIC / "dialog-controls-polish.css").read_text(encoding="utf-8")
         local = (STATIC / "sources.css").read_text(encoding="utf-8")
-        self.assertIn('class="source-browser-close"', partial)
-        self.assertIn(".source-browser-close::before", shared)
-        self.assertIn(".source-browser-close::after", shared)
-        self.assertIn("font-size: 0 !important", shared)
-        self.assertIn("translate(-50%, -50%) rotate(45deg)", shared)
-        self.assertIn("translate(-50%, -50%) rotate(-45deg)", shared)
-        self.assertNotIn(".source-browser-close::before", local)
-        self.assertNotIn(".source-browser-close::after", local)
+        self.assertIn('class="source-browser-close-icon"', partial)
+        self.assertIn('d="M6 6L18 18M18 6L6 18"', partial)
+        self.assertIn(".source-browser-close::before,.source-browser-close::after", local)
+        self.assertIn("content:none!important", local)
+        self.assertIn(".source-browser-close-icon path", local)
+        self.assertNotIn(".source-browser-close::before", shared)
+        self.assertNotIn(".source-browser-close::after", shared)
 
 
 if __name__ == "__main__":
