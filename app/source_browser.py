@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import time
 from collections import deque
 from pathlib import Path
@@ -32,8 +33,8 @@ def _resolved(path: Path | str) -> Path:
     drive may be perfectly browsable with scandir while resolve() fails with
     WinError 1272 because Windows refuses the provider's unauthenticated UNC
     resolution. For Windows we therefore use lexical absolute normalization and
-    rely on explicit root containment plus non-followed directory entries. POSIX
-    keeps realpath-style resolution so symlink escapes remain rejected there.
+    explicit reparse-point checks. POSIX keeps realpath-style resolution so
+    symlink escapes remain rejected there.
     """
     if os.name == "nt":
         return _windows_browse_path(path)
@@ -92,6 +93,40 @@ def _inside(path: Path, roots: tuple[Path, ...]) -> bool:
     return False
 
 
+def _windows_has_reparse_component(path: Path, roots: tuple[Path, ...]) -> bool:
+    """Detect symlinks/junctions below an allowed Windows root without resolving it.
+
+    The configured drive root itself is deliberately not stat'ed. That is the
+    important distinction for mapped SMB/NFS drives: opening X:\\ with scandir can
+    succeed even when Windows' path-resolution provider rejects resolving X:\\ to
+    its remote target. Components below the root are checked with lstat so a
+    crafted symlink or junction cannot escape the configured browse boundary.
+    """
+    matched_root: Path | None = None
+    relative: Path | None = None
+    for root in roots:
+        try:
+            relative = path.relative_to(root)
+            matched_root = root
+            break
+        except ValueError:
+            continue
+    if matched_root is None or relative is None:
+        return True
+
+    cursor = matched_root
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x0400)
+    for part in relative.parts:
+        cursor /= part
+        try:
+            info = os.lstat(cursor)
+        except OSError as exc:
+            raise SourceBrowserError(f"InfoMancer cannot access that folder: {exc}") from exc
+        if stat.S_ISLNK(info.st_mode) or (getattr(info, "st_file_attributes", 0) & reparse_flag):
+            return True
+    return False
+
+
 def allowed_roots(values: tuple[Path, ...]) -> tuple[Path, ...]:
     cache_key = _root_cache_key(values)
     now = time.monotonic()
@@ -137,6 +172,8 @@ def validate_browse_path(path: Path | str, roots: tuple[Path, ...]) -> Path:
     resolved = _resolved(path)
     if not _inside(resolved, roots):
         raise SourceBrowserError("That folder is outside the allowed media locations")
+    if os.name == "nt" and _windows_has_reparse_component(resolved, roots):
+        raise SourceBrowserError("That folder uses a Windows link or junction outside the safe browse path")
     if not _root_is_accessible(resolved):
         raise SourceBrowserError("That folder is not accessible to InfoMancer")
     return resolved
@@ -178,6 +215,12 @@ def list_folders(path: str, configured_roots: tuple[Path, ...]) -> dict:
             continue
         if not _inside(child, roots):
             continue
+        if os.name == "nt":
+            try:
+                if _windows_has_reparse_component(child, roots):
+                    continue
+            except SourceBrowserError:
+                continue
         folders.append({"name": entry.name, "path": str(child)})
 
     parent = current.parent
@@ -235,6 +278,12 @@ def preview_folder(
                         continue
                     if not _inside(child, roots):
                         continue
+                    if os.name == "nt":
+                        try:
+                            if _windows_has_reparse_component(child, roots):
+                                continue
+                        except SourceBrowserError:
+                            continue
                     if entry.name.casefold().startswith("season "):
                         season_folders += 1
                     if depth == 0 and MOVIE_BUCKET_RE.fullmatch(entry.name):
