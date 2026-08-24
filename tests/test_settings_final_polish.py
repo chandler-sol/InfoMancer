@@ -31,15 +31,15 @@ class SettingsFinalPolishContracts(unittest.TestCase):
         settings_nav = (TEMPLATES / "_settings_nav.html").read_text(encoding="utf-8")
         sources = (TEMPLATES / "sources.html").read_text(encoding="utf-8")
 
-        self.assertIn("recovery-polish.css", recovery)
+        self.assertIn("recovery-restore.css", recovery)
         self.assertNotIn("settings-final-polish.css", settings_nav)
         self.assertFalse((STATIC / "settings-final-polish.css").exists())
         self.assertNotIn("settings-handoff", sources)
         self.assertNotIn("Metadata and maintenance have moved", sources)
 
     def test_saved_views_explain_the_saved_state_and_keep_checkbox_aligned(self):
-        script = (STATIC / "library-saved-views-polish.js").read_text(encoding="utf-8")
-        styles = (STATIC / "library-saved-views-polish.css").read_text(encoding="utf-8")
+        script = (STATIC / "library-saved-views.js").read_text(encoding="utf-8")
+        styles = (STATIC / "library-saved-views.css").read_text(encoding="utf-8")
 
         self.assertIn("saved-view-explainer", script)
         self.assertIn("current Library scope, filters, and sorting", script)
@@ -48,9 +48,9 @@ class SettingsFinalPolishContracts(unittest.TestCase):
 
     def test_bulk_collection_choices_have_dedicated_modal_layout(self):
         template = (TEMPLATES / "organize_bulk.html").read_text(encoding="utf-8")
-        styles = (STATIC / "organize-bulk-polish.css").read_text(encoding="utf-8")
+        styles = (STATIC / "organize-bulk.css").read_text(encoding="utf-8")
 
-        self.assertIn("organize-bulk-polish.css", template)
+        self.assertIn("organize-bulk.css", template)
         self.assertIn("organize-collection-grid", template)
         self.assertIn("organize-collection-option", template)
         self.assertIn("grid-template-columns: 18px minmax(0, 1fr)", styles)

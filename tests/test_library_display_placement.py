@@ -25,7 +25,7 @@ class LibraryDisplayPlacementContracts(unittest.TestCase):
         self.assertIn("justify-content: flex-start", source)
 
     def test_saved_views_stay_before_display_controls(self):
-        source = (ROOT / "app/static/library-saved-views-polish.css").read_text(
+        source = (ROOT / "app/static/library-saved-views.css").read_text(
             encoding="utf-8"
         )
 

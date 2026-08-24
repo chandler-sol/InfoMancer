@@ -100,10 +100,10 @@ class OnboardingTour08ContractTests(unittest.TestCase):
         source = (STATIC / "engagement.js").read_text(encoding="utf-8")
         self.assertIn('loadStyle("onboarding-tour.css", tourVersion)', source)
         self.assertIn('loadStyle("onboarding-tour-inspector-preview.css", tourVersion)', source)
-        self.assertIn('loadStyle("onboarding-tour-mobile-polish.css", tourVersion)', source)
+        self.assertIn('loadStyle("onboarding-tour-mobile.css", tourVersion)', source)
         self.assertIn('loadScript("onboarding-tour.js", tourVersion)', source)
         self.assertIn('loadScript("onboarding-tour-inspector-preview.js", tourVersion)', source)
-        self.assertIn('loadScript("onboarding-tour-mobile-polish.js", tourVersion)', source)
+        self.assertIn('loadScript("onboarding-tour-mobile.js", tourVersion)', source)
         self.assertIn("Promise.all([", source)
         self.assertIn("tour_assets=20260822c", source)
         self.assertIn("tour.hidden = true", source)
@@ -140,8 +140,8 @@ class OnboardingTour08ContractTests(unittest.TestCase):
         self.assertIn("prefers-reduced-motion", css)
 
     def test_mobile_tour_polish_keeps_late_steps_stable(self) -> None:
-        source = (STATIC / "onboarding-tour-mobile-polish.js").read_text(encoding="utf-8")
-        css = (STATIC / "onboarding-tour-mobile-polish.css").read_text(encoding="utf-8")
+        source = (STATIC / "onboarding-tour-mobile.js").read_text(encoding="utf-8")
+        css = (STATIC / "onboarding-tour-mobile.css").read_text(encoding="utf-8")
         self.assertIn("card.scrollTop = 0", source)
         self.assertIn('profileTitle = "Your account and preferences"', source)
         self.assertIn('account.setAttribute("open", "")', source)

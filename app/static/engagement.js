@@ -52,11 +52,11 @@
     Promise.all([
       loadStyle("onboarding-tour.css", tourVersion),
       loadStyle("onboarding-tour-inspector-preview.css", tourVersion),
-      loadStyle("onboarding-tour-mobile-polish.css", tourVersion),
+      loadStyle("onboarding-tour-mobile.css", tourVersion),
     ])
       .then(() => loadScript("onboarding-tour.js", tourVersion))
       .then(() => loadScript("onboarding-tour-inspector-preview.js", tourVersion))
-      .then(() => loadScript("onboarding-tour-mobile-polish.js", tourVersion));
+      .then(() => loadScript("onboarding-tour-mobile.js", tourVersion));
   }
 
   const popup = document.getElementById("announcement-popup");

@@ -196,7 +196,7 @@
     ? Promise.all([loadStyle('settings-system-nav.css')])
     : Promise.resolve();
   const savedViewStyles = savedViews
-    ? Promise.all([loadStyle('library-saved-views-polish.css')])
+    ? Promise.all([loadStyle('library-saved-views.css')])
     : Promise.resolve();
   const letterJumpStyles = letterJump
     ? Promise.all([loadStyle('library-letter-jump.css')])
@@ -208,7 +208,7 @@
     loadStyle('library-selection.css'),
   ]) : Promise.resolve();
   const detailStyles = detail
-    ? Promise.all([loadStyle('detail-page-polish.css')])
+    ? Promise.all([loadStyle('detail-page.css')])
     : Promise.resolve();
   const letterJumpReady = letterJump
     ? letterJumpStyles.then(() => loadScript('library-letter-jump.js'))
@@ -233,7 +233,7 @@
   });
   if (settingsCoverDensity) loadScript('settings-cover-density.js');
   savedViewStyles.then(() => {
-    if (savedViews) return loadScript('library-saved-views-polish.js');
+    if (savedViews) return loadScript('library-saved-views.js');
   });
   letterJumpReady.then(() => {
     if (!letterJump) return;
@@ -270,6 +270,6 @@
   });
 
   detailStyles.then(() => {
-    if (detail) return loadScript('detail-page-polish.js');
+    if (detail) return loadScript('detail-page.js');
   });
 })();

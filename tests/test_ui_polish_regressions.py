@@ -11,7 +11,7 @@ TEMPLATES = ROOT / "app" / "templates"
 
 class UiPolishRegressionTests(unittest.TestCase):
     def test_saved_views_dismisses_on_outside_click_and_escape(self):
-        source = (STATIC / "library-saved-views-polish.js").read_text(encoding="utf-8")
+        source = (STATIC / "library-saved-views.js").read_text(encoding="utf-8")
         self.assertIn("document.addEventListener('pointerdown'", source)
         self.assertIn("!manager.contains(event.target)", source)
         self.assertIn("event.key !== 'Escape'", source)
@@ -28,30 +28,30 @@ class UiPolishRegressionTests(unittest.TestCase):
         self.assertIn("aria-busy", source)
 
     def test_title_media_facts_are_scroll_free_quality_cards(self):
-        source = (STATIC / "detail-page-polish.css").read_text(encoding="utf-8")
+        source = (STATIC / "detail-page.css").read_text(encoding="utf-8")
         self.assertIn("grid-template-columns: repeat(6, minmax(0, 1fr))", source)
         self.assertIn("overflow: visible !important", source)
         self.assertNotIn("overflow-x: auto !important", source)
 
     def test_title_source_is_single_clickable_library_filter(self):
         route = (ROOT / "app/routes/title_media_info.py").read_text(encoding="utf-8")
-        script = (STATIC / "detail-page-polish.js").read_text(encoding="utf-8")
-        styles = (STATIC / "detail-page-polish.css").read_text(encoding="utf-8")
+        script = (STATIC / "detail-page.js").read_text(encoding="utf-8")
+        styles = (STATIC / "detail-page.css").read_text(encoding="utf-8")
         self.assertIn('"source_href": f"/library?root=', route)
         self.assertIn("value.href = sourceHrefState", script)
         self.assertIn('.dossier-on-disk .file-source").forEach((node) => node.remove())', script)
         self.assertIn(".dossier-on-disk .file-source {\n  display: none !important;", styles)
 
     def test_title_and_inspector_artwork_fill_their_summary_tracks(self):
-        source = (STATIC / "detail-page-polish.css").read_text(encoding="utf-8")
+        source = (STATIC / "detail-page.css").read_text(encoding="utf-8")
         self.assertIn("detail-page-head .detail-poster-column", source)
         self.assertIn("align-self: stretch", source)
         self.assertIn(".workspace-inspector-summary", source)
         self.assertIn("width: 120px", source)
 
     def test_title_workflows_cannot_retain_horizontal_scroll(self):
-        script = (STATIC / "detail-page-polish.js").read_text(encoding="utf-8")
-        styles = (STATIC / "detail-page-polish.css").read_text(encoding="utf-8")
+        script = (STATIC / "detail-page.js").read_text(encoding="utf-8")
+        styles = (STATIC / "detail-page.css").read_text(encoding="utf-8")
         self.assertIn("body.scrollLeft = 0", script)
         self.assertIn("overflow-x: hidden !important", styles)
         self.assertIn("max-width: 100% !important", styles)
