@@ -47,20 +47,30 @@ class SourceBrowserTests(unittest.TestCase):
         with self.assertRaises(SourceBrowserError):
             list_folders(str(link), self.allowed)
 
-    def test_inaccessible_configured_root_does_not_break_location_listing(self):
-        blocked = (self.root.parent / "Blocked network drive").resolve()
+    def test_inaccessible_configured_root_remains_visible_but_unavailable(self):
+        blocked = self.root.parent / "Blocked network drive"
         real_accessible = source_browser._root_is_accessible
 
         def accessible(path: Path) -> bool:
-            if path == blocked:
+            if path == Path(os.path.abspath(os.fspath(blocked))):
                 return False
             return real_accessible(path)
 
         with mock.patch.object(source_browser, "_root_is_accessible", side_effect=accessible):
             result = list_folders("", (self.root, blocked))
 
-        self.assertEqual(len(result["locations"]), 1)
-        self.assertEqual(result["locations"][0]["path"], str(self.root))
+        self.assertEqual(len(result["locations"]), 2)
+        locations = {row["path"]: row for row in result["locations"]}
+        self.assertTrue(locations[str(self.root)]["accessible"])
+        blocked_path = str(Path(os.path.abspath(os.fspath(blocked))))
+        self.assertIn(blocked_path, locations)
+        self.assertFalse(locations[blocked_path]["accessible"])
+
+    def test_inaccessible_configured_root_cannot_be_browsed(self):
+        blocked = self.root.parent / "Blocked network drive"
+        with mock.patch.object(source_browser, "_root_is_accessible", return_value=False):
+            with self.assertRaises(SourceBrowserError):
+                list_folders(str(blocked), (blocked,))
 
     def test_configured_root_accessibility_probe_is_short_lived_cached(self):
         with mock.patch.object(source_browser, "_root_is_accessible", return_value=True) as probe:

@@ -47,6 +47,21 @@ def _root_cache_key(values: tuple[Path, ...]) -> tuple[str, ...]:
     )
 
 
+def _configured_roots(values: tuple[Path, ...]) -> tuple[Path, ...]:
+    """Return configured roots without resolving or probing their filesystems."""
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for value in values:
+        expanded = Path(value).expanduser()
+        root = Path(os.path.abspath(os.fspath(expanded)))
+        key = os.path.normcase(os.fspath(root))
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(root)
+    return tuple(roots)
+
+
 def _clear_allowed_roots_cache() -> None:
     """Clear the short-lived browse-root cache, primarily for tests and reconfiguration."""
     with _allowed_roots_cache_lock:
@@ -124,16 +139,16 @@ def _visible_directory(entry: os.DirEntry[str]) -> bool:
 
 
 def list_folders(path: str, configured_roots: tuple[Path, ...]) -> dict:
-    roots = allowed_roots(configured_roots)
     if not path:
         locations = []
-        for root in roots:
+        for root in _configured_roots(configured_roots):
             locations.append({
                 "name": root.name or str(root), "path": str(root),
-                "accessible": True,
+                "accessible": _root_is_accessible(root),
             })
         return {"locations": locations, "current": "", "parent": None, "folders": []}
 
+    roots = allowed_roots(configured_roots)
     current = validate_browse_path(path, roots)
     folders = []
     try:
