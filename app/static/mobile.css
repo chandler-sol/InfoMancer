@@ -1,3 +1,9 @@
+/* Consolidated mobile chrome styles.
+   Merged from final-mobile-polish.css, mobile-header.css, and mobile-detail.css
+   in their original bootstrap injection order (general polish, header, detail).
+   Loaded by app-shell-bootstrap.js on every page. */
+/* ---- from final-mobile-polish.css ---- */
+
 /* Final 0.8 mobile polish. Keep these overrides narrow and structural so the
    desktop workspace design remains unchanged. */
 
@@ -440,5 +446,186 @@
   .topbar .task-widget,
   .topbar .announcement-button {
     transition: none;
+  }
+}
+/* ---- from mobile-header.css ---- */
+
+/* Mobile-only header geometry. Keep account and announcement controls optically
+   centered and prevent WebKit tap/focus chrome from painting stray rings. */
+@media (max-width: 760px) {
+  .topbar .account-menu {
+    flex: 0 0 42px;
+    width: 42px;
+    min-width: 42px;
+  }
+
+  .topbar .account-menu > summary {
+    position: relative;
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
+    min-height: 42px;
+    padding: 0;
+    overflow: hidden;
+    border-color: #45641f;
+    outline: 0;
+    box-shadow: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .topbar .account-menu > summary:focus {
+    outline: 0;
+  }
+
+  .topbar .account-menu > summary:focus-visible {
+    overflow: visible;
+    box-shadow: 0 0 0 3px rgba(81, 214, 230, .28);
+  }
+
+  .topbar .account-avatar {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    border-radius: inherit;
+    background: var(--lime);
+    color: #081008;
+  }
+
+  .topbar .announcement-button {
+    overflow: visible;
+  }
+
+  .topbar .announcement-button svg {
+    width: 18px;
+    height: 18px;
+    overflow: visible;
+    transform: translateX(1px);
+  }
+}
+/* ---- from mobile-detail.css ---- */
+
+/* Mobile title pages should read as one continuous dossier rather than a desktop
+   grid squeezed into a phone. The poster and identity share the first row; Overview
+   and Cast & crew then use the full card width on a single typographic axis. */
+@media (max-width: 620px) {
+  body.has-app-sidebar .media-dossier .detail-page-head {
+    grid-template-columns: clamp(108px, 31vw, 138px) minmax(0, 1fr);
+    column-gap: 16px;
+    row-gap: 0;
+    align-items: start;
+    padding: 14px;
+  }
+
+  body.has-app-sidebar .media-dossier .detail-page-head .detail-poster-column {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: start;
+    width: 100%;
+    min-height: 0;
+    max-width: 138px;
+  }
+
+  body.has-app-sidebar .media-dossier .detail-page-head .detail-poster,
+  body.has-app-sidebar .media-dossier .detail-page-head .detail-poster-placeholder {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    max-width: none;
+    aspect-ratio: 2 / 3;
+    align-self: start;
+    object-fit: cover;
+  }
+
+  body.has-app-sidebar .media-dossier .detail-page-head .detail-copy {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+    padding-top: 0;
+  }
+
+  body.has-app-sidebar .media-dossier .detail-page-head .detail-copy h1 {
+    margin-top: 0;
+    font-size: clamp(27px, 7.8vw, 36px);
+  }
+
+  body.has-app-sidebar .media-dossier .title-hero-aside {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    min-width: 0;
+    gap: 0;
+    margin: 16px 0 0;
+    padding: 14px 0 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  body.has-app-sidebar .media-dossier .title-synopsis,
+  body.has-app-sidebar .media-dossier .movie-credits {
+    width: 100%;
+    margin: 0;
+    padding: 16px 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  body.has-app-sidebar .media-dossier .movie-credits {
+    border-top: 1px solid var(--line);
+  }
+
+  body.has-app-sidebar .media-dossier .movie-credits > div {
+    grid-template-columns: 78px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  body.has-app-sidebar .media-dossier .title-synopsis h2,
+  body.has-app-sidebar .media-dossier .movie-credits h2 {
+    margin-top: 0;
+  }
+
+  body.has-app-sidebar .media-dossier .title-overview {
+    margin-bottom: 0;
+  }
+
+  /* The On Disk header should share the file list's left/right axes instead of
+     centering the label while the count and file details pull in opposite directions. */
+  body.has-app-sidebar .media-dossier .dossier-on-disk > .panel-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+  }
+
+  body.has-app-sidebar .media-dossier.detail-kind-movie .dossier-on-disk .panel-head {
+    margin-inline: 0;
+    padding: 12px 0;
+    row-gap: 0;
+  }
+
+  body.has-app-sidebar .media-dossier .dossier-on-disk .on-disk-copy {
+    justify-self: start;
+    text-align: left;
+  }
+
+  body.has-app-sidebar .media-dossier .dossier-on-disk .dossier-file-count {
+    justify-self: end;
+    text-align: right;
+  }
+
+  body.has-app-sidebar .media-dossier .dossier-on-disk .series-controls {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+  }
+
+  /* The template keeps a shared series-controls host for movies and TV. Movies with
+     files do not put anything in that host, so the generic mobile margin used to turn
+     the empty element into a large blank row between the On Disk title and divider. */
+  body.has-app-sidebar .media-dossier.detail-kind-movie
+  .dossier-on-disk .series-controls:not(:has(> *)) {
+    display: none;
+    margin: 0;
   }
 }

@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class ResponsiveSweepTests(unittest.TestCase):
     def test_mobile_application_chrome_stays_inside_dynamic_viewport(self):
-        css = (ROOT / "app/static/final-mobile-polish.css").read_text(encoding="utf-8")
+        css = (ROOT / "app/static/mobile.css").read_text(encoding="utf-8")
 
         self.assertIn("100dvh", css)
         self.assertIn("env(safe-area-inset-top)", css)
@@ -36,7 +36,7 @@ class ResponsiveSweepTests(unittest.TestCase):
         self.assertNotIn("calc(100vh - 30px)", css)
 
     def test_mobile_header_popovers_have_scrollable_height_budget(self):
-        css = (ROOT / "app/static/final-mobile-polish.css").read_text(encoding="utf-8")
+        css = (ROOT / "app/static/mobile.css").read_text(encoding="utf-8")
 
         for selector in (
             ".topbar .global-search-suggestions",
@@ -52,10 +52,10 @@ class ResponsiveSweepTests(unittest.TestCase):
         self.assertIn("-webkit-overflow-scrolling: touch", css)
 
     def test_mobile_header_profile_and_announcement_chrome_are_bounded(self):
-        css = (ROOT / "app/static/mobile-header.css").read_text(encoding="utf-8")
+        css = (ROOT / "app/static/mobile.css").read_text(encoding="utf-8")
         bootstrap = (ROOT / "app/static/app-shell-bootstrap.js").read_text(encoding="utf-8")
 
-        self.assertIn("/static/mobile-header.css", bootstrap)
+        self.assertIn("/static/mobile.css", bootstrap)
         self.assertIn(".topbar .account-menu", css)
         self.assertIn("flex: 0 0 42px", css)
         self.assertIn("-webkit-tap-highlight-color: transparent", css)
@@ -83,7 +83,7 @@ class ResponsiveSweepTests(unittest.TestCase):
         )
 
     def test_mobile_metadata_results_put_commit_action_on_its_own_row(self):
-        css = (ROOT / "app/static/final-mobile-polish.css").read_text(encoding="utf-8")
+        css = (ROOT / "app/static/mobile.css").read_text(encoding="utf-8")
 
         self.assertIn(".results > .result", css)
         self.assertIn("grid-template-columns: 70px minmax(0, 1fr)", css)
@@ -91,7 +91,7 @@ class ResponsiveSweepTests(unittest.TestCase):
         self.assertIn("grid-column: 1 / -1", css)
 
     def test_mobile_touch_controls_and_shared_actions_have_room(self):
-        css = (ROOT / "app/static/final-mobile-polish.css").read_text(encoding="utf-8")
+        css = (ROOT / "app/static/mobile.css").read_text(encoding="utf-8")
 
         self.assertIn(".task-popover-controls button", css)
         self.assertIn(".source-browser-close", css)
@@ -102,7 +102,7 @@ class ResponsiveSweepTests(unittest.TestCase):
         self.assertIn("flex-direction: column-reverse", css)
 
     def test_settings_and_tables_keep_touch_scrolling_contained(self):
-        css = (ROOT / "app/static/final-mobile-polish.css").read_text(encoding="utf-8")
+        css = (ROOT / "app/static/mobile.css").read_text(encoding="utf-8")
 
         self.assertIn("scroll-snap-type: x proximity", css)
         self.assertIn("scroll-snap-align: center", css)
@@ -115,7 +115,7 @@ class ResponsiveSweepTests(unittest.TestCase):
             self.assertIn(selector, css)
 
     def test_short_landscape_viewports_respect_cutouts_and_reclaim_height(self):
-        css = (ROOT / "app/static/final-mobile-polish.css").read_text(encoding="utf-8")
+        css = (ROOT / "app/static/mobile.css").read_text(encoding="utf-8")
 
         self.assertIn("@media (orientation: landscape) and (max-height: 500px)", css)
         self.assertIn("padding-left: max(24px, env(safe-area-inset-left))", css)

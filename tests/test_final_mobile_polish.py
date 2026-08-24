@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class FinalMobilePolishTests(unittest.TestCase):
     def test_mobile_polish_assets_cover_reported_layout_regressions(self):
-        css = (ROOT / "app/static/final-mobile-polish.css").read_text(encoding="utf-8")
+        css = (ROOT / "app/static/mobile.css").read_text(encoding="utf-8")
         script = (ROOT / "app/static/final-mobile-polish.js").read_text(encoding="utf-8")
         bootstrap = (ROOT / "app/static/app-shell-bootstrap.js").read_text(encoding="utf-8")
 
@@ -30,7 +30,7 @@ class FinalMobilePolishTests(unittest.TestCase):
         self.assertIn("X-CSRF-Token", script)
         self.assertIn("role-librarian", script)
 
-        self.assertIn("final-mobile-polish.css", bootstrap)
+        self.assertIn("mobile.css", bootstrap)
         self.assertIn("final-mobile-polish.js", bootstrap)
 
     def test_scan_all_cancellation_stops_before_next_source(self):

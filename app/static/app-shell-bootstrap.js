@@ -42,26 +42,14 @@
     document.head.append(libraryControlsStylesheet);
   }
 
-  /* Final release polish is loaded from bootstrap so structural mobile fixes are
-     present before the Settings and task controllers perform their late handoff. */
-  const polishStylesheet = document.createElement('link');
-  polishStylesheet.rel = 'stylesheet';
-  polishStylesheet.href = `/static/final-mobile-polish.css${versionQuery}`;
-  document.head.append(polishStylesheet);
-
-  /* Header-specific mobile chrome has its own small owner so account/focus geometry
-     and announcement icon sizing do not get buried inside broader responsive rules. */
-  const mobileHeaderStylesheet = document.createElement('link');
-  mobileHeaderStylesheet.rel = 'stylesheet';
-  mobileHeaderStylesheet.href = `/static/mobile-header.css${versionQuery}`;
-  document.head.append(mobileHeaderStylesheet);
-
-  /* Detail-page phone layout has a dedicated owner so the mobile dossier can be
-     simplified without weakening the richer desktop/tablet presentation. */
-  const mobileDetailStylesheet = document.createElement('link');
-  mobileDetailStylesheet.rel = 'stylesheet';
-  mobileDetailStylesheet.href = `/static/mobile-detail.css${versionQuery}`;
-  document.head.append(mobileDetailStylesheet);
+  /* Consolidated mobile chrome (general polish, header, detail sections in cascade
+     order) is loaded from bootstrap so structural mobile fixes are present before
+     the Settings and task controllers perform their late handoff. One request
+     replaces the previous three-stylesheet waterfall. */
+  const mobileStylesheet = document.createElement('link');
+  mobileStylesheet.rel = 'stylesheet';
+  mobileStylesheet.href = `/static/mobile.css${versionQuery}`;
+  document.head.append(mobileStylesheet);
 
   const polishController = document.createElement('script');
   polishController.src = `/static/final-mobile-polish.js${versionQuery}`;

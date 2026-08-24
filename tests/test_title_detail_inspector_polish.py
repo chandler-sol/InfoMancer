@@ -7,7 +7,7 @@ STATIC = ROOT / "app" / "static"
 
 class TitleDetailInspectorPolishTests(unittest.TestCase):
     def test_empty_movie_controls_do_not_create_on_disk_spacer(self):
-        css = (STATIC / "mobile-detail.css").read_text(encoding="utf-8")
+        css = (STATIC / "mobile.css").read_text(encoding="utf-8")
         self.assertIn(".dossier-on-disk .series-controls:not(:has(> *))", css)
         self.assertIn("display: none", css)
 
