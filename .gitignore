@@ -15,6 +15,7 @@ htmlcov/
 .vscode/
 data/
 data-sandbox/
+data-before-reset/
 sandbox-media/
 !.env.sandbox.example
 *.log
@@ -22,6 +23,7 @@ sandbox-media/
 dist/
 build/
 *.spec
+im_jobs.json
 
 # Desktop build output and dependency caches are reproducible and must not be committed.
 node_modules/
