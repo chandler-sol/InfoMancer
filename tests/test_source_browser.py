@@ -49,7 +49,8 @@ class SourceBrowserTests(unittest.TestCase):
                 source_browser._resolved(str(self.root / "Movies"))
         message = str(raised.exception)
         self.assertIn("unauthenticated guest", message)
-        self.assertIn("net use", message)
+        self.assertIn("NFS mapping", message)
+        self.assertIn("UNC path", message)
         self.assertIn("Group Policy", message)
 
     def test_other_access_errors_keep_their_original_message(self):
