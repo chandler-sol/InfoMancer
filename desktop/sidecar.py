@@ -7,7 +7,7 @@ import string
 import sys
 from pathlib import Path
 
-DESKTOP_VERSION = "0.8.0-alpha.1"
+DESKTOP_VERSION = "0.8.1-alpha.1"
 
 
 def _root_is_accessible(root: Path) -> bool:
