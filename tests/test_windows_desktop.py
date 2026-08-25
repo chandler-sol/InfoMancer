@@ -12,8 +12,13 @@ class WindowsDesktopContractTests(unittest.TestCase):
         main = (ROOT / "app/main.py").read_text(encoding="utf-8")
         match = re.search(r'APP_VERSION = "([^"]+)"', main)
         self.assertIsNotNone(match)
+        expected_version = match.group(1)
         config = json.loads((ROOT / "desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["version"], match.group(1))
+        sidecar = (ROOT / "desktop/sidecar.py").read_text(encoding="utf-8")
+        sidecar_match = re.search(r'DESKTOP_VERSION = "([^"]+)"', sidecar)
+        self.assertIsNotNone(sidecar_match)
+        self.assertEqual(config["version"], expected_version)
+        self.assertEqual(sidecar_match.group(1), expected_version)
         self.assertEqual(config["productName"], "InfoMancer")
         self.assertEqual(config["identifier"], "cloud.arsenik.infomancer")
 
@@ -60,6 +65,7 @@ class WindowsDesktopContractTests(unittest.TestCase):
 
     def test_updater_uses_signed_github_release_channel(self):
         rust = (ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
+        sidecar = (ROOT / "desktop/sidecar.py").read_text(encoding="utf-8")
         self.assertIn("tauri_plugin_updater", rust)
         self.assertIn("desktop-alpha/latest.json", rust)
         self.assertIn("INFOMANCER_UPDATER_PUBLIC_KEY", rust)
