@@ -23,7 +23,6 @@ class LibraryControlRegressionTests(unittest.TestCase):
         self.assertNotIn("/static/dialog-controls.css", bootstrap)
         for selector in (
             ".organize-dialog-close",
-            ".source-browser-close",
             ".overview-dialog-close",
             ".title-cast-dialog-close",
             ".profile-account-dialog-close",
@@ -32,6 +31,7 @@ class LibraryControlRegressionTests(unittest.TestCase):
             "#task-dismiss",
         ):
             self.assertIn(selector, css)
+        self.assertNotIn(".source-browser-close", css)
         self.assertIn("font-size: 0 !important", css)
         self.assertIn("translate(-50%, -50%) rotate(45deg)", css)
         self.assertIn("translate(-50%, -50%) rotate(-45deg)", css)
