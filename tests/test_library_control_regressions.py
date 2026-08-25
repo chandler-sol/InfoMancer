@@ -15,10 +15,12 @@ class LibraryControlRegressionTests(unittest.TestCase):
         self.assertIn("versionQuery", bootstrap)
 
     def test_shared_dialog_close_controls_are_loaded_and_font_independent(self) -> None:
+        base = (TEMPLATES / "base.html").read_text(encoding="utf-8")
         bootstrap = (STATIC / "app-shell-bootstrap.js").read_text(encoding="utf-8")
         css = (STATIC / "dialog-controls.css").read_text(encoding="utf-8")
         bulk_css = (STATIC / "organize-bulk.css").read_text(encoding="utf-8")
-        self.assertIn("dialog-controls.css", bootstrap)
+        self.assertIn("path='dialog-controls.css'", base)
+        self.assertNotIn("/static/dialog-controls.css", bootstrap)
         for selector in (
             ".organize-dialog-close",
             ".source-browser-close",
