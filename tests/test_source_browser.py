@@ -38,12 +38,12 @@ class SourceBrowserTests(unittest.TestCase):
             list_folders(str(self.root.parent), self.allowed)
 
     def test_windows_guest_access_block_gets_actionable_hint(self):
-        blocked = OSError()
-        blocked.winerror = 1272
-        blocked.strerror = (
+        blocked = OSError(
+            1272,
             "You can't access this shared folder because your organization's "
-            "security policies block unauthenticated guest access"
+            "security policies block unauthenticated guest access",
         )
+        blocked.winerror = 1272
         with mock.patch.object(Path, "resolve", side_effect=blocked), \
              mock.patch.object(source_browser, "_root_is_accessible", return_value=False):
             with self.assertRaises(SourceBrowserError) as raised:
