@@ -44,7 +44,8 @@ class SourceBrowserTests(unittest.TestCase):
             "You can't access this shared folder because your organization's "
             "security policies block unauthenticated guest access"
         )
-        with mock.patch.object(Path, "resolve", side_effect=blocked):
+        with mock.patch.object(Path, "resolve", side_effect=blocked), \
+             mock.patch.object(source_browser, "_root_is_accessible", return_value=False):
             with self.assertRaises(SourceBrowserError) as raised:
                 source_browser._resolved(str(self.root / "Movies"))
         message = str(raised.exception)
@@ -52,6 +53,16 @@ class SourceBrowserTests(unittest.TestCase):
         self.assertIn("NFS mapping", message)
         self.assertIn("UNC path", message)
         self.assertIn("Group Policy", message)
+
+    def test_windows_1272_resolver_failure_falls_back_when_direct_open_works(self):
+        (self.root / "Movies").mkdir()
+        blocked = OSError()
+        blocked.winerror = 1272
+        blocked.strerror = "Guest access is blocked during final-path resolution"
+        with mock.patch.object(Path, "resolve", side_effect=blocked):
+            result = list_folders(str(self.root), self.allowed)
+        self.assertEqual([row["name"] for row in result["folders"]], ["Movies"])
+        self.assertEqual(result["current"], str(self.root))
 
     def test_other_access_errors_keep_their_original_message(self):
         blocked = OSError(13, "Permission denied")
@@ -197,9 +208,14 @@ class SourceBrowserUiContracts(unittest.TestCase):
 
     def test_close_button_uses_shared_font_independent_geometry(self):
         partial = (TEMPLATES / "_source_browser.html").read_text(encoding="utf-8")
+        base = (TEMPLATES / "base.html").read_text(encoding="utf-8")
+        bootstrap = (STATIC / "app-shell-bootstrap.js").read_text(encoding="utf-8")
         shared = (STATIC / "dialog-controls.css").read_text(encoding="utf-8")
         local = (STATIC / "sources.css").read_text(encoding="utf-8")
         self.assertIn('class="source-browser-close"', partial)
+        self.assertNotIn(">×</button>", partial)
+        self.assertIn("path='dialog-controls.css'", base)
+        self.assertNotIn("/static/dialog-controls.css", bootstrap)
         self.assertIn(".source-browser-close::before", shared)
         self.assertIn(".source-browser-close::after", shared)
         self.assertIn("font-size: 0 !important", shared)
