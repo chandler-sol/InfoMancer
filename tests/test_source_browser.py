@@ -37,6 +37,29 @@ class SourceBrowserTests(unittest.TestCase):
         with self.assertRaises(SourceBrowserError):
             list_folders(str(self.root.parent), self.allowed)
 
+    def test_windows_guest_access_block_gets_actionable_hint(self):
+        blocked = OSError()
+        blocked.winerror = 1272
+        blocked.strerror = (
+            "You can't access this shared folder because your organization's "
+            "security policies block unauthenticated guest access"
+        )
+        with mock.patch.object(Path, "resolve", side_effect=blocked):
+            with self.assertRaises(SourceBrowserError) as raised:
+                source_browser._resolved(str(self.root / "Movies"))
+        message = str(raised.exception)
+        self.assertIn("unauthenticated guest", message)
+        self.assertIn("net use", message)
+        self.assertIn("Group Policy", message)
+
+    def test_other_access_errors_keep_their_original_message(self):
+        blocked = OSError(13, "Permission denied")
+        with mock.patch.object(Path, "resolve", side_effect=blocked):
+            with self.assertRaises(SourceBrowserError) as raised:
+                source_browser._resolved(str(self.root / "Movies"))
+        self.assertIn("Permission denied", str(raised.exception))
+        self.assertNotIn("net use", str(raised.exception))
+
     def test_rejects_symlink_that_escapes_configured_location(self):
         outside = Path(self.temp.name).parent
         link = self.root / "outside-link"

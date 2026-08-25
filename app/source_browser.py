@@ -19,6 +19,21 @@ class SourceBrowserError(ValueError):
     pass
 
 
+def _access_hint(exc: OSError) -> str:
+    # Windows blocks unauthenticated SMB guest sessions by default (WinError 1272),
+    # which is how NFS/Samba media shares are commonly mapped on Windows. Give the
+    # operator the actual remediation instead of a raw errno string.
+    if getattr(exc, "winerror", None) == 1272:
+        return (
+            f"{exc} This mapped share is being accessed as an unauthenticated guest, "
+            "which Windows blocks by default. Map the share with a username and "
+            "password (for example: net use X: \\\\server\\media /user:yourname), "
+            "or enable insecure guest logons in Group Policy if guest access is "
+            "intended for this network."
+        )
+    return str(exc)
+
+
 def _resolved(path: Path | str) -> Path:
     # Browser input is rejected by validate_browse_path unless the resolved
     # result remains inside a configured media-browse root. Windows can raise
@@ -27,7 +42,9 @@ def _resolved(path: Path | str) -> Path:
     try:
         return Path(path).expanduser().resolve(strict=False)
     except OSError as exc:
-        raise SourceBrowserError(f"InfoMancer cannot access that folder: {exc}") from exc
+        raise SourceBrowserError(
+            f"InfoMancer cannot access that folder: {_access_hint(exc)}"
+        ) from exc
 
 
 def _root_is_accessible(path: Path) -> bool:
