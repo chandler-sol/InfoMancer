@@ -38,5 +38,6 @@ showcase/screenshots/
 Thumbs.db
 Desktop.ini
 
-# graft's local graph cache — regenerable, not committed (run `graft build`).
+# Graft's local graph cache and query snapshots are regenerable, not repository source.
 graft/
+.graft-*.txt
