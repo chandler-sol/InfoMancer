@@ -64,6 +64,18 @@
 - Keep actual startup failures visible and actionable. The splash is presentation for legitimate startup work, not a way to conceal errors.
 - Preserve a route back to installation selection from Settings or the desktop launcher so changing how the app connects never requires deleting application data.
 
+## P1: Librarian “View Library As”
+
+- Add a Librarian-only **View library as** mode that lets a Librarian render the library exactly as a selected guest account would see it for troubleshooting permissions, visibility, filters, and access problems.
+- Treat this as view simulation, not account impersonation. The Librarian must remain authenticated as themselves and must never inherit the guest's credentials, sessions, or write permissions.
+- Apply the selected guest's effective library/source visibility, content restrictions, profile preferences, and relevant UI permissions so hidden or inaccessible titles are reproduced accurately.
+- Keep a persistent, unmistakable banner while simulation is active showing which guest view is being displayed, with a one-click **Exit guest view** action.
+- Disable or clearly separate Librarian-only administrative controls while in simulated view so the screen closely matches what the guest actually experiences.
+- Prevent destructive or state-changing actions from being executed “as” the guest. Any administrative fix should require leaving simulated view or explicitly returning to Librarian context.
+- Allow Librarians to enter the mode from guest/user management and, where useful, from troubleshooting surfaces tied to access issues.
+- Record entry and exit of simulated guest view in the audit trail, including Librarian identity and selected guest, without exposing guest secrets.
+- Add regression coverage to prove the simulation uses effective permissions and cannot become a privilege-escalation or impersonation path.
+
 ## P2: Appearance & Themes
 
 Keep InfoMancer's canonical appearance dark and OLED-first while making the UI adaptable to different environments and accessibility needs.
@@ -96,7 +108,7 @@ The 0.9 startup work should keep the connection target model simple enough to gr
 
 ## Next 0.9 priorities
 
-After the three P0 intelligence systems stabilize: automation rules, notification destinations, read-only Plex/Jellyfin/Emby comparison, provider abstraction, passkeys/TOTP MFA, the desktop startup experience, and the lightweight appearance/theme pass above.
+After the three P0 intelligence systems stabilize: automation rules, notification destinations, read-only Plex/Jellyfin/Emby comparison, provider abstraction, passkeys/TOTP MFA, the desktop startup experience, Librarian guest-view troubleshooting, and the lightweight appearance/theme pass above.
 
 ## Long-range 2.0 direction
 
