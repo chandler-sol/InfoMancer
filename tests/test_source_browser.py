@@ -50,9 +50,10 @@ class SourceBrowserTests(unittest.TestCase):
                 source_browser._resolved(str(self.root / "Movies"))
         message = str(raised.exception)
         self.assertIn("unauthenticated guest", message)
-        self.assertIn("NFS mapping", message)
-        self.assertIn("UNC path", message)
-        self.assertIn("Group Policy", message)
+        self.assertIn("NFS drive", message)
+        self.assertIn("same Windows user session", message)
+        self.assertIn("SMB", message)
+        self.assertNotIn("SMB fallback", message)
 
     def test_windows_1272_resolver_failure_falls_back_when_direct_open_works(self):
         (self.root / "Movies").mkdir()
