@@ -37,14 +37,30 @@ def _access_hint(exc: OSError) -> str:
     return str(exc)
 
 
+def _lexical_absolute(path: Path | str) -> Path:
+    """Normalize an absolute path without resolving it through the filesystem."""
+    expanded = Path(path).expanduser()
+    if expanded.is_absolute():
+        return Path(os.path.normpath(os.fspath(expanded)))
+    return Path(os.path.abspath(os.fspath(expanded)))
+
+
 def _resolved(path: Path | str) -> Path:
     # Browser input is rejected by validate_browse_path unless the resolved
-    # result remains inside a configured media-browse root. Windows can raise
-    # here for disconnected or policy-blocked mapped drives, so translate that
-    # into a normal source-browser error instead of letting the API return 500.
+    # result remains inside a configured media-browse root. Windows network
+    # providers can raise WinError 1272 while realpath/final-path resolution is
+    # attempted even though the same mapped NFS/SMB folder can still be opened
+    # directly. In that one case, prove the lexical path is actually readable
+    # before using it. This avoids turning a resolver quirk into a false offline
+    # result while preserving normal real-path containment everywhere else.
+    candidate = Path(path).expanduser()
     try:
-        return Path(path).expanduser().resolve(strict=False)
+        return candidate.resolve(strict=False)
     except OSError as exc:
+        if getattr(exc, "winerror", None) == 1272:
+            lexical = _lexical_absolute(candidate)
+            if _root_is_accessible(lexical):
+                return lexical
         raise SourceBrowserError(
             f"InfoMancer cannot access that folder: {_access_hint(exc)}"
         ) from exc
