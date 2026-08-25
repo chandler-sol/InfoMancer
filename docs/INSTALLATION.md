@@ -30,7 +30,7 @@ Your movie and TV files remain where they already live. The desktop app does not
 
 Download:
 
-`InfoMancer_0.8.0-alpha.1_x64-setup.exe`
+`InfoMancer_0.8.1-alpha.1_x64-setup.exe`
 
 1. Run the installer.
 2. Launch **InfoMancer** from the Start menu.
@@ -46,7 +46,7 @@ InfoMancer stores standalone desktop state under the current user's application-
 
 Download:
 
-`InfoMancer_0.8.0-alpha.1_aarch64.dmg`
+`InfoMancer_0.8.1-alpha.1_aarch64.dmg`
 
 The current 0.8 draft provides an **Apple silicon** preview. An Intel/universal macOS package is not included yet.
 
@@ -62,20 +62,20 @@ The current alpha DMG is not Apple-notarized. If macOS blocks the first launch, 
 
 Two packages are provided:
 
-- `InfoMancer_0.8.0-alpha.1_amd64.deb` for Debian/Ubuntu-family systems, including Linux Mint where compatible.
-- `InfoMancer_0.8.0-alpha.1_amd64.AppImage` as a portable preview for other desktop distributions.
+- `InfoMancer_0.8.1-alpha.1_amd64.deb` for Debian/Ubuntu-family systems, including Linux Mint where compatible.
+- `InfoMancer_0.8.1-alpha.1_amd64.AppImage` as a portable preview for other desktop distributions.
 
 Install the DEB with:
 
 ```bash
-sudo apt install ./InfoMancer_0.8.0-alpha.1_amd64.deb
+sudo apt install ./InfoMancer_0.8.1-alpha.1_amd64.deb
 ```
 
 Or run the AppImage with:
 
 ```bash
-chmod +x InfoMancer_0.8.0-alpha.1_amd64.AppImage
-./InfoMancer_0.8.0-alpha.1_amd64.AppImage
+chmod +x InfoMancer_0.8.1-alpha.1_amd64.AppImage
+./InfoMancer_0.8.1-alpha.1_amd64.AppImage
 ```
 
 Some distributions may require FUSE compatibility for AppImage execution. The DEB is preferred on supported Debian/Ubuntu-family desktops.

@@ -77,10 +77,10 @@ class DesktopReleaseContractTests(unittest.TestCase):
     def test_installation_guide_documents_native_packages(self):
         guide = (ROOT / "docs" / "INSTALLATION.md").read_text(encoding="utf-8")
         for expected in (
-            "InfoMancer_0.8.0-alpha.1_x64-setup.exe",
-            "InfoMancer_0.8.0-alpha.1_aarch64.dmg",
-            "InfoMancer_0.8.0-alpha.1_amd64.deb",
-            "InfoMancer_0.8.0-alpha.1_amd64.AppImage",
+            "InfoMancer_0.8.1-alpha.1_x64-setup.exe",
+            "InfoMancer_0.8.1-alpha.1_aarch64.dmg",
+            "InfoMancer_0.8.1-alpha.1_amd64.deb",
+            "InfoMancer_0.8.1-alpha.1_amd64.AppImage",
             "Run on this computer",
             "Connect to a server",
         ):
