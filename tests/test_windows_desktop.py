@@ -55,6 +55,14 @@ class WindowsDesktopContractTests(unittest.TestCase):
         self.assertIn('os.getenv("INFOMANCER_BOOTSTRAP_TOKEN", "")', sidecar)
         self.assertIn('os.environ["INFOMANCER_BOOTSTRAP_TOKEN"] = bootstrap_token', sidecar)
 
+    def test_local_core_startup_allows_windows_cold_boot(self):
+        rust = (ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
+        self.assertIn("LOCAL_CORE_STARTUP_TIMEOUT: Duration = Duration::from_secs(60)", rust)
+        self.assertIn("while started.elapsed() < LOCAL_CORE_STARTUP_TIMEOUT", rust)
+        self.assertIn("Local core port became reachable after", rust)
+        self.assertIn("Check desktop-launcher.log for startup details", rust)
+        self.assertNotIn("for _ in 0..120", rust)
+
     def test_remote_http_pages_are_not_granted_tauri_ipc(self):
         capability = json.loads((ROOT / "desktop/src-tauri/capabilities/launcher.json").read_text(encoding="utf-8"))
         config = json.loads((ROOT / "desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
