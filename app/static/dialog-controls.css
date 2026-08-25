@@ -1,10 +1,9 @@
-/* Canonical close-mark rendering for application chrome.
+/* Canonical close-mark rendering for shared application chrome.
    Close buttons must not depend on font glyph metrics: the multiplication sign
    renders at visibly different optical centers across Segoe UI, San Francisco,
-   Linux system fonts, and WebView hosts. Keep component styles responsible for
-   button size/placement while this file owns the mark itself. */
+   Linux system fonts, and WebView hosts. Component-specific controls may opt out
+   when they own an explicit SVG icon, as the source browser does. */
 .organize-dialog-close,
-.source-browser-close,
 .overview-dialog-close,
 .title-cast-dialog-close,
 .profile-account-dialog-close,
@@ -21,8 +20,6 @@
 
 .organize-dialog-close::before,
 .organize-dialog-close::after,
-.source-browser-close::before,
-.source-browser-close::after,
 .overview-dialog-close::before,
 .overview-dialog-close::after,
 .title-cast-dialog-close::before,
@@ -48,7 +45,6 @@
 }
 
 .organize-dialog-close::before,
-.source-browser-close::before,
 .overview-dialog-close::before,
 .title-cast-dialog-close::before,
 .profile-account-dialog-close::before,
@@ -59,7 +55,6 @@
 }
 
 .organize-dialog-close::after,
-.source-browser-close::after,
 .overview-dialog-close::after,
 .title-cast-dialog-close::after,
 .profile-account-dialog-close::after,
