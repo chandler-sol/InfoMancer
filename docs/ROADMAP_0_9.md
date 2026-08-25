@@ -53,26 +53,50 @@
 - Preserve or restore the user's previous scroll position when the tour is skipped, closed, or completed where doing so does not create confusing navigation.
 - Add tour regression coverage for representative short and long pages so future layout changes cannot silently break step positioning.
 
+## P1: Desktop Startup Experience
+
+- After an InfoMancer desktop installation has been configured, remember its selected target and launch directly into it instead of asking Local Desktop versus Server Client on every startup.
+- Keep the Local Desktop versus Server Client chooser for first run, recovery, or an explicit **Change installation** action rather than making it the normal launch screen.
+- For bundled local-core startup, show a lightweight animated InfoMancer splash while the core, database, and Workspace become ready. The splash must hide startup latency without artificially delaying a fast launch.
+- Avoid fake percentage progress. Prefer honest phase text such as **Starting InfoMancer**, **Opening catalog**, and **Preparing Workspace**, with an indeterminate animation while each phase is active.
+- Delay the splash briefly before showing it so very fast launches do not flash a window unnecessarily.
+- If startup exceeds the normal window, transition the splash into a useful slow-start state with access to diagnostics or retry information rather than silently waiting forever.
+- Keep actual startup failures visible and actionable. The splash is presentation for legitimate startup work, not a way to conceal errors.
+- Preserve a route back to installation selection from Settings or the desktop launcher so changing how the app connects never requires deleting application data.
+
 ## P2: Appearance & Themes
 
 Keep InfoMancer's canonical appearance dark and OLED-first while making the UI adaptable to different environments and accessibility needs.
 
 - Make **InfoMancer OLED** the default theme with true-black canvas areas and carefully elevated dark surfaces.
 - Add a small curated theme set rather than a large theme marketplace:
-  - **OLED** — true black, canonical InfoMancer appearance.
-  - **Graphite** — softer neutral dark surfaces.
-  - **Midnight** — very dark blue-black surfaces.
-  - **Light** — intentionally designed light surfaces rather than a simple color inversion.
-  - **System** — follow the operating system/browser light or dark preference.
+  - **OLED**: true black, canonical InfoMancer appearance.
+  - **Graphite**: softer neutral dark surfaces.
+  - **Midnight**: very dark blue-black surfaces.
+  - **Light**: intentionally designed light surfaces rather than a simple color inversion.
+  - **System**: follow the operating system/browser light or dark preference.
 - Move remaining hard-coded presentation colors toward semantic CSS variables such as canvas, surface, raised surface, text, border, accent, and semantic status tokens.
 - Keep status meaning stable across themes: critical/error, warning, healthy/success, and informational colors must remain recognizable and accessible.
 - Persist appearance per user so different accounts can choose different themes without changing the installation globally.
 - Keep theme selection separate from any future accent-color selection so appearance and brand accents do not multiply into dozens of theme combinations.
 - Treat this as a lightweight 0.9 UI feature built primarily through CSS tokens and a small persisted preference, not a new rendering architecture.
 
+## Future: Multiple Installation Profiles
+
+The 0.9 startup work should keep the connection target model simple enough to grow into multiple saved InfoMancer installations later without making 0.9 depend on a full multi-instance manager.
+
+- Allow the desktop shell to save named installations such as **Home**, **Server**, **Test**, or **Remote**, each pointing to either the bundled local instance or an explicitly configured remote InfoMancer server.
+- Add a **Switch installation** action inside the desktop app so moving between saved instances does not require returning to a startup chooser or re-entering server URLs.
+- Remember a default or last-used installation and open it automatically at launch.
+- Show enough identity information to make targets unmistakable, such as friendly name, hostname, URL, connection type, and online/offline state.
+- Keep authentication sessions and sensitive connection material isolated per installation. A login to one InfoMancer instance must never implicitly authorize another.
+- Treat each installation as a separate catalog and operational context. Do not merge libraries, tasks, settings, or findings across instances unless a future feature explicitly introduces cross-instance behavior.
+- Provide a safe way to edit, remove, or re-authenticate a saved installation without affecting the server itself.
+- Consider optional LAN discovery later, but never auto-connect to an unknown server merely because it appears on the network.
+
 ## Next 0.9 priorities
 
-After the three P0 intelligence systems stabilize: automation rules, notification destinations, read-only Plex/Jellyfin/Emby comparison, provider abstraction, passkeys/TOTP MFA, and the lightweight appearance/theme pass above.
+After the three P0 intelligence systems stabilize: automation rules, notification destinations, read-only Plex/Jellyfin/Emby comparison, provider abstraction, passkeys/TOTP MFA, the desktop startup experience, and the lightweight appearance/theme pass above.
 
 ## Long-range 2.0 direction
 
