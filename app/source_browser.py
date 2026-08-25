@@ -20,19 +20,20 @@ class SourceBrowserError(ValueError):
 
 
 def _access_hint(exc: OSError) -> str:
-    # Windows reports WinError 1272 from its SMB redirector when a network share
-    # is reached as an unauthenticated guest. This commonly happens with NFS
-    # drive mappings too: mapped letters are per-logon-session, so an elevated
-    # or background process falls back to SMB and is then policy-blocked. Give
-    # the operator the actual remediation instead of a raw errno string.
+    # WinError 1272 can surface while Windows resolves a network drive even when
+    # the mapping is NFS rather than SMB. Avoid guessing which redirector/provider
+    # produced it. _resolved() only reaches this hint after direct access to the
+    # mapped path has also failed, so point the operator at the session/credential
+    # causes that can actually be corrected.
     if getattr(exc, "winerror", None) == 1272:
         return (
-            f"{exc} Windows reached this share through its SMB fallback and blocked "
-            "unauthenticated guest access. If this is an NFS mapping, run InfoMancer "
-            "as the same non-elevated user that created the drive mapping, or use "
-            "the UNC path (for example \\\\server\\share) as the source. For SMB "
-            "shares, map the drive with a username and password, or enable insecure "
-            "guest logons in Group Policy if guest access is intended."
+            f"{exc} Windows denied this network mapping to InfoMancer, and the folder "
+            "could not be opened directly either. If this is an NFS drive, make sure "
+            "the drive is mounted in the same Windows user session that runs InfoMancer "
+            "and avoid launching InfoMancer elevated when the mapping was created by a "
+            "non-elevated session. If this is SMB, map the share with authenticated "
+            "credentials, or explicitly allow guest logons only when guest access is "
+            "intentional."
         )
     return str(exc)
 
