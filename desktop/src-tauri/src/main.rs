@@ -7,7 +7,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream},
     path::PathBuf,
     sync::{Mutex, OnceLock},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::Manager;
 use tauri_plugin_shell::{process::CommandChild, process::CommandEvent, ShellExt};
@@ -17,6 +17,8 @@ use uuid::Uuid;
 
 const UPDATE_ENDPOINT: &str =
     "https://github.com/chandler-sol/InfoMancer/releases/download/desktop-alpha/latest.json";
+const LOCAL_CORE_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
+const LOCAL_CORE_POLL_INTERVAL: Duration = Duration::from_millis(150);
 
 static LAUNCH_LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -123,13 +125,21 @@ fn reserve_loopback_port() -> Result<u16, String> {
 
 async fn wait_for_local_core(port: u16) -> Result<(), String> {
     let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
-    for _ in 0..120 {
-        if TcpStream::connect_timeout(&address, Duration::from_millis(150)).is_ok() {
+    let started = Instant::now();
+    while started.elapsed() < LOCAL_CORE_STARTUP_TIMEOUT {
+        if TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok() {
+            log_launcher(&format!(
+                "Local core port became reachable after {} ms.",
+                started.elapsed().as_millis()
+            ));
             return Ok(());
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(LOCAL_CORE_POLL_INTERVAL).await;
     }
-    Err("The local InfoMancer core did not become ready in time.".into())
+    Err(format!(
+        "The local InfoMancer core did not become ready within {} seconds. Check desktop-launcher.log for startup details.",
+        LOCAL_CORE_STARTUP_TIMEOUT.as_secs()
+    ))
 }
 
 fn app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -196,6 +206,9 @@ async fn start_local(app: tauri::AppHandle) -> Result<LocalStartup, String> {
     let url = format!("http://127.0.0.1:{port}/");
     let setup_url = format!("http://127.0.0.1:{port}/setup");
 
+    log_launcher(&format!(
+        "Launching bundled InfoMancer core on 127.0.0.1:{port}; first_run={first_run}."
+    ));
     let args = vec![
         "--port".to_string(),
         port.to_string(),
