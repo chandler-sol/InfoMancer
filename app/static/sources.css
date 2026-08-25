@@ -28,9 +28,17 @@
   flex:0 0 42px;
   width:42px;
   height:42px;
+  display:grid;
+  place-items:center;
+  padding:0;
   overflow:hidden;
   border-radius:50%;
+  font-size:0!important;
+  line-height:0!important;
 }
+.source-browser-close::before,.source-browser-close::after { content:none!important; display:none!important; }
+.source-browser-close-icon { display:block; width:18px; height:18px; overflow:visible; pointer-events:none; }
+.source-browser-close-icon path { fill:none; stroke:currentColor; stroke-width:2.25; stroke-linecap:round; vector-effect:non-scaling-stroke; }
 .source-browser-nav { justify-content:flex-start; min-height:58px; }
 .source-browser-crumbs { display:flex; align-items:center; gap:4px; min-width:0; overflow:auto; }
 .source-browser-crumbs button { border:0; background:transparent; color:var(--muted); padding:7px; }
