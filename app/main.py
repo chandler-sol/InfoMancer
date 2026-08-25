@@ -102,7 +102,7 @@ try:
 except ProviderSecretError as exc:
     stored_provider_secrets = {}
     provider_secret_error = str(exc)
-APP_VERSION = "0.8.0-alpha.1"
+APP_VERSION = "0.8.1-alpha.1"
 @asynccontextmanager
 async def _infomancer_lifespan(_app: FastAPI):
     background.start()
