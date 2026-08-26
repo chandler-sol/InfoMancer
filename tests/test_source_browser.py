@@ -207,20 +207,27 @@ class SourceBrowserUiContracts(unittest.TestCase):
         self.assertIn("JSON.parse(text)", script)
         self.assertNotIn("await response.json()", script)
 
-    def test_close_button_has_one_explicit_svg_renderer(self):
+    def test_drive_root_back_returns_to_location_chooser(self):
+        script = (STATIC / "source-browser.js").read_text(encoding="utf-8")
+        self.assertIn('const backTarget = data.parent || (current ? "" : null)', script)
+        self.assertIn("back.disabled = backTarget === null", script)
+        self.assertIn("back.onclick = backTarget !== null ? () => load(backTarget) : null", script)
+
+    def test_close_button_uses_only_shared_two_bar_renderer(self):
         partial = (TEMPLATES / "_source_browser.html").read_text(encoding="utf-8")
+        base = (TEMPLATES / "base.html").read_text(encoding="utf-8")
         shared = (STATIC / "dialog-controls.css").read_text(encoding="utf-8")
         local = (STATIC / "sources.css").read_text(encoding="utf-8")
         self.assertIn('class="source-browser-close"', partial)
-        self.assertIn('class="source-browser-close-icon"', partial)
-        self.assertIn('d="M6 6L18 18M18 6L6 18"', partial)
-        self.assertNotIn(">×</button>", partial)
-        self.assertNotIn(".source-browser-close", shared)
+        self.assertNotIn("source-browser-close-icon", partial)
+        self.assertNotIn("<svg", partial.split('class="source-browser-close"', 1)[1].split("</button>", 1)[0])
+        self.assertIn(".source-browser-close", shared)
+        self.assertIn("content: \"\" !important", shared)
+        self.assertIn("display: block !important", shared)
+        self.assertIn("translate(-50%, -50%) rotate(45deg)", shared)
+        self.assertIn("translate(-50%, -50%) rotate(-45deg)", shared)
         self.assertIn(".source-browser-close::before,.source-browser-close::after", local)
-        self.assertIn("content:none!important", local)
-        self.assertIn(".source-browser-close-icon path", local)
-        self.assertIn("stroke:currentColor", local)
-        self.assertIn("stroke-linecap:round", local)
+        self.assertLess(base.index("path='sources.css'"), base.index("path='dialog-controls.css'"))
 
 
 if __name__ == "__main__":
