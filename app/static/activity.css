@@ -1,0 +1,16 @@
+.activity-page-actions {
+  align-items: stretch;
+}
+
+.activity-page-actions > form {
+  display: flex;
+  margin: 0;
+}
+
+.activity-page-actions > .button,
+.activity-page-actions > form > .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+}
