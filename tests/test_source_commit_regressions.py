@@ -35,23 +35,24 @@ class SourceCommitRegressionTests(unittest.TestCase):
         self.assertIn("allowed_roots", source_commit)
         self.assertNotIn(".resolve()", source_commit.split("def add_root_safe", 1)[1])
 
-    def test_source_browser_x_has_final_transform_authority(self) -> None:
+    def test_source_browser_x_has_single_transform_owner(self) -> None:
         dialog_css = (STATIC / "dialog-controls.css").read_text(encoding="utf-8")
         modern_css = (STATIC / "modern.css").read_text(encoding="utf-8")
 
-        # modern.css still carries an older generic dialog rule. The canonical
-        # renderer must explicitly beat its higher-specificity transform until
-        # that broader stylesheet is cleaned up.
-        self.assertIn('dialog button[aria-label^="Close"]::before', modern_css)
-        self.assertIn("dialog button.source-browser-close::before", dialog_css)
+        self.assertNotIn('dialog button[aria-label^="Close"]::before', modern_css)
+        self.assertNotIn('dialog button[aria-label^="Close"]::after', modern_css)
+        self.assertIn(".source-browser-close::before,", dialog_css)
+        self.assertIn(".source-browser-close::after,", dialog_css)
         self.assertIn(
-            "transform: translate(-50%, -50%) rotate(45deg) !important",
+            "transform: translate(-50%, -50%) rotate(45deg)",
             dialog_css,
         )
         self.assertIn(
-            "transform: translate(-50%, -50%) rotate(-45deg) !important",
+            "transform: translate(-50%, -50%) rotate(-45deg)",
             dialog_css,
         )
+        self.assertNotIn("rotate(45deg) !important", dialog_css)
+        self.assertNotIn("rotate(-45deg) !important", dialog_css)
 
 
 if __name__ == "__main__":
