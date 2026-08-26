@@ -21,12 +21,57 @@ class SourceUnavailableError(ValueError):
     """The configured source could not be reached safely."""
 
 
+def _lexical_absolute(path: Path) -> Path:
+    """Normalize an absolute path without asking the filesystem to resolve it."""
+    expanded = path.expanduser()
+    if expanded.is_absolute():
+        return Path(os.path.normpath(os.fspath(expanded)))
+    return Path(os.path.abspath(os.fspath(expanded)))
+
+
+def _resolve_scan_path(path: Path, *, directory: bool = False) -> tuple[Path, bool]:
+    """Resolve a scan path while tolerating WinError 1272 on readable mappings.
+
+    Windows can reject final-path resolution for a mapped NFS/SMB location even
+    though normal directory enumeration and file access work. The source browser
+    already has to tolerate that provider quirk. Scanning must do the same or a
+    folder can preview successfully and then immediately degrade with zero files.
+
+    The fallback is deliberately narrow: only WinError 1272 is accepted, and the
+    lexical path must still be directly readable before it is used. Callers keep
+    the existing symlink/junction and containment checks around this helper.
+    """
+    try:
+        return path.resolve(strict=True), False
+    except OSError as exc:
+        if getattr(exc, "winerror", None) != 1272:
+            raise
+        lexical = _lexical_absolute(path)
+        try:
+            if directory:
+                with os.scandir(lexical):
+                    pass
+            else:
+                os.stat(lexical)
+        except OSError:
+            raise exc
+        return lexical, True
+
+
+def _readable_directory(path: Path) -> bool:
+    try:
+        with os.scandir(path):
+            return True
+    except OSError:
+        return False
+
+
 def _walk_files(root: Path, errors: list[str]):
     def on_error(error: OSError) -> None:
         errors.append(str(error))
 
     try:
-        resolved_root = root.resolve(strict=True)
+        resolved_root, lexical_root = _resolve_scan_path(root, directory=True)
     except OSError as exc:
         errors.append(str(exc))
         return
@@ -57,7 +102,11 @@ def _walk_files(root: Path, errors: list[str]):
                 # files whose resolved path remains under the configured root.
                 if candidate.is_symlink() or candidate.is_junction():
                     continue
-                candidate.resolve(strict=True).relative_to(resolved_root)
+                if lexical_root:
+                    resolved_candidate = _lexical_absolute(candidate)
+                else:
+                    resolved_candidate, _ = _resolve_scan_path(candidate)
+                resolved_candidate.relative_to(resolved_root)
             except ValueError:
                 errors.append(f"Skipped a file that resolves outside the configured source: {candidate}")
                 continue
@@ -65,6 +114,8 @@ def _walk_files(root: Path, errors: list[str]):
                 errors.append(str(exc))
                 continue
             yield candidate
+
+
 EPISODE_RE = re.compile(
     r"(?i)(?:^|[. _\-])s(?P<season>\d{1,3})[. _\-]*e(?P<start>\d{1,3})"
     r"(?:[. _\-]*(?:e|-e?)(?P<end>\d{1,3}))?"
@@ -202,7 +253,7 @@ def scan_root(
     *, force_cleanup: bool = False,
 ) -> dict[str, int | str]:
     root = Path(root_row["path"])
-    if not root.exists() or not root.is_dir():
+    if not _readable_directory(root):
         raise SourceUnavailableError(f"Media path is not an accessible directory: {root}")
 
     scan_id = uuid.uuid4().hex
@@ -338,7 +389,7 @@ def scan_title(
     progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, int | str]:
     folder = Path(title_row["folder_path"])
-    if title_row["kind"] != "tv" or not folder.exists() or not folder.is_dir():
+    if title_row["kind"] != "tv" or not _readable_directory(folder):
         raise SourceUnavailableError(f"Series path is not an accessible directory: {folder}")
 
     scan_id = uuid.uuid4().hex
