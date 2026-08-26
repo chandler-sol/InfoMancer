@@ -3,7 +3,7 @@
 use serde::Serialize;
 use std::{
     fs::OpenOptions,
-    io::Write,
+    io::{Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream},
     path::PathBuf,
     sync::{Mutex, OnceLock},
@@ -123,22 +123,55 @@ fn reserve_loopback_port() -> Result<u16, String> {
         .map_err(|error| format!("Could not read the local port: {error}"))
 }
 
-async fn wait_for_local_core(port: u16) -> Result<(), String> {
+fn probe_setup_pending(port: u16) -> Result<bool, String> {
     let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(350))
+        .map_err(|error| format!("Local core is not accepting HTTP requests yet: {error}"))?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+    stream
+        .write_all(b"GET /setup HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .map_err(|error| format!("Could not ask the local core for setup status: {error}"))?;
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| format!("Could not read local setup status: {error}"))?;
+    let status_line = response
+        .lines()
+        .next()
+        .ok_or_else(|| "The local core returned an empty setup-status response.".to_string())?;
+    let code = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|value| value.parse::<u16>().ok())
+        .ok_or_else(|| format!("The local core returned an invalid HTTP status: {status_line}"))?;
+    match code {
+        200 => Ok(true),
+        301 | 302 | 303 | 307 | 308 => Ok(false),
+        _ => Err(format!("The local setup-status check returned HTTP {code}.")),
+    }
+}
+
+async fn wait_for_local_core(port: u16) -> Result<bool, String> {
     let started = Instant::now();
+    let mut last_error = String::new();
     while started.elapsed() < LOCAL_CORE_STARTUP_TIMEOUT {
-        if TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok() {
-            log_launcher(&format!(
-                "Local core port became reachable after {} ms.",
-                started.elapsed().as_millis()
-            ));
-            return Ok(());
+        match probe_setup_pending(port) {
+            Ok(setup_pending) => {
+                log_launcher(&format!(
+                    "Local core became HTTP-ready after {} ms; setup_pending={setup_pending}.",
+                    started.elapsed().as_millis()
+                ));
+                return Ok(setup_pending);
+            }
+            Err(error) => last_error = error,
         }
         tokio::time::sleep(LOCAL_CORE_POLL_INTERVAL).await;
     }
     Err(format!(
-        "The local InfoMancer core did not become ready within {} seconds. Check desktop-launcher.log for startup details.",
-        LOCAL_CORE_STARTUP_TIMEOUT.as_secs()
+        "The local InfoMancer core did not become ready within {} seconds. {} Check desktop-launcher.log for startup details.",
+        LOCAL_CORE_STARTUP_TIMEOUT.as_secs(),
+        last_error
     ))
 }
 
@@ -200,14 +233,13 @@ async fn start_local(app: tauri::AppHandle) -> Result<LocalStartup, String> {
     let data_dir = app_data_dir(&app)?;
     std::fs::create_dir_all(&data_dir)
         .map_err(|error| format!("Could not create the application data directory: {error}"))?;
-    let first_run = !data_dir.join("infomancer.db").exists();
     let port = reserve_loopback_port()?;
     let bootstrap_token = format!("desktop-{}", Uuid::new_v4().simple());
     let url = format!("http://127.0.0.1:{port}/");
     let setup_url = format!("http://127.0.0.1:{port}/setup");
 
     log_launcher(&format!(
-        "Launching bundled InfoMancer core on 127.0.0.1:{port}; first_run={first_run}."
+        "Launching bundled InfoMancer core on 127.0.0.1:{port}."
     ));
     let args = vec![
         "--port".to_string(),
@@ -248,6 +280,15 @@ async fn start_local(app: tauri::AppHandle) -> Result<LocalStartup, String> {
         *child_slot = Some(child);
     }
 
+    let first_run = match wait_for_local_core(port).await {
+        Ok(value) => value,
+        Err(error) => {
+            log_launcher(&format!("Local core startup failed: {error}"));
+            stop_local_core(state.inner());
+            return Err(error);
+        }
+    };
+
     let startup = LocalStartup {
         url,
         setup_url,
@@ -262,16 +303,9 @@ async fn start_local(app: tauri::AppHandle) -> Result<LocalStartup, String> {
         *startup_slot = Some(startup.clone());
     }
 
-    if let Err(error) = wait_for_local_core(port).await {
-        log_launcher(&format!("Local core startup failed: {error}"));
-        stop_local_core(state.inner());
-        if let Ok(mut startup_slot) = state.startup.lock() {
-            *startup_slot = None;
-        }
-        return Err(error);
-    }
-
-    log_launcher(&format!("Local InfoMancer core is ready on 127.0.0.1:{port}."));
+    log_launcher(&format!(
+        "Local InfoMancer core is ready on 127.0.0.1:{port}; setup_pending={first_run}."
+    ));
     Ok(startup)
 }
 
