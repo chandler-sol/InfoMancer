@@ -6,7 +6,7 @@
   <form class="auth-card auth-form first-run-form" method="post" action="/setup">
     <input type="hidden" name="preauth_token" value="{{ preauth_token }}">
     {% if error %}<div class="form-error">{{ error }}</div>{% endif %}
-    {% if not sandbox_mode %}<label>Bootstrap token<input name="bootstrap_token" type="password" autocomplete="off" required><small>Use the one-time token shown in the InfoMancer server logs, or the value configured with <code>INFOMANCER_BOOTSTRAP_TOKEN</code>.</small></label>{% endif %}
+    {% if not sandbox_mode %}<label>Library Card #<input name="bootstrap_token" type="password" autocomplete="off" required><small>Your one-time InfoMancer bootstrap token. Use the Library Card # shown in the InfoMancer server logs, or the value configured with <code>INFOMANCER_BOOTSTRAP_TOKEN</code>.</small></label>{% endif %}
     <label>Username<input name="username" value="{{ username }}" minlength="3" maxlength="50" autocomplete="username" required><small>Used for local sign-in. Letters, numbers, dots, dashes, and underscores.</small></label>
     <label>Email<input name="email" type="email" value="{{ email }}" autocomplete="email" {% if auth_mode == 'cloudflare' %}required{% endif %}></label>
     <label>Display name<input name="display_name" value="{{ display_name }}" maxlength="100" autocomplete="name" required></label>
