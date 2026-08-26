@@ -56,7 +56,8 @@
   const status = reviewForm.querySelector('[data-bulk-apply-status]');
   const applyButtons = [...reviewForm.querySelectorAll('[data-bulk-apply-button]')];
   const itemLabel = reviewForm.dataset.bulkMatchItemLabel || 'match';
-  const itemPlural = reviewForm.dataset.bulkMatchItemPlural || `${itemLabel}s`;
+  const itemPlural = reviewForm.dataset.bulkMatchItemPlural
+    || (itemLabel.endsWith('series') ? itemLabel : `${itemLabel}s`);
 
   reviewForm.addEventListener('submit', (event) => {
     if (reviewForm.dataset.bulkApplying === '1') {
