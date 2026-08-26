@@ -43,8 +43,9 @@ async function attach(pageOrLocator, testInfo, name, fullPage = false) {
 test.describe.serial('InfoMancer browser acceptance', () => {
   test('bootstrap-token setup creates the first Librarian', async ({ page }, testInfo) => {
     await page.goto(`${tokenUrl}/setup`);
-    await expect(page.locator('input[name="bootstrap_token"]')).toBeVisible();
-    await expect(page.getByText('Bootstrap token', { exact: true })).toBeVisible();
+    const bootstrap = page.locator('input[name="bootstrap_token"]');
+    await expect(bootstrap).toBeVisible();
+    await expect(page.locator('label:has(input[name="bootstrap_token"])')).toContainText('Bootstrap token');
     await attach(page, testInfo, 'bootstrap-setup', true);
 
     await createLibrarian(page, tokenUrl, 'token-librarian', bootstrapToken);
@@ -129,7 +130,7 @@ test.describe.serial('InfoMancer browser acceptance', () => {
     await attach(page, testInfo, 'activity-unread', true);
 
     await Promise.all([
-      page.waitForLoadState('domcontentloaded'),
+      page.waitForURL((url) => url.pathname === '/activity'),
       page.getByRole('button', { name: 'Mark all read' }).click(),
     ]);
 
