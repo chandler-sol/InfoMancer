@@ -56,6 +56,7 @@
   const status = reviewForm.querySelector('[data-bulk-apply-status]');
   const applyButtons = [...reviewForm.querySelectorAll('[data-bulk-apply-button]')];
   const itemLabel = reviewForm.dataset.bulkMatchItemLabel || 'match';
+  const itemPlural = reviewForm.dataset.bulkMatchItemPlural || `${itemLabel}s`;
 
   reviewForm.addEventListener('submit', (event) => {
     if (reviewForm.dataset.bulkApplying === '1') {
@@ -76,7 +77,7 @@
     reviewForm.dataset.bulkApplying = '1';
     reviewForm.setAttribute('aria-busy', 'true');
     const count = selected.length;
-    const noun = count === 1 ? itemLabel : `${itemLabel}s`;
+    const noun = count === 1 ? itemLabel : itemPlural;
     applyButtons.forEach((button) => {
       button.disabled = true;
       button.textContent = count === 1 ? 'Applying match…' : `Applying ${count} matches…`;
