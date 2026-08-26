@@ -133,6 +133,7 @@ jobs:
           MEDIA_ROOT="$E2E_ROOT/media/Movies"
           TOKEN_DB="$E2E_ROOT/state/token.db"
           SANDBOX_DB="$E2E_ROOT/state/sandbox.db"
+          TOUR_DB="$E2E_ROOT/state/tour.db"
           SECRET="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
           INFOMANCER_DATABASE="$TOKEN_DB" \
@@ -151,11 +152,19 @@ jobs:
             >"$E2E_ROOT/logs/sandbox-server.log" 2>&1 &
           echo $! > "$E2E_ROOT/sandbox-server.pid"
 
+          INFOMANCER_DATABASE="$TOUR_DB" \
+          INFOMANCER_SANDBOX=1 \
+          INFOMANCER_SECRET="$SECRET" \
+          MEDIA_BROWSE_ROOTS="$MEDIA_ROOT" \
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8789 \
+            >"$E2E_ROOT/logs/tour-server.log" 2>&1 &
+          echo $! > "$E2E_ROOT/tour-server.pid"
+
           python - <<'PY'
           import time
           import urllib.request
 
-          for port in (8787, 8788):
+          for port in (8787, 8788, 8789):
               url = f"http://127.0.0.1:{port}/health"
               deadline = time.monotonic() + 30
               while time.monotonic() < deadline:
@@ -175,6 +184,7 @@ jobs:
         env:
           INFOMANCER_E2E_TOKEN_URL: http://127.0.0.1:8787
           INFOMANCER_E2E_SANDBOX_URL: http://127.0.0.1:8788
+          INFOMANCER_E2E_TOUR_URL: http://127.0.0.1:8789
         run: npm test
 
       - name: Upload acceptance evidence
