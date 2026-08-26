@@ -32,6 +32,17 @@
 - Preserve useful task context in the destination when practical, such as the affected source, title, maintenance tool, review queue, or scheduled-task definition.
 - When a task has no dedicated live surface, fall back to the most relevant Activity, Operations, or Scheduled Tasks view instead of making the row a dead end.
 
+## P1: Bulk Match Review Filters & Safer Batch Review
+
+- Add filters to movie and TV bulk-match review so Librarians can narrow large suggestion queues before approving metadata changes.
+- Support confidence buckets such as **Very high**, **High**, **Medium**, and **Low**, plus exact matches, possible matches, no-result rows, and provider/error states.
+- Add useful sorting such as confidence ascending or descending, title, result count, and source/library where those fields are available.
+- Make **Needs attention** a quick filter for low-confidence, possible, missing, or failed suggestions so uncertain matches can be reviewed first.
+- Preserve checkbox selections while changing filters when practical, and make it unmistakable whether an Apply action affects selected rows, visible rows, or the entire cached batch.
+- Show result counts for active filters so a Librarian knows how much work remains without paging through the full queue.
+- Keep filtering local to cached suggestions. Changing a review filter must not trigger new provider requests or silently apply metadata.
+- Share the same filtering model between movie and TV review rather than growing separate behavior for each screen.
+
 ## P1: Realistic Tour Demo Media
 
 - Replace sparse tour placeholders with a richer synthetic media fixture set that looks like a believable populated InfoMancer library without exposing or depending on real user media.
@@ -108,7 +119,7 @@ The 0.9 startup work should keep the connection target model simple enough to gr
 
 ## Next 0.9 priorities
 
-After the three P0 intelligence systems stabilize: automation rules, notification destinations, read-only Plex/Jellyfin/Emby comparison, provider abstraction, passkeys/TOTP MFA, the desktop startup experience, Librarian guest-view troubleshooting, and the lightweight appearance/theme pass above.
+After the three P0 intelligence systems stabilize: automation rules, notification destinations, read-only Plex/Jellyfin/Emby comparison, provider abstraction, passkeys/TOTP MFA, the desktop startup experience, Librarian guest-view troubleshooting, bulk-match review filtering, and the lightweight appearance/theme pass above.
 
 ## Long-range 2.0 direction
 
