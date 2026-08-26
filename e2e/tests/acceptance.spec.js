@@ -26,6 +26,34 @@ async function createLibrarian(page, baseUrl, username, token = '') {
   ]);
 }
 
+async function dismissFreshInstallTour(page, testInfo, attachmentName) {
+  const tour = page.locator('#onboarding-tour');
+  await expect(tour).toBeVisible({ timeout: 12000 });
+  await expect(tour.getByRole('heading', { name: 'Meet the 0.8 workspace' })).toBeVisible();
+  await expect(tour.locator('#tour-step-label')).toContainText(/^1 of \d+$/);
+  await expect(tour.getByRole('button', { name: 'Skip for now' })).toBeVisible();
+  await attach(tour, testInfo, attachmentName);
+
+  await Promise.all([
+    page.waitForURL((url) => url.pathname === '/' && url.searchParams.get('setup_prompt') === '1'),
+    tour.getByRole('button', { name: 'Skip for now' }).click(),
+  ]);
+
+  const setupChoice = page.locator('.setup-choice-layer');
+  await expect(setupChoice).toBeVisible();
+  await expect(setupChoice.getByRole('heading', { name: 'How would you like to begin?' })).toBeVisible();
+  return setupChoice;
+}
+
+async function enterGuidedSetupFromFreshInstall(page, testInfo) {
+  const setupChoice = await dismissFreshInstallTour(page, testInfo, 'fresh-install-tour');
+  await Promise.all([
+    page.waitForURL(/\/getting-started\/general/),
+    setupChoice.getByRole('button', { name: /Guided setup/ }).click(),
+  ]);
+  await expect(page.getByRole('heading', { name: 'Set your time zone' })).toBeVisible();
+}
+
 function seedState(...args) {
   if (!sandboxDatabase) throw new Error('INFOMANCER_E2E_DATABASE is required');
   execFileSync(
@@ -40,8 +68,13 @@ async function attach(pageOrLocator, testInfo, name, fullPage = false) {
   await testInfo.attach(name, { body, contentType: 'image/png' });
 }
 
-test.describe.serial('InfoMancer browser acceptance', () => {
-  test('bootstrap-token setup creates the first Librarian', async ({ page }, testInfo) => {
+test.describe('InfoMancer browser acceptance', () => {
+  // These tests intentionally mutate two persistent disposable servers. Retrying a
+  // completed bootstrap or setup step against the same database produces false
+  // failures, so keep this stateful acceptance group single-attempt.
+  test.describe.configure({ retries: 0 });
+
+  test('bootstrap-token setup creates the first Librarian and starts the fresh-install tour', async ({ page }, testInfo) => {
     await page.goto(`${tokenUrl}/setup`);
     const bootstrap = page.locator('input[name="bootstrap_token"]');
     await expect(bootstrap).toBeVisible();
@@ -49,15 +82,15 @@ test.describe.serial('InfoMancer browser acceptance', () => {
     await attach(page, testInfo, 'bootstrap-setup', true);
 
     await createLibrarian(page, tokenUrl, 'token-librarian', bootstrapToken);
-    await expect(page.locator('body')).toContainText(/Build your library|Dashboard|InfoMancer/);
+    const setupChoice = await dismissFreshInstallTour(page, testInfo, 'bootstrap-fresh-install-tour');
+    await expect(setupChoice.getByRole('button', { name: /Guided setup/ })).toBeVisible();
+    await expect(setupChoice.getByRole('button', { name: /Set up manually/ })).toBeVisible();
   });
 
   test('guided setup can browse, back out, preview, add, and scan a deterministic source', async ({ page }, testInfo) => {
     await createLibrarian(page, sandboxUrl, 'acceptance-librarian');
+    await enterGuidedSetupFromFreshInstall(page, testInfo);
 
-    if (new URL(page.url()).pathname !== '/getting-started/general') {
-      await page.goto(`${sandboxUrl}/getting-started/general`);
-    }
     await page.getByRole('button', { name: 'Save and continue' }).click();
     await expect(page).toHaveURL(/\/getting-started\/metadata/);
     await page.getByRole('button', { name: 'Skip in testing mode' }).click();
