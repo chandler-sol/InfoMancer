@@ -1,7 +1,6 @@
 /* Canonical close-mark rendering for shared application chrome.
-   Close buttons must not depend on font glyph metrics: the multiplication sign
-   renders at visibly different optical centers across Segoe UI, San Francisco,
-   Linux system fonts, and WebView hosts. */
+   Modal-specific styles own button size, border, and color. This file alone owns
+   close-mark geometry so no font glyph or page stylesheet can distort the X. */
 .source-browser-close,
 .organize-dialog-close,
 .overview-dialog-close,
@@ -49,11 +48,6 @@
   pointer-events: none;
 }
 
-/* The general visual-polish stylesheet also has a historical dialog-close rule
-   with a more specific selector. It used to overwrite the transform on ::before,
-   leaving one horizontal/slanted bar instead of an X. These explicit transforms
-   are intentionally important so the canonical renderer is the final authority. */
-dialog button.source-browser-close::before,
 .source-browser-close::before,
 .organize-dialog-close::before,
 .overview-dialog-close::before,
@@ -62,12 +56,9 @@ dialog button.source-browser-close::before,
 .profile-avatar-dialog-close::before,
 .workspace-inspector-close::before,
 #task-dismiss::before {
-  content: "" !important;
-  display: block !important;
-  transform: translate(-50%, -50%) rotate(45deg) !important;
+  transform: translate(-50%, -50%) rotate(45deg);
 }
 
-dialog button.source-browser-close::after,
 .source-browser-close::after,
 .organize-dialog-close::after,
 .overview-dialog-close::after,
@@ -76,7 +67,5 @@ dialog button.source-browser-close::after,
 .profile-avatar-dialog-close::after,
 .workspace-inspector-close::after,
 #task-dismiss::after {
-  content: "" !important;
-  display: block !important;
-  transform: translate(-50%, -50%) rotate(-45deg) !important;
+  transform: translate(-50%, -50%) rotate(-45deg);
 }
