@@ -38,6 +38,47 @@
     return "scan";
   };
 
+  // The task center already owns background-task polling. Observe its task snapshots
+  // instead of adding a second poller to Sources, then refresh the server-rendered
+  // counts and health state once a source scan disappears from the active task list.
+  const isSourceScanTaskId = (id) => id === "scan-all" || /^scan-\d+$/.test(id);
+  const scanTaskIdFor = (form, kind) => {
+    if (kind === "scan-all") return "scan-all";
+    if (kind !== "scan") return "";
+    const match = actionPath(form).match(/^\/roots\/(\d+)\/scan$/);
+    return match ? `scan-${match[1]}` : "";
+  };
+  const observedScanTasks = new Set();
+  document.querySelectorAll('.root-row[data-scan-active="1"] .root-library-link[data-source-id]').forEach((link) => {
+    if (link.dataset.sourceId) observedScanTasks.add(`scan-${link.dataset.sourceId}`);
+  });
+  let scanRefreshScheduled = false;
+  const scheduleScanRefresh = () => {
+    if (scanRefreshScheduled) return;
+    scanRefreshScheduled = true;
+    showFeedback("Scan complete. Refreshing source totals…", "success", 0);
+    window.setTimeout(() => window.location.reload(), 250);
+  };
+  const rememberScanTask = (form, kind) => {
+    const taskId = scanTaskIdFor(form, kind);
+    if (taskId) observedScanTasks.add(taskId);
+  };
+  document.addEventListener("infomancer:tasks", (event) => {
+    const tasks = Array.isArray(event.detail?.tasks) ? event.detail.tasks : [];
+    const currentScanTasks = new Set(
+      tasks
+        .map((task) => String(task?.id || ""))
+        .filter(isSourceScanTaskId),
+    );
+    for (const taskId of observedScanTasks) {
+      if (!currentScanTasks.has(taskId)) {
+        scheduleScanRefresh();
+        return;
+      }
+    }
+    currentScanTasks.forEach((taskId) => observedScanTasks.add(taskId));
+  });
+
   const optimisticTaskWidget = (kind, label) => {
     if (kind === "check") return;
     const widget = document.getElementById("task-widget");
@@ -141,7 +182,10 @@
         }
 
         if (kind === "check") refreshConnectionState(freshDocument, form);
-        else optimisticTaskWidget(kind, label);
+        else {
+          rememberScanTask(form, kind);
+          optimisticTaskWidget(kind, label);
+        }
 
         const serverMessage = flashMessageFrom(freshDocument);
         const fallbackMessage = kind === "check"
