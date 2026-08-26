@@ -88,16 +88,15 @@ jobs:
 
   acceptance:
     name: Browser acceptance
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       INFOMANCER_E2E_BOOTSTRAP_TOKEN: e2e-library-card-123456
     steps:
-      - name: Check out pull request head
+      - name: Check out candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Prepare acceptance paths
