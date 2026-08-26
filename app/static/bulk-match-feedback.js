@@ -59,6 +59,27 @@
   const itemPlural = reviewForm.dataset.bulkMatchItemPlural
     || (itemLabel.endsWith('series') ? itemLabel : `${itemLabel}s`);
 
+  const showStatus = (message, working = false) => {
+    if (!status) return;
+    status.hidden = false;
+    status.replaceChildren();
+    const copy = document.createElement('span');
+    copy.textContent = message;
+    status.append(copy);
+    if (working) {
+      const track = document.createElement('span');
+      track.className = 'task-track';
+      track.setAttribute('aria-hidden', 'true');
+      track.append(document.createElement('i'));
+      status.append(track);
+    }
+  };
+
+  const completionMessage = new URLSearchParams(window.location.search).get('message') || '';
+  if (/^Matched\s+\d+/i.test(completionMessage)) {
+    showStatus(completionMessage, false);
+  }
+
   reviewForm.addEventListener('submit', (event) => {
     if (reviewForm.dataset.bulkApplying === '1') {
       event.preventDefault();
@@ -67,10 +88,7 @@
     const selected = [...reviewForm.querySelectorAll('input[name="matches"]:checked')];
     if (!selected.length) {
       event.preventDefault();
-      if (status) {
-        status.hidden = false;
-        status.textContent = 'Select at least one suggested match before applying.';
-      }
+      showStatus('Select at least one suggested match before applying.');
       return;
     }
 
@@ -83,13 +101,14 @@
       button.disabled = true;
       button.textContent = count === 1 ? 'Applying match…' : `Applying ${count} matches…`;
     });
-    if (status) {
-      status.hidden = false;
-      status.textContent = `Applying ${count} selected ${noun}. InfoMancer is fetching and saving metadata. Keep this window open.`;
-    }
+    showStatus(
+      `Applying ${count} selected ${noun}. InfoMancer is fetching and saving metadata. `
+      + 'Unselected or unresolved items will remain here for review.',
+      true,
+    );
 
-    // Give WebView a paint opportunity so the busy state is visible before the
-    // synchronous bulk POST begins its provider lookups.
+    // Give WebView a paint opportunity so the busy state and indeterminate progress
+    // track are visible before the synchronous bulk POST begins its provider lookups.
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => HTMLFormElement.prototype.submit.call(reviewForm));
     });
