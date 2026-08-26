@@ -17,7 +17,9 @@
     {% else %}
       <p class="auth-provider-note">Cloudflare Access verified this browser. This account will be linked to <strong>{{ email }}</strong>.</p>
     {% endif %}
+    <button class="button" type="button" data-first-run-back hidden>← Back to setup token</button>
     <button class="button primary auth-submit">Create Librarian account</button>
   </form>
 </section>
+<script src="{{ url_for('static', path='setup-navigation.js') }}?v={{ static_version }}" defer></script>
 {% endblock %}
