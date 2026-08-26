@@ -6,6 +6,7 @@ const tokenUrl = process.env.INFOMANCER_E2E_TOKEN_URL || 'http://127.0.0.1:8787'
 const sandboxUrl = process.env.INFOMANCER_E2E_SANDBOX_URL || 'http://127.0.0.1:8788';
 const sandboxDatabase = process.env.INFOMANCER_E2E_DATABASE || '';
 const bootstrapToken = process.env.INFOMANCER_E2E_BOOTSTRAP_TOKEN || 'e2e-library-card-123456';
+const acceptancePassword = 'acceptance-password-123';
 
 async function createLibrarian(page, baseUrl, username, token = '') {
   await page.goto(`${baseUrl}/setup`);
@@ -17,12 +18,22 @@ async function createLibrarian(page, baseUrl, username, token = '') {
   await page.locator('input[name="display_name"]').fill('Acceptance Librarian');
   const email = page.locator('input[name="email"]');
   if (await email.count()) await email.fill(`${username}@example.invalid`);
-  await page.locator('input[name="password"]').fill('acceptance-password-123');
-  await page.locator('input[name="password_confirm"]').fill('acceptance-password-123');
+  await page.locator('input[name="password"]').fill(acceptancePassword);
+  await page.locator('input[name="password_confirm"]').fill(acceptancePassword);
 
   await Promise.all([
     page.waitForURL((url) => url.pathname !== '/setup'),
     page.getByRole('button', { name: 'Create Librarian account' }).click(),
+  ]);
+}
+
+async function signIn(page, baseUrl, username) {
+  await page.goto(`${baseUrl}/login`);
+  await page.getByRole('textbox', { name: 'Username or email' }).fill(username);
+  await page.locator('input[type="password"]').fill(acceptancePassword);
+  await Promise.all([
+    page.waitForURL((url) => url.pathname !== '/login'),
+    page.getByRole('button', { name: 'Sign in' }).click(),
   ]);
 }
 
@@ -87,7 +98,7 @@ test.describe('InfoMancer browser acceptance', () => {
     await expect(setupChoice.getByRole('button', { name: /Set up manually/ })).toBeVisible();
   });
 
-  test('guided setup can browse, back out, preview, add, and scan a deterministic source', async ({ page }, testInfo) => {
+  test('guided setup can browse, back out, preview, add, scan, and finish a deterministic source', async ({ page }, testInfo) => {
     await createLibrarian(page, sandboxUrl, 'acceptance-librarian');
     await enterGuidedSetupFromFreshInstall(page, testInfo);
 
@@ -152,10 +163,22 @@ test.describe('InfoMancer browser acceptance', () => {
     await expect(sourceRow).toContainText('12 video files');
     await expect(sourceRow).toContainText(/Healthy/i);
     await attach(page, testInfo, 'sources-after-scan', true);
+
+    await page.goto(`${sandboxUrl}/getting-started/sources`);
+    await Promise.all([
+      page.waitForURL(/\/getting-started\/finish/),
+      page.getByRole('button', { name: 'Continue' }).click(),
+    ]);
+    await expect(page.getByRole('heading', { name: 'Your library is ready for its first scan' })).toBeVisible();
+    await Promise.all([
+      page.waitForURL((url) => url.pathname === '/'),
+      page.getByRole('button', { name: 'Finish setup' }).click(),
+    ]);
   });
 
   test('Mark all read clears the entire Activity inbox, not only the visible 250', async ({ page }, testInfo) => {
     seedState('--activity', '300');
+    await signIn(page, sandboxUrl, 'acceptance-librarian');
     await page.goto(`${sandboxUrl}/activity`);
 
     await expect(page.getByRole('button', { name: 'Mark all read' })).toBeVisible();
@@ -176,6 +199,7 @@ test.describe('InfoMancer browser acceptance', () => {
 
   test('bulk match review gives visible apply feedback and preserves unresolved rows', async ({ page }, testInfo) => {
     seedState('--movie-suggestions', '6');
+    await signIn(page, sandboxUrl, 'acceptance-librarian');
     await page.goto(`${sandboxUrl}/movies/bulk-match?review=true`);
 
     await expect(page.getByRole('heading', { name: 'Bulk movie matching' })).toBeVisible();
