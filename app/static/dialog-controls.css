@@ -46,6 +46,15 @@
   pointer-events: none;
 }
 
+/* sources.css used to opt this button out of the shared renderer. Keep this
+   stronger reset here until the old source-local rules are removed in the next
+   cleanup pass. This guarantees exactly two bars even with cached alpha CSS. */
+.source-browser-close::before,
+.source-browser-close::after {
+  content: "" !important;
+  display: block !important;
+}
+
 .source-browser-close::before,
 .organize-dialog-close::before,
 .overview-dialog-close::before,
