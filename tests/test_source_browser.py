@@ -215,19 +215,19 @@ class SourceBrowserUiContracts(unittest.TestCase):
 
     def test_close_button_uses_only_shared_two_bar_renderer(self):
         partial = (TEMPLATES / "_source_browser.html").read_text(encoding="utf-8")
-        base = (TEMPLATES / "base.html").read_text(encoding="utf-8")
         shared = (STATIC / "dialog-controls.css").read_text(encoding="utf-8")
         local = (STATIC / "sources.css").read_text(encoding="utf-8")
+        modern = (STATIC / "modern.css").read_text(encoding="utf-8")
         self.assertIn('class="source-browser-close"', partial)
         self.assertNotIn("source-browser-close-icon", partial)
         self.assertNotIn("<svg", partial.split('class="source-browser-close"', 1)[1].split("</button>", 1)[0])
-        self.assertIn(".source-browser-close", shared)
-        self.assertIn("content: \"\" !important", shared)
-        self.assertIn("display: block !important", shared)
+        self.assertIn(".source-browser-close::before", shared)
+        self.assertIn(".source-browser-close::after", shared)
         self.assertIn("translate(-50%, -50%) rotate(45deg)", shared)
         self.assertIn("translate(-50%, -50%) rotate(-45deg)", shared)
-        self.assertIn(".source-browser-close::before,.source-browser-close::after", local)
-        self.assertLess(base.index("path='sources.css'"), base.index("path='dialog-controls.css'"))
+        self.assertNotIn(".source-browser-close::before", local)
+        self.assertNotIn(".source-browser-close::after", local)
+        self.assertNotIn('dialog button[aria-label^="Close"]::before', modern)
 
 
 if __name__ == "__main__":
