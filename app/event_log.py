@@ -199,9 +199,27 @@ class EventLog:
     def mark_read(self, user_id: int, event_ids: list[int] | None = None) -> int:
         if user_id <= 0:
             return 0
+        if event_ids is None:
+            # "Mark all" means the entire visible Activity inbox, not merely the
+            # 250-row window used to keep interactive list/count queries bounded.
+            # Keep the visibility predicate in SQL so account-local events cannot
+            # be marked by another user and avoid materializing thousands of rows.
+            categories = sorted(ACTIVITY_CATEGORIES)
+            placeholders = ",".join("?" for _ in categories)
+            with self.database.connect() as conn:
+                before = conn.total_changes
+                conn.execute(
+                    f"""INSERT OR IGNORE INTO user_event_reads(user_id,event_id)
+                        SELECT ?,e.id FROM event_logs e
+                        WHERE e.category IN ({placeholders})
+                          AND (e.user_id IS NULL OR e.user_id=?)""",
+                    [user_id, *categories, user_id],
+                )
+                return conn.total_changes - before
+
         events = self.activity(user_id, unread_only=True, limit=250)
         allowed = {item["id"] for item in events}
-        selected = allowed if event_ids is None else allowed.intersection(event_ids)
+        selected = allowed.intersection(event_ids)
         with self.database.connect() as conn:
             conn.executemany(
                 "INSERT OR IGNORE INTO user_event_reads(user_id,event_id) VALUES (?,?)",
