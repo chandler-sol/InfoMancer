@@ -45,11 +45,11 @@ class BootstrapTokenManager:
             pass
         if not self._announced:
             print(
-                "InfoMancer first-run bootstrap token: " + token,
+                "InfoMancer Library Card #: " + token,
                 flush=True,
             )
             print(
-                "Enter this token once at /setup. It is invalidated after the first Librarian is created.",
+                "Enter this one-time Library Card # at /setup. It is invalidated after the first Librarian is created.",
                 flush=True,
             )
             self._announced = True
