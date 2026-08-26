@@ -28,12 +28,14 @@ class MetadataModalStateTests(unittest.TestCase):
         self.assertNotIn("if (!row.isConnected) return;", source)
 
     def test_dialog_close_buttons_use_shared_optical_centering(self):
-        source = (ROOT / "app/static/modern.css").read_text(encoding="utf-8")
+        source = (ROOT / "app/static/dialog-controls.css").read_text(encoding="utf-8")
 
-        self.assertIn('dialog button[aria-label^="Close"]', source)
-        self.assertIn('content: "×"', source)
-        self.assertIn("place-items: center !important", source)
-        self.assertIn("transform: translateY(-1px)", source)
+        self.assertIn(".metadata-maintenance-close,", source)
+        self.assertIn(".tvdb-credentials-close,", source)
+        self.assertIn("place-items: center", source)
+        self.assertIn("transform: translate(-50%, -50%) rotate(45deg)", source)
+        self.assertIn("transform: translate(-50%, -50%) rotate(-45deg)", source)
+        self.assertNotIn('content: "×"', source)
 
 
 if __name__ == "__main__":
