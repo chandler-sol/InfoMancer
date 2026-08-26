@@ -22,7 +22,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      E2E_ROOT: ${{ runner.temp }}/infomancer-e2e
       INFOMANCER_E2E_BOOTSTRAP_TOKEN: e2e-library-card-123456
     steps:
       - name: Check out candidate
@@ -30,6 +29,12 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+
+      - name: Prepare acceptance paths
+        shell: bash
+        run: |
+          echo "E2E_ROOT=$RUNNER_TEMP/infomancer-e2e" >> "$GITHUB_ENV"
+          echo "INFOMANCER_E2E_DATABASE=$RUNNER_TEMP/infomancer-e2e/state/sandbox.db" >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -100,7 +105,6 @@ jobs:
         env:
           INFOMANCER_E2E_TOKEN_URL: http://127.0.0.1:8787
           INFOMANCER_E2E_SANDBOX_URL: http://127.0.0.1:8788
-          INFOMANCER_E2E_DATABASE: ${{ runner.temp }}/infomancer-e2e/state/sandbox.db
         run: npm test
 
       - name: Upload acceptance evidence
@@ -111,7 +115,7 @@ jobs:
           path: |
             e2e/playwright-report
             e2e/test-results
-            ${{ runner.temp }}/infomancer-e2e/logs
+            ${{ env.E2E_ROOT }}/logs
           if-no-files-found: warn
           retention-days: 14
 
