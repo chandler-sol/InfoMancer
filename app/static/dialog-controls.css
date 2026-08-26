@@ -8,6 +8,8 @@
 .profile-account-dialog-close,
 .profile-avatar-dialog-close,
 .workspace-inspector-close,
+.metadata-maintenance-close,
+.tvdb-credentials-close,
 #task-dismiss {
   position: relative;
   display: grid;
@@ -31,6 +33,10 @@
 .profile-avatar-dialog-close::after,
 .workspace-inspector-close::before,
 .workspace-inspector-close::after,
+.metadata-maintenance-close::before,
+.metadata-maintenance-close::after,
+.tvdb-credentials-close::before,
+.tvdb-credentials-close::after,
 #task-dismiss::before,
 #task-dismiss::after {
   content: "";
@@ -55,6 +61,8 @@
 .profile-account-dialog-close::before,
 .profile-avatar-dialog-close::before,
 .workspace-inspector-close::before,
+.metadata-maintenance-close::before,
+.tvdb-credentials-close::before,
 #task-dismiss::before {
   transform: translate(-50%, -50%) rotate(45deg);
 }
@@ -66,6 +74,8 @@
 .profile-account-dialog-close::after,
 .profile-avatar-dialog-close::after,
 .workspace-inspector-close::after,
+.metadata-maintenance-close::after,
+.tvdb-credentials-close::after,
 #task-dismiss::after {
   transform: translate(-50%, -50%) rotate(-45deg);
 }
