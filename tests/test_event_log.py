@@ -87,6 +87,24 @@ class EventLogTests(unittest.TestCase):
         self.assertEqual(self.logs.mark_read(user_id, [activity[0]["id"]]), 1)
         self.assertEqual(self.logs.unread_count(user_id), 0)
 
+    def test_mark_all_read_clears_more_than_the_bounded_activity_window(self):
+        with self.database.connect() as conn:
+            user_id = conn.execute(
+                """INSERT INTO users(username,display_name,role,password_hash)
+                   VALUES ('many','Many','member','test')"""
+            ).lastrowid
+        for index in range(325):
+            self.logs.write(
+                "mie", f"Finding {index}",
+                context={"finding_id": index + 1}, user_id=user_id,
+            )
+
+        # The badge/list query is deliberately bounded, but Mark all must not be.
+        self.assertEqual(self.logs.unread_count(user_id), 250)
+        self.assertEqual(self.logs.mark_read(user_id), 325)
+        self.assertEqual(self.logs.unread_count(user_id), 0)
+        self.assertEqual(self.logs.activity(user_id, unread_only=True, limit=250), [])
+
     def test_unread_count_does_not_materialize_or_decode_activity_rows(self):
         with self.database.connect() as conn:
             user_id = conn.execute(
