@@ -59,7 +59,7 @@ class WindowsDesktopContractTests(unittest.TestCase):
         rust = (ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
         self.assertIn("LOCAL_CORE_STARTUP_TIMEOUT: Duration = Duration::from_secs(60)", rust)
         self.assertIn("while started.elapsed() < LOCAL_CORE_STARTUP_TIMEOUT", rust)
-        self.assertIn("Local core port became reachable after", rust)
+        self.assertIn("Local core became HTTP-ready after", rust)
         self.assertIn("Check desktop-launcher.log for startup details", rust)
         self.assertNotIn("for _ in 0..120", rust)
 
