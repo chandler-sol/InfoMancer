@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Bulk TV series matching · InfoMancer{% endblock %}
 {% block content %}
-{% macro review_actions(position='bottom') %}<div class="review-actions review-actions-{{ position }}"><a class="button" href="/shows/bulk-match">{{ 'Back to TV Bulk Match' if direct_selection else 'Choose another batch' }}</a><div class="actions">{% if offset > 0 %}<a class="button" href="/shows/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}&amp;offset={{ [0, offset - 50]|max }}">Previous 50</a>{% endif %}{% if offset + 50 < cached_count %}<a class="button" href="/shows/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}&amp;offset={{ offset + 50 }}">Next 50</a>{% endif %}<button class="button primary">Apply selected matches</button></div></div>{% endmacro %}
+{% macro review_actions(position='bottom') %}<div class="review-actions review-actions-{{ position }}"><a class="button" href="/shows/bulk-match">{{ 'Back to TV Bulk Match' if direct_selection else 'Choose another batch' }}</a><div class="actions">{% if offset > 0 %}<a class="button" href="/shows/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}&amp;offset={{ [0, offset - 50]|max }}">Previous 50</a>{% endif %}{% if offset + 50 < cached_count %}<a class="button" href="/shows/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}&amp;offset={{ offset + 50 }}">Next 50</a>{% endif %}<button class="button primary" data-bulk-apply-button>Apply selected matches</button></div></div>{% endmacro %}
 <a class="back" href="/bulk-match">← Bulk Match</a>
+<div data-bulk-match-controller data-bulk-match-task="tv-match-analysis" data-bulk-match-active="{{ '1' if job.status in ['starting', 'running'] else '0' }}" data-bulk-match-complete-url="/shows/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}"></div>
 <div class="page-head"><div><p class="eyebrow">REVIEW QUEUE</p><h1>{{ 'Match selected TV series' if direct_selection else 'TV series matching' }}</h1>{% if direct_selection %}<p class="muted">Review matches for only the TV series you selected. Episode records load after you approve each match.</p>{% endif %}</div></div>
 {% if not direct_selection %}<section class="panel bulk-match-note"><h2>How TV matching works</h2><p class="muted">A bulk TV match connects each show folder to one TVDB series. InfoMancer then loads that series’ episode list. Future source or series scans compare your local files against it to identify new and missing episodes.</p></section>{% endif %}
 {% if not analyzed %}
@@ -14,10 +15,11 @@
   </tbody></table></section>
 </form>
 {% else %}
-<form method="post" action="/shows/bulk-match">
+<form method="post" action="/shows/bulk-match" data-bulk-match-review-form data-bulk-match-item-label="TV series">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   {% if direct_selection %}<input type="hidden" name="selected_scope" value="1">{% endif %}
-  {% if direct_selection and job.status in ['starting', 'running'] %}<section class="panel bulk-direct-progress"><div><h2>Finding matches for {{ job.total }} selected TV series</h2><p class="muted">{{ job.processed or 0 }} analyzed{% if job.current %} · currently searching {{ job.current }}{% endif %}. This page will update automatically.</p></div><span class="task-track"><i></i></span></section>{% endif %}
+  {% if direct_selection and job.status in ['starting', 'running'] %}<section class="panel bulk-direct-progress" data-bulk-match-progress><div><h2>Finding matches for {{ job.total }} selected TV series</h2><p class="muted" data-bulk-match-progress-copy>{% if job.processed %}{{ job.processed }} of {{ job.total }} checked{% if job.current %} · currently searching {{ job.current }}{% endif %}. This page will update automatically.{% else %}Preparing TVDB searches… This page will update automatically.{% endif %}</p></div><span class="task-track"><i data-bulk-match-progress-fill></i></span></section>{% endif %}
+  <div class="notice" data-bulk-apply-status role="status" aria-live="polite" hidden></div>
   {{ review_actions('top') }}
   <section class="panel table-wrap"><table><thead><tr><th>Apply</th><th>Library series</th><th>Suggested TVDB series</th><th>Confidence</th></tr></thead><tbody>
   {% for item in suggestions %}<tr><td>{% if item.candidate %}<input class="match-check" type="checkbox" name="matches" value="{{ item.title.id }}:{{ item.candidate.tvdb_id or item.candidate.id }}" {% if item.exact %}checked{% endif %}>{% endif %}</td><td><strong>{{ item.title.title }}</strong>{% if item.title.year %} ({{ item.title.year }}){% endif %}<small>{{ item.title.folder_path }}</small></td><td>{% if item.candidate %}<div class="title-cell">{% if item.candidate.image_url %}<img class="poster-thumb" src="{{ item.candidate.image_url }}" alt="">{% endif %}<div><strong>{{ item.candidate.name }}</strong>{% if item.candidate.year %} ({{ item.candidate.year }}){% endif %}<small>TVDB {{ item.candidate.tvdb_id or item.candidate.id }} · {{ item.result_count }} result(s)</small><a class="possible-match-link" href="/titles/{{ item.title.id }}/tvdb">Review all matches</a></div></div>{% elif item.pending and job.status in ['starting', 'running'] %}<span class="muted">Waiting to search…</span>{% else %}<span class="muted">No result</span><a class="possible-match-link" href="/titles/{{ item.title.id }}/tvdb">Try manual search</a>{% endif %}</td><td>{% if item.confidence %}<span class="confidence-badge {% if item.confidence.score >= 95 %}very-high{% elif item.confidence.score >= 80 %}high{% elif item.confidence.score >= 60 %}medium{% else %}low{% endif %}">{{ item.confidence.score }}% · {{ item.confidence.label }}</span>{% else %}—{% endif %}</td></tr>{% else %}<tr><td colspan="4" class="empty">No selected unmatched TV series remain.</td></tr>{% endfor %}
@@ -37,9 +39,7 @@
   const count = document.getElementById('selection-count');
   const update = () => { const total = choices.filter(choice => choice.checked).length; if (count) count.textContent = `${total} selected`; if (actions) actions.hidden = !total; };
   choices.forEach(choice => choice.addEventListener('change', update)); update();
-  {% if job.status in ['starting', 'running'] %}
-  const timer = window.setInterval(async () => { try { const response = await fetch('/api/tv-match-analysis', {cache:'no-store'}); const status = await response.json(); if (status.status === 'complete') { clearInterval(timer); location.assign('/shows/bulk-match?review=true{% if direct_selection %}&selected=true{% endif %}'); } } catch (_) {} }, 2500);
-  {% endif %}
 })();
 </script>
+<script src="{{ url_for('static', path='bulk-match-feedback.js') }}?v={{ static_version }}" defer></script>
 {% endblock %}
