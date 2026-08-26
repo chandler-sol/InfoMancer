@@ -75,8 +75,12 @@
     try {
       const data = await fetchJson(`/api/source-browser?path=${encodeURIComponent(path)}`);
       current = data.current || "";
-      back.disabled = !data.parent;
-      back.onclick = data.parent ? () => load(data.parent) : null;
+      // A filesystem root such as L:\ has no parent, but it does have a logical
+      // parent in this UI: the list of available storage locations. Treat that
+      // location chooser as the Back target instead of disabling the button.
+      const backTarget = data.parent || (current ? "" : null);
+      back.disabled = backTarget === null;
+      back.onclick = backTarget !== null ? () => load(backTarget) : null;
       crumbs.replaceChildren();
       for (const crumb of data.breadcrumbs || []) {
         const button = document.createElement("button");
