@@ -4,9 +4,28 @@ const path = require('node:path');
 
 const tokenUrl = process.env.INFOMANCER_E2E_TOKEN_URL || 'http://127.0.0.1:8787';
 const sandboxUrl = process.env.INFOMANCER_E2E_SANDBOX_URL || 'http://127.0.0.1:8788';
+const tourUrl = process.env.INFOMANCER_E2E_TOUR_URL || 'http://127.0.0.1:8789';
 const sandboxDatabase = process.env.INFOMANCER_E2E_DATABASE || '';
 const bootstrapToken = process.env.INFOMANCER_E2E_BOOTSTRAP_TOKEN || 'e2e-library-card-123456';
 const acceptancePassword = 'acceptance-password-123';
+
+const librarianTourSteps = [
+  { title: 'Meet the 0.8 workspace', path: '/' },
+  { title: 'One workspace, wherever you are', path: '/' },
+  { title: 'Scope it once, save it for later', path: '/library' },
+  { title: 'Find the exact slice you need', path: '/library' },
+  { title: 'Choose detail or artwork', path: '/library' },
+  { title: 'Inspect first, act second', path: '/library' },
+  { title: 'Review is your decision inbox', path: '/review' },
+  { title: 'Sources stay explicit and guarded', path: '/sources' },
+  { title: 'Choose how much file authority to allow', path: '/settings/system' },
+  { title: 'Schedule maintenance without babysitting it', path: '/settings/scheduled-tasks' },
+  { title: 'Recovery is preview-first too', path: '/settings/recovery' },
+  { title: 'Every supported file change leaves a trail', path: '/operations' },
+  { title: 'Background work stays out of your way', path: '/review' },
+  { title: 'Search and commands follow you', path: '/review' },
+  { title: 'Your account and preferences', path: '/review' },
+];
 
 async function createLibrarian(page, baseUrl, username, token = '') {
   await page.goto(`${baseUrl}/setup`);
@@ -65,6 +84,46 @@ async function enterGuidedSetupFromFreshInstall(page, testInfo) {
   await expect(page.getByRole('heading', { name: 'Set your time zone' })).toBeVisible();
 }
 
+async function completeLibrarianTour(page, testInfo) {
+  const tour = page.locator('#onboarding-tour');
+  const title = tour.locator('#tour-title');
+  const label = tour.locator('#tour-step-label');
+  const next = tour.locator('#tour-next');
+
+  for (let index = 0; index < librarianTourSteps.length; index += 1) {
+    const step = librarianTourSteps[index];
+    await expect(tour).toBeVisible({ timeout: 12000 });
+    await expect(title).toHaveText(step.title);
+    await expect(label).toHaveText(`${index + 1} of ${librarianTourSteps.length}`);
+    expect(new URL(page.url()).pathname).toBe(step.path);
+
+    if (index === 0) {
+      await expect(next).toHaveText('Start tour');
+    } else {
+      await expect(page.locator('.tour-highlight').first()).toBeVisible();
+      await expect(next).toHaveText(index === librarianTourSteps.length - 1 ? 'Finish' : 'Next');
+    }
+
+    await attach(page, testInfo, `tour-step-${String(index + 1).padStart(2, '0')}`, true);
+
+    if (index === librarianTourSteps.length - 1) {
+      await Promise.all([
+        page.waitForURL((url) => url.pathname === '/' && url.searchParams.get('setup_prompt') === '1'),
+        next.click(),
+      ]);
+      break;
+    }
+
+    await next.click();
+    await expect(title).toHaveText(librarianTourSteps[index + 1].title, { timeout: 12000 });
+  }
+
+  await expect(tour).toHaveCount(0);
+  const setupChoice = page.locator('.setup-choice-layer');
+  await expect(setupChoice).toBeVisible();
+  await expect(setupChoice.getByRole('heading', { name: 'How would you like to begin?' })).toBeVisible();
+}
+
 function seedState(...args) {
   if (!sandboxDatabase) throw new Error('INFOMANCER_E2E_DATABASE is required');
   execFileSync(
@@ -80,7 +139,7 @@ async function attach(pageOrLocator, testInfo, name, fullPage = false) {
 }
 
 test.describe('InfoMancer browser acceptance', () => {
-  // These tests intentionally mutate two persistent disposable servers. Retrying a
+  // These tests intentionally mutate persistent disposable servers. Retrying a
   // completed bootstrap or setup step against the same database produces false
   // failures, so keep this stateful acceptance group single-attempt.
   test.describe.configure({ retries: 0 });
@@ -96,6 +155,11 @@ test.describe('InfoMancer browser acceptance', () => {
     const setupChoice = await dismissFreshInstallTour(page, testInfo, 'bootstrap-fresh-install-tour');
     await expect(setupChoice.getByRole('button', { name: /Guided setup/ })).toBeVisible();
     await expect(setupChoice.getByRole('button', { name: /Set up manually/ })).toBeVisible();
+  });
+
+  test('fresh Librarian can complete every guided-tour step and reach setup choice', async ({ page }, testInfo) => {
+    await createLibrarian(page, tourUrl, 'tour-librarian');
+    await completeLibrarianTour(page, testInfo);
   });
 
   test('guided setup can browse, back out, preview, add, scan, and finish a deterministic source', async ({ page }, testInfo) => {
