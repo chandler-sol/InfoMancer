@@ -38,23 +38,22 @@
   position: absolute;
   top: 50%;
   left: 50%;
+  display: block;
   width: 17px;
   height: 2px;
   border-radius: 999px;
   background: currentColor;
+  font-size: 0 !important;
+  line-height: 0 !important;
   transform-origin: center;
   pointer-events: none;
 }
 
-/* sources.css used to opt this button out of the shared renderer. Keep this
-   stronger reset here until the old source-local rules are removed in the next
-   cleanup pass. This guarantees exactly two bars even with cached alpha CSS. */
-.source-browser-close::before,
-.source-browser-close::after {
-  content: "" !important;
-  display: block !important;
-}
-
+/* The general visual-polish stylesheet also has a historical dialog-close rule
+   with a more specific selector. It used to overwrite the transform on ::before,
+   leaving one horizontal/slanted bar instead of an X. These explicit transforms
+   are intentionally important so the canonical renderer is the final authority. */
+dialog button.source-browser-close::before,
 .source-browser-close::before,
 .organize-dialog-close::before,
 .overview-dialog-close::before,
@@ -63,9 +62,12 @@
 .profile-avatar-dialog-close::before,
 .workspace-inspector-close::before,
 #task-dismiss::before {
-  transform: translate(-50%, -50%) rotate(45deg);
+  content: "" !important;
+  display: block !important;
+  transform: translate(-50%, -50%) rotate(45deg) !important;
 }
 
+dialog button.source-browser-close::after,
 .source-browser-close::after,
 .organize-dialog-close::after,
 .overview-dialog-close::after,
@@ -74,5 +76,7 @@
 .profile-avatar-dialog-close::after,
 .workspace-inspector-close::after,
 #task-dismiss::after {
-  transform: translate(-50%, -50%) rotate(-45deg);
+  content: "" !important;
+  display: block !important;
+  transform: translate(-50%, -50%) rotate(-45deg) !important;
 }
