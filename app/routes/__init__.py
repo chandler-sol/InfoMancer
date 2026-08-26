@@ -12,6 +12,7 @@ from .library_optimized import build_router as build_library_router
 from .inspector_media import build_router as build_inspector_media_router
 from .recovery import build_router as build_recovery_router
 from .scheduled_tasks import build_router as build_scheduled_tasks_router
+from .source_commit import build_router as build_source_commit_router
 from .settings import build_router as build_settings_router
 from .settings_quick_actions import build_router as build_settings_quick_actions_router
 from .account_avatar import build_router as build_account_avatar_router
@@ -45,6 +46,9 @@ ROUTER_BUILDERS = (
     build_inspector_media_router,
     build_recovery_router,
     build_scheduled_tasks_router,
+    # Source creation must be registered before the broader Settings bundle so
+    # POST /roots uses the same Windows/NFS-safe path validation as the browser.
+    build_source_commit_router,
     build_settings_router,
     build_settings_quick_actions_router,
     build_account_avatar_router,
