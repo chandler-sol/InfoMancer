@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 
 from ..access import require_librarian
 from .context import RouteContext
@@ -15,8 +15,9 @@ def build_router(ctx: RouteContext):
         "/api/movies/bulk-match/progress",
         dependencies=[Depends(require_librarian)],
     )
-    def bulk_movie_match_progress() -> dict:
+    def bulk_movie_match_progress(response: Response) -> dict:
         """Return suggestions already saved by the active bulk movie analysis."""
+        response.headers["Cache-Control"] = "no-store"
         with movie_match_lock:
             job = dict(movie_match_job)
 
