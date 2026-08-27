@@ -321,11 +321,20 @@ test.describe('InfoMancer browser acceptance', () => {
     try {
       const apply = page.locator('[data-bulk-apply-button]').first();
       await apply.click({ noWaitAfter: true });
-      await expect(apply).toBeDisabled();
-      const status = page.locator('[data-bulk-apply-status]');
-      await expect(status).toBeVisible();
-      await expect(status).toContainText('Applying 5 selected movies');
-      await expect(status.locator('.task-track')).toBeVisible();
+      const feedback = await page.locator('[data-bulk-match-review-form]').evaluate((form) => {
+        const status = form.querySelector('[data-bulk-apply-status]');
+        const buttons = [...form.querySelectorAll('[data-bulk-apply-button]')];
+        return {
+          text: status?.textContent || '',
+          hidden: Boolean(status?.hidden),
+          hasTrack: Boolean(status?.querySelector('.task-track')),
+          allButtonsDisabled: buttons.length > 0 && buttons.every((button) => button.disabled),
+        };
+      });
+      expect(feedback.hidden).toBe(false);
+      expect(feedback.text).toContain('Applying 5 selected movies');
+      expect(feedback.hasTrack).toBe(true);
+      expect(feedback.allButtonsDisabled).toBe(true);
       await expect(page.getByText('Deliberately Wrong Candidate')).toBeVisible();
       await attach(page, testInfo, 'bulk-match-applying', true);
     } finally {
