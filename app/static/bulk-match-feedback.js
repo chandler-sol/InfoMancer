@@ -19,6 +19,7 @@
   let progressiveRequest = null;
   let lastProgressiveProcessed = -1;
   let queuedProgressiveProcessed = -1;
+  let restoreRememberedCheckbox = () => {};
 
   /* Bulk review tables can be very tall. Keep active feedback below the persistent
      application header so an action started from the bottom of the table is still
@@ -74,6 +75,7 @@
         checkbox.name = 'matches';
         checkbox.value = `${item.title_id}:${candidate.id}`;
         checkbox.checked = Boolean(item.exact);
+        restoreRememberedCheckbox(checkbox);
         applyCell.append(checkbox);
       }
     }
@@ -220,6 +222,79 @@
   const itemLabel = reviewForm.dataset.bulkMatchItemLabel || 'match';
   const itemPlural = reviewForm.dataset.bulkMatchItemPlural
     || (itemLabel.endsWith('series') ? itemLabel : `${itemLabel}s`);
+  const selectionScope = reviewForm.querySelector('input[name="selected_scope"]')
+    ? 'selected'
+    : 'review';
+  const selectionMemoryKey = `infomancer:bulk-match-selection:${window.location.pathname}:${selectionScope}`;
+  let rememberedSelection = null;
+
+  const readSelectionMemory = () => {
+    if (rememberedSelection !== null) return rememberedSelection;
+    try {
+      const parsed = JSON.parse(window.sessionStorage.getItem(selectionMemoryKey) || '{}');
+      rememberedSelection = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed
+        : {};
+    } catch (_) {
+      rememberedSelection = {};
+    }
+    return rememberedSelection;
+  };
+
+  const checkboxTitleId = (checkbox) => String(checkbox?.value || '').split(':', 1)[0];
+
+  const rememberReviewSelection = () => {
+    const next = { ...readSelectionMemory() };
+    reviewForm.querySelectorAll('input[name="matches"]').forEach((checkbox) => {
+      const titleId = checkboxTitleId(checkbox);
+      if (titleId) next[titleId] = Boolean(checkbox.checked);
+    });
+    rememberedSelection = next;
+    try {
+      window.sessionStorage.setItem(selectionMemoryKey, JSON.stringify(next));
+    } catch (_) {
+      // Selection memory is a convenience only. Review remains usable if storage
+      // is unavailable or disabled by the WebView/browser.
+    }
+  };
+
+  restoreRememberedCheckbox = (checkbox) => {
+    const titleId = checkboxTitleId(checkbox);
+    const memory = readSelectionMemory();
+    if (titleId && Object.prototype.hasOwnProperty.call(memory, titleId)) {
+      checkbox.checked = Boolean(memory[titleId]);
+    }
+  };
+
+  reviewForm.querySelectorAll('input[name="matches"]').forEach(restoreRememberedCheckbox);
+  reviewForm.addEventListener('change', (event) => {
+    if (event.target instanceof HTMLInputElement && event.target.name === 'matches') {
+      rememberReviewSelection();
+    }
+  });
+
+  document.addEventListener('click', (event) => {
+    const link = event.target.closest?.('a');
+    if (!link) return;
+    if (link.classList.contains('possible-match-link')) {
+      rememberReviewSelection();
+      return;
+    }
+    if (!link.classList.contains('back') && !link.closest('.review-actions')) return;
+    const destination = new URL(link.href, window.location.origin);
+    const staysInReview = destination.pathname === window.location.pathname
+      && destination.searchParams.get('review') === 'true';
+    if (!staysInReview) {
+      rememberedSelection = {};
+      try {
+        window.sessionStorage.removeItem(selectionMemoryKey);
+      } catch (_) {
+        // The navigation should never be blocked by optional selection memory.
+      }
+    }
+  });
+  window.addEventListener('pagehide', rememberReviewSelection);
+
   makeFeedbackSticky(status);
 
   const showStatus = (message, working = false) => {
@@ -256,6 +331,7 @@
     }
 
     event.preventDefault();
+    rememberReviewSelection();
     reviewForm.dataset.bulkApplying = '1';
     reviewForm.setAttribute('aria-busy', 'true');
     const count = selected.length;
