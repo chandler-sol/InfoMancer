@@ -227,6 +227,7 @@
     : 'review';
   const selectionMemoryKey = `infomancer:bulk-match-selection:${window.location.pathname}:${selectionScope}`;
   let rememberedSelection = null;
+  let clearSelectionOnPageHide = false;
 
   const readSelectionMemory = () => {
     if (rememberedSelection !== null) return rememberedSelection;
@@ -258,6 +259,15 @@
     }
   };
 
+  const clearReviewSelection = () => {
+    rememberedSelection = {};
+    try {
+      window.sessionStorage.removeItem(selectionMemoryKey);
+    } catch (_) {
+      // Leaving the review must not be blocked by optional selection memory.
+    }
+  };
+
   restoreRememberedCheckbox = (checkbox) => {
     const titleId = checkboxTitleId(checkbox);
     const memory = readSelectionMemory();
@@ -285,15 +295,18 @@
     const staysInReview = destination.pathname === window.location.pathname
       && destination.searchParams.get('review') === 'true';
     if (!staysInReview) {
-      rememberedSelection = {};
-      try {
-        window.sessionStorage.removeItem(selectionMemoryKey);
-      } catch (_) {
-        // The navigation should never be blocked by optional selection memory.
-      }
+      // Defer removal until pagehide. If navigation is cancelled or opened in a
+      // separate tab, the current review keeps its remembered checkbox state.
+      clearSelectionOnPageHide = true;
     }
   });
-  window.addEventListener('pagehide', rememberReviewSelection);
+  window.addEventListener('pagehide', () => {
+    if (clearSelectionOnPageHide) {
+      clearReviewSelection();
+    } else {
+      rememberReviewSelection();
+    }
+  });
 
   makeFeedbackSticky(status);
 
