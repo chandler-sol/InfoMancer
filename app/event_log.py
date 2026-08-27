@@ -207,6 +207,11 @@ class EventLog:
             categories = sorted(ACTIVITY_CATEGORIES)
             placeholders = ",".join("?" for _ in categories)
             with self.database.connect() as conn:
+                # Interactive read-state changes should not make the whole desktop
+                # look frozen behind SQLite's normal 30-second writer wait. If a
+                # long scan owns the write lock, fail quickly and let the route
+                # return a useful retry message instead of an Internal Server Error.
+                conn.execute("PRAGMA busy_timeout=1500")
                 before = conn.total_changes
                 conn.execute(
                     f"""INSERT OR IGNORE INTO user_event_reads(user_id,event_id)
@@ -221,6 +226,7 @@ class EventLog:
         allowed = {item["id"] for item in events}
         selected = allowed.intersection(event_ids)
         with self.database.connect() as conn:
+            conn.execute("PRAGMA busy_timeout=1500")
             conn.executemany(
                 "INSERT OR IGNORE INTO user_event_reads(user_id,event_id) VALUES (?,?)",
                 [(user_id, event_id) for event_id in selected],
