@@ -10,6 +10,18 @@
   const progressFill = document.querySelector('[data-bulk-match-progress-fill]');
   let finishingAnalysis = false;
 
+  /* Bulk review tables can be very tall. Keep active feedback below the persistent
+     application header so an action started from the bottom of the table is still
+     visible without moving the user's scroll position. */
+  const makeFeedbackSticky = (node) => {
+    if (!node) return;
+    node.style.position = 'sticky';
+    node.style.top = '80px';
+    node.style.zIndex = '4';
+    node.style.boxShadow = '0 14px 32px rgba(0, 0, 0, .32)';
+  };
+  makeFeedbackSticky(progress);
+
   const renderAnalysisTask = (task) => {
     const detail = String(task?.detail || '');
     const match = detail.match(/([\d,]+)\s+of\s+([\d,]+)\s+checked/i);
@@ -58,6 +70,7 @@
   const itemLabel = reviewForm.dataset.bulkMatchItemLabel || 'match';
   const itemPlural = reviewForm.dataset.bulkMatchItemPlural
     || (itemLabel.endsWith('series') ? itemLabel : `${itemLabel}s`);
+  makeFeedbackSticky(status);
 
   const showStatus = (message, working = false) => {
     if (!status) return;
