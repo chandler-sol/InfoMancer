@@ -4,6 +4,7 @@ import argparse
 import os
 import shutil
 import string
+import subprocess
 import sys
 import threading
 import time
@@ -198,16 +199,39 @@ def create_recovery_package(data_dir: Path, output: Path) -> None:
     print(str(output), flush=True)
 
 
-def main() -> None:
+def _check_ffprobe() -> int:
+    """Verify the packaged core can find and execute its media inspector."""
+    from app.media_info import ffprobe_executable
+
+    try:
+        result = subprocess.run(
+            [ffprobe_executable(), "-version"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return 23
+    return 0 if result.returncode == 0 else 23
+
+
+def main() -> int:
     parser = argparse.ArgumentParser(description="InfoMancer Desktop local core")
     parser.add_argument("--port", type=int)
     # Retained for backwards-compatible manual launches. The native launcher sends
     # this secret through the inherited environment so it is not exposed in process
     # command-line listings.
     parser.add_argument("--bootstrap-token", default="")
-    parser.add_argument("--data-dir", required=True)
+    parser.add_argument("--data-dir")
     parser.add_argument("--recovery-output")
+    parser.add_argument("--check-ffprobe", action="store_true")
     args = parser.parse_args()
+
+    if args.check_ffprobe:
+        return _check_ffprobe()
+    if not args.data_dir:
+        parser.error("--data-dir is required unless --check-ffprobe is used")
 
     data_dir = Path(args.data_dir).expanduser().resolve()
     _ensure_runtime_streams(data_dir)
@@ -217,8 +241,8 @@ def main() -> None:
             create_recovery_package(data_dir, Path(args.recovery_output))
         except Exception as exc:
             print(f"Recovery package failed: {exc}", file=sys.stderr, flush=True)
-            raise SystemExit(2) from exc
-        return
+            return 2
+        return 0
 
     if args.port is None:
         parser.error("--port is required when starting the local InfoMancer core")
@@ -254,7 +278,8 @@ def main() -> None:
         access_log=False,
         log_level="warning",
     )
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
