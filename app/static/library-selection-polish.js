@@ -495,6 +495,12 @@
     queueSync();
   });
 
+  /* Select-all and letter-group changes are applied programmatically by the Library
+     controller, so no individual checkbox change event fires for those bulk paths.
+     Consume the controller's canonical selection event to keep body selection state,
+     Inspector selection UI, and the bulk command bar synchronized. */
+  document.addEventListener('infomancer:library-selection-updated', () => queueSync());
+
   document.addEventListener('infomancer:library-compare-selected', () => openCompareDialog());
 
   /* Closing the Inspector is an explicit user preference for the current selection.
