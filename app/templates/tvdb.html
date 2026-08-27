@@ -7,7 +7,7 @@
     <p class="eyebrow">METADATA</p>
     <h1>Match {{ 'movie' if entity == 'movie' else 'on TVDB' }}</h1>
   </div>
-  <form class="search" method="get" action="/titles/{{ title.id }}/tvdb">{% if request.query_params.get('from') %}<input type="hidden" name="from" value="{{ request.query_params.get('from') }}">{% endif %}{% if request.query_params.get('library_return') %}<input type="hidden" name="library_return" value="{{ request.query_params.get('library_return') }}">{% endif %}<input name="q" value="{{ q }}" {% if entity != 'movie' %}placeholder="Title, TVDB ID, or TVDB link"{% endif %} required><button class="button primary">Search</button></form>
+  <form class="search" method="get" action="/titles/{{ title.id }}/tvdb">{% if request.query_params.get('from') %}<input type="hidden" name="from" value="{{ request.query_params.get('from') }}">{% endif %}{% if request.query_params.get('library_return') %}<input type="hidden" name="library_return" value="{{ request.query_params.get('library_return') }}">{% endif %}<input name="q" value="{{ q }}" placeholder="{{ 'Movie title' if entity == 'movie' else 'Title, TVDB ID, or TVDB link' }}" required><button class="button primary">Search</button></form>
 </div>
 {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
 <section class="results">
@@ -25,21 +25,23 @@
     {% if entity == 'movie' %}<div class="empty">No results.</div>{% endif %}
   {% endfor %}
 </section>
-{% if entity != 'movie' %}
 <section class="panel manual-tvdb-match">
   <div>
     <p class="eyebrow">MANUAL MATCH</p>
     <h2>{% if results %}Already know the TVDB page?{% else %}No search results?{% endif %}</h2>
+    {% if entity == 'movie' %}
+    <p class="muted">Paste the TVDB movie-page link or its numeric movie ID. InfoMancer will resolve the canonical movie directly, even when TVDB's text-search index misses it.</p>
+    {% else %}
     <p class="muted">Paste the TVDB series-page link or its numeric series ID. InfoMancer will validate it and load that series’ episode metadata.</p>
+    {% endif %}
   </div>
-  <form method="post" action="/titles/{{ title.id }}/tvdb-manual">
+  <form method="post" action="/titles/{{ title.id }}/{{ 'movie-manual' if entity == 'movie' else 'tvdb-manual' }}">
     <input type="hidden" name="return_to" value="{{ request.query_params.get('library_return') or (request.url.path ~ ('?' ~ request.url.query if request.url.query else '')) }}">
     <input type="hidden" name="match_origin" value="{{ request.query_params.get('from', '') }}">
-    <label for="tvdb-reference">TVDB series link or ID</label>
-    <div class="actions"><input id="tvdb-reference" name="tvdb_reference" placeholder="https://thetvdb.com/series/example-show" required><button class="button primary">Use TVDB link</button></div>
+    <label for="tvdb-reference">TVDB {{ 'movie' if entity == 'movie' else 'series' }} link or ID</label>
+    <div class="actions"><input id="tvdb-reference" name="tvdb_reference" placeholder="{{ 'https://thetvdb.com/movies/example-movie' if entity == 'movie' else 'https://thetvdb.com/series/example-show' }}" required><button class="button primary">Use TVDB link</button></div>
   </form>
 </section>
-{% endif %}
 <script>
   (() => {
     const stored = sessionStorage.getItem("infomancerLibraryReturn") || "";
