@@ -13,6 +13,15 @@ class BulkMatchApplyFeedbackTests(unittest.TestCase):
         self.assertIn("/^Matched\\s+\\d+/i.test(completionMessage)", script)
         self.assertIn("Unselected or unresolved items will remain here for review.", script)
 
+    def test_bulk_feedback_stays_visible_from_bottom_of_long_review(self):
+        script = (ROOT / "app/static/bulk-match-feedback.js").read_text(encoding="utf-8")
+        self.assertIn("const makeFeedbackSticky = (node) =>", script)
+        self.assertIn("node.style.position = 'sticky'", script)
+        self.assertIn("node.style.top = '80px'", script)
+        self.assertIn("makeFeedbackSticky(progress)", script)
+        self.assertIn("makeFeedbackSticky(status)", script)
+        self.assertNotIn("scrollIntoView", script)
+
     def test_selected_bulk_apply_returns_to_selected_review_scope(self):
         routes = (ROOT / "app/routes/review.py").read_text(encoding="utf-8")
         self.assertIn(
