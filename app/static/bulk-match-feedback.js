@@ -60,8 +60,9 @@
     const confidenceCell = row.querySelector('[data-bulk-confidence-cell]');
     const applyCell = row.querySelector('[data-bulk-apply-cell]');
     const candidate = item?.candidate || null;
-    const score = Number(item?.confidence_score);
-    const hasScore = Number.isFinite(score);
+    const scoreValue = item?.confidence_score;
+    const score = Number(scoreValue);
+    const hasScore = scoreValue !== null && scoreValue !== undefined && Number.isFinite(score);
     const possible = Boolean(candidate?.possible_match) || (hasScore && score < 80);
 
     if (applyCell) {
