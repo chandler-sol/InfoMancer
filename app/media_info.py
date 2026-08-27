@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -25,6 +28,21 @@ class MediaInspectionError(RuntimeError):
         if not self.technical_detail:
             return self.user_message
         return f"{self.user_message}\n\nFFprobe output:\n{self.technical_detail}"
+
+
+def ffprobe_executable() -> str:
+    """Resolve FFprobe from an override, native bundle, or the host PATH."""
+    override = os.environ.get("INFOMANCER_FFPROBE", "").strip()
+    if override:
+        return override
+
+    bundle_dir = getattr(sys, "_MEIPASS", "")
+    if bundle_dir:
+        candidate = Path(bundle_dir) / ("ffprobe.exe" if os.name == "nt" else "ffprobe")
+        if candidate.is_file():
+            return str(candidate)
+
+    return shutil.which("ffprobe") or "ffprobe"
 
 
 def _ffprobe_error(path: Path, technical: str) -> MediaInspectionError:
@@ -121,7 +139,7 @@ def inspect_media(path: Path, timeout: int = 90) -> dict:
             headline="The cataloged file is no longer available",
         )
     command = [
-        "ffprobe", "-v", "error", "-show_entries",
+        ffprobe_executable(), "-v", "error", "-show_entries",
         "format=duration,bit_rate,format_name:stream=index,codec_type,codec_name,width,height,channels,color_transfer,color_primaries:stream_side_data",
         "-of", "json", str(path),
     ]
@@ -131,9 +149,10 @@ def inspect_media(path: Path, timeout: int = 90) -> dict:
         )
     except FileNotFoundError as exc:
         raise MediaInspectionError(
-            "FFprobe is not installed in the InfoMancer environment. Rebuild "
-            "the application image or install FFmpeg, then try again.",
-            headline="FFprobe is not installed",
+            "FFprobe is unavailable. Native InfoMancer builds include it; update "
+            "or reinstall InfoMancer, or configure INFOMANCER_FFPROBE for a "
+            "source/server installation, then try again.",
+            headline="FFprobe is unavailable",
         ) from exc
     except subprocess.TimeoutExpired as exc:
         raise MediaInspectionError(
@@ -144,7 +163,7 @@ def inspect_media(path: Path, timeout: int = 90) -> dict:
         ) from exc
     except OSError as exc:
         raise MediaInspectionError(
-            "InfoMancer could not start FFprobe for this file. Check that the media storage is connected and readable and that FFmpeg can run on this system, then try again.",
+            "InfoMancer could not start FFprobe for this file. Check that the media storage is connected and readable and that FFprobe can run on this system, then try again.",
             headline="Media inspection could not start",
             technical_detail=str(exc),
         ) from exc
