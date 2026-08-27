@@ -316,11 +316,12 @@ test.describe('InfoMancer browser acceptance', () => {
 
     const apply = page.locator('[data-bulk-apply-button]').first();
     await apply.click({ noWaitAfter: true });
+    await expect(apply).toBeDisabled();
     const status = page.locator('[data-bulk-apply-status]');
     await expect(status).toBeVisible();
     await expect(status).toContainText('Applying 5 selected movies');
     await expect(status.locator('.task-track')).toBeVisible();
-    await expect(apply).toBeDisabled();
     await expect(page.getByText('Deliberately Wrong Candidate')).toBeVisible();
+    await attach(page, testInfo, 'bulk-match-applying', true);
   });
 });
