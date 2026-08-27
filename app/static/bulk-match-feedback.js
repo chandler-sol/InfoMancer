@@ -4,11 +4,21 @@
 
   const taskId = controller.dataset.bulkMatchTask || '';
   const completeUrl = controller.dataset.bulkMatchCompleteUrl || window.location.href;
+  const progressUrl = controller.dataset.bulkMatchProgressUrl || '';
+  const matchOrigin = controller.dataset.bulkMatchOrigin || 'bulk-movie';
   const analysisActiveAtRender = controller.dataset.bulkMatchActive === '1';
   const progress = document.querySelector('[data-bulk-match-progress]');
   const progressCopy = document.querySelector('[data-bulk-match-progress-copy]');
   const progressFill = document.querySelector('[data-bulk-match-progress-fill]');
+  const progressiveRows = new Map(
+    [...document.querySelectorAll('[data-bulk-movie-id]')]
+      .map((row) => [String(row.dataset.bulkMovieId || ''), row])
+      .filter(([id]) => id),
+  );
   let finishingAnalysis = false;
+  let progressiveRequest = null;
+  let lastProgressiveProcessed = -1;
+  let queuedProgressiveProcessed = -1;
 
   /* Bulk review tables can be very tall. Keep active feedback below the persistent
      application header so an action started from the bottom of the table is still
@@ -22,44 +32,183 @@
   };
   makeFeedbackSticky(progress);
 
+  const manualMatchLink = (item, candidate, possible) => {
+    const link = document.createElement('a');
+    link.className = 'possible-match-link';
+    const url = new URL(`/titles/${item.title_id}/tvdb`, window.location.origin);
+    const query = String(candidate?.search_query || item.library_title || '');
+    if (query) url.searchParams.set('q', query);
+    url.searchParams.set('from', matchOrigin);
+    link.href = url.pathname + url.search;
+    link.textContent = candidate
+      ? (possible ? 'Review all possible matches' : 'Find another match')
+      : 'Try manual search';
+    return link;
+  };
+
+  const confidenceClass = (score) => {
+    if (score >= 95) return 'very-high';
+    if (score >= 80) return 'high';
+    if (score >= 60) return 'medium';
+    return 'low';
+  };
+
+  const renderProgressiveItem = (item) => {
+    const row = progressiveRows.get(String(item?.title_id || ''));
+    if (!row) return;
+    const suggestionCell = row.querySelector('[data-bulk-suggestion-cell]');
+    const confidenceCell = row.querySelector('[data-bulk-confidence-cell]');
+    const applyCell = row.querySelector('[data-bulk-apply-cell]');
+    const candidate = item?.candidate || null;
+    const score = Number(item?.confidence_score);
+    const hasScore = Number.isFinite(score);
+    const possible = Boolean(candidate?.possible_match) || (hasScore && score < 80);
+
+    if (applyCell) {
+      applyCell.replaceChildren();
+      if (candidate?.id) {
+        const checkbox = document.createElement('input');
+        checkbox.className = 'match-check';
+        checkbox.type = 'checkbox';
+        checkbox.name = 'matches';
+        checkbox.value = `${item.title_id}:${candidate.id}`;
+        checkbox.checked = Boolean(item.exact);
+        applyCell.append(checkbox);
+      }
+    }
+
+    if (suggestionCell) {
+      suggestionCell.replaceChildren();
+      if (candidate) {
+        const titleCell = document.createElement('div');
+        titleCell.className = 'title-cell';
+        if (candidate.image_url) {
+          const poster = document.createElement('img');
+          poster.className = 'poster-thumb';
+          poster.src = candidate.image_url;
+          poster.alt = '';
+          titleCell.append(poster);
+        }
+        const details = document.createElement('div');
+        if (possible) {
+          const flag = document.createElement('span');
+          flag.className = 'possible-match-label';
+          flag.textContent = 'Possible match';
+          details.append(flag);
+        }
+        const title = document.createElement('strong');
+        title.textContent = `${candidate.name || 'TVDB result'}${candidate.year ? ` (${candidate.year})` : ''}`;
+        details.append(title);
+        const metadata = document.createElement('small');
+        const resultCount = Number(item.result_count || 0);
+        metadata.textContent = `TVDB ${candidate.id || '?'} · ${resultCount} search result(s)`;
+        details.append(metadata, manualMatchLink(item, candidate, possible));
+        titleCell.append(details);
+        suggestionCell.append(titleCell);
+      } else {
+        const state = document.createElement('span');
+        state.className = item?.error ? 'error-text' : 'muted';
+        state.textContent = item?.error ? 'Lookup error' : 'No result';
+        suggestionCell.append(state, manualMatchLink(item, null, false));
+      }
+    }
+
+    if (confidenceCell) {
+      confidenceCell.replaceChildren();
+      if (hasScore) {
+        const badge = document.createElement('span');
+        badge.className = `confidence-badge ${confidenceClass(score)}`;
+        badge.textContent = `${score}% · ${item.confidence_label || ''}`.trim();
+        confidenceCell.append(badge);
+      } else {
+        confidenceCell.textContent = '-';
+      }
+    }
+  };
+
+  const refreshProgressiveMatches = (processed, force = false) => {
+    if (!progressUrl || !progressiveRows.size) return;
+    const requested = Number.isFinite(processed) ? processed : 0;
+    if (!force && requested <= lastProgressiveProcessed) return;
+    if (progressiveRequest) {
+      queuedProgressiveProcessed = Math.max(queuedProgressiveProcessed, requested);
+      return;
+    }
+    progressiveRequest = fetch(progressUrl, {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Progressive match request failed: ${response.status}`);
+        return response.json();
+      })
+      .then((payload) => {
+        const items = Array.isArray(payload?.items) ? payload.items : [];
+        items.forEach(renderProgressiveItem);
+        lastProgressiveProcessed = Math.max(
+          lastProgressiveProcessed,
+          Number(payload?.processed || requested || 0),
+        );
+      })
+      .catch(() => {
+        // Task progress remains authoritative. A transient row-refresh failure can
+        // retry on the next task event without interrupting the background job.
+      })
+      .finally(() => {
+        progressiveRequest = null;
+        if (queuedProgressiveProcessed > lastProgressiveProcessed) {
+          const queued = queuedProgressiveProcessed;
+          queuedProgressiveProcessed = -1;
+          refreshProgressiveMatches(queued);
+        }
+      });
+  };
+
   const renderAnalysisTask = (task) => {
     const detail = String(task?.detail || '');
     const match = detail.match(/([\d,]+)\s+of\s+([\d,]+)\s+checked/i);
+    let current = 0;
     if (match) {
-      const current = Number(match[1].replaceAll(',', ''));
+      current = Number(match[1].replaceAll(',', ''));
       const total = Number(match[2].replaceAll(',', ''));
       if (progressCopy) {
         progressCopy.textContent = current > 0
-          ? `${detail}. This page will update automatically.`
-          : 'Preparing TVDB searches… This page will update automatically.';
+          ? `${detail}. Matches will appear in their rows as they are found.`
+          : 'Preparing TVDB searches… Matches will appear here as they are found.';
       }
       if (progressFill && Number.isFinite(current) && Number.isFinite(total) && total > 0) {
         const percent = Math.max(0, Math.min(100, current / total * 100));
         progressFill.style.width = `${percent}%`;
       }
     } else if (progressCopy && detail) {
-      progressCopy.textContent = `${detail}. This page will update automatically.`;
+      progressCopy.textContent = `${detail}. Matches will appear in their rows as they are found.`;
     }
     if (progress) progress.hidden = false;
+    return current;
   };
 
   if (analysisActiveAtRender && taskId) {
+    refreshProgressiveMatches(0, true);
     document.addEventListener('infomancer:tasks', (event) => {
       if (finishingAnalysis) return;
       const tasks = Array.isArray(event.detail?.tasks) ? event.detail.tasks : [];
       const task = tasks.find((candidate) => candidate.id === taskId);
       if (task) {
-        renderAnalysisTask(task);
+        const processed = renderAnalysisTask(task);
+        refreshProgressiveMatches(processed);
         return;
       }
 
       // The server rendered this page while the analysis was active. Once the
       // canonical task poller reports that task absent, the saved suggestions are
-      // ready. Use that existing signal instead of adding another API polling loop.
+      // ready. Use that existing signal instead of adding a second task poller.
       finishingAnalysis = true;
+      refreshProgressiveMatches(Number.MAX_SAFE_INTEGER, true);
       if (progressCopy) progressCopy.textContent = 'Matches ready. Loading the review…';
       if (progressFill) progressFill.style.width = '100%';
-      window.setTimeout(() => window.location.assign(completeUrl), 250);
+      window.setTimeout(() => window.location.assign(completeUrl), 350);
     });
   }
 
