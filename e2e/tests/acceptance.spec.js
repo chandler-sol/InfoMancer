@@ -304,9 +304,13 @@ test.describe('InfoMancer browser acceptance', () => {
     await expect(page.getByText('Deliberately Wrong Candidate')).toBeVisible();
     await attach(page, testInfo, 'bulk-match-review', true);
 
+    let releaseSubmit;
+    const submitGate = new Promise((resolve) => {
+      releaseSubmit = resolve;
+    });
     await page.route('**/movies/bulk-match', async (route) => {
       if (route.request().method() !== 'POST') return route.continue();
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      await submitGate;
       return route.fulfill({
         status: 200,
         contentType: 'text/html',
@@ -314,14 +318,18 @@ test.describe('InfoMancer browser acceptance', () => {
       });
     });
 
-    const apply = page.locator('[data-bulk-apply-button]').first();
-    await apply.click({ noWaitAfter: true });
-    await expect(apply).toBeDisabled();
-    const status = page.locator('[data-bulk-apply-status]');
-    await expect(status).toBeVisible();
-    await expect(status).toContainText('Applying 5 selected movies');
-    await expect(status.locator('.task-track')).toBeVisible();
-    await expect(page.getByText('Deliberately Wrong Candidate')).toBeVisible();
-    await attach(page, testInfo, 'bulk-match-applying', true);
+    try {
+      const apply = page.locator('[data-bulk-apply-button]').first();
+      await apply.click({ noWaitAfter: true });
+      await expect(apply).toBeDisabled();
+      const status = page.locator('[data-bulk-apply-status]');
+      await expect(status).toBeVisible();
+      await expect(status).toContainText('Applying 5 selected movies');
+      await expect(status.locator('.task-track')).toBeVisible();
+      await expect(page.getByText('Deliberately Wrong Candidate')).toBeVisible();
+      await attach(page, testInfo, 'bulk-match-applying', true);
+    } finally {
+      releaseSubmit();
+    }
   });
 });
