@@ -32,6 +32,19 @@
 - Preserve useful task context in the destination when practical, such as the affected source, title, maintenance tool, review queue, or scheduled-task definition.
 - When a task has no dedicated live surface, fall back to the most relevant Activity, Operations, or Scheduled Tasks view instead of making the row a dead end.
 
+## P1: Announcement & Activity Archiving
+
+- Add per-user **Archive** actions to announcement history and Activity so routine history can be removed from the default view without deleting records.
+- Keep archive state separate from deletion, operation history, logs, and audit data. Archiving is presentation cleanup only.
+- Add an **Archived** view for both areas with one-click restore so hidden items remain recoverable.
+- Exclude archived Activity items from the normal Activity list and unread count so the notification badge reflects work the user still wants in their inbox.
+- Archiving an announcement should suppress that announcement from the user's normal announcement feed and future popup delivery for that user, without ending an installation announcement for anyone else.
+- Keep Librarian **End announcement** behavior distinct from **Archive**. Ending changes delivery for the installation audience; archiving changes only the current user's view.
+- Allow official InfoMancer announcements to be archived per user but never deleted or globally disabled by an installation.
+- Provide useful bulk cleanup actions such as **Archive read activity** and **Archive ended announcements**, with clear confirmation and no destructive side effects.
+- Persist archive state with the account where accounts are enabled, and preserve an equivalent local archive state for standalone installations.
+- Add regression coverage proving archived items do not disappear from audit/history sources and can always be restored.
+
 ## P1: Bulk Match Review Filters & Safer Batch Review
 
 - Add filters to movie and TV bulk-match review so Librarians can narrow large suggestion queues before approving metadata changes.
@@ -119,7 +132,7 @@ The 0.9 startup work should keep the connection target model simple enough to gr
 
 ## Next 0.9 priorities
 
-After the three P0 intelligence systems stabilize: automation rules, notification destinations, read-only Plex/Jellyfin/Emby comparison, provider abstraction, passkeys/TOTP MFA, the desktop startup experience, Librarian guest-view troubleshooting, bulk-match review filtering, and the lightweight appearance/theme pass above.
+After the three P0 intelligence systems stabilize: automation rules, notification destinations, read-only Plex/Jellyfin/Emby comparison, provider abstraction, passkeys/TOTP MFA, the desktop startup experience, Librarian guest-view troubleshooting, announcement and Activity archiving, bulk-match review filtering, and the lightweight appearance/theme pass above.
 
 ## Long-range 2.0 direction
 
