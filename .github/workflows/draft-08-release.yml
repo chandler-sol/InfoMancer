@@ -281,6 +281,7 @@ jobs:
 
   draft-release:
     name: Assemble draft GitHub release
+    if: ${{ github.actor == github.repository_owner }}
     needs:
       - source-package
       - native-package
@@ -372,7 +373,7 @@ jobs:
 
   status-report:
     name: Report packaging status
-    if: ${{ always() }}
+    if: ${{ always() && github.actor == github.repository_owner }}
     needs:
       - source-package
       - native-package
@@ -392,7 +393,7 @@ jobs:
         run: |
           RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           if [ "$SOURCE_RESULT" = "success" ] && [ "$NATIVE_RESULT" = "success" ] && [ "$RELEASE_RESULT" = "success" ]; then
-            gh issue close 30 --repo "$GITHUB_REPOSITORY" --reason completed --comment "0.8.0-alpha.1 packaging succeeded. Server/source, Windows, macOS, and Linux artifacts were assembled into the draft prerelease with SHA-256 checksums. Run: $RUN_URL"
+            gh issue close 30 --repo "$GITHUB_REPOSITORY" --reason completed --comment "0.8.1-alpha.1 packaging succeeded. Server/source, Windows, macOS, and Linux artifacts were assembled into the draft prerelease with SHA-256 checksums. Run: $RUN_URL"
           else
-            gh issue comment 30 --repo "$GITHUB_REPOSITORY" --body "0.8.0-alpha.1 packaging did not complete successfully. source=$SOURCE_RESULT, native=$NATIVE_RESULT, draft-release=$RELEASE_RESULT. Run: $RUN_URL"
+            gh issue comment 30 --repo "$GITHUB_REPOSITORY" --body "0.8.1-alpha.1 packaging did not complete successfully. source=$SOURCE_RESULT, native=$NATIVE_RESULT, draft-release=$RELEASE_RESULT. Run: $RUN_URL"
           fi
