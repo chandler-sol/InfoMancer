@@ -38,6 +38,18 @@ class BulkMatchApplyFeedbackTests(unittest.TestCase):
         self.assertIn('name="selected_scope" value="1"', movie_template)
         self.assertIn('name="selected_scope" value="1"', tv_template)
 
+    def test_manual_match_round_trip_preserves_checkbox_choices(self):
+        script = (ROOT / "app/static/bulk-match-feedback.js").read_text(encoding="utf-8")
+        self.assertIn("infomancer:bulk-match-selection", script)
+        self.assertIn("window.sessionStorage.setItem(selectionMemoryKey", script)
+        self.assertIn("window.sessionStorage.getItem(selectionMemoryKey)", script)
+        self.assertIn("link.classList.contains('possible-match-link')", script)
+        self.assertIn("rememberReviewSelection();", script)
+        self.assertIn("reviewForm.querySelectorAll('input[name=\"matches\"]').forEach(restoreRememberedCheckbox)", script)
+        self.assertIn("Object.prototype.hasOwnProperty.call(memory, titleId)", script)
+        self.assertIn("restoreRememberedCheckbox(checkbox);", script)
+        self.assertIn("window.addEventListener('pagehide', rememberReviewSelection)", script)
+
     def test_search_return_only_happens_after_selected_review_is_empty(self):
         script = (ROOT / "app/static/workspace-ui.js").read_text(encoding="utf-8")
         self.assertIn("node.textContent.trim().startsWith('No selected unmatched')", script)
