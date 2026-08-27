@@ -125,19 +125,19 @@ Before enabling installer builds, add:
 
 ## Primary packaging references
 
-- [PyInstaller platform support](https://pyinstaller.org/en/stable/) — builds
+- [PyInstaller platform support](https://pyinstaller.org/en/stable/) builds
   must run separately on Windows, macOS, and Linux.
 - [Briefcase Windows packaging](https://briefcase.beeware.org/en/stable/reference/platforms/windows/)
-  — Windows application folders and MSI installers.
+  covers Windows application folders and MSI installers.
 - [Briefcase macOS packaging](https://briefcase.beeware.org/en/latest/reference/platforms/macOS/)
-  — signed/notarized app bundles, DMG, and PKG outputs.
+  covers signed/notarized app bundles, DMG, and PKG outputs.
 - [Briefcase Linux system packages](https://briefcase.beeware.org/en/stable/reference/platforms/linux/system/)
-  — distribution-specific DEB, RPM, and Arch-family packages.
+  covers distribution-specific DEB, RPM, and Arch-family packages.
 - [Apple Developer ID](https://developer.apple.com/support/developer-id/) and
-  [macOS distribution](https://developer.apple.com/macos/distribution/) —
+  [macOS distribution](https://developer.apple.com/macos/distribution/) cover
   signing and notarization requirements.
 - [Microsoft code-signing options](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options)
-  — Windows trust and signing choices.
+  covers Windows trust and signing choices.
 
 ## Windows desktop alpha implementation
 
@@ -157,3 +157,36 @@ interactive backup prompt.
 The desktop build has an automated Windows smoke test that seeds known Roaming and
 Local AppData paths, silently uninstalls InfoMancer, and fails if owned state or
 installer registration survives.
+
+### Bundled FFprobe contract
+
+Native desktop packages include FFprobe because media inspection must work on a
+clean machine without requiring the user to install FFmpeg or modify `PATH`.
+InfoMancer currently pins FFprobe 6.1.1 from the `eugeneware/ffmpeg-static`
+`b6.1.1` release and stages the matching binary for Windows x64, Linux x64,
+Linux arm64, macOS x64, or macOS arm64 at package-build time.
+
+The staging script pins SHA-256 values for the downloaded compressed asset, the
+decompressed executable, and the upstream-provided platform license. Packaging
+fails if any of those hashes differ. The executable and its license/notice are
+then added to the PyInstaller core. Before Tauri is allowed to create the native
+installer or image, CI executes the finished core with `--check-ffprobe`. That
+check must successfully locate and execute the bundled FFprobe binary.
+
+At runtime, media inspection resolves FFprobe in this order:
+
+1. `INFOMANCER_FFPROBE`, when an operator explicitly provides an override.
+2. The FFprobe executable embedded in a native PyInstaller build.
+3. A system `ffprobe` available on `PATH`, which remains useful for source and
+   server installations.
+
+Only FFprobe is bundled for this inspection feature. The full FFmpeg executable
+should not be added unless a future feature actually requires media conversion
+or remuxing.
+
+The native package carries the license text distributed with the pinned binary
+and an InfoMancer third-party notice. Those files document what is shipped, but
+their presence alone is not a claim that every redistribution obligation has
+been satisfied. Before publishing a production release, confirm the exact
+FFmpeg build configuration and applicable LGPL/GPL obligations, including any
+source or build-correspondence requirements that apply to that binary.
