@@ -10,6 +10,7 @@ class BulkMatchApplyFeedbackTests(unittest.TestCase):
         script = (ROOT / "app/static/bulk-match-feedback.js").read_text(encoding="utf-8")
         self.assertIn("Applying ${count} selected ${noun}", script)
         self.assertIn("track.className = 'task-track'", script)
+        self.assertIn("button.disabled = true", script)
         self.assertIn("/^Matched\\s+\\d+/i.test(completionMessage)", script)
         self.assertIn("Unselected or unresolved items will remain here for review.", script)
 
@@ -48,7 +49,14 @@ class BulkMatchApplyFeedbackTests(unittest.TestCase):
         self.assertIn("reviewForm.querySelectorAll('input[name=\"matches\"]').forEach(restoreRememberedCheckbox)", script)
         self.assertIn("Object.prototype.hasOwnProperty.call(memory, titleId)", script)
         self.assertIn("restoreRememberedCheckbox(checkbox);", script)
-        self.assertIn("window.addEventListener('pagehide', rememberReviewSelection)", script)
+        self.assertIn("let clearSelectionOnPageHide = false", script)
+        self.assertIn("clearSelectionOnPageHide = true", script)
+        self.assertIn("const clearReviewSelection = () =>", script)
+        self.assertIn("window.sessionStorage.removeItem(selectionMemoryKey)", script)
+        self.assertIn("window.addEventListener('pagehide', () =>", script)
+        self.assertIn("if (clearSelectionOnPageHide)", script)
+        self.assertIn("clearReviewSelection();", script)
+        self.assertIn("rememberReviewSelection();", script)
 
     def test_search_return_only_happens_after_selected_review_is_empty(self):
         script = (ROOT / "app/static/workspace-ui.js").read_text(encoding="utf-8")
