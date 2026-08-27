@@ -9,10 +9,28 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  max-width: 100%;
+  width: auto;
+  max-width: 260px;
+  overflow: hidden;
   color: var(--muted);
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+  transition:
+    max-width 180ms cubic-bezier(.22, 1, .36, 1),
+    opacity 140ms ease,
+    transform 180ms cubic-bezier(.22, 1, .36, 1);
 }
 
+.cover-size-control.library-density-ready.is-collapsed {
+  max-width: 0;
+  opacity: 0;
+  transform: translateX(8px);
+  pointer-events: none;
+}
+
+/* Keep hidden as a no-JS/pre-enhancement fallback. Once library-density.js owns
+   the control it removes hidden and uses the animated collapsed state instead. */
 .cover-size-control.library-density-ready[hidden] {
   display: none;
 }
@@ -144,7 +162,6 @@
 
 .cover-size-control.library-density-ready {
   flex: 0 0 auto;
-  width: auto;
 }
 
 /* Once the view controls leave this row, alphabet filtering owns only its own
@@ -228,5 +245,11 @@
     width: 100%;
     max-width: none;
     justify-self: stretch;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cover-size-control.library-density-ready {
+    transition: none;
   }
 }
