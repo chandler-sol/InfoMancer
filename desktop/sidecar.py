@@ -5,6 +5,8 @@ import os
 import shutil
 import string
 import sys
+import threading
+import time
 from pathlib import Path
 
 DESKTOP_VERSION = "0.8.1-alpha.1"
@@ -97,6 +99,77 @@ def _ensure_runtime_streams(data_dir: Path) -> None:
         sys.stderr = stream
 
 
+def _process_is_alive(pid: int) -> bool:
+    """Return whether a process still exists without requiring extra packages."""
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            process_query_limited_information = 0x1000
+            still_active = 259
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            open_process = kernel32.OpenProcess
+            open_process.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+            open_process.restype = ctypes.c_void_p
+            get_exit_code = kernel32.GetExitCodeProcess
+            get_exit_code.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)]
+            get_exit_code.restype = ctypes.c_int
+            close_handle = kernel32.CloseHandle
+            close_handle.argtypes = [ctypes.c_void_p]
+            close_handle.restype = ctypes.c_int
+            handle = open_process(process_query_limited_information, 0, pid)
+            if not handle:
+                return ctypes.get_last_error() == 5
+            try:
+                exit_code = ctypes.c_uint32()
+                if not get_exit_code(handle, ctypes.byref(exit_code)):
+                    return True
+                return exit_code.value == still_active
+            finally:
+                close_handle(handle)
+        except (AttributeError, OSError, TypeError, ValueError):
+            return True
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _start_onefile_parent_watchdog() -> None:
+    """Stop the real Windows one-file worker if its PyInstaller parent is killed.
+
+    PyInstaller one-file builds run a bootloader parent plus the Python application
+    child. Tauri owns the bootloader PID. On Windows, terminating that parent can
+    leave the Python child running in the background. That orphan keeps the SQLite
+    catalog and runtime lease alive, which prevents the next desktop launch.
+    """
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return
+    parent_pid = os.getppid()
+    if parent_pid <= 0:
+        return
+
+    def watch() -> None:
+        while True:
+            time.sleep(0.05)
+            if not _process_is_alive(parent_pid):
+                os._exit(0)
+
+    threading.Thread(
+        target=watch,
+        name="infomancer-desktop-parent-watchdog",
+        daemon=True,
+    ).start()
+
+
 def create_recovery_package(data_dir: Path, output: Path) -> None:
     data_dir = data_dir.expanduser().resolve()
     database = data_dir / "infomancer.db"
@@ -138,6 +211,7 @@ def main() -> None:
 
     data_dir = Path(args.data_dir).expanduser().resolve()
     _ensure_runtime_streams(data_dir)
+    _start_onefile_parent_watchdog()
     if args.recovery_output:
         try:
             create_recovery_package(data_dir, Path(args.recovery_output))
@@ -161,6 +235,7 @@ def main() -> None:
     os.environ["INFOMANCER_PUBLIC_URL"] = f"http://127.0.0.1:{args.port}"
     os.environ["INFOMANCER_TRUSTED_HOSTS"] = "127.0.0.1,localhost"
     os.environ["INFOMANCER_TRUST_CLOUDFLARE_PROXY"] = "false"
+    os.environ["INFOMANCER_RUNTIME_CONTEXT"] = "desktop"
     if bootstrap_token:
         os.environ["INFOMANCER_BOOTSTRAP_TOKEN"] = bootstrap_token
     else:
