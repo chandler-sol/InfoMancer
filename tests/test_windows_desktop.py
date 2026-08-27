@@ -63,6 +63,16 @@ class WindowsDesktopContractTests(unittest.TestCase):
         self.assertIn("Check desktop-launcher.log for startup details", rust)
         self.assertNotIn("for _ in 0..120", rust)
 
+    def test_windows_onefile_core_does_not_outlive_desktop_parent(self):
+        sidecar = (ROOT / "desktop/sidecar.py").read_text(encoding="utf-8")
+        runtime = (ROOT / "app/runtime.py").read_text(encoding="utf-8")
+        self.assertIn("_start_onefile_parent_watchdog()", sidecar)
+        self.assertIn("os.getppid()", sidecar)
+        self.assertIn('os.environ["INFOMANCER_RUNTIME_CONTEXT"] = "desktop"', sidecar)
+        self.assertIn('f"desktop:{host}:{os.getpid()}', runtime)
+        self.assertIn("_desktop_owner_pid", runtime)
+        self.assertIn("_process_is_alive", runtime)
+
     def test_remote_http_pages_are_not_granted_tauri_ipc(self):
         capability = json.loads((ROOT / "desktop/src-tauri/capabilities/launcher.json").read_text(encoding="utf-8"))
         config = json.loads((ROOT / "desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
