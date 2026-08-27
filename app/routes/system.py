@@ -1,3 +1,5 @@
+import sqlite3
+
 from fastapi import APIRouter, Depends
 
 from ..access import require_librarian
@@ -89,9 +91,17 @@ def build_router(ctx: RouteContext):
     ):
         # Read state is account-local and EventLog intersects requested IDs with
         # notifications visible to this user, so members can safely manage their own inbox.
-        changed = event_log.mark_read(
-            request.state.user.id, None if all_events == "1" else event_ids,
-        )
+        try:
+            changed = event_log.mark_read(
+                request.state.user.id, None if all_events == "1" else event_ids,
+            )
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).casefold() and "busy" not in str(exc).casefold():
+                raise
+            return redirect(
+                "/activity",
+                "The catalog is busy finishing background library work. Nothing was lost. Try Mark all read again in a moment.",
+            )
         return redirect("/activity", f"Marked {changed:,} notification{'s' if changed != 1 else ''} as read.")
 
     @router.get("/api/task-failures", dependencies=[Depends(require_librarian)])
