@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
+import unicodedata
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -84,16 +87,91 @@ class TVDBClient:
             record["overview"] = translation["overview"]
         return record
 
+    @staticmethod
+    def _movie_slug_candidate(query: str) -> str:
+        """Build the conservative TVDB slug used only after normal search misses."""
+        value = query.strip()
+        if not value or "://" in value or "/" in value:
+            return ""
+        ascii_value = unicodedata.normalize("NFKD", value).encode(
+            "ascii", "ignore"
+        ).decode("ascii")
+        return re.sub(r"[^a-z0-9]+", "-", ascii_value.casefold()).strip("-")
+
     def search_series(self, query: str) -> list[dict]:
         payload = self._get("/search", {"query": query, "type": "series"})
         return payload.get("data") or []
+
+    def movie_by_slug(self, slug: str) -> dict:
+        """Resolve one movie directly through TVDB's canonical slug endpoint."""
+        cleaned = slug.strip().strip("/")
+        if not cleaned:
+            return {}
+        payload = self._get(
+            f"/movies/slug/{quote(cleaned, safe='-')}", allow_not_found=True,
+        )
+        record = payload.get("data") or {}
+        if not record:
+            return {}
+        if record.get("id") and not record.get("tvdb_id"):
+            record["tvdb_id"] = record["id"]
+        record.setdefault("type", "movie")
+        if not record.get("image_url") and record.get("image"):
+            record["image_url"] = record["image"]
+        return record
+
+    def movie_id_from_reference(self, reference: str) -> int:
+        """Resolve a numeric TVDB movie ID or canonical TVDB movie-page link."""
+        value = reference.strip()
+        if not value:
+            raise ValueError("Paste a TVDB movie link or numeric movie ID")
+        if value.isdigit():
+            return int(value)
+
+        candidate_url = value if "://" in value else f"https://{value}"
+        parsed = urlparse(candidate_url)
+        if (parsed.hostname or "").casefold() not in {"thetvdb.com", "www.thetvdb.com"}:
+            raise ValueError("That is not a TheTVDB movie link")
+        parts = [part for part in parsed.path.split("/") if part]
+        lowered = [part.casefold() for part in parts]
+        if "movies" not in lowered:
+            raise ValueError("That TVDB link is not a movie page")
+        movie_index = lowered.index("movies")
+        if movie_index + 1 >= len(parts):
+            raise ValueError("The TVDB movie link is incomplete")
+        identifier = parts[movie_index + 1].strip()
+        if identifier.isdigit():
+            return int(identifier)
+
+        record = self.movie_by_slug(identifier)
+        movie_id = record.get("tvdb_id") or record.get("id")
+        if not str(movie_id or "").isdigit():
+            raise ValueError("That TVDB movie page could not be resolved through the API")
+        return int(movie_id)
 
     def search_movies(self, query: str, year: int | None = None) -> list[dict]:
         params = {"query": query, "type": "movie"}
         if year:
             params["year"] = year
         payload = self._get("/search", params)
-        return payload.get("data") or []
+        results = payload.get("data") or []
+        if results:
+            return results
+
+        # TVDB's text-search index can occasionally miss a movie that its website
+        # and canonical movie endpoint both know about. On a strict search miss,
+        # try the title as a canonical slug before InfoMancer gives up. This keeps
+        # the fallback exact and avoids widening every successful provider search.
+        slug = self._movie_slug_candidate(query)
+        if not slug:
+            return []
+        record = self.movie_by_slug(slug)
+        if not record:
+            return []
+        record_year_text = str(record.get("year") or "")[:4]
+        if year and record_year_text.isdigit() and int(record_year_text) != year:
+            return []
+        return [record]
 
     def series(self, series_id: int) -> dict:
         record = self._get(f"/series/{series_id}/extended").get("data") or {}
