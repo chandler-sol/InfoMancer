@@ -88,6 +88,24 @@
 - Keep actual startup failures visible and actionable. The splash is presentation for legitimate startup work, not a way to conceal errors.
 - Preserve a route back to installation selection from Settings or the desktop launcher so changing how the app connects never requires deleting application data.
 
+## P1: Release Channels & Update Management
+
+- Give Librarians an installation-level **Update channel** setting with **Stable**, **Beta**, and **Alpha** choices. Stable should be the default, while Beta and especially Alpha should carry clear bleeding-edge warnings before switching.
+- Treat the user-facing channels as release streams, not raw Git checkouts. Production installations should consume versioned, signed build artifacts or container images produced from the corresponding development line rather than running `git pull` against a working tree.
+- Let a Librarian click **Check for updates** at any time and show the current version, selected channel, newest available version, release date, release notes, and whether a restart will be required.
+- Support automatic update checks for every channel. Keep automatic installation separately configurable so a Librarian can choose notification-only, download-and-prompt, or later opt into unattended installation where the deployment type can do so safely.
+- Keep channel selection installation-wide rather than per user because updating changes the running server/core for everyone using that installation. Members can see update notices when appropriate but cannot change channels or install updates.
+- When switching from Stable to Beta or Alpha, explain that updates may arrive more frequently and may contain incomplete features, migrations, or regressions. Require an explicit confirmation before changing to a less stable channel.
+- When switching back toward a more stable channel, do not silently downgrade code or database state. Wait for the selected channel to contain a compatible version unless a future explicit rollback workflow can prove the downgrade is safe.
+- Use one update model across native desktop, server, and container deployments while allowing the installation mechanism to differ underneath. Native desktop can use signed updater artifacts, containers can pull an explicitly versioned image, and source/server installs can use a controlled update helper rather than granting the web process unrestricted host access.
+- Verify signatures or published checksums before applying downloaded artifacts and reject an update when integrity verification fails.
+- Create a validated database backup before any update that can run schema migrations, then report the backup location and update result through Activity and Operations history.
+- Preserve the current installation settings, selected update channel, connection target, and media catalog through normal updates.
+- Surface update progress through the existing background-task UI so **Downloading**, **Verifying**, **Installing**, **Restarting**, and **Ready** states are visible instead of making the application appear frozen.
+- If an update fails before replacement, leave the current version running whenever possible. If failure occurs during restart or migration, provide a recovery path and diagnostics rather than repeatedly retrying unattended.
+- Keep Alpha, Beta, and Stable manifests independently testable in CI so a branch build cannot accidentally publish itself into the wrong update channel.
+- Add regression coverage for channel permissions, manifest selection, version comparison, integrity verification, migration backup behavior, and channel-switch safety.
+
 ## P1: Librarian “View Library As”
 
 - Add a Librarian-only **View library as** mode that lets a Librarian render the library exactly as a selected guest account would see it for troubleshooting permissions, visibility, filters, and access problems.
@@ -132,7 +150,7 @@ The 0.9 startup work should keep the connection target model simple enough to gr
 
 ## Next 0.9 priorities
 
-After the three P0 intelligence systems stabilize: automation rules, notification destinations, read-only Plex/Jellyfin/Emby comparison, provider abstraction, passkeys/TOTP MFA, the desktop startup experience, Librarian guest-view troubleshooting, announcement and Activity archiving, bulk-match review filtering, and the lightweight appearance/theme pass above.
+After the three P0 intelligence systems stabilize: automation rules, notification destinations, read-only Plex/Jellyfin/Emby comparison, provider abstraction, passkeys/TOTP MFA, the desktop startup experience, release channels and update management, Librarian guest-view troubleshooting, announcement and Activity archiving, bulk-match review filtering, and the lightweight appearance/theme pass above.
 
 ## Long-range 2.0 direction
 
