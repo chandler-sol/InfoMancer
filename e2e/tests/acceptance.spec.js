@@ -240,6 +240,38 @@ test.describe('InfoMancer browser acceptance', () => {
     ]);
   });
 
+  test('Library select-all and letter groups reveal the bulk action bar', async ({ page }, testInfo) => {
+    await signIn(page, sandboxUrl, 'acceptance-librarian');
+    await page.goto(`${sandboxUrl}/movies`);
+
+    const choices = page.locator('.library-title-choice');
+    await expect(choices).toHaveCount(24);
+    const actionBar = page.locator('#library-selection-actions');
+    const selectionCount = page.locator('#library-selection-count');
+    const selectAll = page.locator('#select-all-titles');
+
+    await expect(actionBar).toBeHidden();
+    await selectAll.check();
+    await expect(page.locator('.library-title-choice:checked')).toHaveCount(24);
+    await expect(page.locator('body')).toHaveClass(/library-multi-selection/);
+    await expect(actionBar).toBeVisible();
+    await expect(selectionCount).toHaveText('12 selected');
+    await attach(page, testInfo, 'library-select-all-actions', true);
+
+    await page.locator('#deselect-library-titles').click();
+    await expect(page.locator('.library-title-choice:checked')).toHaveCount(0);
+    await expect(actionBar).toBeHidden();
+
+    const letterA = page.locator('.letter-title-choice[data-letter="A"]');
+    await expect(letterA).toBeVisible();
+    await letterA.check();
+    await expect(page.locator('.library-title-choice:checked')).toHaveCount(24);
+    await expect(page.locator('body')).toHaveClass(/library-multi-selection/);
+    await expect(actionBar).toBeVisible();
+    await expect(selectionCount).toHaveText('12 selected');
+    await attach(page, testInfo, 'library-letter-group-actions', true);
+  });
+
   test('Mark all read clears the entire Activity inbox, not only the visible 250', async ({ page }, testInfo) => {
     seedState('--activity', '300');
     await signIn(page, sandboxUrl, 'acceptance-librarian');
@@ -274,7 +306,7 @@ test.describe('InfoMancer browser acceptance', () => {
 
     await page.route('**/movies/bulk-match', async (route) => {
       if (route.request().method() !== 'POST') return route.continue();
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await new Promise((resolve) => setTimeout(resolve, 5000));
       return route.fulfill({
         status: 200,
         contentType: 'text/html',
