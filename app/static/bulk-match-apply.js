@@ -76,9 +76,6 @@
   const runApply = async (event) => {
     if (event.target !== reviewForm) return;
     event.preventDefault();
-    // This capture-phase handler intentionally supersedes the older synchronous-
-    // navigation compatibility handler in bulk-match-feedback.js.
-    event.stopImmediatePropagation();
     if (reviewForm.dataset.bulkApplying === '1') return;
 
     const selected = selectedMatches();
@@ -102,6 +99,10 @@
       true,
     );
 
+    /* This capture-phase handler prepares and starts the asynchronous request before
+       the form's older compatibility listener runs. Do not stop propagation: the
+       compatibility listener sees data-bulk-applying=1 and exits, while acceptance
+       tests and accessibility observers can still inspect the visible submit state. */
     try {
       const response = await fetch(reviewForm.action, {
         method: 'POST',
