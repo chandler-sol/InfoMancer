@@ -1,4 +1,7 @@
 (() => {
+  if (window.__infomancerBulkMatchApplyLoaded) return;
+  window.__infomancerBulkMatchApplyLoaded = true;
+
   const reviewForm = document.querySelector('[data-bulk-match-review-form]');
   if (!reviewForm || typeof window.fetch !== 'function') return;
 
@@ -9,25 +12,20 @@
     || (itemLabel.endsWith('series') ? itemLabel : `${itemLabel}s`);
   const applyTimeoutMs = 30 * 60 * 1000;
 
-  const showStatus = (message, working = false) => {
+  const showStatus = (message) => {
     if (!status) return;
     status.hidden = false;
     status.replaceChildren();
     const copy = document.createElement('span');
     copy.textContent = message;
     status.append(copy);
-    if (working) {
-      const track = document.createElement('span');
-      track.className = 'task-track';
-      track.setAttribute('aria-hidden', 'true');
-      track.append(document.createElement('i'));
-      status.append(track);
-    }
   };
 
   const selectedMatches = () => [
     ...reviewForm.querySelectorAll('input[name="matches"]:checked'),
   ];
+
+  const titleIdForCheckbox = (checkbox) => String(checkbox?.value || '').split(':', 1)[0];
 
   const csrfToken = () => (
     reviewForm.querySelector('input[name="csrf_token"]')?.value
@@ -52,10 +50,27 @@
     });
   };
 
-  const clearRememberedSelection = () => {
+  const selectionMemoryKey = () => {
     const scope = reviewForm.querySelector('input[name="selected_scope"]') ? 'selected' : 'review';
-    const key = `infomancer:bulk-match-selection:${window.location.pathname}:${scope}`;
-    try { window.sessionStorage.removeItem(key); } catch (_) {}
+    return `infomancer:bulk-match-selection:${window.location.pathname}:${scope}`;
+  };
+
+  const purgeRememberedSelection = (titleIds) => {
+    if (!titleIds.length) return;
+    try {
+      const key = selectionMemoryKey();
+      const parsed = JSON.parse(window.sessionStorage.getItem(key) || '{}');
+      const memory = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      titleIds.forEach((titleId) => { delete memory[String(titleId)]; });
+      if (Object.keys(memory).length) window.sessionStorage.setItem(key, JSON.stringify(memory));
+      else window.sessionStorage.removeItem(key);
+    } catch (_) {}
+
+    // The selected-search handoff used by Workspace previously expected a full
+    // redirect after Apply. In-place Apply deliberately keeps the user on this
+    // review, so clear that one-shot redirect marker when the batch succeeds.
+    const kind = reviewForm.action.includes('/shows/') ? 'tv' : 'movie';
+    try { window.sessionStorage.removeItem(`infomancer:bulk-match-return-pending:${kind}`); } catch (_) {}
   };
 
   const formatJsonDetail = (detail) => {
@@ -102,6 +117,54 @@
     return `HTTP ${response.status}: ${raw.replace(/\s+/g, ' ').slice(0, 320)}`;
   };
 
+  const reviewRows = () => [...reviewForm.querySelectorAll('.table-wrap tbody tr')]
+    .filter((row) => !row.querySelector('.empty'));
+
+  const updateContinueLinks = () => {
+    const remaining = reviewRows().length;
+    const currentUrl = new URL(window.location.href);
+    const currentOffset = Math.max(0, Number.parseInt(currentUrl.searchParams.get('offset') || '0', 10) || 0);
+    reviewForm.querySelectorAll('.review-actions a.button').forEach((link) => {
+      if (!/^Next 50$/i.test(link.textContent.trim()) && !/^Continue review$/i.test(link.textContent.trim())) return;
+      const url = new URL(link.href, window.location.origin);
+      url.searchParams.set('offset', String(currentOffset + remaining));
+      link.href = url.pathname + url.search;
+      link.textContent = 'Continue review';
+    });
+    return remaining;
+  };
+
+  const showEmptyPageState = () => {
+    const tbody = reviewForm.querySelector('.table-wrap tbody');
+    if (!tbody || reviewRows().length) return;
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 4;
+    cell.className = 'empty good';
+    cell.textContent = 'All selected matches on this page were applied. Continue reviewing when ready.';
+    row.append(cell);
+    tbody.replaceChildren(row);
+  };
+
+  const applyResultInPlace = (payload, selected) => {
+    const appliedIds = new Set(
+      (Array.isArray(payload?.applied_title_ids) ? payload.applied_title_ids : [])
+        .map(value => String(value)),
+    );
+    const appliedTitleIds = [...appliedIds];
+    selected.forEach((checkbox) => {
+      if (!appliedIds.has(titleIdForCheckbox(checkbox))) return;
+      checkbox.closest('tr')?.remove();
+    });
+    purgeRememberedSelection(appliedTitleIds);
+    document.dispatchEvent(new CustomEvent('infomancer:bulk-match-applied', {
+      detail: {appliedTitleIds, payload},
+    }));
+    const remaining = updateContinueLinks();
+    showEmptyPageState();
+    return {appliedTitleIds, remaining};
+  };
+
   const runApply = async (event) => {
     if (event.target !== reviewForm) return;
     event.preventDefault();
@@ -131,16 +194,14 @@
     showStatus(
       `Applying ${count} selected ${noun}. InfoMancer is fetching and saving metadata. `
       + 'You can keep using InfoMancer while this finishes.',
-      true,
     );
+    document.dispatchEvent(new CustomEvent('infomancer:bulk-apply-started', {
+      detail: {count, titleIds: selected.map(titleIdForCheckbox)},
+    }));
 
-    /* The capture-phase handler owns Bulk Apply. The older feedback script still
-       supports progressive review and selection memory, but its compatibility
-       submit listener sees data-bulk-applying=1 and exits. Keeping this request a
-       normal fetch avoids WebView2's keepalive lifecycle path, which can wedge an
-       embedded page after an immediate rejection. */
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), applyTimeoutMs);
+    let finishDetail = {ok: false, appliedTitleIds: []};
     try {
       const response = await fetch(reviewForm.action, {
         method: 'POST',
@@ -149,32 +210,51 @@
         redirect: 'follow',
         signal: controller.signal,
         headers: {
-          Accept: 'text/html',
+          Accept: 'application/json',
           'X-CSRF-Token': token,
           'X-Requested-With': 'InfoMancerAsync',
         },
       });
       if (!response.ok) throw new Error(await responseDetail(response));
-      clearRememberedSelection();
-      window.location.assign(response.url || window.location.href);
+
+      const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+      if (!contentType.includes('application/json')) {
+        // Compatibility fallback for an older core. Do not parse/rewrite returned
+        // HTML in the current document; a normal navigation is safer in that case.
+        window.location.assign(response.url || window.location.href);
+        return;
+      }
+
+      const payload = await response.json();
+      const {appliedTitleIds, remaining} = applyResultInPlace(payload, selected);
+      resetApplyState();
+      const failed = Number(payload?.failed || 0);
+      const message = String(payload?.message || `Matched ${appliedTitleIds.length} ${noun}`).trim();
+      showStatus(
+        `${message}. ${remaining} review row${remaining === 1 ? '' : 's'} remain on this page.`,
+      );
+      finishDetail = {ok: true, appliedTitleIds, failed, payload};
     } catch (error) {
       resetApplyState();
       if (error?.name === 'AbortError') {
         showStatus(
           'InfoMancer stopped waiting for this Apply request after 30 minutes. '
           + 'Some matches may already have completed. Reload this review before retrying and check Activity/Logs for the final state.',
-          false,
         );
+        finishDetail = {ok: false, appliedTitleIds: [], aborted: true};
         return;
       }
       const detail = String(error?.message || error || 'Unknown request error').trim();
       showStatus(
         `InfoMancer could not finish applying these matches. ${detail}. `
         + 'The rest of the app remains available; retry when ready or open Activity/Logs for details.',
-        false,
       );
+      finishDetail = {ok: false, appliedTitleIds: [], error: detail};
     } finally {
       window.clearTimeout(timeoutId);
+      document.dispatchEvent(new CustomEvent('infomancer:bulk-apply-finished', {
+        detail: finishDetail,
+      }));
     }
   };
 
