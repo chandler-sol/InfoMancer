@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 
@@ -93,6 +94,36 @@ def _tv_identity_matches(row, candidate: Path, root: Path) -> bool:
     )
 
 
+def _historical_sha256(row) -> str:
+    """Return a reusable historical fingerprint only when it matches the old file signature."""
+    if row["hash_status"] != "complete" or not row["historical_sha256"]:
+        return ""
+    try:
+        if int(row["hash_size"] or 0) != int(row["size_bytes"] or 0):
+            return ""
+        if float(row["hash_modified"] or 0) != float(row["modified_at"] or 0):
+            return ""
+    except (TypeError, ValueError):
+        return ""
+    return str(row["historical_sha256"])
+
+
+def _sha256_path(path: Path) -> str:
+    """Fingerprint one ambiguity candidate without changing catalog state."""
+    try:
+        before = path.stat()
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            while chunk := handle.read(4 * 1024 * 1024):
+                digest.update(chunk)
+        after = path.stat()
+        if before.st_size != after.st_size or before.st_mtime != after.st_mtime:
+            return ""
+        return digest.hexdigest()
+    except OSError:
+        return ""
+
+
 def missing_file_ids(db, root_id: int) -> list[int]:
     """Return catalog file ids whose current paths are not directly reachable."""
     with db.connect() as conn:
@@ -119,25 +150,29 @@ def clear_missing_path_failures(db, root_id: int) -> int:
 
 
 def reconcile_root_paths(db, root_id: int) -> dict[str, int | bool]:
-    """Conservatively reconnect renamed/moved files before a normal source scan.
+    """Reconnect renamed or moved files before a normal source scan.
 
-    A path is changed in-place only when a missing catalog row maps to exactly one
-    new physical file in the same source. File size is used as a first guard, then
-    movie/provider identity or TV episode identity is required. Ambiguous matches
-    are left alone for the normal scan/review workflow rather than guessed.
+    Cheap evidence is tried first: size plus provider/title/episode identity. When
+    more than one candidate survives and the old catalog row has a current stored
+    SHA-256 fingerprint, only those ambiguous candidates are hashed. A unique hash
+    match is accepted; duplicate identical copies and unresolved ambiguity are left
+    for review rather than guessed.
     """
     with db.connect() as conn:
         root_row = conn.execute(
             "SELECT id,path,kind FROM roots WHERE id=? AND enabled=1", (root_id,)
         ).fetchone()
         if not root_row:
-            return {"available": False, "reconciled": 0}
+            return {"available": False, "reconciled": 0, "hash_resolved": 0}
         rows = conn.execute(
             """SELECT f.id file_id, f.title_id, f.path, f.filename, f.size_bytes,
-                      f.season, f.episode_start, f.episode_end,
+                      f.modified_at, f.season, f.episode_start, f.episode_end,
                       t.folder_path, t.title, t.year, t.metadata_title, t.metadata_year,
-                      t.tmdb_id, t.imdb_id, t.tvdb_movie_id
+                      t.tmdb_id, t.imdb_id, t.tvdb_movie_id,
+                      h.sha256 historical_sha256, h.status hash_status,
+                      h.size_bytes hash_size, h.modified_at hash_modified
                FROM files f JOIN titles t ON t.id=f.title_id
+               LEFT JOIN media_file_hashes h ON h.file_id=f.id
                WHERE t.root_id=?
                ORDER BY f.id""",
             (root_id,),
@@ -145,11 +180,11 @@ def reconcile_root_paths(db, root_id: int) -> dict[str, int | bool]:
 
     root = Path(root_row["path"])
     if not _readable_directory(root):
-        return {"available": False, "reconciled": 0}
+        return {"available": False, "reconciled": 0, "hash_resolved": 0}
 
     missing = [row for row in rows if not _file_exists(row["path"])]
     if not missing:
-        return {"available": True, "reconciled": 0}
+        return {"available": True, "reconciled": 0, "hash_resolved": 0}
 
     known_paths = {str(Path(row["path"])) for row in rows if _file_exists(row["path"])}
     walk_errors: list[str] = []
@@ -168,10 +203,11 @@ def reconcile_root_paths(db, root_id: int) -> dict[str, int | bool]:
     # A partial directory walk is not enough evidence for identity decisions. Let
     # Source Guard's normal scan classify and preserve the source instead.
     if walk_errors:
-        return {"available": True, "reconciled": 0}
+        return {"available": True, "reconciled": 0, "hash_resolved": 0}
 
     used: set[str] = set()
-    matches: list[tuple[object, Path]] = []
+    candidate_hashes: dict[str, str] = {}
+    matches: list[tuple[object, Path, bool, str]] = []
     for row in missing:
         same_size = [
             item for item in candidates
@@ -192,18 +228,38 @@ def reconcile_root_paths(db, root_id: int) -> dict[str, int | bool]:
                 if _tv_identity_matches(row, item["path"], root)
             ]
 
+        matched_by_hash = False
+        historical_hash = ""
+        if len(identity_matches) > 1:
+            historical_hash = _historical_sha256(row)
+            if historical_hash:
+                hash_matches: list[dict[str, object]] = []
+                for item in identity_matches:
+                    candidate = item["path"]
+                    cache_key = str(candidate)
+                    if cache_key not in candidate_hashes:
+                        candidate_hashes[cache_key] = _sha256_path(candidate)
+                    if candidate_hashes[cache_key] == historical_hash:
+                        hash_matches.append(item)
+                # Two byte-identical copies are genuine duplicates, not evidence
+                # that either particular path is the historical catalog location.
+                if len(hash_matches) == 1:
+                    identity_matches = hash_matches
+                    matched_by_hash = True
+
         if len(identity_matches) != 1:
             continue
         candidate = identity_matches[0]["path"]
         used.add(str(candidate))
-        matches.append((row, candidate))
+        matches.append((row, candidate, matched_by_hash, historical_hash))
 
     if not matches:
-        return {"available": True, "reconciled": 0}
+        return {"available": True, "reconciled": 0, "hash_resolved": 0}
 
     reconciled = 0
+    hash_resolved = 0
     with db.connect() as conn:
-        for row, candidate in matches:
+        for row, candidate, matched_by_hash, historical_hash in matches:
             try:
                 stat = candidate.stat()
             except OSError:
@@ -266,6 +322,22 @@ def reconcile_root_paths(db, root_id: int) -> dict[str, int | bool]:
                     row["file_id"],
                 ),
             )
+            if matched_by_hash and historical_hash:
+                conn.execute(
+                    """UPDATE media_file_hashes
+                       SET sha256=?, size_bytes=?, modified_at=?, status='complete',
+                           error='', hashed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+                       WHERE file_id=?""",
+                    (
+                        historical_hash, int(stat.st_size), float(stat.st_mtime),
+                        row["file_id"],
+                    ),
+                )
+                hash_resolved += 1
             reconciled += 1
 
-    return {"available": True, "reconciled": reconciled}
+    return {
+        "available": True,
+        "reconciled": reconciled,
+        "hash_resolved": hash_resolved,
+    }
