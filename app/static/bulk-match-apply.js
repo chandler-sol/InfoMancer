@@ -7,6 +7,7 @@
   const itemLabel = reviewForm.dataset.bulkMatchItemLabel || 'match';
   const itemPlural = reviewForm.dataset.bulkMatchItemPlural
     || (itemLabel.endsWith('series') ? itemLabel : `${itemLabel}s`);
+  const applyTimeoutMs = 30 * 60 * 1000;
 
   const showStatus = (message, working = false) => {
     if (!status) return;
@@ -27,6 +28,12 @@
   const selectedMatches = () => [
     ...reviewForm.querySelectorAll('input[name="matches"]:checked'),
   ];
+
+  const csrfToken = () => (
+    reviewForm.querySelector('input[name="csrf_token"]')?.value
+    || document.body?.dataset?.csrfToken
+    || ''
+  ).trim();
 
   const rememberIdleLabels = () => {
     applyButtons.forEach((button) => {
@@ -84,6 +91,12 @@
       return;
     }
 
+    const token = csrfToken();
+    if (!token) {
+      showStatus('InfoMancer could not verify this request. Reload the review and try again.');
+      return;
+    }
+
     rememberIdleLabels();
     reviewForm.dataset.bulkApplying = '1';
     reviewForm.setAttribute('aria-busy', 'true');
@@ -99,18 +112,23 @@
       true,
     );
 
-    /* This capture-phase handler prepares and starts the asynchronous request before
-       the form's older compatibility listener runs. Do not stop propagation: the
-       compatibility listener sees data-bulk-applying=1 and exits, while acceptance
-       tests and accessibility observers can still inspect the visible submit state. */
+    /* The capture-phase handler owns Bulk Apply. The older feedback script still
+       supports progressive review and selection memory, but its compatibility
+       submit listener sees data-bulk-applying=1 and exits. Keeping this request a
+       normal fetch avoids WebView2's keepalive lifecycle path, which can wedge an
+       embedded page after an immediate rejection. */
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), applyTimeoutMs);
     try {
       const response = await fetch(reviewForm.action, {
         method: 'POST',
         body: new FormData(reviewForm),
         credentials: 'same-origin',
         redirect: 'follow',
+        signal: controller.signal,
         headers: {
           Accept: 'text/html',
+          'X-CSRF-Token': token,
           'X-Requested-With': 'InfoMancerAsync',
         },
       });
@@ -119,12 +137,22 @@
       window.location.assign(response.url || window.location.href);
     } catch (error) {
       resetApplyState();
+      if (error?.name === 'AbortError') {
+        showStatus(
+          'InfoMancer stopped waiting for this Apply request after 30 minutes. '
+          + 'Some matches may already have completed. Reload this review before retrying and check Activity/Logs for the final state.',
+          false,
+        );
+        return;
+      }
       const detail = String(error?.message || error || 'Unknown request error').trim();
       showStatus(
         `InfoMancer could not finish applying these matches. ${detail}. `
         + 'The rest of the app remains available; retry when ready or open Activity/Logs for details.',
         false,
       );
+    } finally {
+      window.clearTimeout(timeoutId);
     }
   };
 
