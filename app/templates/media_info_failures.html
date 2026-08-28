@@ -27,14 +27,17 @@
   {% for file in failures %}
   <article class="panel media-failure-item">
     <div class="media-failure-title">
-      <div>
+      <div class="media-failure-identity">
         <span class="kind {{ file.kind }}">{{ file.kind }}</span>
         <h2>{{ file.display_title }}</h2>
         <strong>{{ file.filename }}</strong>
       </div>
-      <div class="actions">
+      <div class="actions media-failure-actions">
         <a class="button primary" href="/titles/{{ file.title_id }}">Open title</a>
         <a class="button" href="{{ file.logs_url }}">Related logs</a>
+        <form method="post" action="/media-info/failures/{{ file.id }}/dismiss">
+          <button class="button" type="submit" aria-label="Dismiss alert for {{ file.display_title }}">Dismiss</button>
+        </form>
       </div>
     </div>
     <div class="media-failure-explanation">
