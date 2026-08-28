@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from app.db import Database
+from app.file_hashes import MediaHashService
 from app.path_reconciliation import reconcile_root_paths
 from app.scanner import scan_root
 
@@ -103,6 +104,37 @@ class PathReconciliationTests(unittest.TestCase):
         self.assertEqual(int(files[0]["id"]), file_id)
         self.assertEqual(files[0]["path"], str(renamed))
 
+    def test_ambiguous_movie_candidates_use_historical_hash(self):
+        bucket = self.media / "H"
+        bucket.mkdir()
+        original = bucket / "Hash Choice (2020).mkv"
+        original.write_bytes(b"A" * 64)
+        root_id = self.add_root("movie")
+        self.scan(root_id)
+
+        with self.db.connect() as conn:
+            file_id = int(conn.execute("SELECT id FROM files").fetchone()["id"])
+        MediaHashService(self.db).hash_file(file_id)
+
+        correct = bucket / "Hash Choice (2020) REMUX.mkv"
+        wrong = bucket / "Hash Choice (2020) WEB-DL.mkv"
+        original.rename(correct)
+        wrong.write_bytes(b"B" * 64)
+
+        result = reconcile_root_paths(self.db, root_id)
+        self.assertEqual(result["reconciled"], 1)
+        self.assertEqual(result["hash_resolved"], 1)
+
+        with self.db.connect() as conn:
+            file_row = conn.execute("SELECT id,path FROM files WHERE id=?", (file_id,)).fetchone()
+            hash_row = conn.execute(
+                "SELECT status,size_bytes,modified_at FROM media_file_hashes WHERE file_id=?",
+                (file_id,),
+            ).fetchone()
+        self.assertEqual(file_row["path"], str(correct))
+        self.assertEqual(hash_row["status"], "complete")
+        self.assertEqual(int(hash_row["size_bytes"]), 64)
+
 
 class FollowupUiContractTests(unittest.TestCase):
     def source(self, relative: str) -> str:
@@ -132,6 +164,18 @@ class FollowupUiContractTests(unittest.TestCase):
         self.assertIn("media-failures-heading", css)
         self.assertIn("display: block !important", css)
         self.assertIn('"/media-info/failures/{file_id}/dismiss"', route)
+
+    def test_windows_media_inspection_hides_helper_console(self):
+        media_info = self.source("app/media_info.py")
+        self.assertIn("CREATE_NO_WINDOW", media_info)
+        self.assertIn("STARTF_USESHOWWINDOW", media_info)
+        self.assertIn("_quiet_subprocess_options()", media_info)
+
+    def test_reachable_degraded_source_gets_distinct_connection_copy(self):
+        polish = self.source("app/routes/final_polish.py")
+        self.assertIn("The source root is reachable", polish)
+        self.assertIn("complete scan confirms the full catalog", polish)
+        self.assertIn("could not reach the configured source from the app process", polish)
 
 
 if __name__ == "__main__":
