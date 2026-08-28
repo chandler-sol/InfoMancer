@@ -161,6 +161,7 @@
   const letterJump = Boolean(letterJumpAlphabet);
   const library = Boolean(document.querySelector('.library-table') && document.getElementById('cover-library'));
   const detail = Boolean(document.querySelector('.media-dossier'));
+  const mediaFailures = Boolean(document.querySelector('.media-failures-heading'));
 
   if (letterJumpAlphabet) {
     letterJumpAlphabet.style.visibility = 'hidden';
@@ -210,6 +211,9 @@
   const detailStyles = detail
     ? Promise.all([loadStyle('detail-page.css')])
     : Promise.resolve();
+  const mediaFailureStyles = mediaFailures
+    ? Promise.all([loadStyle('media-failures.css')])
+    : Promise.resolve();
   const letterJumpReady = letterJump
     ? letterJumpStyles.then(() => loadScript('library-letter-jump.js'))
     : Promise.resolve();
@@ -224,7 +228,7 @@
 
   globalStyles.then(() => Promise.all([
     loadScript('workspace-ui-core.js'),
-    loadScript('task-widget.js'),
+    loadScript('task-widget.js').then(() => loadScript('task-widget-open-polish.js')),
     loadScript('app-navigation.js'),
   ]));
 
@@ -259,6 +263,7 @@
       'library-selection-polish.js',
       'library-inspector-lifecycle.js',
       'library-selection-toolbar.js',
+      'library-filter-dismiss.js',
     ].map((path) => loadScript(path));
     pending[0].then(() => {
       coverSizeControl?.style.removeProperty('visibility');
@@ -272,4 +277,5 @@
   detailStyles.then(() => {
     if (detail) return loadScript('detail-page.js');
   });
+  mediaFailureStyles.then(() => undefined);
 })();
