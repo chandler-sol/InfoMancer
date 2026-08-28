@@ -58,6 +58,28 @@
     try { window.sessionStorage.removeItem(key); } catch (_) {}
   };
 
+  const formatJsonDetail = (detail) => {
+    if (Array.isArray(detail)) {
+      return detail
+        .map((item) => {
+          if (!item || typeof item !== 'object') return String(item || '').trim();
+          const location = Array.isArray(item.loc)
+            ? item.loc.map(value => String(value)).filter(Boolean).join(' → ')
+            : '';
+          const message = String(item.msg || item.message || 'Invalid request').trim();
+          return location ? `${location}: ${message}` : message;
+        })
+        .filter(Boolean)
+        .join('; ');
+    }
+    if (detail && typeof detail === 'object') {
+      const message = String(detail.msg || detail.message || '').trim();
+      if (message) return message;
+      try { return JSON.stringify(detail); } catch (_) { return 'Invalid request'; }
+    }
+    return String(detail || '').trim();
+  };
+
   const responseDetail = async (response) => {
     let raw = '';
     try { raw = (await response.text()).trim(); } catch (_) {}
@@ -74,7 +96,7 @@
     }
     try {
       const payload = JSON.parse(raw);
-      const detail = String(payload?.detail || payload?.message || '').trim();
+      const detail = formatJsonDetail(payload?.detail ?? payload?.message ?? '');
       if (detail) return `HTTP ${response.status}: ${detail.slice(0, 320)}`;
     } catch (_) {}
     return `HTTP ${response.status}: ${raw.replace(/\s+/g, ' ').slice(0, 320)}`;
