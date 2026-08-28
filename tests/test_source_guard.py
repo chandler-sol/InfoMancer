@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from fastapi.testclient import TestClient
 
@@ -46,6 +47,37 @@ class SourceGuardTests(unittest.TestCase):
         self.assertEqual(root["health_status"], "offline")
         self.assertEqual(root["last_file_count"], 42)
         self.assertIsNotNone(root["last_checked_at"])
+
+    def test_reachable_degraded_source_reports_reachable_without_claiming_outage(self):
+        source = self.base / "nas"
+        source.mkdir()
+        (source / "visible.mkv").write_bytes(b"visible")
+        root_id = self.add_root(source, status="degraded", baseline=1)
+
+        client = TestClient(main.app)
+        sources = client.get("/sources")
+        self.assertEqual(sources.status_code, 200)
+        csrf_token = client.cookies.get(LOCAL_CSRF_COOKIE)
+        self.assertTrue(csrf_token)
+
+        response = client.post(
+            f"/roots/{root_id}/check",
+            headers={"X-CSRF-Token": csrf_token},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 303)
+        query = parse_qs(urlparse(response.headers["location"]).query)
+        message = query.get("message", [""])[0]
+        self.assertIn("Connection confirmed", message)
+        self.assertIn("source root is reachable", message)
+        self.assertIn("complete scan", message)
+        self.assertNotIn("unavailable or incomplete", message)
+
+        with self.database.connect() as conn:
+            root = conn.execute("SELECT * FROM roots WHERE id=?", (root_id,)).fetchone()
+        # A quick connection check still must not clear Source Guard. Only a full
+        # scan can prove the entire protected catalog is visible again.
+        self.assertEqual(root["health_status"], "degraded")
 
     def test_empty_reconnected_mount_is_degraded_and_gets_remediation_preview(self):
         source = self.base / "nas"
