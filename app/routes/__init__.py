@@ -8,12 +8,14 @@ from .system import build_router as build_system_router
 from .operations import build_router as build_operations_router
 from .dashboard import build_router as build_dashboard_router
 from .bulk_match_progress import build_router as build_bulk_match_progress_router
+from .bulk_match_apply import build_router as build_bulk_match_apply_router
 from .review import build_router as build_review_router
 from .library_optimized import build_router as build_library_router
 from .inspector_media import build_router as build_inspector_media_router
 from .recovery import build_router as build_recovery_router
 from .scheduled_tasks import build_router as build_scheduled_tasks_router
 from .source_commit import build_router as build_source_commit_router
+from .source_health import build_router as build_source_health_router
 from .settings import build_router as build_settings_router
 from .settings_quick_actions import build_router as build_settings_quick_actions_router
 from .account_avatar import build_router as build_account_avatar_router
@@ -44,6 +46,10 @@ ROUTER_BUILDERS = (
     build_operations_router,
     build_dashboard_router,
     build_bulk_match_progress_router,
+    # Own the two bulk-apply POST URLs before Review registers its legacy handlers.
+    # The focused handlers isolate each title failure and keep the desktop request
+    # responsive instead of aborting an entire batch on one provider/database error.
+    build_bulk_match_apply_router,
     build_review_router,
     build_library_router,
     build_inspector_media_router,
@@ -52,6 +58,7 @@ ROUTER_BUILDERS = (
     # Source creation must be registered before the broader Settings bundle so
     # POST /roots uses the same Windows/NFS-safe path validation as the browser.
     build_source_commit_router,
+    build_source_health_router,
     build_settings_router,
     build_settings_quick_actions_router,
     build_account_avatar_router,
