@@ -47,7 +47,8 @@ class DesktopReleaseContractTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "draft-08-release.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("PyInstaller --noconfirm --clean --onefile --noconsole", workflow)
+        self.assertIn("PyInstaller --noconfirm --onefile --noconsole", workflow)
+        self.assertNotIn("PyInstaller --noconfirm --clean --onefile --noconsole", workflow)
         self.assertIn("Verify Windows launcher uses GUI subsystem", workflow)
 
     def test_draft_release_launches_installed_windows_app(self):
