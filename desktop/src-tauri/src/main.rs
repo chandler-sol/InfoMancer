@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod external_links;
+
 use serde::Serialize;
 use std::{
     fs::OpenOptions,
@@ -390,6 +392,7 @@ fn main() {
     log_launcher("InfoMancer Desktop launcher starting.");
 
     let result = tauri::Builder::default()
+        .setup(external_links::setup)
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(DesktopState::default())
