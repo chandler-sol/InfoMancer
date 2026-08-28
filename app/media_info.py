@@ -45,6 +45,27 @@ def ffprobe_executable() -> str:
     return shutil.which("ffprobe") or "ffprobe"
 
 
+def _quiet_subprocess_options() -> dict[str, object]:
+    """Keep helper executables invisible in native Windows desktop builds."""
+    if os.name != "nt":
+        return {}
+
+    options: dict[str, object] = {}
+    create_no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if create_no_window:
+        options["creationflags"] = create_no_window
+
+    startupinfo_type = getattr(subprocess, "STARTUPINFO", None)
+    startf_use_showwindow = getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+    sw_hide = getattr(subprocess, "SW_HIDE", 0)
+    if startupinfo_type is not None and startf_use_showwindow:
+        startupinfo = startupinfo_type()
+        startupinfo.dwFlags |= startf_use_showwindow
+        startupinfo.wShowWindow = sw_hide
+        options["startupinfo"] = startupinfo
+    return options
+
+
 def _ffprobe_error(path: Path, technical: str) -> MediaInspectionError:
     """Translate common FFprobe output into an actionable explanation."""
     normalized = technical.casefold()
@@ -146,6 +167,7 @@ def inspect_media(path: Path, timeout: int = 90) -> dict:
     try:
         result = subprocess.run(
             command, capture_output=True, text=True, timeout=timeout, check=False,
+            **_quiet_subprocess_options(),
         )
     except FileNotFoundError as exc:
         raise MediaInspectionError(
