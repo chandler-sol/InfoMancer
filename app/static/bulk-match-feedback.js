@@ -10,16 +10,21 @@
   const progress = document.querySelector('[data-bulk-match-progress]');
   const progressCopy = document.querySelector('[data-bulk-match-progress-copy]');
   const progressFill = document.querySelector('[data-bulk-match-progress-fill]');
+  const reviewForm = document.querySelector('[data-bulk-match-review-form]');
   const progressiveRows = new Map(
     [...document.querySelectorAll('[data-bulk-movie-id]')]
       .map((row) => [String(row.dataset.bulkMovieId || ''), row])
       .filter(([id]) => id),
   );
   let finishingAnalysis = false;
+  let pendingAnalysisReload = false;
   let progressiveRequest = null;
+  let progressiveAbortController = null;
   let lastProgressiveProcessed = 0;
   let queuedProgressiveProcessed = -1;
   let restoreRememberedCheckbox = () => {};
+
+  const applyRunning = () => reviewForm?.dataset.bulkApplying === '1';
 
   /* Bulk review tables can be very tall. Keep active feedback below the persistent
      application header so an action started from the bottom of the table is still
@@ -57,7 +62,7 @@
 
   const renderProgressiveItem = (item) => {
     const row = progressiveRows.get(String(item?.title_id || ''));
-    if (!row) return;
+    if (!row || !row.isConnected) return;
     const suggestionCell = row.querySelector('[data-bulk-suggestion-cell]');
     const confidenceCell = row.querySelector('[data-bulk-confidence-cell]');
     const applyCell = row.querySelector('[data-bulk-apply-cell]');
@@ -91,6 +96,9 @@
           poster.className = 'poster-thumb';
           poster.src = candidate.image_url;
           poster.alt = '';
+          poster.loading = 'lazy';
+          poster.decoding = 'async';
+          poster.fetchPriority = 'low';
           titleCell.append(poster);
         }
         const details = document.createElement('div');
@@ -131,17 +139,22 @@
   };
 
   const refreshProgressiveMatches = (processed, force = false) => {
-    if (!progressUrl || !progressiveRows.size) return;
+    if (!progressUrl || !progressiveRows.size) return Promise.resolve();
     const requested = Number.isFinite(processed) ? Math.max(0, processed) : 0;
-    if (!force && requested <= lastProgressiveProcessed) return;
+    if (applyRunning()) {
+      queuedProgressiveProcessed = Math.max(queuedProgressiveProcessed, requested);
+      return Promise.resolve();
+    }
+    if (!force && requested <= lastProgressiveProcessed) return Promise.resolve();
     if (progressiveRequest) {
       queuedProgressiveProcessed = Math.max(queuedProgressiveProcessed, requested);
-      return;
+      return progressiveRequest;
     }
 
     const url = new URL(progressUrl, window.location.origin);
     url.searchParams.set('after', String(lastProgressiveProcessed));
     const abortController = new AbortController();
+    progressiveAbortController = abortController;
     const timeoutId = window.setTimeout(() => abortController.abort(), 15000);
     progressiveRequest = fetch(url.pathname + url.search, {
       method: 'GET',
@@ -168,13 +181,15 @@
       })
       .finally(() => {
         window.clearTimeout(timeoutId);
+        if (progressiveAbortController === abortController) progressiveAbortController = null;
         progressiveRequest = null;
-        if (queuedProgressiveProcessed > lastProgressiveProcessed) {
+        if (queuedProgressiveProcessed > lastProgressiveProcessed && !applyRunning()) {
           const queued = queuedProgressiveProcessed;
           queuedProgressiveProcessed = -1;
           refreshProgressiveMatches(queued);
         }
       });
+    return progressiveRequest;
   };
 
   const renderAnalysisTask = (task) => {
@@ -185,20 +200,53 @@
       current = Number(match[1].replaceAll(',', ''));
       const total = Number(match[2].replaceAll(',', ''));
       if (progressCopy) {
-        progressCopy.textContent = current > 0
-          ? `${detail}. Matches will appear in their rows as they are found.`
-          : 'Preparing TVDB searches… Matches will appear here as they are found.';
+        progressCopy.textContent = current > 0 ? detail : 'Preparing TVDB searches…';
       }
       if (progressFill && Number.isFinite(current) && Number.isFinite(total) && total > 0) {
         const percent = Math.max(0, Math.min(100, current / total * 100));
         progressFill.style.width = `${percent}%`;
       }
     } else if (progressCopy && detail) {
-      progressCopy.textContent = `${detail}. Matches will appear in their rows as they are found.`;
+      progressCopy.textContent = detail;
     }
     if (progress) progress.hidden = false;
     return current;
   };
+
+  const settleAnalysisCompletion = () => {
+    if (applyRunning()) {
+      pendingAnalysisReload = true;
+      return;
+    }
+
+    // A selected movie review already contains placeholder rows for the complete
+    // requested set, so its final persisted suggestions can hydrate in place. Other
+    // review modes still need one normal reload to reveal rows that did not exist
+    // when the page was rendered.
+    const canFinishInPlace = Boolean(
+      progressUrl && progressiveRows.size && matchOrigin === 'bulk-movie-selected',
+    );
+    if (canFinishInPlace) {
+      const requested = Math.max(lastProgressiveProcessed + 1, queuedProgressiveProcessed);
+      queuedProgressiveProcessed = -1;
+      refreshProgressiveMatches(requested, true).finally(() => {
+        if (progressCopy) progressCopy.textContent = 'Analysis complete.';
+        if (progressFill) progressFill.style.width = '100%';
+      });
+      return;
+    }
+
+    if (progressCopy) progressCopy.textContent = 'Matches ready. Loading the review…';
+    if (progressFill) progressFill.style.width = '100%';
+    window.setTimeout(() => window.location.assign(completeUrl), 750);
+  };
+
+  document.addEventListener('infomancer:bulk-apply-started', () => {
+    // Applying metadata already owns a provider-heavy operation. Abort any optional
+    // row hydration request and let task progress queue the newest cursor instead of
+    // competing for DOM/main-thread time while Apply is running.
+    progressiveAbortController?.abort();
+  });
 
   if (analysisActiveAtRender && taskId) {
     refreshProgressiveMatches(0, true);
@@ -212,21 +260,11 @@
         return;
       }
 
-      // The canonical task poller says analysis finished. Reloading the review is
-      // cheaper and safer than forcing one last full DOM refresh; persisted results
-      // are authoritative on the newly rendered page.
       finishingAnalysis = true;
-      if (progressiveRequest) {
-        // Let the in-flight incremental request settle naturally. Navigation below
-        // will cancel it if it has not completed by then.
-      }
-      if (progressCopy) progressCopy.textContent = 'Matches ready. Loading the review…';
-      if (progressFill) progressFill.style.width = '100%';
-      window.setTimeout(() => window.location.assign(completeUrl), 350);
+      settleAnalysisCompletion();
     });
   }
 
-  const reviewForm = document.querySelector('[data-bulk-match-review-form]');
   if (!reviewForm) return;
   const status = reviewForm.querySelector('[data-bulk-apply-status]');
   const selectionScope = reviewForm.querySelector('input[name="selected_scope"]')
@@ -249,6 +287,16 @@
     return rememberedSelection;
   };
 
+  const writeSelectionMemory = () => {
+    try {
+      if (Object.keys(rememberedSelection || {}).length) {
+        window.sessionStorage.setItem(selectionMemoryKey, JSON.stringify(rememberedSelection));
+      } else {
+        window.sessionStorage.removeItem(selectionMemoryKey);
+      }
+    } catch (_) {}
+  };
+
   const checkboxTitleId = (checkbox) => String(checkbox?.value || '').split(':', 1)[0];
 
   const rememberReviewSelection = () => {
@@ -258,12 +306,7 @@
       if (titleId) next[titleId] = Boolean(checkbox.checked);
     });
     rememberedSelection = next;
-    try {
-      window.sessionStorage.setItem(selectionMemoryKey, JSON.stringify(next));
-    } catch (_) {
-      // Selection memory is a convenience only. Review remains usable if storage
-      // is unavailable or disabled by the WebView/browser.
-    }
+    writeSelectionMemory();
   };
 
   const clearReviewSelection = () => {
@@ -287,6 +330,33 @@
   reviewForm.addEventListener('change', (event) => {
     if (event.target instanceof HTMLInputElement && event.target.name === 'matches') {
       rememberReviewSelection();
+    }
+  });
+
+  document.addEventListener('infomancer:bulk-match-applied', (event) => {
+    const appliedIds = Array.isArray(event.detail?.appliedTitleIds)
+      ? event.detail.appliedTitleIds.map((value) => String(value))
+      : [];
+    if (!appliedIds.length) return;
+    const memory = { ...readSelectionMemory() };
+    appliedIds.forEach((titleId) => {
+      delete memory[titleId];
+      progressiveRows.delete(titleId);
+    });
+    rememberedSelection = memory;
+    writeSelectionMemory();
+  });
+
+  document.addEventListener('infomancer:bulk-apply-finished', () => {
+    if (pendingAnalysisReload) {
+      pendingAnalysisReload = false;
+      settleAnalysisCompletion();
+      return;
+    }
+    if (queuedProgressiveProcessed > lastProgressiveProcessed) {
+      const queued = queuedProgressiveProcessed;
+      queuedProgressiveProcessed = -1;
+      refreshProgressiveMatches(queued);
     }
   });
 
