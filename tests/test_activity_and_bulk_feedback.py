@@ -34,6 +34,8 @@ class ActivityAndBulkFeedbackTests(unittest.TestCase):
     def test_bulk_apply_override_keeps_shell_interactive_without_keepalive(self):
         feedback = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
         bootstrap = (ROOT / "app/static/app-shell-bootstrap.js").read_text(encoding="utf-8")
+        movie = (ROOT / "app/templates/bulk_movie_match.html").read_text(encoding="utf-8")
+        tv = (ROOT / "app/templates/bulk_tv_match.html").read_text(encoding="utf-8")
 
         self.assertIn("Applying ${count} selected ${noun}", feedback)
         self.assertIn("reviewForm.setAttribute('aria-busy', 'true')", feedback)
@@ -43,9 +45,12 @@ class ActivityAndBulkFeedbackTests(unittest.TestCase):
         self.assertIn("credentials: 'same-origin'", feedback)
         self.assertNotIn("keepalive:", feedback)
         self.assertIn("await responseDetail(response)", feedback)
-        self.assertIn("window.location.assign(response.url", feedback)
+        self.assertIn("Accept: 'application/json'", feedback)
+        self.assertIn("checkbox.closest('tr')?.remove()", feedback)
         self.assertIn("resetApplyState()", feedback)
-        self.assertIn("bulk-match-apply.js", bootstrap)
+        self.assertNotIn("/static/bulk-match-apply.js", bootstrap)
+        self.assertEqual(movie.count("bulk-match-apply.js"), 1)
+        self.assertEqual(tv.count("bulk-match-apply.js"), 1)
 
 
 if __name__ == "__main__":
