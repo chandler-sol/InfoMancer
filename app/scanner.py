@@ -116,6 +116,30 @@ def _walk_files(root: Path, errors: list[str]):
             yield candidate
 
 
+def _catalog_fully_accounted(
+    previous_count: int, file_count: int, preserved_count: int,
+) -> bool:
+    """Return true when a rescan proved every known catalog file is still visible."""
+    return previous_count > 0 and preserved_count == 0 and file_count >= previous_count
+
+
+def _read_errors_block_health(
+    errors: list[str], *, previous_count: int, file_count: int, preserved_count: int,
+) -> bool:
+    """Keep Source Guard strict except for a proven Windows provider metadata quirk.
+
+    WinError 1272 can be raised by Windows path metadata calls against otherwise
+    readable mapped NFS/SMB storage. It is safe to treat those errors as warnings
+    only after a rescan has independently accounted for every previously cataloged
+    media file. Any other read error, or any missing catalog file, remains blocking.
+    """
+    if not errors:
+        return False
+    if not _catalog_fully_accounted(previous_count, file_count, preserved_count):
+        return True
+    return any("winerror 1272" not in error.lower() for error in errors)
+
+
 EPISODE_RE = re.compile(
     r"(?i)(?:^|[. _\-])s(?P<season>\d{1,3})[. _\-]*e(?P<start>\d{1,3})"
     r"(?:[. _\-]*(?:e|-e?)(?P<end>\d{1,3}))?"
@@ -336,12 +360,18 @@ def scan_root(
     suspicious_drop = previous_count > 0 and (
         file_count == 0 or (previous_count >= 10 and file_count * 4 < previous_count)
     )
-    degraded = bool(read_errors or (suspicious_drop and not force_cleanup))
     preserved_count = int(conn.execute(
         """SELECT COUNT(*) FROM files f JOIN titles t ON t.id=f.title_id
            WHERE t.root_id=? AND f.seen_scan!=?""",
         (root_row["id"], scan_id),
     ).fetchone()[0])
+    read_errors_blocking = _read_errors_block_health(
+        read_errors,
+        previous_count=previous_count,
+        file_count=file_count,
+        preserved_count=preserved_count,
+    )
+    degraded = bool(read_errors_blocking or (suspicious_drop and not force_cleanup))
     if not degraded:
         conn.execute(
             "DELETE FROM files WHERE title_id IN (SELECT id FROM titles WHERE root_id = ?) AND seen_scan != ?",
@@ -358,7 +388,7 @@ def scan_root(
     if degraded:
         reason = (
             f"The source returned {len(read_errors)} read error(s)."
-            if read_errors else
+            if read_errors_blocking else
             f"Only {file_count:,} of the previous {previous_count:,} files were visible."
         )
         conn.execute(
@@ -380,6 +410,7 @@ def scan_root(
         "source_status": "degraded" if degraded else "healthy",
         "preserved": preserved_count if degraded else 0,
         "read_errors": len(read_errors),
+        "read_warnings": len(read_errors) if read_errors and not degraded else 0,
     }
 
 
@@ -440,11 +471,17 @@ def scan_title(
     suspicious_drop = previous_count > 0 and (
         file_count == 0 or (previous_count >= 10 and file_count * 4 < previous_count)
     )
-    degraded = bool(read_errors or suspicious_drop)
     preserved_count = int(conn.execute(
         "SELECT COUNT(*) FROM files WHERE title_id=? AND seen_scan!=?",
         (title_row["id"], scan_id),
     ).fetchone()[0])
+    read_errors_blocking = _read_errors_block_health(
+        read_errors,
+        previous_count=previous_count,
+        file_count=file_count,
+        preserved_count=preserved_count,
+    )
+    degraded = bool(read_errors_blocking or suspicious_drop)
     if not degraded:
         conn.execute(
             "DELETE FROM files WHERE title_id=? AND seen_scan != ?",
@@ -453,7 +490,7 @@ def scan_title(
     else:
         reason = (
             f"The series scan returned {len(read_errors)} read error(s)."
-            if read_errors else
+            if read_errors_blocking else
             f"Only {file_count:,} of the previous {previous_count:,} series files were visible."
         )
         conn.execute(
@@ -471,4 +508,6 @@ def scan_title(
         "files": file_count, "titles": 1, "scan_id": scan_id,
         "source_status": "degraded" if degraded else "healthy",
         "preserved": preserved_count if degraded else 0,
+        "read_errors": len(read_errors),
+        "read_warnings": len(read_errors) if read_errors and not degraded else 0,
     }
