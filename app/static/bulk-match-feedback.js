@@ -26,6 +26,17 @@
 
   const applyRunning = () => reviewForm?.dataset.bulkApplying === '1';
 
+  // Bulk review can contain dozens of remote provider posters. Keep their decoding
+  // and network priority out of the interaction-critical path so Apply does not
+  // finish into a burst of eager image decode/paint work on the renderer thread.
+  const deferPoster = (poster) => {
+    if (!(poster instanceof HTMLImageElement)) return;
+    poster.loading = 'lazy';
+    poster.decoding = 'async';
+    poster.fetchPriority = 'low';
+  };
+  document.querySelectorAll('[data-bulk-match-review-form] img.poster-thumb').forEach(deferPoster);
+
   /* Bulk review tables can be very tall. Keep active feedback below the persistent
      application header so an action started from the bottom of the table is still
      visible without moving the user's scroll position. */
