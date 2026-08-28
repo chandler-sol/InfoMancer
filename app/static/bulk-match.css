@@ -1,0 +1,48 @@
+/* High-frequency Bulk Match review readability. Keep the zebra treatment subtle,
+   then make the active row unmistakable when the pointer is moving quickly. */
+[data-bulk-match-review-form] .table-wrap tbody tr > td {
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+[data-bulk-match-review-form] .table-wrap tbody tr:nth-child(odd) > td {
+  background: rgba(255, 255, 255, .008);
+}
+
+[data-bulk-match-review-form] .table-wrap tbody tr:nth-child(even) > td {
+  background: rgba(255, 255, 255, .028);
+}
+
+[data-bulk-match-review-form] .table-wrap tbody tr:hover > td {
+  background: rgba(185, 245, 66, .075);
+}
+
+[data-bulk-match-review-form] .table-wrap tbody tr:hover > td:first-child {
+  box-shadow: inset 3px 0 0 rgba(185, 245, 66, .82);
+}
+
+[data-bulk-match-review-form] .table-wrap tbody tr:focus-within > td {
+  background: rgba(81, 214, 230, .07);
+}
+
+[data-bulk-match-review-form] .title-cell {
+  align-items: center;
+  gap: 14px;
+}
+
+[data-bulk-match-review-form] .title-cell .poster-thumb {
+  width: 48px;
+  height: 72px;
+  flex: 0 0 48px;
+  object-fit: cover;
+}
+
+[data-bulk-match-review-form] .match-check {
+  width: 18px;
+  height: 18px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-bulk-match-review-form] .table-wrap tbody tr > td {
+    transition: none;
+  }
+}
