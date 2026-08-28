@@ -1,9 +1,7 @@
 use std::process::Command;
 
-use tauri::{
-    webview::{NewWindowResponse, Url},
-    WebviewUrl, WebviewWindowBuilder,
-};
+use tauri::{webview::NewWindowResponse, WebviewUrl, WebviewWindowBuilder};
+use url::Url;
 
 fn safe_external_url(url: &Url) -> bool {
     matches!(url.scheme(), "http" | "https")
