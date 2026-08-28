@@ -180,7 +180,10 @@ def build_router(ctx: RouteContext):
                 "observed_files": int(root["last_observed_file_count"] or 0),
                 "protected_files": protected,
             },
-            "issue_count": max(1, affected_total) if status in {"offline", "degraded"} else len(affected),
+            # Degraded/offline is one source-health issue. The separate affected_total
+            # communicates how many catalog files are involved without pretending each
+            # protected file is an independent outage.
+            "issue_count": 1 if status in {"offline", "degraded"} else len(affected),
             "summary": finding["summary"] if finding else fallback_summary,
             "explanation": finding["explanation"] if finding else fallback_explanation,
             "recommendation": finding["recommendation"] if finding else fallback_recommendation,
@@ -190,7 +193,10 @@ def build_router(ctx: RouteContext):
             "affected_total": affected_total,
             "affected_truncated": affected_total > len(affected),
             "review_url": f"/review?bucket=sources&q={quote_plus(str(label))}",
-            "logs_url": f"/logs?category=scan&search={quote_plus(str(label))}",
+            # Scan events store root_id in structured context rather than duplicating
+            # the source label in every message, so source-name search could hide the
+            # very event the user is trying to inspect.
+            "logs_url": "/logs?category=scan",
         }
 
     return router, {"source_health_details": source_health_details}
