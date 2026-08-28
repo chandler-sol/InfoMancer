@@ -184,7 +184,10 @@ class ParsedTitle:
 
 def clean_words(value: str) -> str:
     value = ID_TAG_RE.sub(" ", value)
-    value = value.replace(".", " ").replace("_", " ")
+    # Periods are common filename separators, but a period between digits can be
+    # meaningful title punctuation (for example "Jackass 3.5"). Preserve only
+    # digit-to-digit periods while normalizing the rest like ordinary separators.
+    value = re.sub(r"(?<!\d)\.|\.(?!\d)", " ", value).replace("_", " ")
     return re.sub(r"\s+", " ", value).strip(" -")
 
 
