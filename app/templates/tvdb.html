@@ -30,7 +30,11 @@
     <p class="eyebrow">MANUAL MATCH</p>
     <h2>{% if results %}Already know the TVDB page?{% else %}No search results?{% endif %}</h2>
     {% if entity == 'movie' %}
-    <p class="muted">Paste the TVDB movie-page link or its numeric movie ID. InfoMancer will resolve the canonical movie directly, even when TVDB's text-search index misses it.</p>
+    <p class="muted">Paste the TVDB movie-page link or its numeric movie ID. InfoMancer will resolve the canonical movie directly, even when TVDB's API text-search index misses it.</p>
+    {% if q %}
+    <p class="muted">TVDB's website search can sometimes find a movie that the API search does not. Open the same search on TVDB, then paste the movie page below.</p>
+    <a class="button" href="https://www.thetvdb.com/search?query={{ q|urlencode }}" target="_blank" rel="noopener noreferrer">Search TVDB website ↗</a>
+    {% endif %}
     {% else %}
     <p class="muted">Paste the TVDB series-page link or its numeric series ID. InfoMancer will validate it and load that series’ episode metadata.</p>
     {% endif %}
