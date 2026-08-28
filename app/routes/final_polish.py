@@ -15,11 +15,17 @@ from .context import RouteContext
 
 
 _SCAN_ALL_CANCEL = threading.Event()
+_GENERIC_SOURCE_GUARD_MESSAGE = (
+    "The source is unavailable or incomplete. Source Guard is preserving its catalog records. "
+    "Check the NAS, mount, and permissions."
+)
 
 
 def build_router(ctx: RouteContext):
     router = APIRouter()
     JSONResponse = ctx.get("JSONResponse")
+    base_check_source_health = ctx.get("check_source_health")
+    base_redirect = ctx.get("redirect")
     base_run_media_inspection = ctx.get("run_media_inspection")
     base_run_scan = ctx.get("run_scan")
     db = ctx.live("db")
@@ -34,13 +40,58 @@ def build_router(ctx: RouteContext):
     scan_jobs = ctx.live("scan_jobs")
     scan_lock = ctx.live("scan_lock")
 
+    # A degraded source can still be fully reachable. The base connection checker
+    # intentionally keeps a previously degraded source protected until a complete
+    # scan proves the full catalog is visible. Preserve that safety behavior while
+    # replacing the older generic banner that incorrectly sounded like an outage.
+    source_check_state = threading.local()
+
+    def tracked_check_source_health(root_id: int) -> dict:
+        result = base_check_source_health(root_id)
+        source_check_state.result = dict(result)
+        return result
+
+    def source_aware_redirect(path: str, message: str = ""):
+        result = getattr(source_check_state, "result", None)
+        if result is not None:
+            # The connection route redirects immediately after the check. Clear
+            # thread-local state on that next redirect so worker-thread reuse can
+            # never leak a source result into a later request.
+            source_check_state.result = None
+            base_path = path.split("#", 1)[0].split("?", 1)[0]
+            if base_path == "/sources" and message == _GENERIC_SOURCE_GUARD_MESSAGE:
+                status = str(result.get("status") or "")
+                detail = str(result.get("error") or "")
+                normalized = detail.casefold()
+                if status == "degraded" and "source root is reachable" in normalized:
+                    message = (
+                        "Connection confirmed. The source root is reachable. Source Guard is "
+                        "keeping it Degraded until a complete scan confirms the full catalog "
+                        "is visible; no catalog records were removed."
+                    )
+                elif status == "degraded":
+                    message = (
+                        "InfoMancer reached the source, but it appears incomplete compared with "
+                        "the protected catalog. Source Guard is preserving the existing records."
+                    )
+                elif status == "offline":
+                    message = (
+                        "InfoMancer could not reach the configured source from the app process. "
+                        "Source Guard is preserving its catalog records. Check the mapped drive "
+                        "or network mount, permissions, and connection."
+                    )
+        return base_redirect(path, message)
+
+    ctx.set("check_source_health", tracked_check_source_health)
+    ctx.set("redirect", source_aware_redirect)
+
     def reconciling_run_scan(
         root_id: int, *, hash_after: bool = True, force_cleanup: bool = False,
     ) -> list[int]:
         """Reconcile confident path changes before the normal guarded scan."""
         before_missing = set(missing_file_ids(db, root_id))
         reconciliation = reconcile_root_paths(db, root_id) if before_missing else {
-            "available": True, "reconciled": 0,
+            "available": True, "reconciled": 0, "hash_resolved": 0,
         }
         changed = base_run_scan(
             root_id, hash_after=hash_after, force_cleanup=force_cleanup,
@@ -69,14 +120,21 @@ def build_router(ctx: RouteContext):
             return changed
 
         reconciled = int(reconciliation.get("reconciled") or 0)
+        hash_resolved = int(reconciliation.get("hash_resolved") or 0)
         if reconciled:
+            detail = (
+                f" {hash_resolved:,} ambiguous path change"
+                f"{'s were' if hash_resolved != 1 else ' was'} confirmed by SHA-256."
+                if hash_resolved else ""
+            )
             record_event(
                 "scan",
-                f"Reconciled {reconciled:,} media path change{'s' if reconciled != 1 else ''} during the source scan.",
+                f"Reconciled {reconciled:,} media path change{'s' if reconciled != 1 else ''} during the source scan.{detail}",
                 context={
                     "root_id": root_id,
                     "operation": "path_reconciliation",
                     "reconciled": reconciled,
+                    "hash_resolved": hash_resolved,
                 },
             )
 
