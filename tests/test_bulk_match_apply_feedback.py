@@ -9,7 +9,6 @@ class BulkMatchApplyFeedbackTests(unittest.TestCase):
     def test_apply_shows_working_completion_and_error_feedback(self):
         script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
         self.assertIn("Applying ${count} selected ${noun}", script)
-        self.assertIn("track.className = 'task-track'", script)
         self.assertIn("button.disabled = true", script)
         self.assertIn("You can keep using InfoMancer while this finishes.", script)
         self.assertIn("fetch(reviewForm.action", script)
@@ -18,28 +17,74 @@ class BulkMatchApplyFeedbackTests(unittest.TestCase):
         self.assertIn("Activity/Logs", script)
         self.assertIn("resetApplyState()", script)
         self.assertIn("button.disabled = false", script)
+        self.assertNotIn("track.className = 'task-track'", script)
 
     def test_apply_sends_csrf_header_and_avoids_webview_keepalive(self):
         script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
         self.assertIn("input[name=\"csrf_token\"]", script)
         self.assertIn("'X-CSRF-Token': token", script)
         self.assertIn("'X-Requested-With': 'InfoMancerAsync'", script)
+        self.assertIn("Accept: 'application/json'", script)
         self.assertIn("new AbortController()", script)
         self.assertIn("signal: controller.signal", script)
         self.assertIn("error?.name === 'AbortError'", script)
         self.assertNotIn("keepalive", script.split("fetch(reviewForm.action", 1)[1])
 
-    def test_hardened_apply_handler_loads_before_legacy_feedback(self):
+    def test_bulk_apply_controller_has_one_canonical_loader(self):
         for template_name in ("bulk_movie_match.html", "bulk_tv_match.html"):
             template = (ROOT / f"app/templates/{template_name}").read_text(encoding="utf-8")
-            self.assertIn("bulk-match-apply.js", template)
+            self.assertEqual(template.count("bulk-match-apply.js"), 1, template_name)
             self.assertIn("bulk-match-feedback.js", template)
             self.assertLess(
                 template.index("bulk-match-apply.js"),
                 template.index("bulk-match-feedback.js"),
             )
+        bootstrap = (ROOT / "app/static/app-shell-bootstrap.js").read_text(encoding="utf-8")
+        self.assertNotIn("/static/bulk-match-apply.js", bootstrap)
         script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
+        self.assertIn("window.__infomancerBulkMatchApplyLoaded", script)
         self.assertIn("document.addEventListener('submit', runApply, true)", script)
+
+    def test_successful_apply_updates_review_in_place(self):
+        script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
+        self.assertIn("await response.json()", script)
+        self.assertIn("applied_title_ids", script)
+        self.assertIn("checkbox.closest('tr')?.remove()", script)
+        self.assertIn("infomancer:bulk-match-applied", script)
+        self.assertIn("updateContinueLinks()", script)
+        self.assertIn("showEmptyPageState()", script)
+        self.assertIn("Continue review", script)
+        self.assertIn("contentType.includes('application/json')", script)
+        compatibility = script.index("if (!contentType.includes('application/json'))")
+        apply_in_place = script.index("const payload = await response.json()")
+        self.assertLess(compatibility, apply_in_place)
+        self.assertNotIn("window.location.assign", script[apply_in_place:])
+
+    def test_apply_coordinates_with_progressive_hydration(self):
+        apply_script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
+        feedback = (ROOT / "app/static/bulk-match-feedback.js").read_text(encoding="utf-8")
+        self.assertIn("infomancer:bulk-apply-started", apply_script)
+        self.assertIn("infomancer:bulk-apply-finished", apply_script)
+        self.assertIn("const applyRunning = () =>", feedback)
+        self.assertIn("if (applyRunning())", feedback)
+        self.assertIn("progressiveAbortController?.abort()", feedback)
+        self.assertIn("pendingAnalysisReload", feedback)
+        self.assertIn("infomancer:bulk-apply-finished", feedback)
+        self.assertIn("refreshProgressiveMatches(queued)", feedback)
+
+    def test_bulk_review_posters_are_deferred_from_interaction_path(self):
+        feedback = (ROOT / "app/static/bulk-match-feedback.js").read_text(encoding="utf-8")
+        self.assertIn("const deferPoster = (poster) =>", feedback)
+        self.assertIn("poster.loading = 'lazy'", feedback)
+        self.assertIn("poster.decoding = 'async'", feedback)
+        self.assertIn("poster.fetchPriority = 'low'", feedback)
+        self.assertIn("img.poster-thumb", feedback)
+
+    def test_bulk_progress_copy_does_not_repeat_row_explainer(self):
+        feedback = (ROOT / "app/static/bulk-match-feedback.js").read_text(encoding="utf-8")
+        self.assertNotIn("Matches will appear in their rows as they are found", feedback)
+        self.assertNotIn("Matches will appear here as they are found", feedback)
+        self.assertIn("progressCopy.textContent = current > 0 ? detail : 'Preparing TVDB searches…'", feedback)
 
     def test_bulk_review_has_one_click_clear_selection(self):
         script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
@@ -61,6 +106,9 @@ class BulkMatchApplyFeedbackTests(unittest.TestCase):
         self.assertIn("except Exception as exc", handler)
         self.assertIn("First error:", handler)
         self.assertIn("Bulk match apply finished", handler)
+        self.assertIn("JSONResponse", handler)
+        self.assertIn('request.headers.get("x-requested-with") == "InfoMancerAsync"', handler)
+        self.assertIn('"applied_title_ids"', handler)
 
     def test_bulk_feedback_stays_visible_from_bottom_of_long_review(self):
         script = (ROOT / "app/static/bulk-match-feedback.js").read_text(encoding="utf-8")
@@ -71,7 +119,7 @@ class BulkMatchApplyFeedbackTests(unittest.TestCase):
         self.assertIn("makeFeedbackSticky(status)", script)
         self.assertNotIn("scrollIntoView", script)
 
-    def test_selected_bulk_apply_returns_to_selected_review_scope(self):
+    def test_selected_bulk_apply_returns_to_selected_review_scope_for_native_fallback(self):
         routes = (ROOT / "app/routes/bulk_match_apply.py").read_text(encoding="utf-8")
         self.assertIn("?review=true&selected=true", routes)
 
