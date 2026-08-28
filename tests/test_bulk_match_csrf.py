@@ -24,6 +24,8 @@ class BulkMatchCsrfTests(unittest.TestCase):
         self.assertIn('reviewForm.querySelector(\'input[name="csrf_token"]\')?.value', script)
         self.assertIn("'X-CSRF-Token': token", script)
         self.assertIn("body: new FormData(reviewForm)", script)
+        self.assertIn("'X-Requested-With': 'InfoMancerAsync'", script)
+        self.assertIn("Accept: 'application/json'", script)
 
     def test_bulk_apply_request_is_framework_request_not_query_parameter(self):
         router, _ = build_router(RouteContext({}))
@@ -35,6 +37,15 @@ class BulkMatchCsrfTests(unittest.TestCase):
                 self.assertNotIn("request", query_names)
                 self.assertIn("matches", body_names)
                 self.assertIn("selected_scope", body_names)
+
+    def test_async_apply_route_returns_compact_result_contract(self):
+        route_source = (ROOT / "app/routes/bulk_match_apply.py").read_text(encoding="utf-8")
+        self.assertIn('request.headers.get("x-requested-with") == "InfoMancerAsync"', route_source)
+        self.assertIn("return JSONResponse({", route_source)
+        self.assertIn('"applied_title_ids"', route_source)
+        self.assertIn('"failures"', route_source)
+        self.assertIn('"redirect_url"', route_source)
+        self.assertIn("return redirect(destination, message)", route_source)
 
     def test_validation_errors_are_rendered_as_text_not_object_object(self):
         script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
