@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Form, Request
 
 from ..access import require_librarian
 from .context import RouteContext
@@ -8,8 +8,6 @@ from .context import RouteContext
 
 def build_router(ctx: RouteContext):
     router = APIRouter()
-    Form = ctx.get("Form")
-    Request = ctx.get("Request")
     db = ctx.live("db")
     record_event = ctx.live("record_event")
     redirect = ctx.live("redirect")
