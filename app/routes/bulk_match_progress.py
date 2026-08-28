@@ -15,8 +15,8 @@ def build_router(ctx: RouteContext):
         "/api/movies/bulk-match/progress",
         dependencies=[Depends(require_librarian)],
     )
-    def bulk_movie_match_progress(response: Response) -> dict:
-        """Return suggestions already saved by the active bulk movie analysis."""
+    def bulk_movie_match_progress(response: Response, after: int = 0) -> dict:
+        """Return only suggestions saved since the caller's last processed index."""
         response.headers["Cache-Control"] = "no-store"
         with movie_match_lock:
             job = dict(movie_match_job)
@@ -28,10 +28,13 @@ def build_router(ctx: RouteContext):
             except (TypeError, ValueError):
                 continue
         title_ids = list(dict.fromkeys(title_ids))
+        processed = max(0, min(int(job.get("processed") or 0), len(title_ids)))
+        after = max(0, min(int(after or 0), processed))
+        changed_title_ids = title_ids[after:processed]
 
         items: list[dict] = []
-        if title_ids:
-            placeholders = ",".join("?" for _ in title_ids)
+        if changed_title_ids:
+            placeholders = ",".join("?" for _ in changed_title_ids)
             with db.connect() as conn:
                 rows = conn.execute(
                     f"""SELECT t.id title_id,
@@ -42,10 +45,10 @@ def build_router(ctx: RouteContext):
                         FROM titles t
                         LEFT JOIN movie_match_suggestions s ON s.title_id=t.id
                         WHERE t.kind='movie' AND t.id IN ({placeholders})""",
-                    tuple(title_ids),
+                    tuple(changed_title_ids),
                 ).fetchall()
             by_id = {int(row["title_id"]): row for row in rows}
-            for title_id in title_ids:
+            for title_id in changed_title_ids:
                 row = by_id.get(title_id)
                 if not row or row["suggestion_id"] is None:
                     continue
@@ -89,7 +92,7 @@ def build_router(ctx: RouteContext):
 
         return {
             "status": str(job.get("status") or "idle"),
-            "processed": int(job.get("processed") or 0),
+            "processed": processed,
             "total": int(job.get("total") or 0),
             "matched": int(job.get("matched") or 0),
             "errors": int(job.get("errors") or 0),
