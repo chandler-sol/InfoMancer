@@ -204,7 +204,10 @@
   };
 
   const renderAnalysisTask = (task) => {
-    const detail = String(task?.detail || '');
+    const rawDetail = String(task?.detail || '');
+    const detail = rawDetail
+      .replace(/\s*Matches will appear in their rows as they are found\.?\s*$/i, '')
+      .trim();
     const match = detail.match(/([\d,]+)\s+of\s+([\d,]+)\s+checked/i);
     let current = 0;
     if (match) {
