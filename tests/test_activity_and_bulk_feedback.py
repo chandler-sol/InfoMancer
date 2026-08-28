@@ -31,18 +31,21 @@ class ActivityAndBulkFeedbackTests(unittest.TestCase):
         self.assertIn("document.addEventListener('infomancer:tasks'", feedback)
         self.assertIn("Matches ready. Loading the review", feedback)
 
-    def test_bulk_apply_uses_async_request_so_shell_stays_interactive(self):
-        feedback = (ROOT / "app/static/bulk-match-feedback.js").read_text(encoding="utf-8")
+    def test_bulk_apply_override_keeps_shell_interactive_without_keepalive(self):
+        feedback = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
+        bootstrap = (ROOT / "app/static/app-shell-bootstrap.js").read_text(encoding="utf-8")
 
         self.assertIn("Applying ${count} selected ${noun}", feedback)
         self.assertIn("reviewForm.setAttribute('aria-busy', 'true')", feedback)
+        self.assertIn("document.addEventListener('submit', runApply, true)", feedback)
         self.assertIn("fetch(reviewForm.action", feedback)
         self.assertIn("body: new FormData(reviewForm)", feedback)
         self.assertIn("credentials: 'same-origin'", feedback)
-        self.assertIn("keepalive: true", feedback)
-        self.assertIn("window.location.assign(response.url || completeUrl)", feedback)
+        self.assertNotIn("keepalive:", feedback)
+        self.assertIn("await responseDetail(response)", feedback)
+        self.assertIn("window.location.assign(response.url", feedback)
         self.assertIn("resetApplyState()", feedback)
-        self.assertNotIn("HTMLFormElement.prototype.submit.call(reviewForm)", feedback)
+        self.assertIn("bulk-match-apply.js", bootstrap)
 
 
 if __name__ == "__main__":
