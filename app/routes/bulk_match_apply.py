@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Form, Request
+from fastapi.responses import JSONResponse
 
 from ..access import require_librarian
 from .context import RouteContext
@@ -27,7 +28,8 @@ def build_router(ctx: RouteContext):
         selected_scope: str,
     ):
         applied = 0
-        failures: list[str] = []
+        applied_items: list[dict[str, int]] = []
+        failures: list[dict[str, object]] = []
         store = store_movie_match if kind == "movie" else store_tv_match
         suggestion_table = (
             "movie_match_suggestions" if kind == "movie" else "tv_match_suggestions"
@@ -42,9 +44,17 @@ def build_router(ctx: RouteContext):
                 )
                 store(title_id, provider_id)
                 applied += 1
+                applied_items.append({
+                    "title_id": title_id,
+                    "provider_id": provider_id,
+                })
             except Exception as exc:
                 detail = f"{type(exc).__name__}: {exc}".strip()[:500]
-                failures.append(detail or type(exc).__name__)
+                failures.append({
+                    "title_id": title_id,
+                    "provider_id": provider_id,
+                    "detail": detail or type(exc).__name__,
+                })
                 record_event(
                     "metadata",
                     f"Bulk match could not apply one {item_label}.",
@@ -88,7 +98,7 @@ def build_router(ctx: RouteContext):
         message = f"Matched {applied} {noun}"
         if failed:
             message += f"; {failed} failed"
-            message += f". First error: {failures[0]}"
+            message += f". First error: {failures[0]['detail']}"
         record_event(
             "metadata",
             f"Bulk match apply finished: {applied} applied, {failed} failed.",
@@ -107,6 +117,25 @@ def build_router(ctx: RouteContext):
             f"{base}?review=true&selected=true"
             if selected_scope else f"{base}?review=true"
         )
+
+        # Bulk Match's desktop/browser controller asks for a compact result so it can
+        # remove only the successfully applied rows in place. Avoiding a complete
+        # document navigation keeps the review queue, global shell, poster images,
+        # and task controllers from being torn down and rebuilt after every batch.
+        if request.headers.get("x-requested-with") == "InfoMancerAsync":
+            return JSONResponse({
+                "ok": failed == 0,
+                "kind": kind,
+                "requested": min(len(matches), 50),
+                "applied": applied,
+                "failed": failed,
+                "applied_title_ids": [item["title_id"] for item in applied_items],
+                "failures": failures[:10],
+                "message": message,
+                "redirect_url": destination,
+            })
+
+        # Keep native/no-JavaScript form submission behavior intact.
         return redirect(destination, message)
 
     @librarian_post("/movies/bulk-match")
