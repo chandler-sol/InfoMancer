@@ -81,14 +81,9 @@
     }, {once: true});
   }
 
-  if (['/movies/bulk-match', '/shows/bulk-match'].includes(window.location.pathname)) {
-    document.addEventListener('DOMContentLoaded', () => {
-      const controller = document.createElement('script');
-      controller.src = `/static/bulk-match-apply.js${versionQuery}`;
-      controller.async = true;
-      document.head.append(controller);
-    }, {once: true});
-  }
+  /* Bulk Match owns its Apply controller directly from each page template. Keeping
+     one canonical loader avoids duplicate document-level submit handlers and keeps
+     Apply/progressive lifecycle ownership deterministic across browsers and WebViews. */
 
   if (!body.classList.contains('has-app-sidebar')) return;
   try {
