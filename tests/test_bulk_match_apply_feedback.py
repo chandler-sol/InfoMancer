@@ -12,7 +12,10 @@ class BulkMatchApplyFeedbackTests(unittest.TestCase):
         self.assertIn("track.className = 'task-track'", script)
         self.assertIn("button.disabled = true", script)
         self.assertIn("/^Matched\\s+\\d+/i.test(completionMessage)", script)
-        self.assertIn("Unselected or unresolved items will remain here for review.", script)
+        self.assertIn("You can keep using InfoMancer while this finishes.", script)
+        self.assertIn("fetch(reviewForm.action", script)
+        self.assertIn("resetApplyState()", script)
+        self.assertIn("button.disabled = false", script)
 
     def test_bulk_feedback_stays_visible_from_bottom_of_long_review(self):
         script = (ROOT / "app/static/bulk-match-feedback.js").read_text(encoding="utf-8")
