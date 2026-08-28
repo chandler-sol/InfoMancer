@@ -219,6 +219,7 @@
   if (!reviewForm) return;
   const status = reviewForm.querySelector('[data-bulk-apply-status]');
   const applyButtons = [...reviewForm.querySelectorAll('[data-bulk-apply-button]')];
+  const originalApplyLabels = applyButtons.map((button) => button.textContent);
   const itemLabel = reviewForm.dataset.bulkMatchItemLabel || 'match';
   const itemPlural = reviewForm.dataset.bulkMatchItemPlural
     || (itemLabel.endsWith('series') ? itemLabel : `${itemLabel}s`);
@@ -331,6 +332,15 @@
     showStatus(completionMessage, false);
   }
 
+  const resetApplyState = () => {
+    reviewForm.dataset.bulkApplying = '0';
+    reviewForm.removeAttribute('aria-busy');
+    applyButtons.forEach((button, index) => {
+      button.disabled = false;
+      button.textContent = originalApplyLabels[index] || 'Apply selected matches';
+    });
+  };
+
   reviewForm.addEventListener('submit', (event) => {
     if (reviewForm.dataset.bulkApplying === '1') {
       event.preventDefault();
@@ -355,14 +365,34 @@
     });
     showStatus(
       `Applying ${count} selected ${noun}. InfoMancer is fetching and saving metadata. `
-      + 'Unselected or unresolved items will remain here for review.',
+      + 'You can keep using InfoMancer while this finishes.',
       true,
     );
 
-    // Give WebView a paint opportunity so the busy state and indeterminate progress
-    // track are visible before the synchronous bulk POST begins its provider lookups.
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => HTMLFormElement.prototype.submit.call(reviewForm));
-    });
+    // A native form navigation blocks the embedded WebView while the server performs
+    // many sequential provider requests. Submit with fetch instead so scrolling,
+    // navigation, refresh, and the rest of the application remain responsive.
+    fetch(reviewForm.action, {
+      method: 'POST',
+      body: new FormData(reviewForm),
+      credentials: 'same-origin',
+      redirect: 'follow',
+      keepalive: true,
+      headers: { Accept: 'text/html' },
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Bulk match apply failed: ${response.status}`);
+        }
+        clearReviewSelection();
+        window.location.assign(response.url || completeUrl);
+      })
+      .catch(() => {
+        resetApplyState();
+        showStatus(
+          'InfoMancer could not finish applying these matches. Nothing else in the app is locked; retry when ready.',
+          false,
+        );
+      });
   });
 })();
