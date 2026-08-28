@@ -19,6 +19,28 @@ class BulkMatchApplyFeedbackTests(unittest.TestCase):
         self.assertIn("resetApplyState()", script)
         self.assertIn("button.disabled = false", script)
 
+    def test_apply_sends_csrf_header_and_avoids_webview_keepalive(self):
+        script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
+        self.assertIn("input[name=\"csrf_token\"]", script)
+        self.assertIn("'X-CSRF-Token': token", script)
+        self.assertIn("'X-Requested-With': 'InfoMancerAsync'", script)
+        self.assertIn("new AbortController()", script)
+        self.assertIn("signal: controller.signal", script)
+        self.assertIn("error?.name === 'AbortError'", script)
+        self.assertNotIn("keepalive", script.split("fetch(reviewForm.action", 1)[1])
+
+    def test_hardened_apply_handler_loads_before_legacy_feedback(self):
+        for template_name in ("bulk_movie_match.html", "bulk_tv_match.html"):
+            template = (ROOT / f"app/templates/{template_name}").read_text(encoding="utf-8")
+            self.assertIn("bulk-match-apply.js", template)
+            self.assertIn("bulk-match-feedback.js", template)
+            self.assertLess(
+                template.index("bulk-match-apply.js"),
+                template.index("bulk-match-feedback.js"),
+            )
+        script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
+        self.assertIn("document.addEventListener('submit', runApply, true)", script)
+
     def test_bulk_review_has_one_click_clear_selection(self):
         script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
         self.assertIn("data-bulk-clear-selection", script)
