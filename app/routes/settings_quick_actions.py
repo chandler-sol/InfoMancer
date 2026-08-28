@@ -158,7 +158,40 @@ def build_router(ctx: RouteContext):
             f"Checked {checked} source{'s' if checked != 1 else ''}: " + ", ".join(parts) + ".",
         )
 
+    @router.post(
+        "/media-info/failures/{file_id}/dismiss",
+        dependencies=[Depends(require_librarian)],
+    )
+    def dismiss_media_info_failure(request: Request, file_id: int):
+        with db.connect() as conn:
+            row = conn.execute(
+                """SELECT f.id, f.filename, f.media_info_error, f.title_id
+                   FROM files f WHERE f.id=?""",
+                (file_id,),
+            ).fetchone()
+            if not row or not row["media_info_error"]:
+                return redirect(
+                    "/media-info/failures",
+                    "That media inspection alert is already cleared.",
+                )
+            conn.execute(
+                "UPDATE files SET media_info_error=NULL WHERE id=?",
+                (file_id,),
+            )
+        record_event(
+            "media",
+            f"Dismissed media inspection alert for {row['filename']}.",
+            context={
+                "operation": "dismiss_media_info_failure",
+                "file_id": file_id,
+                "title_id": row["title_id"],
+            },
+            user_id=request.state.user.id,
+        )
+        return redirect("/media-info/failures", "Media inspection alert dismissed.")
+
     return router, {
         "save_tvdb_credentials": save_tvdb_credentials,
         "check_all_root_connections": check_all_root_connections,
+        "dismiss_media_info_failure": dismiss_media_info_failure,
     }
