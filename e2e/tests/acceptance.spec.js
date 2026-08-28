@@ -304,41 +304,43 @@ test.describe('InfoMancer browser acceptance', () => {
     await expect(page.getByText('Deliberately Wrong Candidate')).toBeVisible();
     await attach(page, testInfo, 'bulk-match-review', true);
 
-    let releaseSubmit;
-    const submitGate = new Promise((resolve) => {
-      releaseSubmit = resolve;
-    });
-    await page.route('**/movies/bulk-match', async (route) => {
-      if (route.request().method() !== 'POST') return route.continue();
-      await submitGate;
-      return route.fulfill({
-        status: 200,
-        contentType: 'text/html',
-        body: '<!doctype html><title>Acceptance submit complete</title><p>Accepted by E2E harness</p>',
-      });
+    // The application intentionally uses native form.submit() after two animation
+    // frames so the busy state can paint before provider work starts. Replace only
+    // that final navigation in this acceptance page. The real submit handler still
+    // runs, so this verifies the exact pre-navigation state without deadlocking
+    // Playwright against a deliberately stalled navigation request.
+    await page.evaluate(() => {
+      const originalSubmit = HTMLFormElement.prototype.submit;
+      HTMLFormElement.prototype.submit = function acceptanceSubmit() {
+        if (this.matches('[data-bulk-match-review-form]')) {
+          this.dataset.acceptanceSubmitCaptured = '1';
+          return;
+        }
+        return originalSubmit.call(this);
+      };
     });
 
-    try {
-      const apply = page.locator('[data-bulk-apply-button]').first();
-      await apply.click({ noWaitAfter: true });
-      const feedback = await page.locator('[data-bulk-match-review-form]').evaluate((form) => {
-        const status = form.querySelector('[data-bulk-apply-status]');
-        const buttons = [...form.querySelectorAll('[data-bulk-apply-button]')];
-        return {
-          text: status?.textContent || '',
-          hidden: Boolean(status?.hidden),
-          hasTrack: Boolean(status?.querySelector('.task-track')),
-          allButtonsDisabled: buttons.length > 0 && buttons.every((button) => button.disabled),
-        };
-      });
-      expect(feedback.hidden).toBe(false);
-      expect(feedback.text).toContain('Applying 5 selected movies');
-      expect(feedback.hasTrack).toBe(true);
-      expect(feedback.allButtonsDisabled).toBe(true);
-      await expect(page.getByText('Deliberately Wrong Candidate')).toBeVisible();
-      await attach(page, testInfo, 'bulk-match-applying', true);
-    } finally {
-      releaseSubmit();
-    }
+    const reviewForm = page.locator('[data-bulk-match-review-form]');
+    const apply = page.locator('[data-bulk-apply-button]').first();
+    await apply.click();
+    await expect(reviewForm).toHaveAttribute('data-bulk-applying', '1');
+    await expect(reviewForm).toHaveAttribute('data-acceptance-submit-captured', '1');
+
+    const feedback = await reviewForm.evaluate((form) => {
+      const status = form.querySelector('[data-bulk-apply-status]');
+      const buttons = [...form.querySelectorAll('[data-bulk-apply-button]')];
+      return {
+        text: status?.textContent || '',
+        hidden: Boolean(status?.hidden),
+        hasTrack: Boolean(status?.querySelector('.task-track')),
+        allButtonsDisabled: buttons.length > 0 && buttons.every((button) => button.disabled),
+      };
+    });
+    expect(feedback.hidden).toBe(false);
+    expect(feedback.text).toContain('Applying 5 selected movies');
+    expect(feedback.hasTrack).toBe(true);
+    expect(feedback.allButtonsDisabled).toBe(true);
+    await expect(page.getByText('Deliberately Wrong Candidate')).toBeVisible();
+    await attach(page, testInfo, 'bulk-match-applying', true);
   });
 });
