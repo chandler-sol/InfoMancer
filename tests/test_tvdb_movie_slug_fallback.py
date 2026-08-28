@@ -72,6 +72,7 @@ class TVDBMovieSlugFallbackTests(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["name"], "Jackass 3.5")
         self.assertEqual(results[0]["_search_query"], "Jackass 3.5")
+        self.assertTrue(results[0]["_possible_match"])
         self.assertEqual(client.calls[0][1]["query"], "Jackass 3 5")
         self.assertEqual(client.calls[1][1]["query"], "Jackass 3.5")
 
