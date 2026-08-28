@@ -85,19 +85,63 @@ def _inside(candidate: Path, parent: Path) -> bool:
         return False
 
 
+class _TeeStream:
+    """Mirror a captured runtime stream into the persistent desktop core log."""
+
+    def __init__(self, primary, log_stream) -> None:
+        self.primary = primary
+        self.log_stream = log_stream
+
+    @property
+    def encoding(self):
+        return getattr(self.primary, "encoding", None) or "utf-8"
+
+    def write(self, text) -> int:
+        value = str(text)
+        if self.primary is not None:
+            try:
+                self.primary.write(value)
+            except Exception:
+                pass
+        try:
+            self.log_stream.write(value)
+        except Exception:
+            pass
+        return len(value)
+
+    def flush(self) -> None:
+        for stream in (self.primary, self.log_stream):
+            if stream is None:
+                continue
+            try:
+                stream.flush()
+            except Exception:
+                pass
+
+    def isatty(self) -> bool:
+        try:
+            return bool(self.primary and self.primary.isatty())
+        except Exception:
+            return False
+
+
 def _ensure_runtime_streams(data_dir: Path) -> None:
-    """Give windowed Windows builds a diagnostic stream without opening a console."""
-    if os.name != "nt" or (sys.stdout is not None and sys.stderr is not None):
+    """Persist Windows core output even when Tauri captures stdout/stderr."""
+    if os.name != "nt":
         return
     log_dir = data_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     stream = (log_dir / "desktop-core.log").open(
         "a", encoding="utf-8", buffering=1
     )
-    if sys.stdout is None:
-        sys.stdout = stream
-    if sys.stderr is None:
-        sys.stderr = stream
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    sys.stdout = _TeeStream(original_stdout, stream) if original_stdout is not None else stream
+    sys.stderr = _TeeStream(original_stderr, stream) if original_stderr is not None else stream
+    print(
+        f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] InfoMancer desktop core diagnostics started.",
+        flush=True,
+    )
 
 
 def _process_is_alive(pid: int) -> bool:
