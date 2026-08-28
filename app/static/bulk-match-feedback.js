@@ -17,7 +17,7 @@
   );
   let finishingAnalysis = false;
   let progressiveRequest = null;
-  let lastProgressiveProcessed = -1;
+  let lastProgressiveProcessed = 0;
   let queuedProgressiveProcessed = -1;
   let restoreRememberedCheckbox = () => {};
 
@@ -40,6 +40,7 @@
     const query = String(candidate?.search_query || item.library_title || '');
     if (query) url.searchParams.set('q', query);
     url.searchParams.set('from', matchOrigin);
+    url.searchParams.set('return_to', window.location.pathname + window.location.search);
     link.href = url.pathname + url.search;
     link.textContent = candidate
       ? (possible ? 'Review all possible matches' : 'Find another match')
@@ -131,17 +132,23 @@
 
   const refreshProgressiveMatches = (processed, force = false) => {
     if (!progressUrl || !progressiveRows.size) return;
-    const requested = Number.isFinite(processed) ? processed : 0;
+    const requested = Number.isFinite(processed) ? Math.max(0, processed) : 0;
     if (!force && requested <= lastProgressiveProcessed) return;
     if (progressiveRequest) {
       queuedProgressiveProcessed = Math.max(queuedProgressiveProcessed, requested);
       return;
     }
-    progressiveRequest = fetch(progressUrl, {
+
+    const url = new URL(progressUrl, window.location.origin);
+    url.searchParams.set('after', String(lastProgressiveProcessed));
+    const abortController = new AbortController();
+    const timeoutId = window.setTimeout(() => abortController.abort(), 15000);
+    progressiveRequest = fetch(url.pathname + url.search, {
       method: 'GET',
       credentials: 'same-origin',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
+      signal: abortController.signal,
     })
       .then((response) => {
         if (!response.ok) throw new Error(`Progressive match request failed: ${response.status}`);
@@ -156,10 +163,11 @@
         );
       })
       .catch(() => {
-        // Task progress remains authoritative. A transient row-refresh failure can
-        // retry on the next task event without interrupting the background job.
+        // Task progress remains authoritative. A transient or stalled row refresh
+        // retries from the last successfully rendered index on the next task event.
       })
       .finally(() => {
+        window.clearTimeout(timeoutId);
         progressiveRequest = null;
         if (queuedProgressiveProcessed > lastProgressiveProcessed) {
           const queued = queuedProgressiveProcessed;
@@ -204,11 +212,14 @@
         return;
       }
 
-      // The server rendered this page while the analysis was active. Once the
-      // canonical task poller reports that task absent, the saved suggestions are
-      // ready. Use that existing signal instead of adding a second task poller.
+      // The canonical task poller says analysis finished. Reloading the review is
+      // cheaper and safer than forcing one last full DOM refresh; persisted results
+      // are authoritative on the newly rendered page.
       finishingAnalysis = true;
-      refreshProgressiveMatches(Number.MAX_SAFE_INTEGER, true);
+      if (progressiveRequest) {
+        // Let the in-flight incremental request settle naturally. Navigation below
+        // will cancel it if it has not completed by then.
+      }
       if (progressCopy) progressCopy.textContent = 'Matches ready. Loading the review…';
       if (progressFill) progressFill.style.width = '100%';
       window.setTimeout(() => window.location.assign(completeUrl), 350);
@@ -218,11 +229,6 @@
   const reviewForm = document.querySelector('[data-bulk-match-review-form]');
   if (!reviewForm) return;
   const status = reviewForm.querySelector('[data-bulk-apply-status]');
-  const applyButtons = [...reviewForm.querySelectorAll('[data-bulk-apply-button]')];
-  const originalApplyLabels = applyButtons.map((button) => button.textContent);
-  const itemLabel = reviewForm.dataset.bulkMatchItemLabel || 'match';
-  const itemPlural = reviewForm.dataset.bulkMatchItemPlural
-    || (itemLabel.endsWith('series') ? itemLabel : `${itemLabel}s`);
   const selectionScope = reviewForm.querySelector('input[name="selected_scope"]')
     ? 'selected'
     : 'review';
@@ -311,88 +317,17 @@
 
   makeFeedbackSticky(status);
 
-  const showStatus = (message, working = false) => {
+  const showStatus = (message) => {
     if (!status) return;
     status.hidden = false;
     status.replaceChildren();
     const copy = document.createElement('span');
     copy.textContent = message;
     status.append(copy);
-    if (working) {
-      const track = document.createElement('span');
-      track.className = 'task-track';
-      track.setAttribute('aria-hidden', 'true');
-      track.append(document.createElement('i'));
-      status.append(track);
-    }
   };
 
   const completionMessage = new URLSearchParams(window.location.search).get('message') || '';
   if (/^Matched\s+\d+/i.test(completionMessage)) {
-    showStatus(completionMessage, false);
+    showStatus(completionMessage);
   }
-
-  const resetApplyState = () => {
-    reviewForm.dataset.bulkApplying = '0';
-    reviewForm.removeAttribute('aria-busy');
-    applyButtons.forEach((button, index) => {
-      button.disabled = false;
-      button.textContent = originalApplyLabels[index] || 'Apply selected matches';
-    });
-  };
-
-  reviewForm.addEventListener('submit', (event) => {
-    if (reviewForm.dataset.bulkApplying === '1') {
-      event.preventDefault();
-      return;
-    }
-    const selected = [...reviewForm.querySelectorAll('input[name="matches"]:checked')];
-    if (!selected.length) {
-      event.preventDefault();
-      showStatus('Select at least one suggested match before applying.');
-      return;
-    }
-
-    event.preventDefault();
-    rememberReviewSelection();
-    reviewForm.dataset.bulkApplying = '1';
-    reviewForm.setAttribute('aria-busy', 'true');
-    const count = selected.length;
-    const noun = count === 1 ? itemLabel : itemPlural;
-    applyButtons.forEach((button) => {
-      button.disabled = true;
-      button.textContent = count === 1 ? 'Applying match…' : `Applying ${count} matches…`;
-    });
-    showStatus(
-      `Applying ${count} selected ${noun}. InfoMancer is fetching and saving metadata. `
-      + 'You can keep using InfoMancer while this finishes.',
-      true,
-    );
-
-    // A native form navigation blocks the embedded WebView while the server performs
-    // many sequential provider requests. Submit with fetch instead so scrolling,
-    // navigation, refresh, and the rest of the application remain responsive.
-    fetch(reviewForm.action, {
-      method: 'POST',
-      body: new FormData(reviewForm),
-      credentials: 'same-origin',
-      redirect: 'follow',
-      keepalive: true,
-      headers: { Accept: 'text/html' },
-    })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`Bulk match apply failed: ${response.status}`);
-        }
-        clearReviewSelection();
-        window.location.assign(response.url || completeUrl);
-      })
-      .catch(() => {
-        resetApplyState();
-        showStatus(
-          'InfoMancer could not finish applying these matches. Nothing else in the app is locked; retry when ready.',
-          false,
-        );
-      });
-  });
 })();
