@@ -304,43 +304,35 @@ test.describe('InfoMancer browser acceptance', () => {
     await expect(page.getByText('Deliberately Wrong Candidate')).toBeVisible();
     await attach(page, testInfo, 'bulk-match-review', true);
 
-    // The application intentionally uses native form.submit() after two animation
-    // frames so the busy state can paint before provider work starts. Replace only
-    // that final navigation in this acceptance page. The real submit handler still
-    // runs, so this verifies the exact pre-navigation state without deadlocking
-    // Playwright against a deliberately stalled navigation request.
-    await page.evaluate(() => {
-      const originalSubmit = HTMLFormElement.prototype.submit;
-      HTMLFormElement.prototype.submit = function acceptanceSubmit() {
-        if (this.matches('[data-bulk-match-review-form]')) {
-          this.dataset.acceptanceSubmitCaptured = '1';
-          return;
-        }
-        return originalSubmit.call(this);
-      };
-    });
+    // Capture the state from inside the browser's submit event. The application
+    // paints this state before it schedules the native form submission two frames
+    // later, so the assertion no longer competes with a pending navigation.
+    const feedbackPromise = page.evaluate(() => new Promise((resolve) => {
+      const form = document.querySelector('[data-bulk-match-review-form]');
+      form.addEventListener('submit', () => {
+        const status = form.querySelector('[data-bulk-apply-status]');
+        const buttons = [...form.querySelectorAll('[data-bulk-apply-button]')];
+        resolve({
+          applying: form.dataset.bulkApplying || '',
+          busy: form.getAttribute('aria-busy') || '',
+          text: status?.textContent || '',
+          hidden: Boolean(status?.hidden),
+          hasTrack: Boolean(status?.querySelector('.task-track')),
+          allButtonsDisabled: buttons.length > 0 && buttons.every((button) => button.disabled),
+          unresolvedVisible: document.body.textContent.includes('Deliberately Wrong Candidate'),
+        });
+      }, { once: true });
+    }));
 
-    const reviewForm = page.locator('[data-bulk-match-review-form]');
     const apply = page.locator('[data-bulk-apply-button]').first();
-    await apply.click();
-    await expect(reviewForm).toHaveAttribute('data-bulk-applying', '1');
-    await expect(reviewForm).toHaveAttribute('data-acceptance-submit-captured', '1');
-
-    const feedback = await reviewForm.evaluate((form) => {
-      const status = form.querySelector('[data-bulk-apply-status]');
-      const buttons = [...form.querySelectorAll('[data-bulk-apply-button]')];
-      return {
-        text: status?.textContent || '',
-        hidden: Boolean(status?.hidden),
-        hasTrack: Boolean(status?.querySelector('.task-track')),
-        allButtonsDisabled: buttons.length > 0 && buttons.every((button) => button.disabled),
-      };
-    });
+    await apply.click({ noWaitAfter: true });
+    const feedback = await feedbackPromise;
+    expect(feedback.applying).toBe('1');
+    expect(feedback.busy).toBe('true');
     expect(feedback.hidden).toBe(false);
     expect(feedback.text).toContain('Applying 5 selected movies');
     expect(feedback.hasTrack).toBe(true);
     expect(feedback.allButtonsDisabled).toBe(true);
-    await expect(page.getByText('Deliberately Wrong Candidate')).toBeVisible();
-    await attach(page, testInfo, 'bulk-match-applying', true);
+    expect(feedback.unresolvedVisible).toBe(true);
   });
 });
