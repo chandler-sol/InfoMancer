@@ -18,6 +18,14 @@ class StubTVDBClient(TVDBClient):
     ) -> dict:
         self.calls.append((path, params, allow_not_found))
         if path == "/search":
+            if (params or {}).get("query") == "Jackass 3.5":
+                return {
+                    "data": [{
+                        "id": 12345,
+                        "name": "Jackass 3.5",
+                        "year": "2011",
+                    }]
+                }
             return {"data": []}
         if path == "/movies/slug/bring-me-the-head-of-alfredo-garcia":
             return {
@@ -55,6 +63,24 @@ class TVDBMovieSlugFallbackTests(unittest.TestCase):
             client.search_movies("Bring Me the Head of Alfredo Garcia", 1975),
             [],
         )
+
+    def test_decimal_movie_title_is_recovered_after_strict_search_miss(self):
+        client = StubTVDBClient()
+
+        results = client.search_movies("Jackass 3 5", 2011)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["name"], "Jackass 3.5")
+        self.assertEqual(results[0]["_search_query"], "Jackass 3.5")
+        self.assertEqual(client.calls[0][1]["query"], "Jackass 3 5")
+        self.assertEqual(client.calls[1][1]["query"], "Jackass 3.5")
+
+    def test_decimal_recovery_does_not_rewrite_unrelated_numeric_titles(self):
+        client = StubTVDBClient()
+
+        self.assertEqual(client._decimal_query_candidate("Apollo 13"), "")
+        self.assertEqual(client._decimal_query_candidate("Ocean's 11 12"), "")
+        self.assertEqual(client._decimal_query_candidate("Jackass 3 5"), "Jackass 3.5")
 
     def test_movie_page_link_resolves_directly_through_slug_endpoint(self):
         client = StubTVDBClient()
