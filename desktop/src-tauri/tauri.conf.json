@@ -43,6 +43,8 @@
       "allowDowngrades": false,
       "nsis": {
         "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
         "installerHooks": "./windows/hooks.nsh",
         "languages": [
           "English"
