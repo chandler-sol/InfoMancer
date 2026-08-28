@@ -9,6 +9,7 @@ class BulkMatchApplyFeedbackTests(unittest.TestCase):
     def test_apply_shows_working_completion_and_error_feedback(self):
         script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
         self.assertIn("Applying ${count} selected ${noun}", script)
+        self.assertIn("track.className = 'task-track'", script)
         self.assertIn("button.disabled = true", script)
         self.assertIn("You can keep using InfoMancer while this finishes.", script)
         self.assertIn("fetch(reviewForm.action", script)
@@ -17,7 +18,6 @@ class BulkMatchApplyFeedbackTests(unittest.TestCase):
         self.assertIn("Activity/Logs", script)
         self.assertIn("resetApplyState()", script)
         self.assertIn("button.disabled = false", script)
-        self.assertNotIn("track.className = 'task-track'", script)
 
     def test_apply_sends_csrf_header_and_avoids_webview_keepalive(self):
         script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
