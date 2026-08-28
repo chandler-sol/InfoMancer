@@ -60,6 +60,9 @@ class DesktopSidecarTests(unittest.TestCase):
                 sidecar._ensure_runtime_streams(data_dir)
                 print("stdout marker", file=sidecar.sys.stdout, flush=True)
                 print("stderr marker", file=sidecar.sys.stderr, flush=True)
+                persistent_log = sidecar.sys.stdout.log_stream
+                persistent_log.flush()
+                persistent_log.close()
 
             log_text = (data_dir / "logs" / "desktop-core.log").read_text(encoding="utf-8")
 
