@@ -84,6 +84,9 @@ class TVDBMovieSlugFallbackTests(unittest.TestCase):
 
         self.assertIn("'movie-manual' if entity == 'movie' else 'tvdb-manual'", template)
         self.assertIn("TVDB {{ 'movie' if entity == 'movie' else 'series' }} link or ID", template)
+        self.assertIn("https://www.thetvdb.com/search?query={{ q|urlencode }}", template)
+        self.assertIn("Search TVDB website", template)
+        self.assertIn('target="_blank" rel="noopener noreferrer"', template)
         self.assertIn("build_movie_manual_match_router", routes)
         self.assertIn('@librarian_post("/titles/{title_id}/movie-manual")', manual_route)
         self.assertIn("tvdb.movie_id_from_reference(tvdb_reference)", manual_route)
