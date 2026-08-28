@@ -90,31 +90,7 @@ def _require_hash(label: str, data: bytes, expected: str) -> None:
         )
 
 
-def stage(output: Path) -> Path:
-    key = _platform_key()
-    asset = ASSETS.get(key)
-    if not asset:
-        raise RuntimeError(f"No pinned FFprobe asset is configured for {key[0]}/{key[1]}")
-
-    slug = asset["slug"]
-    archive = _download(f"{RELEASE_BASE}/ffprobe-{slug}.gz")
-    _require_hash("FFprobe archive", archive, asset["archive_sha256"])
-    binary = gzip.decompress(archive)
-    _require_hash("FFprobe binary", binary, asset["binary_sha256"])
-
-    license_text = _download(f"{RELEASE_BASE}/{slug}.LICENSE")
-    _require_hash("FFprobe license", license_text, asset["license_sha256"])
-
-    output.mkdir(parents=True, exist_ok=True)
-    binary_name = "ffprobe.exe" if key[0] == "windows" else "ffprobe"
-    binary_path = output / binary_name
-    binary_path.write_bytes(binary)
-    if key[0] != "windows":
-        binary_path.chmod(
-            binary_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-        )
-
-    (output / "FFPROBE_LICENSE.txt").write_bytes(license_text)
+def _write_notice(output: Path) -> None:
     (output / "FFPROBE_NOTICE.txt").write_text(
         "InfoMancer native desktop packages include FFprobe from FFmpeg for local "
         "media inspection.\n\n"
@@ -126,6 +102,59 @@ def stage(output: Path) -> Path:
         "before publishing a production release.\n",
         encoding="utf-8",
     )
+
+
+def _reuse_verified_stage(output: Path, key: tuple[str, str], asset: dict) -> Path | None:
+    """Reuse a cached stage only after re-verifying the pinned binary and license."""
+    binary_name = "ffprobe.exe" if key[0] == "windows" else "ffprobe"
+    binary_path = output / binary_name
+    license_path = output / "FFPROBE_LICENSE.txt"
+    if not binary_path.is_file() or not license_path.is_file():
+        return None
+    try:
+        _require_hash("Cached FFprobe binary", binary_path.read_bytes(), asset["binary_sha256"])
+        _require_hash("Cached FFprobe license", license_path.read_bytes(), asset["license_sha256"])
+    except (OSError, RuntimeError):
+        return None
+    if key[0] != "windows":
+        binary_path.chmod(
+            binary_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+        )
+    _write_notice(output)
+    print(f"Reused verified FFprobe {VERSION} at {binary_path}")
+    return binary_path
+
+
+def stage(output: Path) -> Path:
+    key = _platform_key()
+    asset = ASSETS.get(key)
+    if not asset:
+        raise RuntimeError(f"No pinned FFprobe asset is configured for {key[0]}/{key[1]}")
+
+    output.mkdir(parents=True, exist_ok=True)
+    reused = _reuse_verified_stage(output, key, asset)
+    if reused:
+        return reused
+
+    slug = asset["slug"]
+    archive = _download(f"{RELEASE_BASE}/ffprobe-{slug}.gz")
+    _require_hash("FFprobe archive", archive, asset["archive_sha256"])
+    binary = gzip.decompress(archive)
+    _require_hash("FFprobe binary", binary, asset["binary_sha256"])
+
+    license_text = _download(f"{RELEASE_BASE}/{slug}.LICENSE")
+    _require_hash("FFprobe license", license_text, asset["license_sha256"])
+
+    binary_name = "ffprobe.exe" if key[0] == "windows" else "ffprobe"
+    binary_path = output / binary_name
+    binary_path.write_bytes(binary)
+    if key[0] != "windows":
+        binary_path.chmod(
+            binary_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+        )
+
+    (output / "FFPROBE_LICENSE.txt").write_bytes(license_text)
+    _write_notice(output)
     print(f"Staged verified FFprobe {VERSION} at {binary_path}")
     return binary_path
 
