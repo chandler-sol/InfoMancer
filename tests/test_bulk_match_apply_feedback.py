@@ -6,16 +6,39 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class BulkMatchApplyFeedbackTests(unittest.TestCase):
-    def test_apply_shows_working_and_completion_feedback(self):
-        script = (ROOT / "app/static/bulk-match-feedback.js").read_text(encoding="utf-8")
+    def test_apply_shows_working_completion_and_error_feedback(self):
+        script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
         self.assertIn("Applying ${count} selected ${noun}", script)
         self.assertIn("track.className = 'task-track'", script)
         self.assertIn("button.disabled = true", script)
-        self.assertIn("/^Matched\\s+\\d+/i.test(completionMessage)", script)
         self.assertIn("You can keep using InfoMancer while this finishes.", script)
         self.assertIn("fetch(reviewForm.action", script)
+        self.assertIn("await responseDetail(response)", script)
+        self.assertIn("HTTP ${response.status}", script)
+        self.assertIn("Activity/Logs", script)
         self.assertIn("resetApplyState()", script)
         self.assertIn("button.disabled = false", script)
+
+    def test_bulk_review_has_one_click_clear_selection(self):
+        script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
+        self.assertIn("data-bulk-clear-selection", script)
+        self.assertIn("clear.textContent = 'Clear selection'", script)
+        self.assertIn("input[name=\"matches\"]:checked", script)
+        self.assertIn("checkbox.checked = false", script)
+        self.assertIn("showStatus('Selection cleared.')", script)
+
+    def test_hardened_apply_routes_are_registered_before_review(self):
+        routes = (ROOT / "app/routes/__init__.py").read_text(encoding="utf-8")
+        handler = (ROOT / "app/routes/bulk_match_apply.py").read_text(encoding="utf-8")
+        self.assertLess(
+            routes.index("build_bulk_match_apply_router"),
+            routes.index("build_review_router"),
+        )
+        self.assertIn('@librarian_post("/movies/bulk-match")', handler)
+        self.assertIn('@librarian_post("/shows/bulk-match")', handler)
+        self.assertIn("except Exception as exc", handler)
+        self.assertIn("First error:", handler)
+        self.assertIn("Bulk match apply finished", handler)
 
     def test_bulk_feedback_stays_visible_from_bottom_of_long_review(self):
         script = (ROOT / "app/static/bulk-match-feedback.js").read_text(encoding="utf-8")
@@ -27,15 +50,8 @@ class BulkMatchApplyFeedbackTests(unittest.TestCase):
         self.assertNotIn("scrollIntoView", script)
 
     def test_selected_bulk_apply_returns_to_selected_review_scope(self):
-        routes = (ROOT / "app/routes/review.py").read_text(encoding="utf-8")
-        self.assertIn(
-            'destination = "/movies/bulk-match?review=true&selected=true" if selected_scope else "/movies/bulk-match?review=true"',
-            routes,
-        )
-        self.assertIn(
-            'destination = "/shows/bulk-match?review=true&selected=true" if selected_scope else "/shows/bulk-match?review=true"',
-            routes,
-        )
+        routes = (ROOT / "app/routes/bulk_match_apply.py").read_text(encoding="utf-8")
+        self.assertIn("?review=true&selected=true", routes)
 
         movie_template = (ROOT / "app/templates/bulk_movie_match.html").read_text(encoding="utf-8")
         tv_template = (ROOT / "app/templates/bulk_tv_match.html").read_text(encoding="utf-8")
