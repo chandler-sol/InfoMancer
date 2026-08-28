@@ -98,6 +98,22 @@ class TVDBClient:
         ).decode("ascii")
         return re.sub(r"[^a-z0-9]+", "-", ascii_value.casefold()).strip("-")
 
+    @staticmethod
+    def _decimal_query_candidate(query: str) -> str:
+        """Recover one likely decimal title damaged by filename separator cleanup.
+
+        Older catalog scans converted every period to a space, so a legitimate title
+        such as ``Jackass 3.5`` could be stored as ``Jackass 3 5``. Only repair a
+        trailing numeric pair whose fractional part is one digit, and only after the
+        provider's strict query misses. The returned candidates still go through the
+        normal InfoMancer confidence/review flow; this never auto-accepts a match.
+        """
+        value = query.strip()
+        match = re.search(r"(?<!\d)(\d{1,2})\s+(\d)(?!\d)\s*$", value)
+        if not match:
+            return ""
+        return f"{value[:match.start()]}{match.group(1)}.{match.group(2)}"
+
     def search_series(self, query: str) -> list[dict]:
         payload = self._get("/search", {"query": query, "type": "series"})
         return payload.get("data") or []
@@ -158,11 +174,25 @@ class TVDBClient:
         if results:
             return results
 
+        # Recover a narrow class of titles damaged by the pre-0.8.1 scanner's
+        # period-as-separator cleanup. For example, "Jackass 3 5" is retried as
+        # "Jackass 3.5" after the strict provider lookup fails.
+        decimal_query = self._decimal_query_candidate(query)
+        if decimal_query:
+            decimal_params = {"query": decimal_query, "type": "movie"}
+            if year:
+                decimal_params["year"] = year
+            decimal_results = self._get("/search", decimal_params).get("data") or []
+            if decimal_results:
+                for result in decimal_results:
+                    result.setdefault("_search_query", decimal_query)
+                return decimal_results
+
         # TVDB's text-search index can occasionally miss a movie that its website
         # and canonical movie endpoint both know about. On a strict search miss,
         # try the title as a canonical slug before InfoMancer gives up. This keeps
         # the fallback exact and avoids widening every successful provider search.
-        slug = self._movie_slug_candidate(query)
+        slug = self._movie_slug_candidate(decimal_query or query)
         if not slug:
             return []
         record = self.movie_by_slug(slug)
@@ -171,6 +201,8 @@ class TVDBClient:
         record_year_text = str(record.get("year") or "")[:4]
         if year and record_year_text.isdigit() and int(record_year_text) != year:
             return []
+        if decimal_query:
+            record.setdefault("_search_query", decimal_query)
         return [record]
 
     def series(self, series_id: int) -> dict:
