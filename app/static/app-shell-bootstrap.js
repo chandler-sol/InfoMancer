@@ -67,6 +67,29 @@
     }, {once: true});
   }
 
+  if (window.location.pathname === '/sources') {
+    const sourceHealthStylesheet = document.createElement('link');
+    sourceHealthStylesheet.rel = 'stylesheet';
+    sourceHealthStylesheet.href = `/static/source-health.css${versionQuery}`;
+    document.head.append(sourceHealthStylesheet);
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const controller = document.createElement('script');
+      controller.src = `/static/source-health.js${versionQuery}`;
+      controller.async = true;
+      document.head.append(controller);
+    }, {once: true});
+  }
+
+  if (['/movies/bulk-match', '/shows/bulk-match'].includes(window.location.pathname)) {
+    document.addEventListener('DOMContentLoaded', () => {
+      const controller = document.createElement('script');
+      controller.src = `/static/bulk-match-apply.js${versionQuery}`;
+      controller.async = true;
+      document.head.append(controller);
+    }, {once: true});
+  }
+
   if (!body.classList.contains('has-app-sidebar')) return;
   try {
     const stored = Number.parseInt(localStorage.getItem('infomancer-sidebar-width') || '258', 10);
