@@ -31,13 +31,18 @@ class ActivityAndBulkFeedbackTests(unittest.TestCase):
         self.assertIn("document.addEventListener('infomancer:tasks'", feedback)
         self.assertIn("Matches ready. Loading the review", feedback)
 
-    def test_bulk_apply_feedback_paints_before_synchronous_post(self):
+    def test_bulk_apply_uses_async_request_so_shell_stays_interactive(self):
         feedback = (ROOT / "app/static/bulk-match-feedback.js").read_text(encoding="utf-8")
 
         self.assertIn("Applying ${count} selected ${noun}", feedback)
         self.assertIn("reviewForm.setAttribute('aria-busy', 'true')", feedback)
-        self.assertIn("window.requestAnimationFrame", feedback)
-        self.assertIn("HTMLFormElement.prototype.submit.call(reviewForm)", feedback)
+        self.assertIn("fetch(reviewForm.action", feedback)
+        self.assertIn("body: new FormData(reviewForm)", feedback)
+        self.assertIn("credentials: 'same-origin'", feedback)
+        self.assertIn("keepalive: true", feedback)
+        self.assertIn("window.location.assign(response.url || completeUrl)", feedback)
+        self.assertIn("resetApplyState()", feedback)
+        self.assertNotIn("HTMLFormElement.prototype.submit.call(reviewForm)", feedback)
 
 
 if __name__ == "__main__":
