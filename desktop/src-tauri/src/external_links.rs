@@ -36,7 +36,7 @@ fn is_tvdb_external_url(url: &Url) -> bool {
     }
     matches!(
         url.host_str().map(str::to_ascii_lowercase).as_deref(),
-        Some("thetvdb.com" | "www.thetvdb.com")
+        Some("thetvdb.com") | Some("www.thetvdb.com")
     )
 }
 
