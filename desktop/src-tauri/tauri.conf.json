@@ -8,18 +8,7 @@
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [
-      {
-        "label": "main",
-        "title": "InfoMancer",
-        "width": 1440,
-        "height": 900,
-        "minWidth": 960,
-        "minHeight": 640,
-        "center": true,
-        "resizable": true
-      }
-    ],
+    "windows": [],
     "security": {
       "capabilities": [
         "launcher"
