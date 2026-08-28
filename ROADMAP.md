@@ -197,6 +197,27 @@ Strengthen InfoMancer's own control language instead of converging on generic we
 - keep primary/high-emphasis actions visually distinct so the outlined treatment does not flatten the interface hierarchy;
 - evaluate controls screen by screen rather than mechanically converting every button, with accessibility, touch target size, responsive behavior, and information density treated as constraints.
 
+### Desktop/server connection architecture
+
+Formalize the native desktop app as a client of an authoritative InfoMancer server rather than a synchronized second installation. A user should be able to wipe or replace a computer, install InfoMancer, connect to an existing server, authenticate, and immediately regain access to the same workspace without restoring a second catalog.
+
+Candidate scope:
+
+- give every server installation an immutable installation identity that survives normal upgrades and recovery restores, with deliberate handling for clones or migrations;
+- add a small server identity/compatibility endpoint that lets a desktop client verify that a URL is an InfoMancer server before navigating to it;
+- report product/server version, supported desktop-protocol range, installation identity, safe display metadata, and negotiated capabilities without exposing secrets or library contents;
+- define a versioned desktop/server protocol independently of the product release number so compatible desktop and server patch/minor versions do not need to match exactly;
+- negotiate capabilities rather than assuming that every desktop shell implements every native feature;
+- let the desktop remember one or more connection profiles containing only the server URL, installation identity, friendly name, last-known compatibility information, and similar non-secret connection metadata;
+- keep the remote server authoritative for the catalog, accounts, metadata, MIE state, source configuration, provider credentials, scheduled/background work, and filesystem operations rather than copying that state into the desktop app;
+- perform a compatibility handshake before opening the remote workspace and provide clear states for compatible, desktop-too-old, server-too-old, unreachable, invalid-server, and authentication-required cases;
+- provide graceful recovery from incompatibility, including an appropriate desktop-update path, server-update guidance, and an **Open in browser** fallback when the native client cannot safely connect;
+- remember the user's chosen server and reconnect automatically on ordinary launches, while retaining explicit **Change Server** and **Forget Server** controls;
+- allow a server URL to change without losing installation identity, so moving the same InfoMancer installation to a new hostname does not inherently create a new logical workspace;
+- preserve the existing native security boundary: remote server content must not automatically receive Tauri/native shell, updater, filesystem, or other privileged IPC access;
+- keep desktop and server release/update channels independent so platform-specific desktop fixes and server-only fixes can ship without forcing meaningless lockstep releases;
+- define tests for protocol negotiation, version skew, capability skew, server migration/URL changes, reinstall/reconnect, stale saved connections, authentication expiry, and browser fallback.
+
 ### Native application maturity
 
 After the Windows alpha and 0.8 release pipeline are proven:
@@ -238,7 +259,8 @@ Specific integration scope should be chosen after 0.8 rather than committed prem
 
 ### Proposed 1.0 bar
 
-- a documented compatibility policy for databases, recovery packages, settings, and upgrades;
+- a documented compatibility policy for databases, recovery packages, settings, upgrades, and desktop/server protocol versions;
+- a defined compatibility window and graceful failure behavior for supported desktop/server version skew;
 - a clear support window and policy for unsupported old schemas;
 - stable backup/restore semantics with tested cross-version recovery;
 - supported platforms and architectures explicitly maintained;
