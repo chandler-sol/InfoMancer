@@ -176,7 +176,8 @@ class TVDBClient:
 
         # Recover a narrow class of titles damaged by the pre-0.8.1 scanner's
         # period-as-separator cleanup. For example, "Jackass 3 5" is retried as
-        # "Jackass 3.5" after the strict provider lookup fails.
+        # "Jackass 3.5" after the strict provider lookup fails. Mark every hit as
+        # a possible match so punctuation-normalized confidence cannot auto-apply it.
         decimal_query = self._decimal_query_candidate(query)
         if decimal_query:
             decimal_params = {"query": decimal_query, "type": "movie"}
@@ -186,6 +187,7 @@ class TVDBClient:
             if decimal_results:
                 for result in decimal_results:
                     result.setdefault("_search_query", decimal_query)
+                    result["_possible_match"] = True
                 return decimal_results
 
         # TVDB's text-search index can occasionally miss a movie that its website
@@ -203,6 +205,7 @@ class TVDBClient:
             return []
         if decimal_query:
             record.setdefault("_search_query", decimal_query)
+            record["_possible_match"] = True
         return [record]
 
     def series(self, series_id: int) -> dict:
