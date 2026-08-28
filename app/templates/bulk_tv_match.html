@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Bulk TV series matching · InfoMancer{% endblock %}
 {% block content %}
-{% macro review_actions(position='bottom') %}<div class="review-actions review-actions-{{ position }}"><a class="button" href="/shows/bulk-match">{{ 'Back to TV Bulk Match' if direct_selection else 'Choose another batch' }}</a><div class="actions">{% if offset > 0 %}<a class="button" href="/shows/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}&amp;offset={{ [0, offset - 50]|max }}">Previous 50</a>{% endif %}{% if offset + 50 < cached_count %}<a class="button" href="/shows/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}&amp;offset={{ offset + 50 }}">Next 50</a>{% endif %}<button class="button primary" data-bulk-apply-button>Apply selected matches</button></div></div>{% endmacro %}
+<link rel="stylesheet" href="{{ url_for('static', path='bulk-match.css') }}?v={{ static_version }}">
+{% macro review_actions(position='bottom') %}<div class="review-actions review-actions-{{ position }}"><a class="button" href="/shows/bulk-match">{{ 'Back to TV Bulk Match' if direct_selection else 'Choose another batch' }}</a><div class="actions">{% if offset > 0 %}<a class="button" href="/shows/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}&amp;offset={{ [0, offset - 50]|max }}">Previous 50</a>{% endif %}{% if offset + 50 < cached_count %}<a class="button" href="/shows/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}&amp;offset={{ offset + 50 }}">Next 50</a>{% endif %}<button class="button" type="button" data-bulk-clear-selection>Clear selection</button><button class="button primary" data-bulk-apply-button>Apply selected matches</button></div></div>{% endmacro %}
 <a class="back" href="/bulk-match">← Bulk Match</a>
 <div data-bulk-match-controller data-bulk-match-task="tv-match-analysis" data-bulk-match-active="{{ '1' if job.status in ['starting', 'running'] else '0' }}" data-bulk-match-complete-url="/shows/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}"></div>
 <div class="page-head"><div><p class="eyebrow">REVIEW QUEUE</p><h1>{{ 'Match selected TV series' if direct_selection else 'TV series matching' }}</h1>{% if direct_selection %}<p class="muted">Review matches for only the TV series you selected. Episode records load after you approve each match.</p>{% endif %}</div></div>
@@ -32,7 +33,13 @@
   document.querySelectorAll('.possible-match-link').forEach((link) => {
     const url = new URL(link.href, window.location.origin);
     url.searchParams.set('from', '{{ "bulk-tv-selected" if direct_selection else "bulk-tv" }}');
+    url.searchParams.set('return_to', window.location.pathname + window.location.search);
     link.href = url.pathname + url.search;
+  });
+  document.querySelectorAll('[data-bulk-clear-selection]').forEach((button) => {
+    button.addEventListener('click', () => {
+      document.querySelectorAll('.match-check').forEach((choice) => { choice.checked = false; });
+    });
   });
   const choices = [...document.querySelectorAll('.batch-choice')];
   const actions = document.getElementById('selection-actions');
