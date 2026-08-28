@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Bulk movie matching · InfoMancer{% endblock %}
 {% block content %}
-{% macro review_actions(position='bottom') %}<div class="review-actions review-actions-{{ position }}"><a class="button" href="/movies/bulk-match">{{ 'Back to Movie Bulk Match' if direct_selection else 'Choose another batch' }}</a><div class="actions">{% if offset > 0 %}<a class="button" href="/movies/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}&amp;offset={{ [0, offset - 50]|max }}">Previous 50</a>{% endif %}{% if offset + 50 < cached_count %}<a class="button" href="/movies/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}&amp;offset={{ offset + 50 }}">Next 50</a>{% endif %}<button class="button primary" data-bulk-apply-button>Apply selected matches</button></div></div>{% endmacro %}
+<link rel="stylesheet" href="{{ url_for('static', path='bulk-match.css') }}?v={{ static_version }}">
+{% macro review_actions(position='bottom') %}<div class="review-actions review-actions-{{ position }}"><a class="button" href="/movies/bulk-match">{{ 'Back to Movie Bulk Match' if direct_selection else 'Choose another batch' }}</a><div class="actions">{% if offset > 0 %}<a class="button" href="/movies/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}&amp;offset={{ [0, offset - 50]|max }}">Previous 50</a>{% endif %}{% if offset + 50 < cached_count %}<a class="button" href="/movies/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}&amp;offset={{ offset + 50 }}">Next 50</a>{% endif %}<button class="button" type="button" data-bulk-clear-selection>Clear selection</button><button class="button primary" data-bulk-apply-button>Apply selected matches</button></div></div>{% endmacro %}
 <a class="back" href="/movies">← Movies</a>
 <div data-bulk-match-controller data-bulk-match-task="movie-match-analysis" data-bulk-match-active="{{ '1' if job.status in ['starting', 'running'] else '0' }}" data-bulk-match-complete-url="/movies/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}" data-bulk-match-progress-url="/api/movies/bulk-match/progress" data-bulk-match-origin="{{ 'bulk-movie-selected' if direct_selection else 'bulk-movie' }}"></div>
 <div class="page-head"><div><p class="eyebrow">REVIEW QUEUE</p><h1>{{ 'Match selected movies' if direct_selection else 'Bulk movie matching' }}</h1><p class="muted">{% if direct_selection %}Review matches for only the movies you selected. Nothing is applied until you approve it here.{% else %}Analyze a small batch, any selection, or every unmatched movie. Suggestions are stored locally and nothing is applied without review.{% endif %}</p></div></div>
@@ -46,7 +47,13 @@
   document.querySelectorAll(".possible-match-link").forEach((link) => {
     const url = new URL(link.href, window.location.origin);
     url.searchParams.set("from", "{{ 'bulk-movie-selected' if direct_selection else 'bulk-movie' }}");
+    url.searchParams.set("return_to", window.location.pathname + window.location.search);
     link.href = url.pathname + url.search;
+  });
+  document.querySelectorAll("[data-bulk-clear-selection]").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll(".match-check").forEach((choice) => { choice.checked = false; });
+    });
   });
   if (choices.length && count && analyze && actions) {
     const update = () => {
