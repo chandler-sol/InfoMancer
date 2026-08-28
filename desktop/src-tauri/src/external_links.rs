@@ -3,11 +3,41 @@ use std::process::Command;
 use tauri::{webview::NewWindowResponse, WebviewUrl, WebviewWindowBuilder};
 use url::Url;
 
+const DESKTOP_EXTERNAL_LINK_BRIDGE: &str = r#"
+window.__INFOMANCER_DESKTOP__ = true;
+document.addEventListener('click', (event) => {
+  const link = event.target?.closest?.('a[target="_blank"]');
+  if (!link) return;
+  try {
+    const url = new URL(link.href, window.location.href);
+    const host = url.hostname.toLowerCase();
+    if (url.protocol === 'https:' && (host === 'thetvdb.com' || host === 'www.thetvdb.com')) {
+      // WebView2 has not reliably surfaced target=_blank requests through
+      // on_new_window for hosted InfoMancer pages. Convert this one trusted
+      // external destination into a top-level navigation; Rust intercepts that
+      // navigation below, opens the OS browser, and cancels the WebView move.
+      event.preventDefault();
+      window.location.assign(url.href);
+    }
+  } catch (_) {}
+}, true);
+"#;
+
 fn safe_external_url(url: &Url) -> bool {
     matches!(url.scheme(), "http" | "https")
         && url.host_str().is_some()
         && url.username().is_empty()
         && url.password().is_none()
+}
+
+fn is_tvdb_external_url(url: &Url) -> bool {
+    if !safe_external_url(url) || url.scheme() != "https" {
+        return false;
+    }
+    matches!(
+        url.host_str().map(str::to_ascii_lowercase).as_deref(),
+        Some("thetvdb.com" | "www.thetvdb.com")
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -54,6 +84,16 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .min_inner_size(960.0, 640.0)
         .center()
         .resizable(true)
+        .initialization_script(DESKTOP_EXTERNAL_LINK_BRIDGE)
+        .on_navigation(|url| {
+            if is_tvdb_external_url(url) {
+                if let Err(error) = launch(url) {
+                    eprintln!("InfoMancer external link error: {error}");
+                }
+                return false;
+            }
+            true
+        })
         .on_new_window(|url, _features| {
             if safe_external_url(&url) {
                 // Remote InfoMancer content intentionally has no shell IPC access.
@@ -79,5 +119,21 @@ mod tests {
         assert!(safe_external_url(&"http://example.test/".parse().unwrap()));
         assert!(!safe_external_url(&"file:///tmp/test".parse().unwrap()));
         assert!(!safe_external_url(&"https://user:pass@example.test/".parse().unwrap()));
+    }
+
+    #[test]
+    fn top_level_external_bridge_is_limited_to_tvdb_https() {
+        assert!(is_tvdb_external_url(
+            &"https://www.thetvdb.com/search?query=Jackass+3.5".parse().unwrap()
+        ));
+        assert!(is_tvdb_external_url(
+            &"https://thetvdb.com/movies/jackass-35".parse().unwrap()
+        ));
+        assert!(!is_tvdb_external_url(
+            &"http://www.thetvdb.com/search?query=Alien".parse().unwrap()
+        ));
+        assert!(!is_tvdb_external_url(
+            &"https://example.test/".parse().unwrap()
+        ));
     }
 }
