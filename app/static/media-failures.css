@@ -1,0 +1,35 @@
+body.settings-route .app-main > .app-content > .app-settings-page > .app-settings-heading.media-failures-heading {
+  display: block !important;
+}
+
+.media-failure-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.media-failure-identity .kind,
+.media-failure-identity h2,
+.media-failure-identity strong {
+  margin: 0;
+}
+
+.media-failure-identity .kind {
+  margin-bottom: 2px;
+}
+
+.media-failure-actions {
+  align-self: flex-start;
+}
+
+.media-failure-actions form {
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .media-failure-actions {
+    width: 100%;
+  }
+}
