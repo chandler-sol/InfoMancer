@@ -80,11 +80,13 @@ class BulkMatchApplyFeedbackTests(unittest.TestCase):
         self.assertIn("poster.fetchPriority = 'low'", feedback)
         self.assertIn("img.poster-thumb", feedback)
 
-    def test_bulk_progress_copy_does_not_repeat_row_explainer(self):
+    def test_bulk_progress_copy_strips_redundant_row_explainer(self):
         feedback = (ROOT / "app/static/bulk-match-feedback.js").read_text(encoding="utf-8")
-        self.assertNotIn("Matches will appear in their rows as they are found", feedback)
-        self.assertNotIn("Matches will appear here as they are found", feedback)
+        self.assertIn("const rawDetail = String(task?.detail || '')", feedback)
+        self.assertIn("Matches will appear in their rows as they are found", feedback)
+        self.assertIn(".replace(/\\s*Matches will appear in their rows as they are found", feedback)
         self.assertIn("progressCopy.textContent = current > 0 ? detail : 'Preparing TVDB searches…'", feedback)
+        self.assertNotIn("`${detail} Matches will appear", feedback)
 
     def test_bulk_review_has_one_click_clear_selection(self):
         script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
@@ -141,7 +143,7 @@ class BulkMatchApplyFeedbackTests(unittest.TestCase):
         self.assertIn("let clearSelectionOnPageHide = false", script)
         self.assertIn("clearSelectionOnPageHide = true", script)
         self.assertIn("const clearReviewSelection = () =>", script)
-        self.assertIn("window.sessionStorage.removeItem(selectionMemoryKey)", script)
+        self.assertIn("window.sessionStorage.removeItem(selectionMemoryKey", script)
         self.assertIn("window.addEventListener('pagehide', () =>", script)
         self.assertIn("if (clearSelectionOnPageHide)", script)
         self.assertIn("clearReviewSelection();", script)
