@@ -21,8 +21,6 @@ def build_router(ctx: RouteContext):
         return router.get(path, dependencies=dependencies, **kwargs)
 
     def latest_scan_context(root_id: int) -> dict:
-        with scan_jobs._value().get(root_id, {}) if False else _nullcontext():
-            pass
         try:
             active = dict(scan_jobs.get(root_id, {}) or {})
         except Exception:
@@ -196,11 +194,3 @@ def build_router(ctx: RouteContext):
         }
 
     return router, {"source_health_details": source_health_details}
-
-
-class _nullcontext:
-    def __enter__(self):
-        return None
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
