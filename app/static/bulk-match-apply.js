@@ -12,13 +12,20 @@
     || (itemLabel.endsWith('series') ? itemLabel : `${itemLabel}s`);
   const applyTimeoutMs = 30 * 60 * 1000;
 
-  const showStatus = (message) => {
+  const showStatus = (message, working = false) => {
     if (!status) return;
     status.hidden = false;
     status.replaceChildren();
     const copy = document.createElement('span');
     copy.textContent = message;
     status.append(copy);
+    if (working) {
+      const track = document.createElement('span');
+      track.className = 'task-track';
+      track.setAttribute('aria-hidden', 'true');
+      track.append(document.createElement('i'));
+      status.append(track);
+    }
   };
 
   const selectedMatches = () => [
@@ -194,6 +201,7 @@
     showStatus(
       `Applying ${count} selected ${noun}. InfoMancer is fetching and saving metadata. `
       + 'You can keep using InfoMancer while this finishes.',
+      true,
     );
     document.dispatchEvent(new CustomEvent('infomancer:bulk-apply-started', {
       detail: {count, titleIds: selected.map(titleIdForCheckbox)},
