@@ -1,0 +1,55 @@
+from __future__ import annotations
+
+import importlib.util
+import sys
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SIDECAR_PATH = ROOT / "desktop" / "sidecar.py"
+
+
+def _load_sidecar():
+    spec = importlib.util.spec_from_file_location("infomancer_desktop_sidecar", SIDECAR_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Could not load desktop sidecar for tests")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class DesktopSidecarDriveDiscoveryTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.sidecar = _load_sidecar()
+
+    def test_windows_drive_mask_includes_mapped_drive_letters(self):
+        mask = (1 << 2) | (1 << 13) | (1 << 25)  # C, N, Z
+        self.assertEqual(
+            self.sidecar._windows_drive_strings_from_mask(mask),
+            ["C:\\", "N:\\", "Z:\\"],
+        )
+
+    def test_windows_logical_drives_use_win32_drive_table(self):
+        mask = (1 << 2) | (1 << 13)  # C, N
+        fake_ctypes = SimpleNamespace(
+            windll=SimpleNamespace(
+                kernel32=SimpleNamespace(GetLogicalDrives=lambda: mask)
+            )
+        )
+        with patch.dict(sys.modules, {"ctypes": fake_ctypes}):
+            drives = self.sidecar._windows_logical_drives()
+        self.assertEqual([str(path) for path in drives], ["C:\\", "N:\\"])
+
+    def test_root_deduplication_does_not_resolve_filesystem(self):
+        missing = Path("definitely-not-mounted")
+        with patch.object(Path, "resolve", side_effect=AssertionError("resolve should not run")):
+            roots = self.sidecar._dedupe_media_roots([missing, missing])
+        self.assertEqual(roots, [missing])
+
+
+if __name__ == "__main__":
+    unittest.main()

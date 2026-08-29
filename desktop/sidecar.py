@@ -56,6 +56,44 @@ def _dedupe_media_roots(roots: list[Path]) -> list[Path]:
     return deduped
 
 
+def _windows_drive_strings_from_mask(mask: int) -> list[str]:
+    return [
+        f"{letter}:\\"
+        for index, letter in enumerate(string.ascii_uppercase)
+        if mask & (1 << index)
+    ]
+
+
+def _windows_logical_drives() -> list[Path]:
+    """Enumerate Windows drive letters without touching their filesystems.
+
+    Mapped SMB/NFS drives can exist in the user's Windows session while a live
+    filesystem probe is slow, disconnected, or temporarily denied. Asking the
+    Win32 drive table first keeps those locations visible to InfoMancer and
+    leaves accessibility checks to the folder browser.
+    """
+    try:
+        import ctypes
+
+        mask = int(ctypes.windll.kernel32.GetLogicalDrives())
+    except (AttributeError, OSError, TypeError, ValueError):
+        return []
+    return [Path(value) for value in _windows_drive_strings_from_mask(mask)]
+
+
+def _dedupe_media_roots(roots: list[Path]) -> list[Path]:
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        # Deliberately do not call Path.resolve() here. Resolving a mapped or
+        # NFS-backed Windows drive can perform network I/O during app startup.
+        key = os.path.normcase(os.path.abspath(os.fspath(root))).casefold()
+        if key not in seen:
+            seen.add(key)
+            deduped.append(root)
+    return deduped
+
+
 def _default_media_roots() -> list[Path]:
     roots: list[Path] = []
     home = Path.home()
