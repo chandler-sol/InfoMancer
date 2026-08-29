@@ -9,6 +9,7 @@ on:
     paths:
       - desktop/**
       - app/**
+      - scripts/stage_ffprobe.py
       - requirements.txt
       - .github/workflows/windows-desktop.yml
 
@@ -20,12 +21,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Check out source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: '3.13'
           cache: pip
@@ -41,7 +42,10 @@ jobs:
       - name: Build bundled InfoMancer core
         shell: pwsh
         run: |
-          python -m PyInstaller --noconfirm --clean --onefile --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" desktop/sidecar.py
+          python scripts/stage_ffprobe.py
+          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
+          & .\dist\infomancer-core.exe --check-ffprobe
+          if ($LASTEXITCODE -ne 0) { throw "Bundled FFprobe self-check failed: $LASTEXITCODE" }
           $triple = (rustc --print host-tuple).Trim()
           New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
           Copy-Item dist/infomancer-core.exe "desktop/src-tauri/binaries/infomancer-core-$triple.exe"
@@ -59,7 +63,7 @@ jobs:
 
       - name: Install desktop dependencies
         working-directory: desktop
-        run: npm ci
+        run: npm ci --prefer-offline
 
       - name: Generate native icons
         working-directory: desktop
@@ -99,7 +103,7 @@ jobs:
           if (Test-Path 'HKCU:\Software\Arsenik\InfoMancer') { throw 'InfoMancer publisher registry state remains.' }
 
       - name: Upload Windows installer
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: InfoMancer-Windows-${{ github.sha }}
           path: desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
