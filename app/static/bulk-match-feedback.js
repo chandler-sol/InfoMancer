@@ -25,6 +25,8 @@
   let restoreRememberedCheckbox = () => {};
 
   const applyRunning = () => reviewForm?.dataset.bulkApplying === '1';
+  const progressPhase = () => String(progress?.dataset.bulkMatchProgressPhase || '');
+  const applyOwnsProgress = () => ['apply', 'complete', 'error'].includes(progressPhase());
 
   // Bulk review can contain dozens of remote provider posters. Keep their decoding
   // and network priority out of the interaction-critical path so Apply does not
@@ -204,6 +206,9 @@
   };
 
   const renderAnalysisTask = (task) => {
+    // Apply reuses this same card. Once Apply owns it, late task-center events from
+    // the analysis phase may hydrate rows but must never rewrite Apply progress.
+    if (applyRunning() || applyOwnsProgress()) return 0;
     const rawDetail = String(task?.detail || '');
     const detail = rawDetail
       .replace(/\s*Matches will appear in their rows as they are found\.?\s*$/i, '')
@@ -244,14 +249,19 @@
       const requested = Math.max(lastProgressiveProcessed + 1, queuedProgressiveProcessed);
       queuedProgressiveProcessed = -1;
       refreshProgressiveMatches(requested, true).finally(() => {
+        if (applyOwnsProgress()) return;
         if (progressCopy) progressCopy.textContent = 'Analysis complete.';
         if (progressFill) progressFill.style.width = '100%';
       });
       return;
     }
 
-    if (progressCopy) progressCopy.textContent = 'Matches ready. Loading the review…';
-    if (progressFill) progressFill.style.width = '100%';
+    // If Apply has already completed or entered an error state, preserve that final
+    // phase in the shared card until this review actually navigates away.
+    if (!applyOwnsProgress()) {
+      if (progressCopy) progressCopy.textContent = 'Matches ready. Loading the review…';
+      if (progressFill) progressFill.style.width = '100%';
+    }
     window.setTimeout(() => window.location.assign(completeUrl), 750);
   };
 
