@@ -122,7 +122,10 @@ jobs:
         run: |
           npm install --ignore-scripts
           npm audit --audit-level=high
-          npx playwright install --with-deps chromium
+          # GitHub's hosted image already carries Chromium runtime libraries. Avoid
+          # --with-deps here because it mutates runner apt sources and can fail on an
+          # unrelated third-party repository before Playwright is even installed.
+          npx playwright install chromium
 
       - name: Build deterministic media fixtures
         run: |
