@@ -46,6 +46,14 @@ class BulkMatchWorkflowProgressTests(unittest.TestCase):
         self.assertIn("animation: none", css)
         self.assertIn("width: 100%", css)
 
+    def test_late_analysis_events_cannot_overwrite_apply_phase(self):
+        feedback = (ROOT / "app/static/bulk-match-feedback.js").read_text(encoding="utf-8")
+        self.assertIn("const applyOwnsProgress = () =>", feedback)
+        self.assertIn("['apply', 'complete', 'error'].includes(progressPhase())", feedback)
+        self.assertIn("if (applyRunning() || applyOwnsProgress()) return 0", feedback)
+        self.assertIn("if (applyOwnsProgress()) return", feedback)
+        self.assertIn("if (!applyOwnsProgress())", feedback)
+
 
 if __name__ == "__main__":
     unittest.main()
