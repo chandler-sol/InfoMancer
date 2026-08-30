@@ -27,6 +27,28 @@ class BulkMatchNavigationAndVisualTests(unittest.TestCase):
             self.assertIn(".match-check", template)
             self.assertIn("checked = false", template)
 
+    def test_bulk_match_review_is_unpaginated_and_applies_full_selection(self):
+        routes = (ROOT / "app/routes/__init__.py").read_text(encoding="utf-8")
+        review = (ROOT / "app/routes/bulk_match_review.py").read_text(encoding="utf-8")
+        apply = (ROOT / "app/routes/bulk_match_apply.py").read_text(encoding="utf-8")
+        movie = (ROOT / "app/templates/bulk_movie_match.html").read_text(encoding="utf-8")
+        tv = (ROOT / "app/templates/bulk_tv_match.html").read_text(encoding="utf-8")
+
+        self.assertLess(
+            routes.index("build_bulk_match_review_router"),
+            routes.index("build_review_router"),
+        )
+        self.assertNotIn("LIMIT 50", review)
+        self.assertNotIn("OFFSET", review)
+        self.assertNotIn("matches[:50]", apply)
+        self.assertIn("for value in matches:", apply)
+        self.assertIn('"requested": len(matches)', apply)
+        for template in (movie, tv):
+            self.assertNotIn("Previous 50", template)
+            self.assertNotIn("Next 50", template)
+            self.assertNotIn("offset=", template)
+            self.assertNotIn("Choose another batch", template)
+
     def test_bulk_match_styles_add_zebra_hover_and_larger_posters(self):
         css = (ROOT / "app/static/bulk-match.css").read_text(encoding="utf-8")
 
