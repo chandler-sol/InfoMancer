@@ -7,14 +7,14 @@ class CompoundSearchTVDBClient(TVDBClient):
     def __init__(self, responses: dict[str, list[dict]]):
         super().__init__("test-key")
         self.responses = responses
-        self.calls: list[dict] = []
+        self.calls: list[tuple[str, dict]] = []
 
     def _get(
         self, path: str, params: dict | None = None, *,
         allow_not_found: bool = False, _retry_auth: bool = True,
     ) -> dict:
         params = dict(params or {})
-        self.calls.append(params)
+        self.calls.append((path, params))
         if path != "/search":
             return {}
         return {"data": self.responses.get(str(params.get("query") or ""), [])}
@@ -41,7 +41,7 @@ class TVDBCompoundSearchFallbackTests(unittest.TestCase):
         self.assertEqual(results[0]["_search_query"], "Run FatBoy Run")
         self.assertTrue(results[0]["_possible_match"])
         self.assertEqual(
-            [call["query"] for call in client.calls],
+            [params["query"] for path, params in client.calls if path == "/search"],
             ["Run Fat Boy Run", "Run FatBoy Run"],
         )
 
@@ -62,8 +62,10 @@ class TVDBCompoundSearchFallbackTests(unittest.TestCase):
         results = client.search_movies("Odd Title Words", 2001)
 
         self.assertEqual(results, [strict])
-        self.assertTrue(all(call.get("year") == 2001 for call in client.calls))
-        self.assertLessEqual(len(client.calls), 3)
+        search_calls = [params for path, params in client.calls if path == "/search"]
+        self.assertTrue(all(call.get("year") == 2001 for call in search_calls))
+        self.assertLessEqual(len(search_calls), 3)
+        self.assertTrue(any(path.startswith("/movies/slug/") for path, _ in client.calls))
 
     def test_compact_similarity_recognizes_space_vs_compound_spelling(self):
         client = CompoundSearchTVDBClient({})
