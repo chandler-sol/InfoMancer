@@ -36,7 +36,7 @@ def build_router(ctx: RouteContext):
         )
         item_label = "movie" if kind == "movie" else "TV series"
 
-        for value in matches[:50]:
+        for value in matches:
             title_id = provider_id = None
             try:
                 title_id, provider_id = (
@@ -106,7 +106,7 @@ def build_router(ctx: RouteContext):
             context={
                 "operation": "bulk-match-apply",
                 "kind": kind,
-                "requested": min(len(matches), 50),
+                "requested": len(matches),
                 "applied": applied,
                 "failed": failed,
             },
@@ -121,12 +121,12 @@ def build_router(ctx: RouteContext):
         # Bulk Match's desktop/browser controller asks for a compact result so it can
         # remove only the successfully applied rows in place. Avoiding a complete
         # document navigation keeps the review queue, global shell, poster images,
-        # and task controllers from being torn down and rebuilt after every batch.
+        # and task controllers from being torn down and rebuilt after every apply.
         if request.headers.get("x-requested-with") == "InfoMancerAsync":
             return JSONResponse({
                 "ok": failed == 0,
                 "kind": kind,
-                "requested": min(len(matches), 50),
+                "requested": len(matches),
                 "applied": applied,
                 "failed": failed,
                 "applied_title_ids": [item["title_id"] for item in applied_items],
