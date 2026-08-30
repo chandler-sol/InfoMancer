@@ -41,14 +41,24 @@
   height: 18px;
 }
 
-/* Selected movie analysis exposes a real processed/total count. The shared task
-   track is intentionally indeterminate, so opt this page-specific bar out of that
-   animation and let bulk-match-feedback.js own its actual percentage instead. */
+/* Analysis and Apply now share one phase-aware card. Both phases expose a real
+   processed/total count, so opt this track out of the shared indeterminate slide. */
 .bulk-direct-progress .task-track i[data-bulk-match-progress-fill] {
   width: 0;
   animation: none;
   transform: none;
   transition: width 180ms ease-out;
+}
+
+.bulk-workflow-progress[data-bulk-match-progress-phase="ready"]
+  .task-track i[data-bulk-match-progress-fill],
+.bulk-workflow-progress.is-complete
+  .task-track i[data-bulk-match-progress-fill] {
+  width: 100%;
+}
+
+.bulk-workflow-progress.has-error {
+  border-color: rgba(255, 116, 116, .48);
 }
 
 @media (prefers-reduced-motion: reduce) {
