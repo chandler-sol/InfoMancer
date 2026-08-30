@@ -10,22 +10,61 @@
   const itemLabel = reviewForm.dataset.bulkMatchItemLabel || 'match';
   const itemPlural = reviewForm.dataset.bulkMatchItemPlural
     || (itemLabel.endsWith('series') ? itemLabel : `${itemLabel}s`);
+  const kind = reviewForm.action.includes('/shows/') ? 'tv' : 'movie';
+  const applyProgressUrl = kind === 'tv'
+    ? '/api/shows/bulk-match/apply-progress'
+    : '/api/movies/bulk-match/apply-progress';
   const applyTimeoutMs = 30 * 60 * 1000;
+  let applyProgressTimer = 0;
+  let applyProgressController = null;
 
-  const showStatus = (message, working = false) => {
+  const showStatus = (message) => {
     if (!status) return;
     status.hidden = false;
     status.replaceChildren();
     const copy = document.createElement('span');
     copy.textContent = message;
     status.append(copy);
-    if (working) {
-      const track = document.createElement('span');
-      track.className = 'task-track';
-      track.setAttribute('aria-hidden', 'true');
-      track.append(document.createElement('i'));
-      status.append(track);
+  };
+
+  const hideStatus = () => {
+    if (!status) return;
+    status.hidden = true;
+    status.replaceChildren();
+  };
+
+  const ensureWorkflowProgress = () => {
+    let progress = document.querySelector('[data-bulk-match-progress]');
+    if (progress) return progress;
+    progress = document.createElement('section');
+    progress.className = 'panel bulk-direct-progress bulk-workflow-progress';
+    progress.dataset.bulkMatchProgress = '1';
+    progress.innerHTML = `
+      <div>
+        <h2 data-bulk-match-progress-heading>Bulk Match</h2>
+        <p class="muted" data-bulk-match-progress-copy></p>
+      </div>
+      <span class="task-track" aria-hidden="true"><i data-bulk-match-progress-fill></i></span>
+    `;
+    reviewForm.insertBefore(progress, status || reviewForm.firstChild);
+    return progress;
+  };
+
+  const renderWorkflowProgress = ({ heading, copy, percent, phase = 'apply' }) => {
+    const progress = ensureWorkflowProgress();
+    progress.hidden = false;
+    progress.dataset.bulkMatchProgressPhase = phase;
+    progress.classList.toggle('is-complete', phase === 'complete');
+    progress.classList.toggle('has-error', phase === 'error');
+    const headingNode = progress.querySelector('[data-bulk-match-progress-heading]');
+    const copyNode = progress.querySelector('[data-bulk-match-progress-copy]');
+    const fill = progress.querySelector('[data-bulk-match-progress-fill]');
+    if (headingNode && heading) headingNode.textContent = heading;
+    if (copyNode) copyNode.textContent = copy || '';
+    if (fill && Number.isFinite(Number(percent))) {
+      fill.style.width = `${Math.max(0, Math.min(100, Number(percent)))}%`;
     }
+    hideStatus();
   };
 
   const selectedMatches = () => [
@@ -73,11 +112,8 @@
       else window.sessionStorage.removeItem(key);
     } catch (_) {}
 
-    // The selected-search handoff used by Workspace previously expected a full
-    // redirect after Apply. In-place Apply deliberately keeps the user on this
-    // review, so clear that one-shot redirect marker when the batch succeeds.
-    const kind = reviewForm.action.includes('/shows/') ? 'tv' : 'movie';
-    try { window.sessionStorage.removeItem(`infomancer:bulk-match-return-pending:${kind}`); } catch (_) {}
+    const pendingKind = reviewForm.action.includes('/shows/') ? 'tv' : 'movie';
+    try { window.sessionStorage.removeItem(`infomancer:bulk-match-return-pending:${pendingKind}`); } catch (_) {}
   };
 
   const formatJsonDetail = (detail) => {
@@ -127,19 +163,7 @@
   const reviewRows = () => [...reviewForm.querySelectorAll('.table-wrap tbody tr')]
     .filter((row) => !row.querySelector('.empty'));
 
-  const updateContinueLinks = () => {
-    const remaining = reviewRows().length;
-    const currentUrl = new URL(window.location.href);
-    const currentOffset = Math.max(0, Number.parseInt(currentUrl.searchParams.get('offset') || '0', 10) || 0);
-    reviewForm.querySelectorAll('.review-actions a.button').forEach((link) => {
-      if (!/^Next 50$/i.test(link.textContent.trim()) && !/^Continue review$/i.test(link.textContent.trim())) return;
-      const url = new URL(link.href, window.location.origin);
-      url.searchParams.set('offset', String(currentOffset + remaining));
-      link.href = url.pathname + url.search;
-      link.textContent = 'Continue review';
-    });
-    return remaining;
-  };
+  const updateContinueLinks = () => reviewRows().length;
 
   const showEmptyPageState = () => {
     const tbody = reviewForm.querySelector('.table-wrap tbody');
@@ -148,7 +172,7 @@
     const cell = document.createElement('td');
     cell.colSpan = 4;
     cell.className = 'empty good';
-    cell.textContent = 'All selected matches on this page were applied. Continue reviewing when ready.';
+    cell.textContent = 'All selected matches were applied.';
     row.append(cell);
     tbody.replaceChildren(row);
   };
@@ -165,11 +189,76 @@
     });
     purgeRememberedSelection(appliedTitleIds);
     document.dispatchEvent(new CustomEvent('infomancer:bulk-match-applied', {
-      detail: {appliedTitleIds, payload},
+      detail: { appliedTitleIds, payload },
     }));
     const remaining = updateContinueLinks();
     showEmptyPageState();
-    return {appliedTitleIds, remaining};
+    return { appliedTitleIds, remaining };
+  };
+
+  const createApplyJobId = () => {
+    if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+    const random = Math.random().toString(36).slice(2);
+    return `${Date.now().toString(36)}-${random}`;
+  };
+
+  const stopApplyProgressPolling = () => {
+    if (applyProgressTimer) window.clearTimeout(applyProgressTimer);
+    applyProgressTimer = 0;
+    applyProgressController?.abort();
+    applyProgressController = null;
+  };
+
+  const renderApplySnapshot = (snapshot, fallbackTotal, noun) => {
+    const total = Math.max(0, Number(snapshot?.total || fallbackTotal || 0));
+    const processed = Math.max(0, Number(snapshot?.processed || 0));
+    const applied = Math.max(0, Number(snapshot?.applied || 0));
+    const failed = Math.max(0, Number(snapshot?.failed || 0));
+    const percent = total > 0 ? processed / total * 100 : 0;
+    const copy = failed
+      ? `${processed} of ${total} processed · ${applied} applied · ${failed} need attention.`
+      : `${applied} of ${total} applied. You can keep using InfoMancer while this finishes.`;
+    renderWorkflowProgress({
+      heading: `Applying metadata for ${total || fallbackTotal} ${noun}`,
+      copy,
+      percent,
+      phase: 'apply',
+    });
+  };
+
+  const startApplyProgressPolling = (jobId, total, noun) => {
+    stopApplyProgressPolling();
+    renderApplySnapshot({ processed: 0, applied: 0, failed: 0, total }, total, noun);
+
+    const poll = async () => {
+      if (reviewForm.dataset.bulkApplying !== '1') return;
+      const url = new URL(applyProgressUrl, window.location.origin);
+      url.searchParams.set('job_id', jobId);
+      const controller = new AbortController();
+      applyProgressController = controller;
+      const timeoutId = window.setTimeout(() => controller.abort(), 5000);
+      try {
+        const response = await fetch(url.pathname + url.search, {
+          method: 'GET',
+          credentials: 'same-origin',
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        });
+        if (response.ok) renderApplySnapshot(await response.json(), total, noun);
+      } catch (_) {
+        // The POST remains authoritative. A transient progress-read failure should
+        // never cancel an Apply that is still successfully running on the server.
+      } finally {
+        window.clearTimeout(timeoutId);
+        if (applyProgressController === controller) applyProgressController = null;
+        if (reviewForm.dataset.bulkApplying === '1') {
+          applyProgressTimer = window.setTimeout(poll, 350);
+        }
+      }
+    };
+
+    applyProgressTimer = window.setTimeout(poll, 150);
   };
 
   const runApply = async (event) => {
@@ -194,26 +283,25 @@
     reviewForm.setAttribute('aria-busy', 'true');
     const count = selected.length;
     const noun = count === 1 ? itemLabel : itemPlural;
+    const jobId = createApplyJobId();
     applyButtons.forEach((button) => {
       button.disabled = true;
       button.textContent = count === 1 ? 'Applying match…' : `Applying ${count} matches…`;
     });
-    showStatus(
-      `Applying ${count} selected ${noun}. InfoMancer is fetching and saving metadata. `
-      + 'You can keep using InfoMancer while this finishes.',
-      true,
-    );
+    startApplyProgressPolling(jobId, count, noun);
     document.dispatchEvent(new CustomEvent('infomancer:bulk-apply-started', {
-      detail: {count, titleIds: selected.map(titleIdForCheckbox)},
+      detail: { count, titleIds: selected.map(titleIdForCheckbox), jobId },
     }));
 
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), applyTimeoutMs);
-    let finishDetail = {ok: false, appliedTitleIds: []};
+    let finishDetail = { ok: false, appliedTitleIds: [] };
     try {
+      const formData = new FormData(reviewForm);
+      formData.set('apply_job_id', jobId);
       const response = await fetch(reviewForm.action, {
         method: 'POST',
-        body: new FormData(reviewForm),
+        body: formData,
         credentials: 'same-origin',
         redirect: 'follow',
         signal: controller.signal,
@@ -227,39 +315,60 @@
 
       const contentType = String(response.headers.get('content-type') || '').toLowerCase();
       if (!contentType.includes('application/json')) {
-        // Compatibility fallback for an older core. Do not parse/rewrite returned
-        // HTML in the current document; a normal navigation is safer in that case.
         window.location.assign(response.url || window.location.href);
         return;
       }
 
       const payload = await response.json();
-      const {appliedTitleIds, remaining} = applyResultInPlace(payload, selected);
+      stopApplyProgressPolling();
+      const { appliedTitleIds, remaining } = applyResultInPlace(payload, selected);
       resetApplyState();
       const failed = Number(payload?.failed || 0);
-      const message = String(payload?.message || `Matched ${appliedTitleIds.length} ${noun}`).trim();
-      showStatus(
-        `${message}. ${remaining} review row${remaining === 1 ? '' : 's'} remain on this page.`,
-      );
-      finishDetail = {ok: true, appliedTitleIds, failed, payload};
+      const applied = Number(payload?.applied ?? appliedTitleIds.length);
+      const message = String(payload?.message || `Matched ${applied} ${noun}`).trim();
+      if (failed) {
+        renderWorkflowProgress({
+          heading: `${applied} match${applied === 1 ? '' : 'es'} applied · ${failed} need attention`,
+          copy: `${message}. ${remaining} review row${remaining === 1 ? '' : 's'} remain.`,
+          percent: 100,
+          phase: 'error',
+        });
+      } else {
+        const matchLabel = kind === 'movie' ? 'movie match' : 'TV series match';
+        renderWorkflowProgress({
+          heading: `${applied} ${matchLabel}${applied === 1 ? '' : 'es'} applied`,
+          copy: remaining
+            ? `Metadata has been saved successfully. ${remaining} review row${remaining === 1 ? '' : 's'} remain.`
+            : 'Metadata has been saved successfully.',
+          percent: 100,
+          phase: 'complete',
+        });
+      }
+      finishDetail = { ok: true, appliedTitleIds, failed, payload };
     } catch (error) {
+      stopApplyProgressPolling();
       resetApplyState();
       if (error?.name === 'AbortError') {
-        showStatus(
-          'InfoMancer stopped waiting for this Apply request after 30 minutes. '
-          + 'Some matches may already have completed. Reload this review before retrying and check Activity/Logs for the final state.',
-        );
-        finishDetail = {ok: false, appliedTitleIds: [], aborted: true};
+        renderWorkflowProgress({
+          heading: 'Apply status needs verification',
+          copy: 'InfoMancer stopped waiting after 30 minutes. Some matches may already have completed. Reload this review before retrying and check Activity or Logs for the final state.',
+          percent: 0,
+          phase: 'error',
+        });
+        finishDetail = { ok: false, appliedTitleIds: [], aborted: true };
         return;
       }
       const detail = String(error?.message || error || 'Unknown request error').trim();
-      showStatus(
-        `InfoMancer could not finish applying these matches. ${detail}. `
-        + 'The rest of the app remains available; retry when ready or open Activity/Logs for details.',
-      );
-      finishDetail = {ok: false, appliedTitleIds: [], error: detail};
+      renderWorkflowProgress({
+        heading: 'Bulk Match apply could not finish',
+        copy: `${detail}. The rest of InfoMancer remains available; retry when ready or open Activity or Logs for details.`,
+        percent: 0,
+        phase: 'error',
+      });
+      finishDetail = { ok: false, appliedTitleIds: [], error: detail };
     } finally {
       window.clearTimeout(timeoutId);
+      stopApplyProgressPolling();
       document.dispatchEvent(new CustomEvent('infomancer:bulk-apply-finished', {
         detail: finishDetail,
       }));
