@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 import re
 import unicodedata
 from urllib.parse import quote, urlparse
@@ -9,6 +10,7 @@ import httpx
 
 
 BASE_URL = "https://api4.thetvdb.com/v4"
+MOVIE_SEARCH_PLAUSIBLE_SCORE = 0.65
 
 
 class TVDBError(RuntimeError):
@@ -114,6 +116,71 @@ class TVDBClient:
             return ""
         return f"{value[:match.start()]}{match.group(1)}.{match.group(2)}"
 
+    @staticmethod
+    def _compact_movie_title(value: str) -> str:
+        """Normalize a title for provider-result plausibility checks."""
+        ascii_value = unicodedata.normalize("NFKD", str(value or "")).encode(
+            "ascii", "ignore"
+        ).decode("ascii")
+        return re.sub(r"[^a-z0-9]+", "", ascii_value.casefold())
+
+    @classmethod
+    def _movie_result_similarity(cls, query: str, result: dict) -> float:
+        """Score whether a TVDB search hit is plausibly related to the query."""
+        expected = cls._compact_movie_title(query)
+        if not expected:
+            return 0.0
+
+        names: list[str] = []
+        for key in ("name", "title"):
+            if result.get(key):
+                names.append(str(result[key]))
+        for alias in result.get("aliases") or []:
+            if isinstance(alias, str):
+                names.append(alias)
+            elif isinstance(alias, dict):
+                for key in ("name", "title"):
+                    if alias.get(key):
+                        names.append(str(alias[key]))
+
+        best = 0.0
+        for name in names:
+            offered = cls._compact_movie_title(name)
+            if offered:
+                best = max(best, SequenceMatcher(None, expected, offered).ratio())
+        return best
+
+    @staticmethod
+    def _compound_query_candidates(query: str) -> list[str]:
+        """Build a few adjacent-word compounds for a clearly bad provider hit.
+
+        TVDB's text index can distinguish ``Fat Boy`` from ``Fatboy`` even though
+        those forms are effectively identical for matching. Try pairs nearest the
+        middle of the title first and keep the retry set deliberately small.
+        """
+        value = query.strip()
+        if not value or "://" in value or "/" in value:
+            return []
+        words = re.findall(r"[A-Za-z0-9]+", value)
+        if len(words) < 2 or len(words) > 8:
+            return []
+
+        indexes = list(range(len(words) - 1))
+        center = (len(words) - 2) / 2
+        indexes.sort(key=lambda index: abs(index - center))
+
+        candidates: list[str] = []
+        for index in indexes[:4]:
+            joined = (
+                words[:index]
+                + [words[index] + words[index + 1]]
+                + words[index + 2:]
+            )
+            candidate = " ".join(joined)
+            if candidate and candidate != value and candidate not in candidates:
+                candidates.append(candidate)
+        return candidates
+
     def search_series(self, query: str) -> list[dict]:
         payload = self._get("/search", {"query": query, "type": "series"})
         return payload.get("data") or []
@@ -172,6 +239,35 @@ class TVDBClient:
         payload = self._get("/search", params)
         results = payload.get("data") or []
         if results:
+            best_strict_score = max(
+                (self._movie_result_similarity(query, result) for result in results),
+                default=0.0,
+            )
+            if best_strict_score >= MOVIE_SEARCH_PLAUSIBLE_SCORE:
+                return results
+
+            # A non-empty provider response is not necessarily a useful response.
+            # When every strict hit is clearly unrelated, retry a few conservative
+            # adjacent-word compounds. This recovers titles such as
+            # ``Run Fat Boy Run`` -> ``Run FatBoy Run`` without adding requests to
+            # normal successful searches.
+            for compound_query in self._compound_query_candidates(query):
+                compound_params = {"query": compound_query, "type": "movie"}
+                if year:
+                    compound_params["year"] = year
+                compound_results = (
+                    self._get("/search", compound_params).get("data") or []
+                )
+                plausible_results = [
+                    result for result in compound_results
+                    if self._movie_result_similarity(query, result)
+                    >= MOVIE_SEARCH_PLAUSIBLE_SCORE
+                ]
+                if plausible_results:
+                    for result in plausible_results:
+                        result.setdefault("_search_query", compound_query)
+                        result["_possible_match"] = True
+                    return plausible_results + results
             return results
 
         # Recover a narrow class of titles damaged by the pre-0.8.1 scanner's
