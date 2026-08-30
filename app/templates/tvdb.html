@@ -38,7 +38,7 @@
     <p class="muted">Paste the TVDB movie-page link or its numeric movie ID. InfoMancer will resolve the canonical movie directly, even when TVDB's API text-search index misses it.</p>
     {% if q and not results %}
     <p class="muted">TVDB's website search can sometimes find a movie that the API search does not. Open the same search on TVDB, then paste the movie page below.</p>
-    <a class="button manual-tvdb-web-search" href="https://www.thetv.com/search?query={{ q|urlencode }}" target="_blank" rel="noopener noreferrer">Search TVDB website ↗</a>
+    <a class="button manual-tvdb-web-search" href="https://www.thetvdb.com/search?query={{ q|urlencode }}" target="_blank" rel="noopener noreferrer">Search TVDB website ↗</a>
     {% endif %}
     {% else %}
     <p class="muted">Paste the TVDB series-page link or its numeric series ID. InfoMancer will validate it and load that series’ episode metadata.</p>
