@@ -17,24 +17,28 @@ class ManagedTools09Tests(unittest.TestCase):
 
     def test_resolution_prefers_override_then_managed(self):
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             managed = root / "tools" / "ffprobe" / managed_tools.FFPROBE_MANAGED_VERSION / (
                 "ffprobe.exe" if os.name == "nt" else "ffprobe"
             )
             managed.parent.mkdir(parents=True)
             managed.write_bytes(b"managed")
-            with mock.patch.dict(os.environ, {"INFOMANCER_DATA_DIR": temp}, clear=False):
+            with mock.patch.dict(os.environ, {"INFOMANCER_DATA_DIR": str(root)}, clear=False):
                 os.environ.pop("INFOMANCER_FFPROBE", None)
-                self.assertEqual(managed_tools.resolve_ffprobe_executable(), str(managed))
-                os.environ["INFOMANCER_FFPROBE"] = str(root / "custom-ffprobe")
                 self.assertEqual(
-                    managed_tools.resolve_ffprobe_executable(),
-                    str(root / "custom-ffprobe"),
+                    Path(managed_tools.resolve_ffprobe_executable()).resolve(),
+                    managed.resolve(),
+                )
+                custom = root / "custom-ffprobe"
+                os.environ["INFOMANCER_FFPROBE"] = str(custom)
+                self.assertEqual(
+                    Path(managed_tools.resolve_ffprobe_executable()).resolve(),
+                    custom.resolve(),
                 )
 
     def test_bootstrap_stages_and_atomically_installs_bundled_copy(self):
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             bundle = root / "bundle" / ("ffprobe.exe" if os.name == "nt" else "ffprobe")
             bundle.parent.mkdir(parents=True)
             bundle.write_bytes(b"verified-bundled-ffprobe")
