@@ -155,6 +155,22 @@ class BulkMovieMatchProgressTests(unittest.TestCase):
         self.assertNotIn("innerHTML", script)
         self.assertNotIn("Number.MAX_SAFE_INTEGER", script)
 
+    def test_selected_review_progress_bar_is_determinate(self):
+        stylesheet = (ROOT / "app" / "static" / "bulk-match.css").read_text(
+            encoding="utf-8"
+        )
+        script = (ROOT / "app" / "static" / "bulk-match-feedback.js").read_text(
+            encoding="utf-8"
+        )
+        selector = ".bulk-direct-progress .task-track i[data-bulk-match-progress-fill]"
+        self.assertIn(selector, stylesheet)
+        scoped_rule = stylesheet.split(selector, 1)[1].split("}", 1)[0]
+        self.assertIn("animation: none", scoped_rule)
+        self.assertIn("transform: none", scoped_rule)
+        self.assertIn("width: 0", scoped_rule)
+        self.assertIn("progressFill.style.width = `${percent}%`", script)
+        self.assertIn("progressFill.style.width = '100%'", script)
+
     def test_progressive_manual_links_keep_exact_review_return_url(self):
         script = (ROOT / "app" / "static" / "bulk-match-feedback.js").read_text(
             encoding="utf-8"
