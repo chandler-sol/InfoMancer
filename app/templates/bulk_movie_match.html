@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Bulk movie matching · InfoMancer{% endblock %}
 {% block content %}
-{% macro review_actions(position='bottom') %}<div class="review-actions review-actions-{{ position }}"><a class="button" href="/movies/bulk-match">{{ 'Back to Movie Bulk Match' if direct_selection else 'Choose another batch' }}</a><div class="actions">{% if offset > 0 %}<a class="button" href="/movies/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}&amp;offset={{ [0, offset - 50]|max }}">Previous 50</a>{% endif %}{% if offset + 50 < cached_count %}<a class="button" href="/movies/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}&amp;offset={{ offset + 50 }}">Next 50</a>{% endif %}<button class="button primary">Apply selected matches</button></div></div>{% endmacro %}
+{% macro review_actions(position='bottom') %}<div class="review-actions review-actions-{{ position }}"><a class="button" href="/movies/bulk-match">{{ 'Back to Movie Bulk Match' if direct_selection else 'Choose another batch' }}</a><div class="actions"><button class="button primary">Apply selected matches</button></div></div>{% endmacro %}
 <a class="back" href="/movies">← Movies</a>
 <div class="page-head"><div><p class="eyebrow">REVIEW QUEUE</p><h1>{{ 'Match selected movies' if direct_selection else 'Bulk movie matching' }}</h1><p class="muted">{% if direct_selection %}Review matches for only the movies you selected. Nothing is applied until you approve it here.{% else %}Analyze a small batch, any selection, or every unmatched movie. Suggestions are stored locally and nothing is applied without review.{% endif %}</p></div></div>
 {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
