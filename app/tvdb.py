@@ -203,6 +203,34 @@ class TVDBClient:
             record["image_url"] = record["image"]
         return record
 
+    def _movie_by_query_slug(
+        self, query: str, year: int | None = None,
+    ) -> dict:
+        """Resolve an exact-looking movie when TVDB text search is noisy or empty.
+
+        TVDB can return unrelated rows for a title that is still available through
+        its canonical movie slug. Treat a one-year difference as a release-market
+        variance rather than a hard miss, but keep it flagged for review.
+        """
+        slug = self._movie_slug_candidate(query)
+        if not slug:
+            return {}
+        record = self.movie_by_slug(slug)
+        if not record:
+            return {}
+        if self._movie_result_similarity(query, record) < MOVIE_SEARCH_PLAUSIBLE_SCORE:
+            return {}
+
+        record_year_text = str(record.get("year") or "")[:4]
+        if year and record_year_text.isdigit():
+            year_delta = abs(int(record_year_text) - year)
+            if year_delta > 1:
+                return {}
+            if year_delta == 1:
+                record["_possible_match"] = True
+                record.setdefault("_search_query", query)
+        return record
+
     def movie_id_from_reference(self, reference: str) -> int:
         """Resolve a numeric TVDB movie ID or canonical TVDB movie-page link."""
         value = reference.strip()
@@ -268,6 +296,19 @@ class TVDBClient:
                         result.setdefault("_search_query", compound_query)
                         result["_possible_match"] = True
                     return plausible_results + results
+
+            # TVDB sometimes returns a populated but entirely unrelated search page.
+            # Before accepting those rows as the best available candidates, check the
+            # exact canonical slug. This is the important distinction between
+            # "provider returned rows" and "provider found this title".
+            slug_record = self._movie_by_query_slug(query, year)
+            if slug_record:
+                slug_id = str(slug_record.get("tvdb_id") or slug_record.get("id") or "")
+                remaining = [
+                    result for result in results
+                    if str(result.get("tvdb_id") or result.get("id") or "") != slug_id
+                ]
+                return [slug_record, *remaining]
             return results
 
         # Recover a narrow class of titles damaged by the pre-0.8.1 scanner's
@@ -290,14 +331,9 @@ class TVDBClient:
         # and canonical movie endpoint both know about. On a strict search miss,
         # try the title as a canonical slug before InfoMancer gives up. This keeps
         # the fallback exact and avoids widening every successful provider search.
-        slug = self._movie_slug_candidate(decimal_query or query)
-        if not slug:
-            return []
-        record = self.movie_by_slug(slug)
+        slug_query = decimal_query or query
+        record = self._movie_by_query_slug(slug_query, year)
         if not record:
-            return []
-        record_year_text = str(record.get("year") or "")[:4]
-        if year and record_year_text.isdigit() and int(record_year_text) != year:
             return []
         if decimal_query:
             record.setdefault("_search_query", decimal_query)
