@@ -41,8 +41,21 @@
   height: 18px;
 }
 
+/* Selected movie analysis exposes a real processed/total count. The shared task
+   track is intentionally indeterminate, so opt this page-specific bar out of that
+   animation and let bulk-match-feedback.js own its actual percentage instead. */
+.bulk-direct-progress .task-track i[data-bulk-match-progress-fill] {
+  animation: none;
+  transform: none;
+  transition: width 180ms ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   [data-bulk-match-review-form] .table-wrap tbody tr > td {
+    transition: none;
+  }
+
+  .bulk-direct-progress .task-track i[data-bulk-match-progress-fill] {
     transition: none;
   }
 }
