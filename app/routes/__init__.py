@@ -9,6 +9,7 @@ from .operations import build_router as build_operations_router
 from .dashboard import build_router as build_dashboard_router
 from .bulk_match_progress import build_router as build_bulk_match_progress_router
 from .bulk_match_apply import build_router as build_bulk_match_apply_router
+from .bulk_match_review import build_router as build_bulk_match_review_router
 from .review import build_router as build_review_router
 from .library_optimized import build_router as build_library_router
 from .inspector_media import build_router as build_inspector_media_router
@@ -46,10 +47,11 @@ ROUTER_BUILDERS = (
     build_operations_router,
     build_dashboard_router,
     build_bulk_match_progress_router,
-    # Own the two bulk-apply POST URLs before Review registers its legacy handlers.
-    # The focused handlers isolate each title failure and keep the desktop request
-    # responsive instead of aborting an entire batch on one provider/database error.
+    # Own focused Bulk Match URLs before Review registers its legacy handlers.
+    # Apply handles full selected sets, while review renders the complete cached
+    # queue instead of exposing the old 50-row pagination boundary.
     build_bulk_match_apply_router,
+    build_bulk_match_review_router,
     build_review_router,
     build_library_router,
     build_inspector_media_router,
