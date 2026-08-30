@@ -26,7 +26,12 @@ class SupplyChainTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(
             encoding="utf-8"
         )
-        self.assertEqual(workflow.count("persist-credentials: false"), 2)
+        checkout_count = workflow.count("uses: actions/checkout@")
+        self.assertGreater(checkout_count, 0)
+        self.assertEqual(
+            workflow.count("persist-credentials: false"),
+            checkout_count,
+        )
 
     def test_github_actions_use_full_commit_shas(self):
         workflow_dir = ROOT / ".github" / "workflows"
