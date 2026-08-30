@@ -1,0 +1,11 @@
+{
+  "name": "infomancer-e2e-09",
+  "private": true,
+  "version": "0.9.0-alpha",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1"
+  }
+}
