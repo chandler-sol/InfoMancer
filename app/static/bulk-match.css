@@ -45,6 +45,7 @@
    track is intentionally indeterminate, so opt this page-specific bar out of that
    animation and let bulk-match-feedback.js own its actual percentage instead. */
 .bulk-direct-progress .task-track i[data-bulk-match-progress-fill] {
+  width: 0;
   animation: none;
   transform: none;
   transition: width 180ms ease-out;
