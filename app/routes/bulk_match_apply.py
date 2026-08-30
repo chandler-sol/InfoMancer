@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -9,16 +10,23 @@ from ..access import require_librarian
 from .context import RouteContext
 
 
+# Apply itself remains synchronous inside the request, but the browser needs a tiny
+# process-local snapshot so its determinate bar can show actual per-item progress.
+# Keeping this state beside the focused route avoids making the shared job registry a
+# construction-time dependency and preserves the route's lightweight test contract.
+_APPLY_JOBS: dict[str, dict[str, object]] = {}
+_APPLY_JOBS_LOCK = threading.Lock()
+
+
 def build_router(ctx: RouteContext):
     router = APIRouter()
     db = ctx.live("db")
-    job_registry = ctx.live("job_registry")
     record_event = ctx.live("record_event")
     redirect = ctx.live("redirect")
     store_movie_match = ctx.live("store_movie_match")
     store_tv_match = ctx.live("store_tv_match")
-    apply_jobs = job_registry.mapping("bulk-match-apply")
-    apply_jobs_lock = job_registry.lock("bulk-match-apply")
+    apply_jobs = _APPLY_JOBS
+    apply_jobs_lock = _APPLY_JOBS_LOCK
 
     def librarian_get(path: str, **kwargs):
         dependencies = list(kwargs.pop("dependencies", ()))
@@ -30,9 +38,11 @@ def build_router(ctx: RouteContext):
         dependencies.append(Depends(require_librarian))
         return router.post(path, dependencies=dependencies, **kwargs)
 
-    def clean_job_id(value: str) -> str:
+    def clean_job_id(value: object) -> str:
+        if not isinstance(value, str):
+            return ""
         return "".join(
-            character for character in str(value or "")[:100]
+            character for character in value[:100]
             if character.isalnum() or character in {"-", "_"}
         )[:80]
 
@@ -89,6 +99,7 @@ def build_router(ctx: RouteContext):
         apply_job_id: str,
     ):
         applied = 0
+        processed = 0
         applied_items: list[dict[str, int]] = []
         failures: list[dict[str, object]] = []
         store = store_movie_match if kind == "movie" else store_tv_match
@@ -104,7 +115,8 @@ def build_router(ctx: RouteContext):
             applied=0, failed=0, current_title_id=None,
         )
 
-        for index, value in enumerate(matches, start=1):
+        for value in matches:
+            processed += 1
             title_id = provider_id = None
             try:
                 title_id, provider_id = (
@@ -166,7 +178,7 @@ def build_router(ctx: RouteContext):
             finally:
                 update_apply_job(
                     request, kind, safe_job_id,
-                    status="running", processed=index, total=total,
+                    status="running", processed=processed, total=total,
                     applied=applied, failed=len(failures),
                     current_title_id=title_id,
                 )
