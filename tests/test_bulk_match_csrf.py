@@ -48,7 +48,9 @@ class BulkMatchCsrfTests(unittest.TestCase):
         script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
         self.assertIn('reviewForm.querySelector(\'input[name="csrf_token"]\')?.value', script)
         self.assertIn("'X-CSRF-Token': token", script)
-        self.assertIn("body: new FormData(reviewForm)", script)
+        self.assertIn("const formData = new FormData(reviewForm)", script)
+        self.assertIn("formData.set('apply_job_id', jobId)", script)
+        self.assertIn("body: formData", script)
         self.assertIn("'X-Requested-With': 'InfoMancerAsync'", script)
         self.assertIn("Accept: 'application/json'", script)
 
@@ -62,6 +64,7 @@ class BulkMatchCsrfTests(unittest.TestCase):
                 self.assertNotIn("request", query_names)
                 self.assertIn("matches", body_names)
                 self.assertIn("selected_scope", body_names)
+                self.assertIn("apply_job_id", body_names)
 
     def test_async_apply_route_returns_compact_result_contract(self):
         route_source = (ROOT / "app/routes/bulk_match_apply.py").read_text(encoding="utf-8")
@@ -96,6 +99,7 @@ class BulkMatchCsrfTests(unittest.TestCase):
         response = handlers["bulk_movie_match_apply"](
             request,
             ["11:901", "12:902"],
+            "",
             "",
         )
         payload = json.loads(response.body)
