@@ -11,8 +11,10 @@ test('rendered templates use the request CSP nonce consistently', async ({ page 
   expect(content).toContain("script-src-attr 'none'");
   expect(content).toContain("object-src 'none'");
 
+  // Browsers intentionally hide nonce content from getAttribute('nonce') after
+  // parsing. The HTMLElement.nonce property is the supported way to inspect it.
   const scriptNonces = await page.locator('script[nonce]').evaluateAll((nodes) =>
-    nodes.map((node) => node.getAttribute('nonce')).filter(Boolean),
+    nodes.map((node) => node.nonce).filter(Boolean),
   );
   expect(scriptNonces.length).toBeGreaterThan(0);
   expect(new Set(scriptNonces).size).toBe(1);
