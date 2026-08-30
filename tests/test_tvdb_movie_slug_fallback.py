@@ -18,12 +18,21 @@ class StubTVDBClient(TVDBClient):
     ) -> dict:
         self.calls.append((path, params, allow_not_found))
         if path == "/search":
-            if (params or {}).get("query") == "Jackass 3.5":
+            query = (params or {}).get("query")
+            if query == "Jackass 3.5":
                 return {
                     "data": [{
                         "id": 12345,
                         "name": "Jackass 3.5",
                         "year": "2011",
+                    }]
+                }
+            if query == "The Painted Bird":
+                return {
+                    "data": [{
+                        "id": 8661,
+                        "name": "Trail of the Pink Panther",
+                        "year": "1982",
                     }]
                 }
             return {"data": []}
@@ -35,6 +44,16 @@ class StubTVDBClient(TVDBClient):
                     "slug": "bring-me-the-head-of-alfredo-garcia",
                     "year": "1974",
                     "image": "https://artworks.thetvdb.com/example.jpg",
+                }
+            }
+        if path == "/movies/slug/the-painted-bird":
+            return {
+                "data": {
+                    "id": 135322,
+                    "name": "The Painted Bird",
+                    "slug": "the-painted-bird",
+                    "year": "2019",
+                    "image": "https://artworks.thetvdb.com/painted-bird.jpg",
                 }
             }
         return {}
@@ -56,11 +75,33 @@ class TVDBMovieSlugFallbackTests(unittest.TestCase):
             "/movies/slug/bring-me-the-head-of-alfredo-garcia",
         )
 
-    def test_slug_fallback_respects_a_known_conflicting_year(self):
+    def test_noisy_text_search_still_checks_exact_slug(self):
+        client = StubTVDBClient()
+
+        results = client.search_movies("The Painted Bird", 2020)
+
+        self.assertEqual(results[0]["tvdb_id"], 135322)
+        self.assertEqual(results[0]["name"], "The Painted Bird")
+        self.assertEqual(results[0]["year"], "2019")
+        self.assertTrue(results[0]["_possible_match"])
+        self.assertEqual(results[1]["id"], 8661)
+        self.assertTrue(any(
+            call[0] == "/movies/slug/the-painted-bird" for call in client.calls
+        ))
+
+    def test_slug_fallback_allows_one_year_release_market_difference(self):
+        client = StubTVDBClient()
+
+        results = client.search_movies("Bring Me the Head of Alfredo Garcia", 1975)
+
+        self.assertEqual(results[0]["tvdb_id"], 7464)
+        self.assertTrue(results[0]["_possible_match"])
+
+    def test_slug_fallback_rejects_a_larger_known_year_conflict(self):
         client = StubTVDBClient()
 
         self.assertEqual(
-            client.search_movies("Bring Me the Head of Alfredo Garcia", 1975),
+            client.search_movies("Bring Me the Head of Alfredo Garcia", 1976),
             [],
         )
 
