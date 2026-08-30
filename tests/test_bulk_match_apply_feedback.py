@@ -8,16 +8,19 @@ ROOT = Path(__file__).resolve().parents[1]
 class BulkMatchApplyFeedbackTests(unittest.TestCase):
     def test_apply_shows_working_completion_and_error_feedback(self):
         script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
-        self.assertIn("Applying ${count} selected ${noun}", script)
-        self.assertIn("track.className = 'task-track'", script)
+        self.assertIn("Applying metadata for ${total || fallbackTotal} ${noun}", script)
+        self.assertIn("ensureWorkflowProgress", script)
+        self.assertIn("data-bulk-match-progress-fill", script)
         self.assertIn("button.disabled = true", script)
         self.assertIn("You can keep using InfoMancer while this finishes.", script)
         self.assertIn("fetch(reviewForm.action", script)
         self.assertIn("await responseDetail(response)", script)
         self.assertIn("HTTP ${response.status}", script)
-        self.assertIn("Activity/Logs", script)
+        self.assertIn("Activity or Logs", script)
         self.assertIn("resetApplyState()", script)
         self.assertIn("button.disabled = false", script)
+        self.assertIn("phase: 'complete'", script)
+        self.assertIn("phase: 'error'", script)
 
     def test_apply_sends_csrf_header_and_avoids_webview_keepalive(self):
         script = (ROOT / "app/static/bulk-match-apply.js").read_text(encoding="utf-8")
@@ -53,7 +56,7 @@ class BulkMatchApplyFeedbackTests(unittest.TestCase):
         self.assertIn("infomancer:bulk-match-applied", script)
         self.assertIn("updateContinueLinks()", script)
         self.assertIn("showEmptyPageState()", script)
-        self.assertIn("Continue review", script)
+        self.assertIn("review row${remaining === 1 ? '' : 's'} remain", script)
         self.assertIn("contentType.includes('application/json')", script)
         compatibility = script.index("if (!contentType.includes('application/json'))")
         apply_in_place = script.index("const payload = await response.json()")
@@ -111,6 +114,7 @@ class BulkMatchApplyFeedbackTests(unittest.TestCase):
         self.assertIn("JSONResponse", handler)
         self.assertIn('request.headers.get("x-requested-with") == "InfoMancerAsync"', handler)
         self.assertIn('"applied_title_ids"', handler)
+        self.assertIn("apply-progress", handler)
 
     def test_bulk_feedback_stays_visible_from_bottom_of_long_review(self):
         script = (ROOT / "app/static/bulk-match-feedback.js").read_text(encoding="utf-8")
