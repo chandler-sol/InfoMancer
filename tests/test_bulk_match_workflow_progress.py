@@ -10,11 +10,13 @@ class BulkMatchWorkflowProgressTests(unittest.TestCase):
     def test_apply_route_tracks_real_per_item_progress(self):
         source = (ROOT / "app/routes/bulk_match_apply.py").read_text(encoding="utf-8")
         ast.parse(source)
-        self.assertIn('job_registry.mapping("bulk-match-apply")', source)
+        self.assertIn("_APPLY_JOBS", source)
+        self.assertIn("_APPLY_JOBS_LOCK", source)
         self.assertIn('"/api/movies/bulk-match/apply-progress"', source)
         self.assertIn('"/api/shows/bulk-match/apply-progress"', source)
         self.assertIn('apply_job_id: str = Form("")', source)
-        self.assertIn('status="running", processed=index, total=total', source)
+        self.assertIn("for value in matches:", source)
+        self.assertIn('status="running", processed=processed, total=total', source)
         self.assertIn('status="complete", processed=total, total=total', source)
 
     def test_apply_browser_polls_progress_instead_of_animating_fake_work(self):
