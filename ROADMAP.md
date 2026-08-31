@@ -23,6 +23,7 @@ The broader 0.8 product now includes:
 
 - local-first Movie and TV cataloging across multiple sources;
 - TheTVDB and IMDb-backed matching and metadata;
+- multilingual provider identity matching that can use provider aliases, original titles, and official English translations without treating the display title as the only identity;
 - TV expected-episode and missing-episode intelligence;
 - FFprobe-backed technical inspection;
 - Media Intelligence Engine findings with evidence and recommendations;
@@ -185,6 +186,23 @@ Expand the Library filters as the catalog gains richer metadata:
 - make the status filter compose normally with search, genre, source, favorites, tags, match state, episode-gap, and sorting filters rather than behaving as a separate mode;
 - persist TV status as part of Saved Views so users can create reusable views such as “Continuing Shows” or “Ended Shows”;
 - let users remove individual entries from account-synced recent-search history without clearing the entire history, while retaining the existing **Clear search history** action for a full reset.
+
+### Localization and translated metadata
+
+Build on 0.8's provider-identity work by separating **what a title is** from **which language InfoMancer displays it in**.
+
+Candidate scope:
+
+- add a preferred metadata language with an explicit fallback chain such as preferred language → English → provider-original text;
+- retain provider-original/native titles and alternate titles even when a translated title is displayed, so changing language never changes the underlying provider identity;
+- search and match across official aliases, original-language titles, translated titles, and provider-supplied romanizations/transliterations instead of relying on one display string;
+- add transliteration support for non-Latin scripts where providers expose it, while retaining the original script as canonical evidence rather than replacing it with a lossy Romanized form;
+- request translated overviews, episode titles, movie/series titles, and other provider metadata where the provider supports those fields;
+- let Library, Inspector, Review, MIE, search, and matching use the selected display language while keeping original/provider text available in evidence and identity views;
+- make exports capable of carrying the displayed title, original title, language code, aliases, and stable provider IDs so translated presentation does not make exported identity ambiguous;
+- treat application-interface localization separately from metadata localization, allowing InfoMancer's UI language and a library's preferred metadata language to evolve independently;
+- test right-to-left text, CJK, Arabic, Devanagari, diacritics, mixed-script titles, punctuation, and substantially longer translated strings as first-class responsive/accessibility cases;
+- prefer official provider translations. If machine-generated translation is ever added, make it optional, clearly labeled, cacheable, replaceable by provider metadata, and never use it as sole evidence for an automatic identity decision.
 
 ### Visual system and interaction polish
 
