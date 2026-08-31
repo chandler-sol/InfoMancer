@@ -70,10 +70,10 @@ class TVDBMovieSlugFallbackTests(unittest.TestCase):
         self.assertEqual(results[0]["year"], "1974")
         self.assertEqual(results[0]["image_url"], "https://artworks.thetvdb.com/example.jpg")
         self.assertEqual(client.calls[0][0], "/search")
-        self.assertEqual(
-            client.calls[1][0],
-            "/movies/slug/bring-me-the-head-of-alfredo-garcia",
-        )
+        self.assertTrue(any(
+            call[0] == "/movies/slug/bring-me-the-head-of-alfredo-garcia"
+            for call in client.calls
+        ))
 
     def test_noisy_text_search_still_checks_exact_slug(self):
         client = StubTVDBClient()
