@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import unittest
+
 from app.tvdb import TVDBClient
 
 
@@ -34,20 +36,6 @@ class YearRelaxedTVDBClient(TVDBClient):
         if path.startswith("/movies/slug/"):
             return {}
         return {}
-
-
-def test_movie_search_retries_without_year_for_regional_release_difference():
-    client = YearRelaxedTVDBClient()
-
-    results = client.search_movies("The Painted Bird", 2020)
-
-    assert results[0]["id"] == 135322
-    assert results[0]["name"] == "The Painted Bird"
-    assert results[0]["year"] == "2019"
-    assert results[0]["_possible_match"] is True
-    search_calls = [params for path, params in client.calls if path == "/search"]
-    assert {"query": "The Painted Bird", "type": "movie", "year": 2020} in search_calls
-    assert {"query": "The Painted Bird", "type": "movie"} in search_calls
 
 
 class LocalizedTVDBClient(TVDBClient):
@@ -89,17 +77,41 @@ class LocalizedTVDBClient(TVDBClient):
         return {}
 
 
-def test_localized_provider_result_is_reranked_by_english_translation():
-    client = LocalizedTVDBClient()
+class TVDBReleaseYearLocalizationRecoveryTests(unittest.TestCase):
+    def test_movie_search_retries_without_year_for_regional_release_difference(self):
+        client = YearRelaxedTVDBClient()
 
-    results = client.search_movies("The Painted Bird", 2020)
+        results = client.search_movies("The Painted Bird", 2020)
 
-    assert results[0]["id"] == 135322
-    assert results[0]["name"] == "The Painted Bird"
-    assert results[0]["_default_name"] == "Malowany ptak"
-    assert results[0]["_possible_match"] is True
-    assert results[0]["overview"].startswith("A boy wanders")
-    assert any(
-        path == "/movies/135322/translations/eng"
-        for path, _ in client.calls
-    )
+        self.assertEqual(results[0]["id"], 135322)
+        self.assertEqual(results[0]["name"], "The Painted Bird")
+        self.assertEqual(results[0]["year"], "2019")
+        self.assertTrue(results[0]["_possible_match"])
+        search_calls = [params for path, params in client.calls if path == "/search"]
+        self.assertIn(
+            {"query": "The Painted Bird", "type": "movie", "year": 2020},
+            search_calls,
+        )
+        self.assertIn(
+            {"query": "The Painted Bird", "type": "movie"},
+            search_calls,
+        )
+
+    def test_localized_provider_result_is_reranked_by_english_translation(self):
+        client = LocalizedTVDBClient()
+
+        results = client.search_movies("The Painted Bird", 2020)
+
+        self.assertEqual(results[0]["id"], 135322)
+        self.assertEqual(results[0]["name"], "The Painted Bird")
+        self.assertEqual(results[0]["_default_name"], "Malowany ptak")
+        self.assertTrue(results[0]["_possible_match"])
+        self.assertTrue(results[0]["overview"].startswith("A boy wanders"))
+        self.assertTrue(any(
+            path == "/movies/135322/translations/eng"
+            for path, _ in client.calls
+        ))
+
+
+if __name__ == "__main__":
+    unittest.main()
