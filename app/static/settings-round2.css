@@ -1,12 +1,49 @@
 /* 0.8.1 follow-up settings balance and visual-language fixes. */
 
-/* Content hashing should read like one focused workspace, not a full-width
-   dashboard whose controls taper into the left side. */
-body #fingerprints{
-  width:min(100%,1040px);
-  max-width:1040px;
-  justify-self:start;
+/* The System overview has one content-heavy card and two compact cards. A flat
+   three-column row made the compact cards inherit a large empty floor. Pair the
+   compact cards in the left column and let Deployment occupy the taller right
+   column so the first screen reads as an intentional composition. */
+body .system-overview-grid{
+  grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr);
+  grid-template-areas:
+    "storage deployment"
+    "portable deployment";
+  gap:16px;
+  align-items:start;
 }
+body .system-storage-card{
+  grid-area:storage;
+  order:initial;
+  align-self:start;
+  height:auto!important;
+}
+body .system-portable-card{
+  grid-area:portable;
+  order:initial;
+  align-self:start;
+  height:auto!important;
+}
+body .system-deployment-card{
+  grid-area:deployment;
+  order:initial;
+  align-self:stretch;
+  height:100%!important;
+}
+
+/* Functional System sections keep one outer edge. Controls can still use grids
+   internally, but the cards themselves should not suddenly stop 300px before the
+   backup/update sections that follow them. */
+body #fingerprints,
+body #safety{
+  width:100%;
+  max-width:none;
+  justify-self:stretch;
+}
+
+/* Content hashing uses the available card width. Three fields across gives the
+   automatic mode a compact one-row control surface and scheduled mode a balanced
+   two-row layout. */
 body #fingerprints .settings-metrics{
   grid-template-columns:repeat(4,minmax(0,1fr));
 }
@@ -27,27 +64,26 @@ body #fingerprints .hashing-command-bar{
   border-top:1px solid var(--line);
 }
 
-/* Protection modes use compact InfoMancer selection rows. The selected mode
-   gets the familiar lime edge rather than looking like a generic radio card. */
-body #safety{
-  width:min(100%,1040px);
-  max-width:1040px;
-  justify-self:start;
-}
+/* File protection is a three-way selection, so present the modes as one compact
+   chooser across the full card. Titles sit above their descriptions instead of
+   forcing each description through a narrow second column. */
 body #safety .safety-mode-form{
   display:grid;
-  grid-template-columns:minmax(0,1fr);
+  grid-template-columns:repeat(3,minmax(0,1fr))!important;
   width:100%;
-  max-width:920px;
-  gap:8px;
+  max-width:none;
+  gap:10px;
+  align-items:stretch;
 }
 body #safety .safety-mode-choice{
   display:grid;
   grid-template-columns:18px minmax(0,1fr);
   align-items:start;
-  gap:12px;
+  gap:11px;
+  min-width:0;
+  height:100%;
   margin:0;
-  padding:13px 15px;
+  padding:14px 15px;
   border:1px solid var(--line);
   border-radius:7px;
   background:#0e151c;
@@ -69,13 +105,12 @@ body #safety .safety-mode-choice input[type="radio"]{
   margin:2px 0 0;
 }
 body #safety .safety-mode-choice > span{
-  display:grid;
-  grid-template-columns:minmax(150px,.32fr) minmax(0,1fr);
-  gap:18px;
-  align-items:start;
+  display:block!important;
   min-width:0;
 }
 body #safety .safety-mode-choice strong{
+  display:block;
+  margin:0 0 6px;
   font-weight:750;
   line-height:1.3;
 }
@@ -83,12 +118,14 @@ body #safety .safety-mode-choice:has(input:checked) strong{
   color:var(--lime);
 }
 body #safety .safety-mode-choice small{
+  display:block;
   color:var(--muted);
   line-height:1.45;
 }
 body #safety .safety-mode-form > .button{
+  grid-column:1/-1;
   justify-self:start;
-  margin-top:4px;
+  margin-top:2px;
 }
 
 /* Media inspection and export are a matched pair. Keep their hierarchy and
@@ -136,13 +173,33 @@ body #media-information + .settings-card .export-help-note{
 }
 
 @media(max-width:1100px){
-  body #fingerprints,
-  body #safety{
-    width:100%;
-    max-width:none;
+  body .system-overview-grid{
+    grid-template-columns:1fr;
+    grid-template-areas:
+      "storage"
+      "portable"
+      "deployment";
+  }
+  body .system-deployment-card{
+    height:auto!important;
   }
   body #fingerprints .settings-form-grid{
     grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  body #safety .safety-mode-form{
+    grid-template-columns:1fr!important;
+  }
+  body #safety .safety-mode-choice{
+    height:auto;
+  }
+  body #safety .safety-mode-choice > span{
+    display:grid!important;
+    grid-template-columns:minmax(150px,.28fr) minmax(0,1fr);
+    gap:18px;
+    align-items:start;
+  }
+  body #safety .safety-mode-choice strong{
+    margin:0;
   }
 }
 
@@ -154,8 +211,10 @@ body #media-information + .settings-card .export-help-note{
     grid-template-columns:1fr;
   }
   body #safety .safety-mode-choice > span{
-    grid-template-columns:1fr;
-    gap:4px;
+    display:block!important;
+  }
+  body #safety .safety-mode-choice strong{
+    margin-bottom:6px;
   }
   body #media-information + .settings-card .export-actions{
     width:100%;
