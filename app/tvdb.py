@@ -124,13 +124,49 @@ class TVDBClient:
         ).decode("ascii")
         return re.sub(r"[^a-z0-9]+", "", ascii_value.casefold())
 
-    @classmethod
-    def _movie_result_similarity(cls, query: str, result: dict) -> float:
-        """Score whether a TVDB search hit is plausibly related to the query."""
-        expected = cls._compact_movie_title(query)
-        if not expected:
-            return 0.0
+    @staticmethod
+    def _movie_title_words(value: str) -> list[str]:
+        """Return normalized title words while preserving their order."""
+        ascii_value = unicodedata.normalize("NFKD", str(value or "")).encode(
+            "ascii", "ignore"
+        ).decode("ascii")
+        return re.findall(r"[a-z0-9]+", ascii_value.casefold())
 
+    @classmethod
+    def _article_free_movie_title(cls, value: str) -> str:
+        """Normalize leading English articles away for search equivalence.
+
+        TVDB can index ``The Painted Bird`` while a user searches ``painted bird``.
+        Treating those as the same title improves ranking without making unrelated
+        fuzzy matches look exact.
+        """
+        words = cls._movie_title_words(value)
+        if words and words[0] in {"a", "an", "the"}:
+            words = words[1:]
+        return "".join(words)
+
+    @classmethod
+    def _movie_slug_candidates(cls, query: str) -> list[str]:
+        """Build canonical slug candidates for a strict miss.
+
+        The original query is always tried first. If it omits a leading article,
+        try a conservative ``the`` variant as a review-only fallback. This handles
+        common provider indexing differences such as ``painted bird`` versus
+        ``The Painted Bird`` without broadly rewriting the search text.
+        """
+        original = cls._movie_slug_candidate(query)
+        if not original:
+            return []
+        candidates = [original]
+        words = cls._movie_title_words(query)
+        if words and words[0] not in {"a", "an", "the"}:
+            with_article = cls._movie_slug_candidate(f"the {query}")
+            if with_article and with_article not in candidates:
+                candidates.append(with_article)
+        return candidates
+
+    @classmethod
+    def _movie_result_names(cls, result: dict) -> list[str]:
         names: list[str] = []
         for key in ("name", "title"):
             if result.get(key):
@@ -142,13 +178,70 @@ class TVDBClient:
                 for key in ("name", "title"):
                     if alias.get(key):
                         names.append(str(alias[key]))
+        return names
+
+    @classmethod
+    def _movie_result_similarity(cls, query: str, result: dict) -> float:
+        """Score whether a TVDB search hit is plausibly related to the query."""
+        expected = cls._compact_movie_title(query)
+        expected_article_free = cls._article_free_movie_title(query)
+        expected_forms = {
+            value for value in (expected, expected_article_free) if value
+        }
+        if not expected_forms:
+            return 0.0
 
         best = 0.0
-        for name in names:
+        for name in cls._movie_result_names(result):
             offered = cls._compact_movie_title(name)
-            if offered:
-                best = max(best, SequenceMatcher(None, expected, offered).ratio())
+            offered_article_free = cls._article_free_movie_title(name)
+            offered_forms = {
+                value for value in (offered, offered_article_free) if value
+            }
+            if expected_forms & offered_forms:
+                return 1.0
+            for expected_form in expected_forms:
+                for offered_form in offered_forms:
+                    best = max(
+                        best,
+                        SequenceMatcher(None, expected_form, offered_form).ratio(),
+                    )
         return best
+
+    @staticmethod
+    def _movie_result_year(result: dict) -> int | None:
+        for key in ("year", "releaseYear", "firstAired", "release_date"):
+            value = str(result.get(key) or "")
+            match = re.search(r"\b((?:19|20)\d{2})\b", value)
+            if match:
+                return int(match.group(1))
+        return None
+
+    @classmethod
+    def _rank_movie_results(
+        cls, query: str, year: int | None, results: list[dict],
+    ) -> list[dict]:
+        """Put the most title-relevant TVDB movie candidates first.
+
+        TVDB search order is not a relevance guarantee. InfoMancer therefore
+        prefers an exact normalized title, then title similarity, then the requested
+        year. Provider order is retained as the final stable tiebreaker.
+        """
+        ranked: list[tuple[tuple[float, float, int, int, int], dict]] = []
+        for index, result in enumerate(results):
+            similarity = cls._movie_result_similarity(query, result)
+            candidate_year = cls._movie_result_year(result)
+            year_exact = int(bool(year and candidate_year == year))
+            year_near = int(bool(
+                year and candidate_year is not None
+                and abs(candidate_year - year) == 1
+            ))
+            exact_title = float(similarity >= 0.999999)
+            ranked.append((
+                (exact_title, similarity, year_exact, year_near, -index), result
+            ))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        return [result for _, result in ranked]
 
     @staticmethod
     def _compound_query_candidates(query: str) -> list[str]:
@@ -210,26 +303,34 @@ class TVDBClient:
 
         TVDB can return unrelated rows for a title that is still available through
         its canonical movie slug. Treat a one-year difference as a release-market
-        variance rather than a hard miss, but keep it flagged for review.
+        variance rather than a hard miss, but keep it flagged for review. A leading
+        article inferred by InfoMancer is also always review-only.
         """
-        slug = self._movie_slug_candidate(query)
-        if not slug:
+        slug_candidates = self._movie_slug_candidates(query)
+        if not slug_candidates:
             return {}
-        record = self.movie_by_slug(slug)
-        if not record:
-            return {}
-        if self._movie_result_similarity(query, record) < MOVIE_SEARCH_PLAUSIBLE_SCORE:
-            return {}
+        original_slug = slug_candidates[0]
+        for slug in slug_candidates:
+            record = self.movie_by_slug(slug)
+            if not record:
+                continue
+            if self._movie_result_similarity(query, record) < MOVIE_SEARCH_PLAUSIBLE_SCORE:
+                continue
 
-        record_year_text = str(record.get("year") or "")[:4]
-        if year and record_year_text.isdigit():
-            year_delta = abs(int(record_year_text) - year)
-            if year_delta > 1:
-                return {}
-            if year_delta == 1:
+            inferred_article = slug != original_slug
+            record_year = self._movie_result_year(record)
+            if year and record_year is not None:
+                year_delta = abs(record_year - year)
+                if year_delta > 1:
+                    continue
+                if year_delta == 1:
+                    record["_possible_match"] = True
+                    record.setdefault("_search_query", query)
+            if inferred_article:
                 record["_possible_match"] = True
                 record.setdefault("_search_query", query)
-        return record
+            return record
+        return {}
 
     def movie_id_from_reference(self, reference: str) -> int:
         """Resolve a numeric TVDB movie ID or canonical TVDB movie-page link."""
@@ -265,12 +366,24 @@ class TVDBClient:
         if year:
             params["year"] = year
         payload = self._get("/search", params)
-        results = payload.get("data") or []
+        results = self._rank_movie_results(query, year, payload.get("data") or [])
         if results:
-            best_strict_score = max(
-                (self._movie_result_similarity(query, result) for result in results),
-                default=0.0,
-            )
+            best_strict_score = self._movie_result_similarity(query, results[0])
+            if best_strict_score >= 0.999999:
+                return results
+
+            # A provider page can contain plausible text while still omitting the
+            # canonical title. Prefer an exact-looking slug before accepting fuzzy
+            # provider order. This is particularly important for automatic matching.
+            slug_record = self._movie_by_query_slug(query, year)
+            if slug_record:
+                slug_id = str(slug_record.get("tvdb_id") or slug_record.get("id") or "")
+                remaining = [
+                    result for result in results
+                    if str(result.get("tvdb_id") or result.get("id") or "") != slug_id
+                ]
+                return [slug_record, *remaining]
+
             if best_strict_score >= MOVIE_SEARCH_PLAUSIBLE_SCORE:
                 return results
 
@@ -283,8 +396,10 @@ class TVDBClient:
                 compound_params = {"query": compound_query, "type": "movie"}
                 if year:
                     compound_params["year"] = year
-                compound_results = (
-                    self._get("/search", compound_params).get("data") or []
+                compound_results = self._rank_movie_results(
+                    query,
+                    year,
+                    self._get("/search", compound_params).get("data") or [],
                 )
                 plausible_results = [
                     result for result in compound_results
@@ -297,18 +412,6 @@ class TVDBClient:
                         result["_possible_match"] = True
                     return plausible_results + results
 
-            # TVDB sometimes returns a populated but entirely unrelated search page.
-            # Before accepting those rows as the best available candidates, check the
-            # exact canonical slug. This is the important distinction between
-            # "provider returned rows" and "provider found this title".
-            slug_record = self._movie_by_query_slug(query, year)
-            if slug_record:
-                slug_id = str(slug_record.get("tvdb_id") or slug_record.get("id") or "")
-                remaining = [
-                    result for result in results
-                    if str(result.get("tvdb_id") or result.get("id") or "") != slug_id
-                ]
-                return [slug_record, *remaining]
             return results
 
         # Recover a narrow class of titles damaged by the pre-0.8.1 scanner's
@@ -320,7 +423,11 @@ class TVDBClient:
             decimal_params = {"query": decimal_query, "type": "movie"}
             if year:
                 decimal_params["year"] = year
-            decimal_results = self._get("/search", decimal_params).get("data") or []
+            decimal_results = self._rank_movie_results(
+                query,
+                year,
+                self._get("/search", decimal_params).get("data") or [],
+            )
             if decimal_results:
                 for result in decimal_results:
                     result.setdefault("_search_query", decimal_query)
@@ -330,7 +437,7 @@ class TVDBClient:
         # TVDB's text-search index can occasionally miss a movie that its website
         # and canonical movie endpoint both know about. On a strict search miss,
         # try the title as a canonical slug before InfoMancer gives up. This keeps
-        # the fallback exact and avoids widening every successful provider search.
+        # the fallback narrow while also tolerating a missing leading "The".
         slug_query = decimal_query or query
         record = self._movie_by_query_slug(slug_query, year)
         if not record:
