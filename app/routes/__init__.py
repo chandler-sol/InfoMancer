@@ -3,6 +3,7 @@ from __future__ import annotations
 from .security_hardening import build_router as build_security_hardening_router
 from .resilience import build_router as build_resilience_router
 from .final_polish import build_router as build_final_polish_router
+from .health_action_routing import build_router as build_health_action_routing_router
 from .performance import build_router as build_performance_router
 from .system import build_router as build_system_router
 from .operations import build_router as build_operations_router
@@ -37,6 +38,10 @@ ROUTER_BUILDERS = (
     # Small release-polish hooks replace live helpers before the domain routes use
     # them, while keeping the existing public route contracts intact.
     build_final_polish_router,
+    # Library Health findings can carry both source and title ids. Install the UI
+    # destination policy before review/domain routes so title-specific actions do
+    # not fall through to the generic Sources destination.
+    build_health_action_routing_router,
     # The single-title metadata action must own its URL before any broader or
     # legacy route bundle is registered. The Metadata maintenance UI expects this
     # handler to finish the bounded TVDB refresh inside the request and return a
