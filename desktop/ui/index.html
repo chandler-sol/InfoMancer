@@ -9,6 +9,7 @@
     * { box-sizing:border-box; }
     html,body { margin:0; min-height:100%; background:var(--bg); color:var(--text); font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
     body { min-height:100vh; display:grid; place-items:center; background:radial-gradient(circle at 25% 15%,rgba(81,214,230,.11),transparent 34rem),radial-gradient(circle at 80% 88%,rgba(185,245,66,.055),transparent 32rem),var(--bg); }
+    [hidden] { display:none !important; }
     .shell { width:min(980px,calc(100vw - 48px)); padding:34px 0 42px; }
     .brand { display:flex; align-items:center; gap:13px; margin-bottom:34px; }
     .mark { display:grid; width:44px; height:44px; place-items:center; border:1px solid rgba(81,214,230,.38); border-radius:12px; background:linear-gradient(145deg,rgba(81,214,230,.13),rgba(185,245,66,.045)); color:var(--cyan); font-weight:900; letter-spacing:-.08em; }
@@ -31,6 +32,7 @@
     button { border:0; border-radius:9px; padding:10px 13px; cursor:pointer; font-size:11px; font-weight:800; }
     button.primary { width:100%; background:var(--lime); color:#0a0e0c; }
     button.secondary { background:#17232d; color:var(--text); }
+    button.ghost { background:transparent; color:var(--muted); }
     button:disabled { cursor:wait; opacity:.55; }
     .remote-row { display:grid; grid-template-columns:1fr auto; gap:7px; }
     input { min-width:0; border:1px solid #30404d; border-radius:9px; padding:9px 10px; background:#091016; color:var(--text); outline:none; font-size:11px; }
@@ -51,6 +53,16 @@
     #install-update { display:none; }
     #install-update.visible { display:inline-block; }
     footer { margin-top:18px; color:#61707d; font-size:9px; line-height:1.5; }
+    .startup-splash { width:min(560px,calc(100vw - 48px)); text-align:center; }
+    .startup-logo { width:min(390px,82vw); height:auto; display:block; margin:0 auto 30px; filter:drop-shadow(0 18px 40px rgba(0,0,0,.3)); }
+    .startup-indicator { position:relative; width:44px; height:44px; margin:0 auto 20px; border:1px solid rgba(81,214,230,.2); border-radius:50%; }
+    .startup-indicator::before { content:""; position:absolute; inset:5px; border:2px solid rgba(81,214,230,.12); border-top-color:var(--lime); border-radius:50%; animation:startup-spin .9s linear infinite; }
+    .startup-copy strong { display:block; font-size:14px; letter-spacing:.01em; }
+    .startup-copy span { display:block; margin-top:7px; color:var(--muted); font-size:11px; line-height:1.5; }
+    .startup-actions { min-height:34px; margin-top:24px; display:flex; justify-content:center; }
+    .startup-actions button { padding:8px 11px; font-size:10px; }
+    @keyframes startup-spin { to { transform:rotate(360deg); } }
+    @media(prefers-reduced-motion:reduce) { .startup-indicator::before { animation:none; border-color:var(--lime); } }
     @media(min-width:1600px) and (min-height:900px) {
       .shell { width:min(1180px,calc(100vw - 72px)); padding:44px 0 52px; }
       .brand { gap:15px; margin-bottom:40px; }
@@ -80,14 +92,25 @@
       .update-card strong { font-size:13px; }
       .update-card p { font-size:12px; }
       footer { margin-top:22px; font-size:10px; }
+      .startup-logo { width:460px; margin-bottom:36px; }
+      .startup-indicator { width:50px; height:50px; }
+      .startup-copy strong { font-size:16px; }
+      .startup-copy span { font-size:12px; }
     }
     @media(max-width:720px) { .modes{grid-template-columns:1fr}.mode{min-height:auto}.update-card{grid-template-columns:1fr}.update-actions{justify-content:flex-start} }
   </style>
 </head>
 <body>
-  <main class="shell">
+  <section id="startup-splash" class="startup-splash" aria-live="polite">
+    <img class="startup-logo" src="infomancer-lockup.svg" alt="InfoMancer">
+    <div class="startup-indicator" aria-hidden="true"></div>
+    <div class="startup-copy"><strong id="startup-phase">Starting InfoMancer</strong><span id="startup-detail">Preparing the desktop workspace...</span></div>
+    <div class="startup-actions"><button id="change-installation" class="ghost" type="button" hidden>Change installation</button></div>
+  </section>
+
+  <main id="launcher-shell" class="shell" hidden>
     <div class="brand"><div class="mark">IM</div><div class="brand-copy"><strong>InfoMancer</strong><span>Windows Desktop</span></div><span class="alpha">0.8 ALPHA</span></div>
-    <header><p>CHOOSE HOW INFOMANCER RUNS</p><h1>Your Workspace, without the browser.</h1><p>Run the InfoMancer core on this PC or use the desktop shell as a client for an existing server.</p></header>
+    <header><p>CHOOSE HOW INFOMANCER RUNS</p><h1>Your Workspace, without the browser.</h1><p>Run the InfoMancer core on this PC or use the desktop shell as a client for an existing server. InfoMancer will remember this choice for future launches.</p></header>
     <section class="modes">
       <article class="mode recommended">
         <div class="mode-label"><span>LOCAL DESKTOP</span><b>STANDALONE</b></div><h2>Run on this computer</h2><p>Starts a bundled InfoMancer core on loopback. Your database stays in Windows application data while media can remain on local disks or network shares.</p>
@@ -104,18 +127,145 @@
   </main>
   <script>
     const invoke = window.__TAURI__.core.invoke;
-    const localButton = document.getElementById('start-local'); const localStatus = document.getElementById('local-status'); const tokenPanel = document.getElementById('token-panel'); const tokenValue = document.getElementById('bootstrap-token'); const openSetup = document.getElementById('open-setup'); let startup = null;
+    const TARGET_KEY = 'infomancer.desktop.launch-target.v1';
+    const AUTO_LAUNCH_DELAY_MS = 550;
+    const splash = document.getElementById('startup-splash');
+    const startupPhase = document.getElementById('startup-phase');
+    const startupDetail = document.getElementById('startup-detail');
+    const changeInstallation = document.getElementById('change-installation');
+    const launcherShell = document.getElementById('launcher-shell');
+    const localButton = document.getElementById('start-local');
+    const localStatus = document.getElementById('local-status');
+    const tokenPanel = document.getElementById('token-panel');
+    const tokenValue = document.getElementById('bootstrap-token');
+    const openSetup = document.getElementById('open-setup');
+    const remoteInput = document.getElementById('server-url');
+    const remoteStatus = document.getElementById('remote-status');
+    let startup = null;
+    let launchTimer = null;
+    let launchAttempt = 0;
+
     const showError = (element,error) => { element.classList.add('error'); element.textContent = String(error || 'Something went wrong.'); };
-    localButton.addEventListener('click', async () => { localButton.disabled=true; localStatus.classList.remove('error'); localStatus.textContent='Starting the local InfoMancer core...'; try { startup=await invoke('start_local'); if(startup.first_run){tokenValue.textContent=startup.bootstrap_token;tokenPanel.classList.add('visible');localStatus.textContent='Local core is ready. Complete first-run setup to continue.';}else{localStatus.textContent='Local core ready. Opening Workspace...';window.location.replace(startup.url);}} catch(error){showError(localStatus,error);localButton.disabled=false;} });
+    const showSplash = (phase, detail, canChange = true) => {
+      splash.hidden = false;
+      launcherShell.hidden = true;
+      startupPhase.textContent = phase;
+      startupDetail.textContent = detail;
+      changeInstallation.hidden = !canChange;
+    };
+    const showChooser = () => {
+      window.clearTimeout(launchTimer);
+      launchTimer = null;
+      splash.hidden = true;
+      launcherShell.hidden = false;
+      changeInstallation.hidden = true;
+    };
+    const rememberTarget = target => {
+      try { window.localStorage.setItem(TARGET_KEY, JSON.stringify(target)); } catch (_) {}
+    };
+    const forgetTarget = () => {
+      try { window.localStorage.removeItem(TARGET_KEY); } catch (_) {}
+    };
+    const savedTarget = () => {
+      try {
+        const target = JSON.parse(window.localStorage.getItem(TARGET_KEY) || 'null');
+        if (target?.kind === 'local') return {kind:'local'};
+        if (target?.kind === 'remote' && typeof target.url === 'string' && target.url.trim()) return {kind:'remote', url:target.url.trim()};
+      } catch (_) {}
+      return null;
+    };
+    const cancelLaunch = () => {
+      launchAttempt += 1;
+      window.clearTimeout(launchTimer);
+      launchTimer = null;
+      forgetTarget();
+      showChooser();
+    };
+
+    const openLocal = async ({remember = true} = {}) => {
+      const attempt = ++launchAttempt;
+      if (remember) rememberTarget({kind:'local'});
+      localButton.disabled = true;
+      localStatus.classList.remove('error');
+      tokenPanel.classList.remove('visible');
+      showSplash('Starting InfoMancer', 'Opening the local catalog and preparing Workspace...');
+      try {
+        const result = await invoke('start_local');
+        if (attempt !== launchAttempt) return;
+        startup = result;
+        if (startup.first_run) {
+          showChooser();
+          tokenValue.textContent = startup.bootstrap_token;
+          tokenPanel.classList.add('visible');
+          localStatus.textContent = 'Local core is ready. Complete first-run setup to continue.';
+        } else {
+          startupPhase.textContent = 'Preparing Workspace';
+          startupDetail.textContent = 'Local core is ready. Opening your library...';
+          window.location.replace(startup.url);
+        }
+      } catch (error) {
+        if (attempt !== launchAttempt) return;
+        showChooser();
+        showError(localStatus, error);
+        localButton.disabled = false;
+      }
+    };
+
+    const openRemote = async (rawUrl, {remember = true} = {}) => {
+      const attempt = ++launchAttempt;
+      const button = document.getElementById('connect-server');
+      button.disabled = true;
+      remoteStatus.classList.remove('error');
+      showSplash('Connecting to InfoMancer', 'Opening the saved server installation...');
+      try {
+        const normalized = await invoke('normalize_remote', {url:rawUrl});
+        if (attempt !== launchAttempt) return;
+        if (remember) rememberTarget({kind:'remote', url:normalized});
+        startupPhase.textContent = 'Preparing Workspace';
+        startupDetail.textContent = 'Server target is ready. Opening InfoMancer...';
+        window.location.assign(normalized);
+      } catch (error) {
+        if (attempt !== launchAttempt) return;
+        showChooser();
+        remoteInput.value = rawUrl || '';
+        showError(remoteStatus, error);
+        button.disabled = false;
+      }
+    };
+
+    localButton.addEventListener('click', () => openLocal());
+    const connect = () => openRemote(remoteInput.value);
+    document.getElementById('connect-server').addEventListener('click', connect);
+    remoteInput.addEventListener('keydown', event => { if (event.key === 'Enter') connect(); });
+    changeInstallation.addEventListener('click', cancelLaunch);
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !splash.hidden && !changeInstallation.hidden) cancelLaunch();
+    });
+
     const fallbackCopy = text => { const area=document.createElement('textarea'); area.value=text; area.setAttribute('readonly',''); area.style.position='fixed'; area.style.opacity='0'; document.body.appendChild(area); area.select(); let copied=false; try { copied=document.execCommand('copy'); } catch(_) {} area.remove(); return copied; };
     document.getElementById('copy-token').addEventListener('click', async()=>{ if(!startup)return; const button=document.getElementById('copy-token'); let copied=false; try { if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(startup.bootstrap_token);copied=true;} } catch(_) {} if(!copied) copied=fallbackCopy(startup.bootstrap_token); button.textContent=copied?'Copied':'Select & copy'; if(!copied){const selection=window.getSelection();const range=document.createRange();range.selectNodeContents(tokenValue);selection.removeAllRanges();selection.addRange(range);} });
     tokenValue.addEventListener('click',()=>{const selection=window.getSelection();const range=document.createRange();range.selectNodeContents(tokenValue);selection.removeAllRanges();selection.addRange(range);});
     openSetup.addEventListener('click',()=>{if(startup)window.location.assign(startup.setup_url);});
-    const connect=async()=>{const input=document.getElementById('server-url'),status=document.getElementById('remote-status'),button=document.getElementById('connect-server');button.disabled=true;status.classList.remove('error');status.textContent='Checking server address...';try{const normalized=await invoke('normalize_remote',{url:input.value});status.textContent='Opening InfoMancer...';window.location.assign(normalized);}catch(error){showError(status,error);button.disabled=false;}};
-    document.getElementById('connect-server').addEventListener('click',connect); document.getElementById('server-url').addEventListener('keydown',event=>{if(event.key==='Enter')connect();});
+
     const updateStatus=document.getElementById('update-status'),checkUpdate=document.getElementById('check-update'),installUpdate=document.getElementById('install-update');
     const check=async()=>{checkUpdate.disabled=true;installUpdate.classList.remove('visible');updateStatus.textContent='Checking the signed GitHub release channel...';try{const result=await invoke('check_for_update');updateStatus.textContent=result.message;if(result.available)installUpdate.classList.add('visible');}catch(error){updateStatus.textContent=String(error);}finally{checkUpdate.disabled=false;}};
-    checkUpdate.addEventListener('click',check); installUpdate.addEventListener('click',async()=>{installUpdate.disabled=true;updateStatus.textContent='Downloading and verifying the signed update...';try{const installed=await invoke('install_update');if(!installed){updateStatus.textContent='InfoMancer is already up to date.';installUpdate.classList.remove('visible');}else{updateStatus.textContent='Installing update...';}}catch(error){updateStatus.textContent=String(error);installUpdate.disabled=false;}}); check();
+    checkUpdate.addEventListener('click',check); installUpdate.addEventListener('click',async()=>{installUpdate.disabled=true;updateStatus.textContent='Downloading and verifying the signed update...';try{const installed=await invoke('install_update');if(!installed){updateStatus.textContent='InfoMancer is already up to date.';installUpdate.classList.remove('visible');}else{updateStatus.textContent='Installing update...';}}catch(error){updateStatus.textContent=String(error);installUpdate.disabled=false;}});
+
+    const forceChooser = new URLSearchParams(window.location.search).get('choose') === '1';
+    const target = forceChooser ? null : savedTarget();
+    if (!target) {
+      if (forceChooser) forgetTarget();
+      showChooser();
+      check();
+    } else {
+      const description = target.kind === 'local' ? 'Preparing your local installation...' : 'Preparing your saved server installation...';
+      showSplash('Starting InfoMancer', description, true);
+      launchTimer = window.setTimeout(() => {
+        launchTimer = null;
+        if (target.kind === 'local') openLocal({remember:false});
+        else openRemote(target.url, {remember:false});
+      }, AUTO_LAUNCH_DELAY_MS);
+    }
   </script>
 </body>
 </html>
