@@ -11,6 +11,7 @@ import httpx
 
 BASE_URL = "https://api4.thetvdb.com/v4"
 MOVIE_SEARCH_PLAUSIBLE_SCORE = 0.65
+MOVIE_SEARCH_ENRICH_LIMIT = 8
 
 
 class TVDBError(RuntimeError):
@@ -218,6 +219,18 @@ class TVDBClient:
         return None
 
     @classmethod
+    def _movie_year_compatible(
+        cls, result: dict, year: int | None, *, tolerance: int = 1,
+    ) -> bool:
+        """Allow unknown years and small release-market differences in fallbacks."""
+        if not year:
+            return True
+        candidate_year = cls._movie_result_year(result)
+        if candidate_year is None:
+            return True
+        return abs(candidate_year - year) <= tolerance
+
+    @classmethod
     def _rank_movie_results(
         cls, query: str, year: int | None, results: list[dict],
     ) -> list[dict]:
@@ -242,6 +255,31 @@ class TVDBClient:
             ))
         ranked.sort(key=lambda item: item[0], reverse=True)
         return [result for _, result in ranked]
+
+    @staticmethod
+    def _movie_result_key(result: dict) -> tuple[str, str, str]:
+        """Build a stable de-duplication key for mixed TVDB search fallbacks."""
+        movie_id = str(result.get("tvdb_id") or result.get("id") or "").strip()
+        if movie_id:
+            return ("id", movie_id, "")
+        return (
+            "title",
+            str(result.get("name") or result.get("title") or "").casefold(),
+            str(TVDBClient._movie_result_year(result) or ""),
+        )
+
+    @classmethod
+    def _merge_movie_results(cls, *groups: list[dict]) -> list[dict]:
+        merged: list[dict] = []
+        seen: set[tuple[str, str, str]] = set()
+        for group in groups:
+            for result in group:
+                key = cls._movie_result_key(result)
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(result)
+        return merged
 
     @staticmethod
     def _compound_query_candidates(query: str) -> list[str]:
@@ -332,6 +370,43 @@ class TVDBClient:
             return record
         return {}
 
+    def _english_enrich_movie_results(
+        self, query: str, year: int | None, results: list[dict],
+    ) -> list[dict]:
+        """Resolve localized TVDB search labels through English translations.
+
+        TVDB's search endpoint can return a valid movie only under a regional title
+        even when an English translation exists. That makes a correct result look
+        unrelated to the user's query. Only perform these extra translation lookups
+        after the normal and year-relaxed searches are both poor, and cap the work so
+        one pathological title cannot consume an unbounded number of provider calls.
+        """
+        enriched: list[dict] = []
+        for result in results[:MOVIE_SEARCH_ENRICH_LIMIT]:
+            candidate = dict(result)
+            movie_id = candidate.get("tvdb_id") or candidate.get("id")
+            try:
+                numeric_id = int(movie_id)
+            except (TypeError, ValueError):
+                enriched.append(candidate)
+                continue
+            try:
+                translation = self.translation("movie", numeric_id, "eng")
+            except TVDBError:
+                translation = {}
+            if translation.get("name"):
+                candidate["_default_name"] = candidate.get("name")
+                candidate["name"] = translation["name"]
+                if translation.get("overview"):
+                    candidate["overview"] = translation["overview"]
+                candidate["_english_translation"] = translation
+                candidate["_possible_match"] = True
+                candidate.setdefault("_search_query", query)
+            enriched.append(candidate)
+        if len(results) > MOVIE_SEARCH_ENRICH_LIMIT:
+            enriched.extend(results[MOVIE_SEARCH_ENRICH_LIMIT:])
+        return self._rank_movie_results(query, year, enriched)
+
     def movie_id_from_reference(self, reference: str) -> int:
         """Resolve a numeric TVDB movie ID or canonical TVDB movie-page link."""
         value = reference.strip()
@@ -387,6 +462,46 @@ class TVDBClient:
             if best_strict_score >= MOVIE_SEARCH_PLAUSIBLE_SCORE:
                 return results
 
+            # Release-market years are not canonical identity. A local filename can
+            # legitimately say 2020 while TVDB catalogs the festival/theatrical movie
+            # as 2019. If the year-filtered search is nonsense, retry the same title
+            # once without the year before changing the query itself.
+            if year:
+                relaxed_payload = self._get(
+                    "/search", {"query": query, "type": "movie"}
+                )
+                relaxed = self._rank_movie_results(
+                    query, year, relaxed_payload.get("data") or []
+                )
+                plausible_relaxed = [
+                    result for result in relaxed
+                    if self._movie_result_similarity(query, result)
+                    >= MOVIE_SEARCH_PLAUSIBLE_SCORE
+                    and self._movie_year_compatible(result, year)
+                ]
+                if plausible_relaxed:
+                    for result in plausible_relaxed:
+                        candidate_year = self._movie_result_year(result)
+                        if candidate_year != year:
+                            result["_possible_match"] = True
+                            result.setdefault("_search_query", query)
+                    return self._merge_movie_results(plausible_relaxed, results)
+                results = self._merge_movie_results(relaxed, results)
+
+            # If TVDB returned the right record under a localized title, its English
+            # translation can recover the identity without broad fuzzy guessing.
+            # This is intentionally a bounded fallback and every translated hit stays
+            # review-only rather than being silently auto-applied.
+            enriched = self._english_enrich_movie_results(query, year, results)
+            plausible_enriched = [
+                result for result in enriched
+                if self._movie_result_similarity(query, result)
+                >= MOVIE_SEARCH_PLAUSIBLE_SCORE
+                and self._movie_year_compatible(result, year)
+            ]
+            if plausible_enriched:
+                return self._merge_movie_results(plausible_enriched, enriched)
+
             # A non-empty provider response is not necessarily a useful response.
             # When every strict hit is clearly unrelated, retry a few conservative
             # adjacent-word compounds. This recovers titles such as
@@ -405,6 +520,7 @@ class TVDBClient:
                     result for result in compound_results
                     if self._movie_result_similarity(query, result)
                     >= MOVIE_SEARCH_PLAUSIBLE_SCORE
+                    and self._movie_year_compatible(result, year)
                 ]
                 if plausible_results:
                     for result in plausible_results:
@@ -433,6 +549,38 @@ class TVDBClient:
                     result.setdefault("_search_query", decimal_query)
                     result["_possible_match"] = True
                 return decimal_results
+
+        # A year-filtered search can also be empty solely because the catalog year is
+        # a later regional release. Retry the original query without year before the
+        # canonical-slug fallback so manual search behaves like a human title search.
+        if year:
+            relaxed = self._rank_movie_results(
+                query,
+                year,
+                self._get("/search", {"query": query, "type": "movie"}).get("data") or [],
+            )
+            plausible_relaxed = [
+                result for result in relaxed
+                if self._movie_result_similarity(query, result)
+                >= MOVIE_SEARCH_PLAUSIBLE_SCORE
+                and self._movie_year_compatible(result, year)
+            ]
+            if plausible_relaxed:
+                for result in plausible_relaxed:
+                    if self._movie_result_year(result) != year:
+                        result["_possible_match"] = True
+                        result.setdefault("_search_query", query)
+                return plausible_relaxed
+            if relaxed:
+                enriched = self._english_enrich_movie_results(query, year, relaxed)
+                plausible_enriched = [
+                    result for result in enriched
+                    if self._movie_result_similarity(query, result)
+                    >= MOVIE_SEARCH_PLAUSIBLE_SCORE
+                    and self._movie_year_compatible(result, year)
+                ]
+                if plausible_enriched:
+                    return plausible_enriched
 
         # TVDB's text-search index can occasionally miss a movie that its website
         # and canonical movie endpoint both know about. On a strict search miss,
