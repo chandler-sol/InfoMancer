@@ -83,7 +83,7 @@ class SourceGuardNetworkWarningTests(unittest.TestCase):
         self.assertEqual(self.root_row()["health_status"], "degraded")
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM files").fetchone()[0], 2)
 
-    def test_other_read_errors_remain_blocking_even_when_catalog_is_visible(self):
+    def test_other_read_errors_are_warnings_when_catalog_is_fully_visible(self):
         media = self.root / "Arrival (2016).mkv"
         media.write_bytes(b"arrival")
         scan_root(self.conn, self.root_row())
@@ -94,10 +94,27 @@ class SourceGuardNetworkWarningTests(unittest.TestCase):
         ):
             result = scan_root(self.conn, self.root_row())
 
+        self.assertEqual(result["source_status"], "healthy")
+        self.assertEqual(result["read_errors"], 1)
+        self.assertEqual(result["read_warnings"], 1)
+        self.assertIn("Permission denied", result["read_error_detail"])
+        self.assertEqual(self.root_row()["health_status"], "healthy")
+        self.assertEqual(self.root_row()["guard_preserved_count"], 0)
+
+    def test_read_error_on_first_scan_remains_blocking_without_a_catalog_baseline(self):
+        media = self.root / "Arrival (2016).mkv"
+        media.write_bytes(b"arrival")
+
+        with patch(
+            "app.scanner._walk_files",
+            self.walk_with_warning([media], "Permission denied while reading a directory"),
+        ):
+            result = scan_root(self.conn, self.root_row())
+
         self.assertEqual(result["source_status"], "degraded")
         self.assertEqual(result["read_errors"], 1)
         self.assertEqual(result["read_warnings"], 0)
-        self.assertEqual(self.root_row()["health_status"], "degraded")
+        self.assertIn("Permission denied", self.root_row()["last_error"])
 
 
 if __name__ == "__main__":
