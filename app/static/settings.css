@@ -49,3 +49,74 @@ body .settings-section-nav{min-height:54px;margin:0 0 18px;padding:5px;gap:5px;b
 body .settings-section-nav a{padding:10px 14px;border:1px solid transparent;border-radius:6px;color:#9eafbf;font-size:16px;font-weight:600;line-height:1.15}
 body .settings-section-nav a.active{border-color:#4a672d;background:#162014;color:var(--lime);font-weight:750;box-shadow:inset 0 0 0 1px rgba(185,245,66,.04)}
 @media(max-width:760px){body:has(.settings-section-nav) main.shell{padding-top:20px}body .settings-section-nav{margin:0 0 14px;padding:4px}body .settings-section-nav a{padding:9px 11px;font-size:15px}}
+
+/* 0.8.1 Settings punch-list fixes. */
+body .settings-page-grid:has(.system-overview-grid) > #media-information,
+body .settings-page-grid:has(.system-overview-grid) > #media-information + .settings-card{
+  align-self:stretch;
+}
+body #media-information + .settings-card .export-help-note{
+  margin-top:auto;
+}
+
+body .settings-form > label.checkbox-label,
+body .settings-form > label.scheduled-checkbox{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+}
+body .settings-form > label.checkbox-label input[type="checkbox"],
+body .settings-form > label.scheduled-checkbox input[type="checkbox"]{
+  flex:0 0 auto;
+  width:16px;
+  height:16px;
+  margin:2px 0 0;
+}
+
+.storage-location-chips{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin:0 0 8px;
+}
+.storage-location-chip{
+  display:inline-flex;
+  align-items:center;
+  min-width:0;
+  padding:5px 8px;
+  border:1px solid var(--line);
+  border-radius:6px;
+  background:#0e151c;
+  text-decoration:none;
+}
+.storage-location-chip code{
+  color:var(--cyan);
+  white-space:nowrap;
+}
+.storage-location-chip:hover,
+.storage-location-chip:focus-visible{
+  border-color:#4d682b;
+  background:#152213;
+  outline:none;
+}
+.storage-location-chip:hover code,
+.storage-location-chip:focus-visible code{
+  color:var(--lime);
+}
+.storage-location-chips + small{
+  display:block;
+}
+
+body .scheduled-task-layout{
+  grid-template-columns:minmax(0,1fr);
+  width:min(100%,1040px);
+  max-width:1040px;
+  gap:16px;
+  align-items:start;
+}
+body .scheduled-fingerprint-card{
+  grid-column:auto;
+}
+body .scheduled-task-card:not(.scheduled-fingerprint-card){
+  height:auto;
+}
