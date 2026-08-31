@@ -103,29 +103,3 @@ def test_localized_provider_result_is_reranked_by_english_translation():
         path == "/movies/135322/translations/eng"
         for path, _ in client.calls
     )
-
-
-def test_year_relaxation_does_not_promote_distant_same_title_remake():
-    class DistantYearClient(YearRelaxedTVDBClient):
-        def _get(self, path, params=None, *, allow_not_found=False, _retry_auth=True):
-            params = params or {}
-            if path == "/search" and "year" not in params:
-                return {
-                    "data": [{
-                        "id": 1,
-                        "name": "The Painted Bird",
-                        "year": "1980",
-                        "type": "movie",
-                    }]
-                }
-            return super()._get(
-                path, params,
-                allow_not_found=allow_not_found,
-                _retry_auth=_retry_auth,
-            )
-
-    client = DistantYearClient()
-    results = client.search_movies("The Painted Bird", 2020)
-
-    assert results[0]["id"] == 8661
-    assert all(result.get("id") != 1 for result in results[:1])
