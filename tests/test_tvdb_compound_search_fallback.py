@@ -61,7 +61,10 @@ class TVDBCompoundSearchFallbackTests(unittest.TestCase):
 
         results = client.search_movies("Odd Title Words", 2001)
 
-        self.assertEqual(results, [strict])
+        self.assertEqual(results[0]["id"], strict["id"])
+        self.assertEqual(results[0]["name"], strict["name"])
+        self.assertEqual(results[0]["year"], strict["year"])
+        self.assertIn("Completely Different", results[0]["_identity_names"])
         search_calls = [params for path, params in client.calls if path == "/search"]
         self.assertEqual(search_calls[0].get("year"), 2001)
         self.assertEqual(
