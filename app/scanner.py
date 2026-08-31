@@ -126,18 +126,17 @@ def _catalog_fully_accounted(
 def _read_errors_block_health(
     errors: list[str], *, previous_count: int, file_count: int, preserved_count: int,
 ) -> bool:
-    """Keep Source Guard strict except for a proven Windows provider metadata quirk.
+    """Block Source Guard only when read errors coincide with an incomplete view.
 
-    WinError 1272 can be raised by Windows path metadata calls against otherwise
-    readable mapped NFS/SMB storage. It is safe to treat those errors as warnings
-    only after a rescan has independently accounted for every previously cataloged
-    media file. Any other read error, or any missing catalog file, remains blocking.
+    Filesystem providers can report metadata or enumeration errors for entries that
+    do not hide any previously cataloged media. When a complete rescan independently
+    accounts for every known catalog file and nothing must be preserved, keep the
+    source healthy and surface the errors as non-blocking scan warnings instead.
+    Any read error on a first scan or alongside missing catalog files remains blocking.
     """
     if not errors:
         return False
-    if not _catalog_fully_accounted(previous_count, file_count, preserved_count):
-        return True
-    return any("winerror 1272" not in error.lower() for error in errors)
+    return not _catalog_fully_accounted(previous_count, file_count, preserved_count)
 
 
 EPISODE_RE = re.compile(
@@ -389,11 +388,16 @@ def scan_root(
             "UPDATE titles SET last_scanned_at=? WHERE id=?", (now, title_id)
         )
     if degraded:
-        reason = (
-            f"The source returned {len(read_errors)} read error(s)."
-            if read_errors_blocking else
-            f"Only {file_count:,} of the previous {previous_count:,} files were visible."
-        )
+        if read_errors_blocking:
+            detail = str(read_errors[0]).strip()[:700] if read_errors else ""
+            extra = f" (+{len(read_errors) - 1} more)" if len(read_errors) > 1 else ""
+            reason = f"The source returned {len(read_errors)} read error(s)"
+            if detail:
+                reason += f": {detail}{extra}"
+            else:
+                reason += "."
+        else:
+            reason = f"Only {file_count:,} of the previous {previous_count:,} files were visible."
         conn.execute(
             """UPDATE roots SET health_status='degraded',last_checked_at=?,last_seen_at=?,
                last_error=?,last_observed_file_count=?,guard_preserved_count=? WHERE id=?""",
@@ -414,6 +418,7 @@ def scan_root(
         "preserved": preserved_count if degraded else 0,
         "read_errors": len(read_errors),
         "read_warnings": len(read_errors) if read_errors and not degraded else 0,
+        "read_error_detail": str(read_errors[0])[:1000] if read_errors else "",
     }
 
 
@@ -491,11 +496,16 @@ def scan_title(
             (title_row["id"], scan_id),
         )
     else:
-        reason = (
-            f"The series scan returned {len(read_errors)} read error(s)."
-            if read_errors_blocking else
-            f"Only {file_count:,} of the previous {previous_count:,} series files were visible."
-        )
+        if read_errors_blocking:
+            detail = str(read_errors[0]).strip()[:700] if read_errors else ""
+            extra = f" (+{len(read_errors) - 1} more)" if len(read_errors) > 1 else ""
+            reason = f"The series scan returned {len(read_errors)} read error(s)"
+            if detail:
+                reason += f": {detail}{extra}"
+            else:
+                reason += "."
+        else:
+            reason = f"Only {file_count:,} of the previous {previous_count:,} series files were visible."
         conn.execute(
             """UPDATE roots SET health_status='degraded',last_checked_at=?,last_seen_at=?,
                last_error=?,guard_preserved_count=guard_preserved_count+? WHERE id=?""",
@@ -513,4 +523,5 @@ def scan_title(
         "preserved": preserved_count if degraded else 0,
         "read_errors": len(read_errors),
         "read_warnings": len(read_errors) if read_errors and not degraded else 0,
+        "read_error_detail": str(read_errors[0])[:1000] if read_errors else "",
     }
