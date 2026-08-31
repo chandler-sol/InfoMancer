@@ -55,7 +55,7 @@ class TVDBCompoundSearchFallbackTests(unittest.TestCase):
         self.assertEqual(results[0]["id"], 101)
         self.assertEqual(len(client.calls), 1)
 
-    def test_compound_retry_keeps_year_filter_and_preserves_strict_fallback(self):
+    def test_compound_retry_relaxes_year_once_and_preserves_strict_fallback(self):
         strict = {"id": 77, "name": "Completely Different", "year": "2001"}
         client = CompoundSearchTVDBClient({"Odd Title Words": [strict]})
 
@@ -63,8 +63,17 @@ class TVDBCompoundSearchFallbackTests(unittest.TestCase):
 
         self.assertEqual(results, [strict])
         search_calls = [params for path, params in client.calls if path == "/search"]
-        self.assertTrue(all(call.get("year") == 2001 for call in search_calls))
-        self.assertLessEqual(len(search_calls), 3)
+        self.assertEqual(search_calls[0].get("year"), 2001)
+        self.assertEqual(
+            sum(1 for call in search_calls if "year" not in call),
+            1,
+        )
+        self.assertTrue(all(
+            call.get("year") == 2001
+            for call in search_calls
+            if "year" in call
+        ))
+        self.assertLessEqual(len(search_calls), 4)
         self.assertTrue(any(path.startswith("/movies/slug/") for path, _ in client.calls))
 
     def test_compact_similarity_recognizes_space_vs_compound_spelling(self):
