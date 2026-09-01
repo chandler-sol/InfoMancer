@@ -1,4 +1,26 @@
 (() => {
+  const pickerMenus = [...document.querySelectorAll('.collection-picker-menu')];
+  const closePickerMenus = (except = null) => {
+    pickerMenus.forEach((details) => {
+      if (details !== except) details.open = false;
+    });
+  };
+
+  pickerMenus.forEach((details) => {
+    details.addEventListener('toggle', () => {
+      if (details.open) closePickerMenus(details);
+    });
+  });
+
+  document.addEventListener('click', (event) => {
+    const active = event.target.closest('.collection-picker-menu');
+    if (!active) closePickerMenus();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closePickerMenus();
+  });
+
   const params = new URLSearchParams(window.location.search);
   const operationId = params.get('undo_collection');
   if (!operationId || !/^\d+$/.test(operationId)) return;
