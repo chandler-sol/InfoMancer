@@ -11,13 +11,14 @@ class Release081UiPolishContracts(unittest.TestCase):
     def read(self, path: str) -> str:
         return (self.root / path).read_text(encoding="utf-8")
 
-    def test_navigation_paint_guard_waits_for_critical_styles(self):
+    def test_navigation_paint_guard_waits_for_critical_styles_and_controllers(self):
         bootstrap = self.read("app/static/app-shell-bootstrap.js")
         self.assertIn("shell-preparing", bootstrap)
         self.assertIn("release-081-ui-polish.css", bootstrap)
         self.assertIn("action-menu.css", bootstrap)
         self.assertIn("library-controls.css", bootstrap)
-        self.assertIn("Promise.all([domReady, ...criticalStyles])", bootstrap)
+        self.assertIn("pageControllersReady", bootstrap)
+        self.assertIn("Promise.all([domReady, pageControllersReady, ...criticalStyles])", bootstrap)
         self.assertIn("release-081-ui-polish.js", bootstrap)
 
     def test_disabled_controls_are_not_reported_as_busy(self):
@@ -27,7 +28,7 @@ class Release081UiPolishContracts(unittest.TestCase):
         self.assertIn('button[aria-busy="true"]', css)
         self.assertIn("cursor: progress", css)
 
-    def test_collection_creation_and_user_creation_are_modalized(self):
+    def test_collection_creation_user_creation_and_cover_add_are_modalized(self):
         script = self.read("app/static/release-081-ui-polish.js")
         self.assertIn("+ Create Collection", script)
         self.assertIn("Manual", script)
@@ -36,11 +37,18 @@ class Release081UiPolishContracts(unittest.TestCase):
         self.assertIn("create-user-form", script)
         self.assertIn("collection-detail-art-action", script)
 
-    def test_collection_picker_menu_has_release_owned_trigger_geometry(self):
+    def test_collection_picker_menu_and_editor_have_release_owned_contracts(self):
         css = self.read("app/static/release-081-ui-polish.css")
+        script = self.read("app/static/release-081-ui-polish.js")
+        template = self.read("app/templates/collections.html")
         self.assertIn(".collection-picker-menu > summary", css)
         self.assertIn(".collection-picker-menu > summary::before", css)
         self.assertIn("collection-picker-card-actions", css)
+        self.assertIn("collection-picker-editor-form", css)
+        self.assertIn("openCollectionDetailsEditor", script)
+        self.assertIn("data-collection-edit", template)
+        self.assertIn("data-has-custom-artwork", template)
+        self.assertIn("Edit Smart Collection", template)
 
     def test_bulk_add_to_collection_uses_modal_instead_of_page_form_submit(self):
         script = self.read("app/static/release-081-library-actions.js")
