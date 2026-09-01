@@ -19,9 +19,9 @@
   `;
   document.head.append(guard);
 
-  const ensureStylesheet = (path) => new Promise((resolve) => {
+  const ensureStylesheet = (path, {versioned = false} = {}) => new Promise((resolve) => {
     const base = path.startsWith('/static/') ? path : `/static/${path}`;
-    const href = `${base}${versionQuery}`;
+    const href = versioned ? base : `${base}${versionQuery}`;
     let absolute = href;
     try { absolute = new URL(href, window.location.href).href; } catch (_error) {}
     const existing = [...document.querySelectorAll('link[rel="stylesheet"]')]
@@ -52,7 +52,7 @@
   });
 
   const criticalStyles = [
-    ensureStylesheet('/static/mobile.css'),
+    ensureStylesheet(`/static/mobile.css${versionQuery}`, {versioned: true}),
     ensureStylesheet('task-widget.css'),
     ensureStylesheet('app-navigation.css'),
     ensureStylesheet('action-menu.css'),
