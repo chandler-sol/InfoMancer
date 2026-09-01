@@ -56,7 +56,7 @@
       <details class="episode-menu item-action-menu collection-picker-menu">
         <summary aria-label="Actions for {{ collection.name }}" title="Collection actions">⋮</summary>
         <div>
-          <a href="#" data-collection-edit>Edit collection</a>
+          <a href="/collections/{{ collection.id }}?action=edit" data-collection-edit>Edit collection</a>
           {% if collection.collection_type == 'smart' %}
           <a href="/collections/{{ collection.id }}/smart/edit">Edit Smart Collection</a>
           {% else %}
