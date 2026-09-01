@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Add selected titles to collections · InfoMancer{% endblock %}
+{% block content %}
+<div data-organize-content>
+  <a class="back" href="{{ return_to }}">← Library</a>
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">BULK ORGANIZATION</p>
+      <h1>Add to Collection</h1>
+      <p>Add the {{ selected|length }} selected titles to one or more manual Collections. Smart Collections remain rule-driven.</p>
+    </div>
+  </header>
+  <form class="panel organize-title-form bulk-collection-form" method="post" action="/titles/collections-bulk/apply">
+    <input type="hidden" name="return_to" value="{{ return_to }}">
+    {% for title_id in selected %}<input type="hidden" name="selected" value="{{ title_id }}">{% endfor %}
+    <section class="bulk-collection-selected" aria-label="Selected titles">
+      <strong>{{ selected|length }} selected</strong>
+      <p class="muted">{% for title in titles[:6] %}{{ title.display_title }}{% if not loop.last %}, {% endif %}{% endfor %}{% if titles|length > 6 %}, and {{ titles|length - 6 }} more{% endif %}</p>
+    </section>
+    <fieldset class="bulk-collection-options">
+      <legend>Existing Collections</legend>
+      {% for collection in collections %}
+      <label class="inline-check"><input type="checkbox" name="collection_ids" value="{{ collection.id }}"> <span>{{ collection.name }}</span></label>
+      {% else %}
+      <p class="muted">No manual Collections exist yet.</p>
+      {% endfor %}
+    </fieldset>
+    <label class="bulk-collection-new">Or create a new Collection <span class="muted">optional</span><input name="new_collection_name" maxlength="80" placeholder="For example, Weekend favorites"></label>
+    <div class="actions">
+      <a class="button" href="{{ return_to }}" data-organize-close>Cancel</a>
+      <button class="button primary">Add selected titles</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
