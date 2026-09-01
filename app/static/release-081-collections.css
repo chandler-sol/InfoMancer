@@ -29,19 +29,20 @@
   overflow-wrap: anywhere;
 }
 
-/* Some collection builds expose a Sort Titles control as a compact details menu.
-   Give the label and trigger separate visual weight, and never let the surrounding
-   collection surface become the clipping boundary for its menu. */
+/* Collection sort controls have appeared in more than one markup shape during the
+   alpha. The release script marks the live label/toolbar by its visible text, while
+   these named selectors also cover the server-rendered variants. */
 .collection-sort-control,
 .collection-sort-controls,
 .collection-sort-toolbar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px 10px;
-  overflow: visible;
+  gap: 8px 10px !important;
+  overflow: visible !important;
 }
 
+.collection-sort-label,
 .collection-sort-control > strong,
 .collection-sort-control > span:first-child,
 .collection-sort-controls > strong,
@@ -49,9 +50,10 @@
 .collection-sort-toolbar > strong,
 .collection-sort-toolbar > span:first-child {
   flex: 0 0 auto;
-  margin-right: 2px;
+  margin-right: 6px !important;
 }
 
+.collection-sort-overflow-scope,
 .collection-sort-menu,
 .collection-sort-popover,
 .collection-sort-control details,
@@ -61,7 +63,25 @@
 .collection-detail-copy,
 .collection-header-toolbar,
 .collection-header-actions {
-  overflow: visible;
+  overflow: visible !important;
+}
+
+.collection-sort-toolbar details,
+.collection-sort-menu {
+  position: relative;
+  z-index: 90;
+}
+
+.collection-sort-toolbar details[open],
+.collection-sort-menu[open] {
+  z-index: 900;
+}
+
+.collection-sort-toolbar details > div,
+.collection-sort-menu > div,
+.collection-sort-popover {
+  z-index: 1000;
+  max-width: min(360px, calc(100vw - 24px));
 }
 
 .notice.collection-undo-notice {
