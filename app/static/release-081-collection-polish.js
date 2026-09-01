@@ -54,4 +54,25 @@
       ancestor = ancestor.parentElement;
     }
   }, true);
+
+  /* Picker menu links can deep-link directly into the existing manual Collection
+     management UI. Wait for the page load event so collection-detail.js has already
+     installed its dialog/reorder handlers before we synthesize the requested click. */
+  const requestedAction = new URLSearchParams(window.location.search).get('action');
+  const actionSelector = {
+    add: '[data-collection-dialog-open="collection-add-dialog"]',
+    edit: '[data-collection-dialog-open="collection-edit-dialog"]',
+    reorder: '[data-collection-reorder-toggle]',
+  }[requestedAction];
+
+  if (actionSelector) {
+    window.addEventListener('load', () => {
+      const trigger = document.querySelector(actionSelector);
+      if (!trigger) return;
+      trigger.click();
+      const clean = new URL(window.location.href);
+      clean.searchParams.delete('action');
+      history.replaceState(history.state, '', clean.pathname + clean.search + clean.hash);
+    }, {once: true});
+  }
 })();
