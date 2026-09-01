@@ -58,14 +58,34 @@
     ensureStylesheet('release-081-ui-polish.css'),
   ];
 
-  if (['/library', '/movies', '/shows'].includes(window.location.pathname)) {
-    criticalStyles.push(ensureStylesheet('library-controls.css'));
+  const path = window.location.pathname;
+  if (['/library', '/movies', '/shows'].includes(path)) {
+    [
+      'library-controls.css',
+      'library-performance.css',
+      'library-density.css',
+      'library-selection.css',
+      'library-saved-views.css',
+      'library-letter-jump.css',
+    ].forEach((stylesheet) => criticalStyles.push(ensureStylesheet(stylesheet)));
   }
-  if (window.location.pathname === '/settings/metadata') {
+  if (path === '/collections') {
+    criticalStyles.push(ensureStylesheet('release-081-collections.css'));
+  }
+  if (/^\/collections\/\d+$/.test(path)) {
+    criticalStyles.push(ensureStylesheet('collection-detail.css'));
+  }
+  if (path === '/admin/users') {
+    criticalStyles.push(ensureStylesheet('user-management.css'));
+  }
+  if (path === '/settings/metadata') {
     body.classList.add('metadata-maintenance-enhanced');
     criticalStyles.push(ensureStylesheet('metadata-maintenance.css'));
   }
-  if (window.location.pathname === '/sources') {
+  if (path === '/settings/system') {
+    criticalStyles.push(ensureStylesheet('settings-system-nav.css'));
+  }
+  if (path === '/sources') {
     criticalStyles.push(ensureStylesheet('source-health.css'));
   }
 
@@ -97,10 +117,10 @@
 
   const pageControllersReady = domReady.then(async () => {
     const controllers = [loadScript('release-081-ui-polish.js')];
-    if (window.location.pathname === '/settings/metadata') {
+    if (path === '/settings/metadata') {
       controllers.push(loadScript('metadata-maintenance.js', {async: true}));
     }
-    if (window.location.pathname === '/sources') {
+    if (path === '/sources') {
       controllers.push(loadScript('source-health.js', {async: true}));
     }
     await Promise.all(controllers);
