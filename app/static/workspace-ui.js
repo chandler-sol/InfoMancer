@@ -266,13 +266,14 @@
        state source instead of racing the old template controller. */
     await loadScript('library-controller.js');
     const pending = [
-      loadScript('library-density.js'),
-      loadScript('library-surface-lazy.js'),
-      loadScript('library-selection-polish.js'),
-      loadScript('library-inspector-lifecycle.js'),
-      loadScript('library-selection-toolbar.js').then(() => loadScript('release-081-library-actions.js')),
-      loadScript('library-filter-dismiss.js'),
-    ];
+      'library-density.js',
+      'library-surface-lazy.js',
+      'library-selection-polish.js',
+      'library-inspector-lifecycle.js',
+      'library-selection-toolbar.js',
+      'library-filter-dismiss.js',
+    ].map((path) => loadScript(path));
+    pending.push(pending[4].then(() => loadScript('release-081-library-actions.js')));
     pending[0].then(() => {
       coverSizeControl?.style.removeProperty('visibility');
       coverSizeControl?.removeAttribute('aria-hidden');
