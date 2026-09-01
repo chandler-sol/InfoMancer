@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ collection.name }} · InfoMancer{% endblock %}
+{% block content %}
+<div data-organize-content>
+  <a class="back" href="{{ return_to }}">← {{ collection.name }}</a>
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">SMART COLLECTION</p>
+      <h1>Edit Smart Collection</h1>
+      <p>Change the saved filters. Membership is recalculated automatically when you save.</p>
+    </div>
+  </header>
+  <form method="post" action="/collections/{{ collection.id }}/smart/edit" class="panel smart-filter-grid smart-collection-editor-form">
+    <label>Name<input name="name" maxlength="80" required value="{{ collection.name }}"></label>
+    <label>Genre<select name="genre"><option value="">Any genre</option>{% for genre in genres %}<option value="{{ genre }}" {% if filters.get('genre') == genre %}selected{% endif %}>{{ genre }}</option>{% endfor %}</select></label>
+    <label>Year from<input name="year_from" type="number" min="1800" max="2200" value="{{ filters.get('year_from','') }}"></label>
+    <label>Year to<input name="year_to" type="number" min="1800" max="2200" value="{{ filters.get('year_to','') }}"></label>
+    <label>Resolution<select name="resolution"><option value="">Any</option><option value="720" {% if filters.get('resolution') == '720' %}selected{% endif %}>720p+</option><option value="1080" {% if filters.get('resolution') == '1080' %}selected{% endif %}>1080p+</option><option value="2160" {% if filters.get('resolution') == '2160' %}selected{% endif %}>4K</option></select></label>
+    <label>Quality<select name="quality"><option value="">Any</option><option value="hdr" {% if filters.get('quality') == 'hdr' %}selected{% endif %}>HDR</option><option value="sdr" {% if filters.get('quality') == 'sdr' %}selected{% endif %}>SDR</option><option value="high-bitrate" {% if filters.get('quality') == 'high-bitrate' %}selected{% endif %}>High bitrate</option></select></label>
+    <label>Source<select name="root_id"><option value="">Any source</option>{% for root in roots %}<option value="{{ root.id }}" {% if filters.get('root_id') == root.id|string %}selected{% endif %}>{{ root.label or root.path }}</option>{% endfor %}</select></label>
+    <label>Favorite<select name="favorite"><option value="">Either</option><option value="yes" {% if filters.get('favorite') == 'yes' %}selected{% endif %}>Favorite</option><option value="no" {% if filters.get('favorite') == 'no' %}selected{% endif %}>Not favorite</option></select></label>
+    <label>Missing episodes<select name="missing_episodes"><option value="">Either</option><option value="yes" {% if filters.get('missing_episodes') == 'yes' %}selected{% endif %}>Has gaps</option><option value="no" {% if filters.get('missing_episodes') == 'no' %}selected{% endif %}>Complete</option></select></label>
+    <label>Health category<select name="health_category"><option value="">Any</option>{% for category in health_categories %}<option value="{{ category }}" {% if filters.get('health_category') == category %}selected{% endif %}>{{ category.replace('-', ' ')|title }}</option>{% endfor %}</select></label>
+    <label class="full-width">Description <span class="muted">optional</span><input name="description" maxlength="1000" value="{{ collection.description }}"></label>
+    <div class="actions full-width"><a class="button" href="{{ return_to }}" data-organize-close>Cancel</a><button class="button primary">Save changes</button></div>
+  </form>
+</div>
+{% endblock %}
