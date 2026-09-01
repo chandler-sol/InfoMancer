@@ -93,29 +93,31 @@
   polishController.async = false;
   document.head.append(polishController);
 
-  const releasePolishController = document.createElement('script');
-  releasePolishController.src = `/static/release-081-ui-polish.js${versionQuery}`;
-  releasePolishController.defer = true;
-  document.head.append(releasePolishController);
+  domReady.then(() => {
+    const releasePolishController = document.createElement('script');
+    releasePolishController.src = `/static/release-081-ui-polish.js${versionQuery}`;
+    releasePolishController.async = false;
+    document.head.append(releasePolishController);
+  });
 
   /* Page-specific Settings features get their own owners. Their CSS is already in
      the critical set above; load only the controller after the initial DOM settles. */
   if (window.location.pathname === '/settings/metadata') {
-    document.addEventListener('DOMContentLoaded', () => {
+    domReady.then(() => {
       const controller = document.createElement('script');
       controller.src = `/static/metadata-maintenance.js${versionQuery}`;
       controller.async = true;
       document.head.append(controller);
-    }, {once: true});
+    });
   }
 
   if (window.location.pathname === '/sources') {
-    document.addEventListener('DOMContentLoaded', () => {
+    domReady.then(() => {
       const controller = document.createElement('script');
       controller.src = `/static/source-health.js${versionQuery}`;
       controller.async = true;
       document.head.append(controller);
-    }, {once: true});
+    });
   }
 
   /* Bulk Match owns its Apply controller directly from each page template. Keeping
