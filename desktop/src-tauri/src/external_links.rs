@@ -1,9 +1,15 @@
 use std::process::Command;
 
-use tauri::{webview::NewWindowResponse, WebviewUrl, WebviewWindowBuilder};
+use tauri::{webview::NewWindowResponse, window::Color, WebviewUrl, WebviewWindowBuilder};
 use url::Url;
 
 const DESKTOP_EXTERNAL_LINK_BRIDGE: &str = r#"
+// WebView2's default document/window paint is white. Give every desktop document a
+// dark root before page CSS arrives so startup and top-level navigation never expose
+// a white intermediate frame between the launcher and the InfoMancer HTTP app.
+document.documentElement.style.backgroundColor = '#080c10';
+document.documentElement.style.colorScheme = 'dark';
+
 window.__INFOMANCER_DESKTOP__ = true;
 document.addEventListener('click', (event) => {
   const link = event.target?.closest?.('a[target="_blank"]');
@@ -84,6 +90,9 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .min_inner_size(960.0, 640.0)
         .center()
         .resizable(true)
+        // Paint the native window and WebView dark before index.html exists. This
+        // prevents the first white frame WebView2 otherwise shows while booting.
+        .background_color(Color(8, 12, 16, 255))
         .initialization_script(DESKTOP_EXTERNAL_LINK_BRIDGE)
         .on_navigation(|url| {
             if is_tvdb_external_url(url) {
@@ -135,5 +144,11 @@ mod tests {
         assert!(!is_tvdb_external_url(
             &"https://example.test/".parse().unwrap()
         ));
+    }
+
+    #[test]
+    fn desktop_bridge_primes_a_dark_document_before_page_css() {
+        assert!(DESKTOP_EXTERNAL_LINK_BRIDGE.contains("backgroundColor = '#080c10'"));
+        assert!(DESKTOP_EXTERNAL_LINK_BRIDGE.contains("colorScheme = 'dark'"));
     }
 }
