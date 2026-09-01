@@ -1,4 +1,6 @@
 (() => {
+  const csrfToken = () => document.body?.dataset.csrfToken || '';
+
   const makeDialog = ({className = '', eyebrow = '', title = '', description = ''} = {}) => {
     const dialog = document.createElement('dialog');
     dialog.className = `release-ui-dialog ${className}`.trim();
@@ -19,6 +21,65 @@
     });
     document.body.append(dialog);
     return dialog;
+  };
+
+  const openCollectionDetailsEditor = (card) => {
+    const id = card?.dataset.collectionId || '';
+    if (!/^\d+$/.test(id)) return;
+    const name = card.dataset.collectionName || '';
+    const description = card.dataset.collectionDescription || '';
+    const hasArtwork = card.dataset.hasCustomArtwork === '1';
+
+    const dialog = makeDialog({
+      className: 'collection-picker-edit-dialog',
+      eyebrow: 'COLLECTION',
+      title: 'Edit Collection',
+      description: 'Change the Collection name, description, or custom cover. Smart rules are edited separately.',
+    });
+    const body = dialog.querySelector('.release-ui-dialog-body');
+    const form = document.createElement('form');
+    form.className = 'collection-picker-editor-form';
+    form.method = 'post';
+    form.action = `/collections/${id}/edit`;
+    form.enctype = 'multipart/form-data';
+    form.innerHTML = `
+      <input type="hidden" name="csrf_token" value="${csrfToken()}">
+      <label>Name<input name="name" maxlength="80" required></label>
+      <label>Description<textarea name="description" maxlength="1000" rows="4"></textarea></label>
+      <label class="collection-picker-artwork-field">Custom cover<input type="file" name="artwork" accept="image/jpeg,image/png,image/webp"><small>JPEG, PNG, or WebP, up to 5 MB. A new upload replaces the current custom cover.</small></label>
+      ${hasArtwork ? '<label class="inline-check collection-picker-artwork-field"><input type="checkbox" name="remove_artwork" value="1"> Remove the custom cover and return to automatic artwork</label>' : ''}
+      <div class="actions"><button type="button" class="button" data-cancel>Cancel</button><button class="button primary">Save Collection</button></div>`;
+    form.elements.name.value = name;
+    form.elements.description.value = description;
+    form.querySelector('[data-cancel]')?.addEventListener('click', () => dialog.close());
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const submitter = event.submitter;
+      if (submitter) {
+        submitter.disabled = true;
+        submitter.setAttribute('aria-busy', 'true');
+      }
+      try {
+        const response = await fetch(form.action, {
+          method: 'POST',
+          body: new FormData(form),
+          credentials: 'same-origin',
+          redirect: 'follow',
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        window.location.reload();
+      } catch (error) {
+        if (submitter) {
+          submitter.disabled = false;
+          submitter.removeAttribute('aria-busy');
+        }
+        window.alert(`Collection could not be saved: ${error.message}`);
+      }
+    });
+    body.append(form);
+    dialog.addEventListener('close', () => dialog.remove(), {once: true});
+    dialog.showModal();
+    requestAnimationFrame(() => form.elements.name?.focus());
   };
 
   const collectionsIndex = () => {
@@ -71,52 +132,14 @@
       dialog.showModal();
     });
 
-    /* Manual Collection editing from the picker stays modal instead of making the
-       user visit the detail page only to open the same editor. */
-    document.addEventListener('click', async (event) => {
-      const link = event.target.closest('.collection-picker-menu a[href*="?action=edit"]');
-      if (!link) return;
+    document.addEventListener('click', (event) => {
+      const edit = event.target.closest('[data-collection-edit]');
+      if (!edit) return;
+      const card = edit.closest('.collection-picker-card');
+      if (!card) return;
       event.preventDefault();
-      try {
-        const response = await fetch(link.href, {credentials: 'same-origin'});
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const parsed = new DOMParser().parseFromString(await response.text(), 'text/html');
-        const sourceDialog = parsed.getElementById('collection-edit-dialog');
-        if (!sourceDialog) throw new Error('Collection editor unavailable');
-
-        if (!document.querySelector('link[href*="collection-detail.css"]')) {
-          const style = document.createElement('link');
-          style.rel = 'stylesheet';
-          style.href = `/static/collection-detail.css${new URL(document.currentScript?.src || window.location.href, window.location.href).search || ''}`;
-          document.head.append(style);
-        }
-        const imported = document.importNode(sourceDialog, true);
-        imported.id = `collection-edit-dialog-picker-${Date.now()}`;
-        imported.querySelectorAll('[data-collection-dialog-close]').forEach((button) => button.addEventListener('click', () => imported.close()));
-        imported.addEventListener('cancel', (cancelEvent) => {
-          cancelEvent.preventDefault();
-          imported.close();
-        });
-        const form = imported.querySelector('.collection-editor-form');
-        form?.addEventListener('submit', async (submitEvent) => {
-          submitEvent.preventDefault();
-          const submitter = submitEvent.submitter;
-          if (submitter) submitter.disabled = true;
-          try {
-            const save = await fetch(form.action, {method: 'POST', body: new FormData(form), credentials: 'same-origin'});
-            if (!save.ok) throw new Error(`HTTP ${save.status}`);
-            window.location.reload();
-          } catch (error) {
-            if (submitter) submitter.disabled = false;
-            window.alert(`Collection could not be saved: ${error.message}`);
-          }
-        });
-        imported.addEventListener('close', () => imported.remove(), {once: true});
-        document.body.append(imported);
-        imported.showModal();
-      } catch (error) {
-        window.location.assign(link.href);
-      }
+      card.querySelector('.collection-picker-menu')?.removeAttribute('open');
+      openCollectionDetailsEditor(card);
     });
   };
 
