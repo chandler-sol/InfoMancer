@@ -38,13 +38,35 @@
 {% endif %}
 <section class="collection-grid">
 {% for collection in collections %}
-  <a class="collection-card" href="/collections/{{ collection.id }}">
-    <span class="collection-art">{% if collection.artwork_url %}<img src="{{ collection.artwork_url }}" alt="" loading="lazy">{% else %}<span>{{ collection.name[:1]|upper }}</span>{% endif %}</span>
-    <strong>{{ collection.name }}</strong>
-    {% if collection.collection_type == 'smart' %}<span class="kind">Smart</span>{% endif %}
-    <small>{{ collection.title_count }} item{% if collection.title_count != 1 %}s{% endif %}</small>
-    {% if collection.description %}<p>{{ collection.description }}</p>{% endif %}
-  </a>
+  <article class="collection-picker-card">
+    <a class="collection-card collection-picker-card-link" href="/collections/{{ collection.id }}">
+      <span class="collection-art">{% if collection.artwork_url %}<img src="{{ collection.artwork_url }}" alt="" loading="lazy">{% else %}<span>{{ collection.name[:1]|upper }}</span>{% endif %}</span>
+      <strong>{{ collection.name }}</strong>
+      {% if collection.collection_type == 'smart' %}<span class="kind">Smart</span>{% endif %}
+      <small>{{ collection.title_count }} item{% if collection.title_count != 1 %}s{% endif %}</small>
+      {% if collection.description %}<p>{{ collection.description }}</p>{% endif %}
+    </a>
+    {% if current_user.is_librarian %}
+    <div class="collection-picker-card-actions" aria-label="Actions for {{ collection.name }}">
+      <details class="episode-menu item-action-menu collection-picker-menu">
+        <summary aria-label="Actions for {{ collection.name }}" title="Collection actions">⋮</summary>
+        <div>
+          {% if collection.collection_type == 'smart' %}
+          <a href="/collections/{{ collection.id }}/smart/edit">Edit Smart Collection</a>
+          {% else %}
+          <a href="/collections/{{ collection.id }}?action=add">Add titles</a>
+          <a href="/collections/{{ collection.id }}?action=edit">Edit collection</a>
+          <a href="/collections/{{ collection.id }}?action=reorder">Reorder collection</a>
+          {% endif %}
+          <form method="post" action="/collections/{{ collection.id }}/delete" data-workspace-confirm="Delete {{ collection.name }}? The collection and its saved organization will be removed, but no media files will be deleted. InfoMancer will offer Undo immediately afterward.">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="danger">Delete {{ 'Smart Collection' if collection.collection_type == 'smart' else 'collection' }}</button>
+          </form>
+        </div>
+      </details>
+    </div>
+    {% endif %}
+  </article>
 {% else %}
   <div class="panel empty"><h2>No collections yet</h2><p>{% if current_user.is_librarian %}Create the first collection above, then add movies, TV series, or individual episodes in the order you want them shown.{% else %}A Librarian has not created any collections yet.{% endif %}</p></div>
 {% endfor %}

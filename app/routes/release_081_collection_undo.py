@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from ..access import require_librarian
 from .context import RouteContext
@@ -18,7 +18,6 @@ def build_router(ctx: RouteContext):
     """
 
     router = APIRouter()
-    Request = ctx.get("Request")
     db = ctx.live("db")
     record_event = ctx.live("record_event")
     redirect = ctx.live("redirect")
