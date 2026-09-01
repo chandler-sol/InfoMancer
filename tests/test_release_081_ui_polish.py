@@ -21,6 +21,15 @@ class Release081UiPolishContracts(unittest.TestCase):
         self.assertIn("Promise.all([domReady, pageControllersReady, ...criticalStyles])", bootstrap)
         self.assertIn("release-081-ui-polish.js", bootstrap)
 
+    def test_full_page_navigation_blanks_outgoing_document_before_next_shell(self):
+        script = self.read("app/static/app-navigation.js")
+        styles = self.read("app/static/app-navigation.css")
+        self.assertIn("coverOutgoingPage", script)
+        self.assertIn("app-navigation-leaving", script)
+        self.assertIn("html.app-navigation-leaving::before", styles)
+        self.assertIn("background:#090d11", styles)
+        self.assertIn("z-index:2147483646", styles)
+
     def test_disabled_controls_are_not_reported_as_busy(self):
         css = self.read("app/static/release-081-ui-polish.css")
         self.assertIn("button:disabled", css)
