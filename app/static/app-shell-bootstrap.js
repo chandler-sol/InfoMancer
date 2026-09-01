@@ -41,6 +41,15 @@
     document.head.append(link);
   });
 
+  const loadScript = (path, {async = false} = {}) => new Promise((resolve) => {
+    const script = document.createElement('script');
+    script.src = `/static/${path}${versionQuery}`;
+    script.async = async;
+    script.addEventListener('load', () => resolve(script), {once: true});
+    script.addEventListener('error', () => resolve(script), {once: true});
+    document.head.append(script);
+  });
+
   const criticalStyles = [
     ensureStylesheet('mobile.css'),
     ensureStylesheet('task-widget.css'),
@@ -65,13 +74,6 @@
     else document.addEventListener('DOMContentLoaded', resolve, {once: true});
   });
 
-  Promise.all([domReady, ...criticalStyles]).then(() => {
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      body.classList.remove('shell-preparing');
-      guard.remove();
-    }));
-  });
-
   /* record_search is a one-shot server marker used by a committed global search.
      The server has already persisted that search before this page renders. Remove
      it immediately so live Library filtering, view hydration, and other partial
@@ -93,32 +95,23 @@
   polishController.async = false;
   document.head.append(polishController);
 
-  domReady.then(() => {
-    const releasePolishController = document.createElement('script');
-    releasePolishController.src = `/static/release-081-ui-polish.js${versionQuery}`;
-    releasePolishController.async = false;
-    document.head.append(releasePolishController);
+  const pageControllersReady = domReady.then(async () => {
+    const controllers = [loadScript('release-081-ui-polish.js')];
+    if (window.location.pathname === '/settings/metadata') {
+      controllers.push(loadScript('metadata-maintenance.js', {async: true}));
+    }
+    if (window.location.pathname === '/sources') {
+      controllers.push(loadScript('source-health.js', {async: true}));
+    }
+    await Promise.all(controllers);
   });
 
-  /* Page-specific Settings features get their own owners. Their CSS is already in
-     the critical set above; load only the controller after the initial DOM settles. */
-  if (window.location.pathname === '/settings/metadata') {
-    domReady.then(() => {
-      const controller = document.createElement('script');
-      controller.src = `/static/metadata-maintenance.js${versionQuery}`;
-      controller.async = true;
-      document.head.append(controller);
-    });
-  }
-
-  if (window.location.pathname === '/sources') {
-    domReady.then(() => {
-      const controller = document.createElement('script');
-      controller.src = `/static/source-health.js${versionQuery}`;
-      controller.async = true;
-      document.head.append(controller);
-    });
-  }
+  Promise.all([domReady, pageControllersReady, ...criticalStyles]).then(() => {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      body.classList.remove('shell-preparing');
+      guard.remove();
+    }));
+  });
 
   /* Bulk Match owns its Apply controller directly from each page template. Keeping
      one canonical loader avoids duplicate document-level submit handlers and keeps
