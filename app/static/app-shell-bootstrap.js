@@ -7,6 +7,71 @@
     versionQuery = new URL(document.currentScript?.src || '', window.location.href).search;
   } catch (_error) {}
 
+  /* Keep page content hidden until parser-discovered markup, deferred controllers,
+     and the small set of late 0.8 styles have settled. The application chrome stays
+     visible, so navigation feels continuous instead of flashing an intermediate
+     layout. */
+  body.classList.add('shell-preparing');
+  const guard = document.createElement('style');
+  guard.textContent = `
+    body.shell-preparing .shell { visibility: hidden !important; }
+    body.shell-preparing { background: #090d11; }
+  `;
+  document.head.append(guard);
+
+  const ensureStylesheet = (path) => new Promise((resolve) => {
+    const href = `/static/${path}${versionQuery}`;
+    let absolute = href;
+    try { absolute = new URL(href, window.location.href).href; } catch (_error) {}
+    const existing = [...document.querySelectorAll('link[rel="stylesheet"]')]
+      .find((link) => link.href === absolute);
+    if (existing) {
+      if (existing.sheet) resolve(existing);
+      else {
+        existing.addEventListener('load', () => resolve(existing), {once: true});
+        existing.addEventListener('error', () => resolve(existing), {once: true});
+      }
+      return;
+    }
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = href;
+    link.addEventListener('load', () => resolve(link), {once: true});
+    link.addEventListener('error', () => resolve(link), {once: true});
+    document.head.append(link);
+  });
+
+  const criticalStyles = [
+    ensureStylesheet('mobile.css'),
+    ensureStylesheet('task-widget.css'),
+    ensureStylesheet('app-navigation.css'),
+    ensureStylesheet('action-menu.css'),
+    ensureStylesheet('release-081-ui-polish.css'),
+  ];
+
+  if (['/library', '/movies', '/shows'].includes(window.location.pathname)) {
+    criticalStyles.push(ensureStylesheet('library-controls.css'));
+  }
+  if (window.location.pathname === '/settings/metadata') {
+    body.classList.add('metadata-maintenance-enhanced');
+    criticalStyles.push(ensureStylesheet('metadata-maintenance.css'));
+  }
+  if (window.location.pathname === '/sources') {
+    criticalStyles.push(ensureStylesheet('source-health.css'));
+  }
+
+  const domReady = new Promise((resolve) => {
+    if (document.readyState !== 'loading') resolve();
+    else document.addEventListener('DOMContentLoaded', resolve, {once: true});
+  });
+
+  Promise.all([domReady, ...criticalStyles]).then(() => {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      body.classList.remove('shell-preparing');
+      guard.remove();
+    }));
+  });
+
   /* record_search is a one-shot server marker used by a committed global search.
      The server has already persisted that search before this page renders. Remove
      it immediately so live Library filtering, view hydration, and other partial
@@ -23,42 +88,19 @@
     }
   } catch (_error) {}
 
-  /* Library control polish was split into its own stylesheet during the 0.8 cleanup.
-     Load it explicitly on every catalog surface. Keeping the version query attached
-     makes the file participate in the same deployment cache-busting contract as the
-     rest of the shell assets. */
-  if (['/library', '/movies', '/shows'].includes(window.location.pathname)) {
-    const libraryControlsStylesheet = document.createElement('link');
-    libraryControlsStylesheet.rel = 'stylesheet';
-    libraryControlsStylesheet.href = `/static/library-controls.css${versionQuery}`;
-    document.head.append(libraryControlsStylesheet);
-  }
-
-  /* Consolidated mobile chrome (general polish, header, detail sections in cascade
-     order) is loaded from bootstrap so structural mobile fixes are present before
-     the Settings and task controllers perform their late handoff. One request
-     replaces the previous three-stylesheet waterfall. */
-  const mobileStylesheet = document.createElement('link');
-  mobileStylesheet.rel = 'stylesheet';
-  mobileStylesheet.href = `/static/mobile.css${versionQuery}`;
-  document.head.append(mobileStylesheet);
-
   const polishController = document.createElement('script');
   polishController.src = `/static/final-mobile-polish.js${versionQuery}`;
   polishController.async = false;
   document.head.append(polishController);
 
-  /* Page-specific Settings features get their own owners. Bootstrap only marks the
-     page and loads their version-matched assets early enough to avoid a first-paint
-     flash of the legacy fallback surface. */
+  const releasePolishController = document.createElement('script');
+  releasePolishController.src = `/static/release-081-ui-polish.js${versionQuery}`;
+  releasePolishController.defer = true;
+  document.head.append(releasePolishController);
+
+  /* Page-specific Settings features get their own owners. Their CSS is already in
+     the critical set above; load only the controller after the initial DOM settles. */
   if (window.location.pathname === '/settings/metadata') {
-    body.classList.add('metadata-maintenance-enhanced');
-
-    const stylesheet = document.createElement('link');
-    stylesheet.rel = 'stylesheet';
-    stylesheet.href = `/static/metadata-maintenance.css${versionQuery}`;
-    document.head.append(stylesheet);
-
     document.addEventListener('DOMContentLoaded', () => {
       const controller = document.createElement('script');
       controller.src = `/static/metadata-maintenance.js${versionQuery}`;
@@ -68,11 +110,6 @@
   }
 
   if (window.location.pathname === '/sources') {
-    const sourceHealthStylesheet = document.createElement('link');
-    sourceHealthStylesheet.rel = 'stylesheet';
-    sourceHealthStylesheet.href = `/static/source-health.css${versionQuery}`;
-    document.head.append(sourceHealthStylesheet);
-
     document.addEventListener('DOMContentLoaded', () => {
       const controller = document.createElement('script');
       controller.src = `/static/source-health.js${versionQuery}`;
