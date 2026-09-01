@@ -3,6 +3,7 @@ from __future__ import annotations
 from .security_hardening import build_router as build_security_hardening_router
 from .resilience import build_router as build_resilience_router
 from .final_polish import build_router as build_final_polish_router
+from .release_081_announcements import build_router as build_release_081_announcements_router
 from .release_081_stabilization import build_router as build_release_081_stabilization_router
 from .release_081_collection_undo import build_router as build_release_081_collection_undo_router
 from .health_action_routing import build_router as build_health_action_routing_router
@@ -40,6 +41,10 @@ ROUTER_BUILDERS = (
     # Small release-polish hooks replace live helpers before the domain routes use
     # them, while keeping the existing public route contracts intact.
     build_final_polish_router,
+    # Remove only the historical official announcements that older 0.8 builds baked
+    # into every installation. Librarian-authored messages and future official keys
+    # remain untouched.
+    build_release_081_announcements_router,
     # Final RC stabilization owns mapped-drive-safe undo validation plus additive
     # bulk collection and Smart Collection editing routes before domain routers are
     # constructed.
