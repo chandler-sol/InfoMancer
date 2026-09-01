@@ -2,6 +2,18 @@ html {
   scrollbar-gutter: stable;
 }
 
+/* Full-document navigations should never expose a mixed old/new frame. Cover the
+   outgoing document with the application background immediately, then let the
+   incoming bootstrap reveal its fully styled shell only when ready. */
+html.app-navigation-leaving::before {
+  content:"";
+  position:fixed;
+  inset:0;
+  z-index:2147483646;
+  pointer-events:auto;
+  background:#090d11;
+}
+
 html.app-navigation-pending::after {
   content:"";
   position:fixed;

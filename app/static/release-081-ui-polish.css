@@ -1,0 +1,354 @@
+/* Final 0.8.1 interaction polish. This file is loaded at the start of <body> by
+   app-shell-bootstrap.js so these structural rules are present before page reveal. */
+
+/* A disabled control is unavailable, not busy. The old global progress stylesheet
+   used the Windows wait cursor for every disabled button, which made simple hover
+   look like work had started. */
+button:disabled,
+.button:disabled,
+button[aria-disabled="true"] {
+  cursor: not-allowed !important;
+}
+
+button[aria-busy="true"],
+.button[aria-busy="true"],
+.is-busy {
+  cursor: progress !important;
+}
+
+/* Shared modal chrome used by lightweight release transformations. */
+.release-ui-dialog {
+  width: min(880px, calc(100vw - 36px));
+  max-width: none;
+  max-height: calc(100dvh - 48px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #354353;
+  border-radius: 8px;
+  background: #10161d;
+  color: var(--text);
+  box-shadow: 0 28px 80px rgba(0,0,0,.62);
+}
+
+.release-ui-dialog::backdrop {
+  background: rgba(3,7,10,.76);
+}
+
+.release-ui-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.release-ui-dialog-head h2 {
+  margin: 4px 0 0;
+  font-size: 27px;
+}
+
+.release-ui-dialog-head p:last-child {
+  margin: 6px 0 0;
+}
+
+.release-ui-dialog-close {
+  display: grid;
+  place-items: center;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: #0c1117;
+  color: var(--muted);
+  font-size: 24px;
+  line-height: 1;
+}
+
+.release-ui-dialog-close:hover,
+.release-ui-dialog-close:focus-visible {
+  border-color: var(--lime);
+  color: var(--lime);
+}
+
+.release-ui-dialog-body {
+  max-height: calc(100dvh - 145px);
+  padding: 22px 24px 26px;
+  overflow: auto;
+}
+
+.release-dialog-switcher {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 18px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #0c1117;
+}
+
+.release-dialog-switcher button {
+  min-height: 36px;
+  padding: 7px 13px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.release-dialog-switcher button.active {
+  background: var(--lime);
+  color: #10140b;
+}
+
+.release-dialog-pane[hidden] { display: none !important; }
+
+/* Collections index. */
+.collections-modalized .collection-create,
+.collections-modalized .smart-collection-create {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+.collections-modalized .collection-create {
+  grid-template-columns: 1fr;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.collection-create-dialog .collection-create > div:first-child {
+  display: none;
+}
+
+.collections-modalized .smart-collection-create {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.collections-modalized .smart-collection-create > summary {
+  display: none;
+}
+
+.collections-modalized .smart-collection-create .smart-collection-explainer {
+  margin-top: 0;
+}
+
+.collection-create-launcher {
+  display: flex;
+  justify-content: flex-start;
+  margin: 18px 0 22px;
+}
+
+.collection-picker-card-actions {
+  z-index: 80 !important;
+}
+
+/* Do not rely on the later action-menu stylesheet to make the trigger exist. */
+.collection-picker-menu > summary {
+  position: relative;
+  box-sizing: border-box;
+  display: grid !important;
+  place-items: center;
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0 !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 4px !important;
+  background: #0c1117 !important;
+  color: var(--text) !important;
+  font-size: 0 !important;
+  list-style: none;
+  cursor: pointer;
+}
+
+.collection-picker-menu > summary::before {
+  content: "•••";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%,-52%) rotate(90deg);
+  color: currentColor;
+  font-size: 15px;
+  letter-spacing: 2px;
+  line-height: 1;
+}
+
+.collection-picker-menu > summary:hover,
+.collection-picker-menu > summary:focus-visible,
+.collection-picker-menu[open] > summary {
+  border-color: var(--lime) !important;
+  color: var(--lime) !important;
+}
+
+.collection-picker-card:hover .collection-picker-card-actions,
+.collection-picker-card:focus-within .collection-picker-card-actions,
+.collection-picker-card-actions:has(.collection-picker-menu[open]) {
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+.collection-picker-editor-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.collection-picker-editor-form label {
+  min-width: 0;
+}
+
+.collection-picker-editor-form input,
+.collection-picker-editor-form textarea {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.collection-picker-editor-form textarea {
+  resize: vertical;
+}
+
+.collection-picker-artwork-field,
+.collection-picker-editor-form .actions {
+  grid-column: 1 / -1;
+}
+
+.collection-picker-editor-form .actions {
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+/* Collection detail hero should read as one composition instead of a thin left
+   rail next to an enormous empty horizontal field. */
+.collection-detail-head {
+  display: grid !important;
+  grid-template-columns: clamp(220px, 24vw, 340px) minmax(0, 1fr) !important;
+  align-items: start !important;
+  gap: clamp(24px, 3vw, 42px) !important;
+  width: min(1180px, 100%) !important;
+  max-width: 1180px !important;
+}
+
+.collection-detail-art-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.collection-detail-art-wrap .collection-detail-art {
+  display: block;
+  width: 100%;
+}
+
+.collection-detail-art-action {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid var(--lime);
+  border-radius: 50%;
+  background: rgba(10,15,20,.92);
+  color: var(--lime);
+  font-size: 23px;
+  line-height: 1;
+  opacity: 0;
+  transform: translateY(3px);
+  transition: opacity .14s ease, transform .14s ease, background .14s ease;
+}
+
+.collection-detail-art-wrap:hover .collection-detail-art-action,
+.collection-detail-art-wrap:focus-within .collection-detail-art-action {
+  opacity: 1;
+  transform: none;
+}
+
+.collection-detail-art-action:hover,
+.collection-detail-art-action:focus-visible {
+  background: var(--lime);
+  color: #10140b;
+}
+
+.collection-cover-library > .empty {
+  grid-column: 1 / -1;
+  width: min(720px, 100%);
+  min-width: 0;
+}
+
+/* User management: existing people are the page, adding someone is an occasional
+   action. The JS moves the creation form into a modal and leaves one full-width
+   management surface behind. */
+.user-management-modalized .user-management-grid {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.user-management-modalized .user-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.user-management-modalized .create-user-form {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.user-create-dialog .create-user-form > .eyebrow,
+.user-create-dialog .create-user-form > h2 {
+  display: none;
+}
+
+/* Bulk Add to Collection modal. */
+.release-bulk-collection-dialog .bulk-collection-form {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.release-bulk-collection-dialog .bulk-collection-options {
+  max-height: min(320px, 38vh);
+  overflow: auto;
+}
+
+@media (max-width: 760px) {
+  .release-ui-dialog {
+    width: calc(100vw - 20px);
+    max-height: calc(100dvh - 20px);
+  }
+  .release-ui-dialog-body { padding: 18px; }
+  .collection-picker-editor-form {
+    grid-template-columns: 1fr;
+  }
+  .collection-picker-artwork-field,
+  .collection-picker-editor-form .actions {
+    grid-column: auto;
+  }
+  .collection-detail-head {
+    grid-template-columns: 1fr !important;
+  }
+  .collection-detail-art-wrap {
+    width: min(340px, 100%);
+  }
+  .collection-detail-art-action {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .collection-detail-art-action { transition: none; }
+}

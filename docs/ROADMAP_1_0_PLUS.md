@@ -40,6 +40,25 @@ Start with an opt-in, read-only download-status adapter rather than trying to ma
 
 Later, an explicitly opt-in handoff could send user-supplied links to JDownloader or generate a Folder Watch `.crawljob`. That should be a separate capability from read-only monitoring and should preserve clear user control over what is submitted.
 
+## Collection intelligence and management
+
+Treat Collections as first-class Library objects instead of simple containers.
+
+- Add a Collection Inspector using the same side-panel language as title inspection.
+- Show artwork, name, description, manual/Smart type, item count, creation/update dates, and compact summary information such as aggregate runtime or storage size where meaningful.
+- Surface small management actions from the Inspector, including edit details, artwork, add titles, reorder, edit Smart rules, duplicate, and delete where appropriate.
+- Keep Smart Collection rule evidence visible so a user can understand why an item belongs in the Collection.
+- Add an advanced Smart Collection rule builder with nested AND/OR groups, exclusions, comparisons, and a live match preview while retaining the current simple filters as the quick mode.
+
+## Alternate and custom episode ordering
+
+Support provider-defined and user-defined episode ordering without breaking stable provider identity.
+
+- Allow aired, DVD, absolute, and other TVDB/provider-supported alternate orderings on a per-series basis.
+- Let a supported provider ordering serve as the starting point for a custom order.
+- Reuse InfoMancer's existing drag-and-drop ordering interaction for custom episode sequences.
+- Preserve TVDB/provider episode IDs underneath the selected presentation order so metadata, missing-episode detection, renaming, and future Plex/Jellyfin integration can all reference the same canonical episodes.
+
 ## Pre-release Feature Requests
 
 Dev, Alpha, and Beta builds should expose a Feature Requests section for structured product feedback.
