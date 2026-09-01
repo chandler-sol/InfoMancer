@@ -1,16 +1,19 @@
 {% extends "base.html" %}
 {% block title %}Edit {{ collection.name }} · InfoMancer{% endblock %}
 {% block content %}
-<div data-organize-content>
+<link rel="stylesheet" href="{{ url_for('static', path='collection-detail.css') }}?v={{ static_version }}">
+<link rel="stylesheet" href="{{ url_for('static', path='release-081-collections.css') }}?v={{ static_version }}">
+<div class="smart-collection-edit-shell" data-organize-content>
   <a class="back" href="{{ return_to }}">← {{ collection.name }}</a>
-  <header class="page-head">
+  <header class="page-head smart-collection-edit-head">
     <div>
       <p class="eyebrow">SMART COLLECTION</p>
       <h1>Edit Smart Collection</h1>
-      <p>Change the saved filters. Membership is recalculated automatically when you save.</p>
+      <p>Change its name, description, or saved rules. InfoMancer recalculates the matching titles from your Library when you save. Changing these rules does not move, rename, or delete media files.</p>
     </div>
   </header>
   <form method="post" action="/collections/{{ collection.id }}/smart/edit" class="panel smart-filter-grid smart-collection-editor-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>Name<input name="name" maxlength="80" required value="{{ collection.name }}"></label>
     <label>Genre<select name="genre"><option value="">Any genre</option>{% for genre in genres %}<option value="{{ genre }}" {% if filters.get('genre') == genre %}selected{% endif %}>{{ genre }}</option>{% endfor %}</select></label>
     <label>Year from<input name="year_from" type="number" min="1800" max="2200" value="{{ filters.get('year_from','') }}"></label>
@@ -24,5 +27,21 @@
     <label class="full-width">Description <span class="muted">optional</span><input name="description" maxlength="1000" value="{{ collection.description }}"></label>
     <div class="actions full-width"><a class="button" href="{{ return_to }}" data-organize-close>Cancel</a><button class="button primary">Save changes</button></div>
   </form>
+
+  <section class="panel smart-collection-danger" aria-labelledby="smart-collection-delete-title">
+    <div>
+      <p class="eyebrow">SMART COLLECTION</p>
+      <h2 id="smart-collection-delete-title">Delete Smart Collection</h2>
+      <p class="muted">This removes only the saved Smart Collection and its rules. Movies, TV series, episodes, and media files remain untouched. InfoMancer will offer an Undo on the Collections page immediately afterward.</p>
+    </div>
+    <details class="collection-delete-confirm smart-collection-delete-confirm">
+      <summary class="button danger">Delete Smart Collection</summary>
+      <form method="post" action="/collections/{{ collection.id }}/delete">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <p>Delete “{{ collection.name }}”? Its saved rules will be removed, but no Library items or media files will be deleted.</p>
+        <div class="collection-delete-actions"><a class="button" href="{{ return_to }}">Cancel</a><button class="button danger">Delete {{ collection.name }}</button></div>
+      </form>
+    </details>
+  </section>
 </div>
 {% endblock %}

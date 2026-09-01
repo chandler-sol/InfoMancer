@@ -11,11 +11,15 @@
     {% if collection.description %}<p>{{ collection.description }}</p>{% endif %}
     <small data-collection-count-meta><span data-collection-item-count>{{ items|length }}</span> item{% if items|length != 1 %}s{% endif %} · {{ 'updates automatically' if collection.collection_type == 'smart' else 'manual order' }}</small>
     <div class="collection-header-toolbar">
-      {% if current_user.is_librarian and collection.collection_type == 'manual' %}
+      {% if current_user.is_librarian %}
       <div class="collection-header-actions">
+        {% if collection.collection_type == 'manual' %}
         <button type="button" class="button primary" data-collection-dialog-open="collection-add-dialog">+ Add titles</button>
         <button type="button" class="button" data-collection-reorder-toggle>Reorder</button>
         <button type="button" class="button" data-collection-dialog-open="collection-edit-dialog">Edit collection</button>
+        {% else %}
+        <a class="button primary" href="/collections/{{ collection.id }}/smart/edit">Edit Smart Collection</a>
+        {% endif %}
       </div>
       {% endif %}
       {% if items %}
@@ -70,7 +74,7 @@
         <summary class="button danger">Delete collection</summary>
         <form method="post" action="/collections/{{ collection.id }}/delete">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <p>This cannot be undone. The collection itself will be removed, but none of its media will be deleted.</p>
+          <p>The collection itself will be removed, but none of its media will be deleted. InfoMancer will offer an Undo on the Collections page immediately afterward.</p>
           <div class="collection-delete-actions"><button type="button" class="button" data-collection-delete-cancel>Cancel</button><button class="button danger">Delete {{ collection.name }}</button></div>
         </form>
       </details>
@@ -123,7 +127,7 @@
     {% endif %}
   </article>
 {% else %}
-  <div class="panel empty"><h2>This collection is empty</h2><p>{% if current_user.is_librarian %}Use Add titles to begin this collection.{% else %}A Librarian has not added any items yet.{% endif %}</p></div>
+  <div class="panel empty"><h2>This collection is empty</h2><p>{% if current_user.is_librarian and collection.collection_type == 'smart' %}This Smart Collection currently has no matches. Edit its saved rules if you expected titles here.{% elif current_user.is_librarian %}Use Add titles to begin this collection.{% else %}A Librarian has not added any items yet.{% endif %}</p></div>
 {% endfor %}
 </section>
 <script src="{{ url_for('static', path='collection-detail.js') }}?v={{ static_version }}" defer></script>
