@@ -160,6 +160,7 @@
   const coverSizeControl = document.getElementById('cover-size-control');
   const letterJump = Boolean(letterJumpAlphabet);
   const library = Boolean(document.querySelector('.library-table') && document.getElementById('cover-library'));
+  const collectionPage = window.location.pathname === '/collections' || window.location.pathname.startsWith('/collections/');
   const detail = Boolean(document.querySelector('.media-dossier'));
   const mediaFailures = Boolean(document.querySelector('.media-failures-heading'));
 
@@ -208,6 +209,9 @@
     loadStyle('library-density.css'),
     loadStyle('library-selection.css'),
   ]) : Promise.resolve();
+  const collectionStyles = collectionPage
+    ? Promise.all([loadStyle('release-081-collections.css')])
+    : Promise.resolve();
   const detailStyles = detail
     ? Promise.all([loadStyle('detail-page.css')])
     : Promise.resolve();
@@ -246,6 +250,10 @@
     letterJumpToolbar?.style.removeProperty('justify-content');
   });
 
+  collectionStyles.then(() => {
+    if (collectionPage) return loadScript('release-081-collection-polish.js');
+  });
+
   libraryStyles.then(async () => {
     if (!library) return;
     libraryControls?.style.removeProperty('box-sizing');
@@ -265,6 +273,7 @@
       'library-selection-toolbar.js',
       'library-filter-dismiss.js',
     ].map((path) => loadScript(path));
+    pending.push(pending[4].then(() => loadScript('release-081-library-actions.js')));
     pending[0].then(() => {
       coverSizeControl?.style.removeProperty('visibility');
       coverSizeControl?.removeAttribute('aria-hidden');

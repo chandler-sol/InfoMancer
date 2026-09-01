@@ -1,0 +1,162 @@
+/* 0.8.1 release-stabilization polish for Collections.
+   Keep these rules intentionally scoped so the broader 0.9 visual pass can replace
+   them without changing unrelated Library surfaces. */
+
+.smart-collection-create {
+  box-sizing: border-box;
+  width: min(1180px, 100%);
+  margin-right: auto;
+}
+
+.smart-collection-create > summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  cursor: pointer;
+}
+
+.smart-collection-create .smart-filter-grid {
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
+.collection-grid {
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+}
+
+.collection-card strong,
+.collection-card p {
+  overflow-wrap: anywhere;
+}
+
+/* Collection sort controls have appeared in more than one markup shape during the
+   alpha. The release script marks the live label/toolbar by its visible text, while
+   these named selectors also cover the server-rendered variants. */
+.collection-sort-control,
+.collection-sort-controls,
+.collection-sort-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px !important;
+  overflow: visible !important;
+}
+
+.collection-sort-label,
+.collection-sort-control > strong,
+.collection-sort-control > span:first-child,
+.collection-sort-controls > strong,
+.collection-sort-controls > span:first-child,
+.collection-sort-toolbar > strong,
+.collection-sort-toolbar > span:first-child {
+  flex: 0 0 auto;
+  margin-right: 6px !important;
+}
+
+.collection-sort-overflow-scope,
+.collection-sort-menu,
+.collection-sort-popover,
+.collection-sort-control details,
+.collection-sort-controls details,
+.collection-sort-toolbar details,
+.collection-detail-head,
+.collection-detail-copy,
+.collection-header-toolbar,
+.collection-header-actions {
+  overflow: visible !important;
+}
+
+.collection-sort-toolbar details,
+.collection-sort-menu {
+  position: relative;
+  z-index: 90;
+}
+
+.collection-sort-toolbar details[open],
+.collection-sort-menu[open] {
+  z-index: 900;
+}
+
+.collection-sort-toolbar details > div,
+.collection-sort-menu > div,
+.collection-sort-popover {
+  z-index: 1000;
+  max-width: min(360px, calc(100vw - 24px));
+}
+
+.notice.collection-undo-notice {
+  position: sticky;
+  top: 12px;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .38);
+}
+
+.collection-undo-form {
+  margin: 0 0 0 auto;
+  flex: 0 0 auto;
+}
+
+.collection-undo-form .button {
+  min-height: 34px;
+  padding: 6px 11px;
+}
+
+.bulk-collection-form {
+  display: grid;
+  gap: 20px;
+}
+
+.bulk-collection-selected p {
+  margin: 6px 0 0;
+}
+
+.bulk-collection-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+}
+
+.bulk-collection-options legend {
+  padding: 0 6px;
+}
+
+.bulk-collection-new input {
+  margin-top: 6px;
+}
+
+@media (max-width: 900px) {
+  .smart-collection-create .smart-filter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .smart-collection-create .smart-filter-grid,
+  .bulk-collection-options {
+    grid-template-columns: 1fr;
+  }
+
+  .collection-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .notice.collection-undo-notice {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .collection-undo-form {
+    margin-left: 0;
+  }
+
+  .collection-undo-form .button {
+    width: 100%;
+    justify-content: center;
+  }
+}
