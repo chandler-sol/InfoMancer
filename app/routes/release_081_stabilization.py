@@ -5,7 +5,7 @@ import posixpath
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from ..access import require_librarian
 from ..operation_history import OperationHistoryError, OperationHistoryService
@@ -70,7 +70,6 @@ def build_router(ctx: RouteContext):
     router = APIRouter()
     Form = ctx.get("Form")
     HTMLResponse = ctx.get("HTMLResponse")
-    Request = ctx.get("Request")
     MIE_CATEGORIES = ctx.get("MIE_CATEGORIES")
     db = ctx.live("db")
     decode_filters = ctx.live("decode_filters")
