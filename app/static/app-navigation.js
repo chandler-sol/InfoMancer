@@ -2,6 +2,7 @@
   const root = document.documentElement;
   let pendingTimer = 0;
   let pendingDelayTimer = 0;
+  let leavingTimer = 0;
   let libraryWarmPromise = null;
   let lastLibraryWarm = 0;
 
@@ -14,12 +15,26 @@
     delete root.dataset.navigationTarget;
   };
 
+  const clearLeaving = () => {
+    window.clearTimeout(leavingTimer);
+    leavingTimer = 0;
+    root.classList.remove('app-navigation-leaving');
+  };
+
   const announceNavigation = (url = null) => {
     const href = url ? String(url) : '';
     if (href) root.dataset.navigationTarget = href;
     document.dispatchEvent(new CustomEvent('infomancer:before-navigate', {
       detail: {url: href},
     }));
+  };
+
+  const coverOutgoingPage = () => {
+    clearLeaving();
+    root.classList.add('app-navigation-leaving');
+    /* If a browser or embedded WebView cancels navigation after the click, never
+       strand the user behind the transition cover indefinitely. */
+    leavingTimer = window.setTimeout(clearLeaving, 5000);
   };
 
   const showPendingSoon = () => {
@@ -32,6 +47,7 @@
 
   const beginNavigation = (url = null) => {
     announceNavigation(url);
+    coverOutgoingPage();
     showPendingSoon();
   };
 
@@ -145,7 +161,10 @@
   if (document.readyState === 'complete') scheduleIdleLibraryWarm();
   else window.addEventListener('load', scheduleIdleLibraryWarm, {once: true});
 
-  window.addEventListener('pageshow', clearPending);
+  window.addEventListener('pageshow', () => {
+    clearPending();
+    clearLeaving();
+  });
   window.addEventListener('pagehide', () => {
     announceNavigation();
     clearPending();
