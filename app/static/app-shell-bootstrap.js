@@ -20,7 +20,8 @@
   document.head.append(guard);
 
   const ensureStylesheet = (path) => new Promise((resolve) => {
-    const href = `/static/${path}${versionQuery}`;
+    const base = path.startsWith('/static/') ? path : `/static/${path}`;
+    const href = `${base}${versionQuery}`;
     let absolute = href;
     try { absolute = new URL(href, window.location.href).href; } catch (_error) {}
     const existing = [...document.querySelectorAll('link[rel="stylesheet"]')]
@@ -51,7 +52,7 @@
   });
 
   const criticalStyles = [
-    ensureStylesheet('mobile.css'),
+    ensureStylesheet('/static/mobile.css'),
     ensureStylesheet('task-widget.css'),
     ensureStylesheet('app-navigation.css'),
     ensureStylesheet('action-menu.css'),
@@ -59,6 +60,7 @@
   ];
 
   const path = window.location.pathname;
+  const sourcePage = window.location.pathname === '/sources';
   if (['/library', '/movies', '/shows'].includes(path)) {
     [
       'library-controls.css',
@@ -85,7 +87,7 @@
   if (path === '/settings/system') {
     criticalStyles.push(ensureStylesheet('settings-system-nav.css'));
   }
-  if (path === '/sources') {
+  if (sourcePage) {
     criticalStyles.push(ensureStylesheet('source-health.css'));
   }
 
@@ -120,7 +122,7 @@
     if (path === '/settings/metadata') {
       controllers.push(loadScript('metadata-maintenance.js', {async: true}));
     }
-    if (path === '/sources') {
+    if (sourcePage) {
       controllers.push(loadScript('source-health.js', {async: true}));
     }
     await Promise.all(controllers);
