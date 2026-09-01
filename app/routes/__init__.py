@@ -4,6 +4,7 @@ from .security_hardening import build_router as build_security_hardening_router
 from .resilience import build_router as build_resilience_router
 from .final_polish import build_router as build_final_polish_router
 from .release_081_stabilization import build_router as build_release_081_stabilization_router
+from .release_081_collection_undo import build_router as build_release_081_collection_undo_router
 from .health_action_routing import build_router as build_health_action_routing_router
 from .performance import build_router as build_performance_router
 from .system import build_router as build_system_router
@@ -43,6 +44,9 @@ ROUTER_BUILDERS = (
     # bulk collection and Smart Collection editing routes before domain routers are
     # constructed.
     build_release_081_stabilization_router,
+    # Collection deletion needs to own its POST route before the broader Collections
+    # router so the release build can provide a real one-shot Undo snapshot.
+    build_release_081_collection_undo_router,
     # Library Health findings can carry both source and title ids. Install the UI
     # destination policy before review/domain routes so title-specific actions do
     # not fall through to the generic Sources destination.
