@@ -71,7 +71,9 @@ def build_router(ctx: RouteContext):
     Form = ctx.get("Form")
     HTMLResponse = ctx.get("HTMLResponse")
     Request = ctx.get("Request")
+    MIE_CATEGORIES = ctx.get("MIE_CATEGORIES")
     db = ctx.live("db")
+    decode_filters = ctx.live("decode_filters")
     next_collection_position = ctx.live("next_collection_position")
     record_event = ctx.live("record_event")
     redirect = ctx.live("redirect")
@@ -85,6 +87,11 @@ def build_router(ctx: RouteContext):
     # class before that router constructs its service so every undo uses the same
     # mapped-drive-safe containment policy.
     OperationHistoryService._require_inside = staticmethod(network_safe_require_inside)
+
+    def librarian_get(path: str, **kwargs):
+        dependencies = list(kwargs.pop("dependencies", ()))
+        dependencies.append(Depends(require_librarian))
+        return router.get(path, dependencies=dependencies, **kwargs)
 
     def librarian_post(path: str, **kwargs):
         dependencies = list(kwargs.pop("dependencies", ()))
@@ -214,6 +221,36 @@ def build_router(ctx: RouteContext):
         )
         return redirect(destination, message)
 
+    @librarian_get("/collections/{collection_id}/smart/edit", response_class=HTMLResponse)
+    def smart_collection_editor(request: Request, collection_id: int):
+        with db.connect() as conn:
+            collection = conn.execute(
+                """SELECT id,name,description,filter_json,collection_type
+                   FROM collections WHERE id=?""",
+                (collection_id,),
+            ).fetchone()
+            if not collection or collection["collection_type"] != "smart":
+                return redirect("/collections", "That Smart Collection no longer exists.")
+            roots = conn.execute("SELECT id,label,path FROM roots ORDER BY label,path").fetchall()
+            genres = sorted(
+                {
+                    genre.strip()
+                    for row in conn.execute("SELECT genres FROM titles WHERE genres IS NOT NULL")
+                    for genre in (row["genres"] or "").split(",")
+                    if genre.strip()
+                },
+                key=str.casefold,
+            )
+        return templates.TemplateResponse(request, "smart_collection_edit.html", {
+            "collection": collection,
+            "filters": decode_filters(collection["filter_json"]),
+            "roots": roots,
+            "genres": genres,
+            "health_categories": sorted(MIE_CATEGORIES),
+            "return_to": f"/collections/{collection_id}",
+            "message": "",
+        })
+
     @librarian_post("/collections/{collection_id}/smart/edit")
     async def edit_smart_collection(request: Request, collection_id: int):
         form = await request.form()
@@ -261,6 +298,7 @@ def build_router(ctx: RouteContext):
     return router, {
         "bulk_collection_picker": bulk_collection_picker,
         "bulk_collection_apply": bulk_collection_apply,
+        "smart_collection_editor": smart_collection_editor,
         "edit_smart_collection": edit_smart_collection,
         "network_safe_require_inside": network_safe_require_inside,
     }
