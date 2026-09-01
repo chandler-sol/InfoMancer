@@ -161,10 +161,10 @@
   if (document.readyState === 'complete') scheduleIdleLibraryWarm();
   else window.addEventListener('load', scheduleIdleLibraryWarm, {once: true});
 
-  window.addEventListener('pageshow', () => {
-    clearPending();
-    clearLeaving();
-  });
+  /* Keep the long-standing cleanup listener intact for bfcache/pageshow behavior,
+     then independently remove the 0.8.1 blank transition cover. */
+  window.addEventListener('pageshow', clearPending);
+  window.addEventListener('pageshow', clearLeaving);
   window.addEventListener('pagehide', () => {
     announceNavigation();
     clearPending();
