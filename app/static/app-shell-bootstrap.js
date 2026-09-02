@@ -62,8 +62,28 @@
   ];
 
   const path = window.location.pathname;
-  const sourcePage = window.location.pathname === '/sources';
-  if (['/library', '/movies', '/shows'].includes(path)) {
+  const sourcePage = path === '/sources';
+  const librarySurface = ['/library', '/movies', '/shows'].includes(path);
+
+  /* A Library can contain hundreds of cards and its final workspace bounds differ
+     dramatically from most other pages. Letting Chromium/WebView2 treat main.shell
+     as a named cross-document snapshot makes the whole Library interpolate between
+     the old and new bounds, which reads as a grow/shrink animation and can stutter
+     while compositing a large cover grid. Keep only the application chrome in the
+     View Transition on these routes; the Library workspace will reveal atomically. */
+  if (librarySurface) {
+    document.documentElement.classList.add('library-surface-route');
+    const libraryTransitionGuard = document.createElement('style');
+    libraryTransitionGuard.textContent = `
+      html.library-surface-route main.shell,
+      html.library-surface-route body > footer {
+        view-transition-name: none !important;
+      }
+    `;
+    document.head.append(libraryTransitionGuard);
+  }
+
+  if (librarySurface) {
     [
       'library-controls.css',
       'library-performance.css',
@@ -98,6 +118,47 @@
     else document.addEventListener('DOMContentLoaded', resolve, {once: true});
   });
 
+  /* The Library density controller performs two geometry changes after parsing: it
+     moves the display controls beside the scope tabs and applies the saved cover
+     footprint. Keep the already-hidden workspace hidden for those few milliseconds
+     so WebView2 never paints the intermediate size. A bounded fallback prevents a
+     broken optional controller from leaving the workspace hidden indefinitely. */
+  const libraryLayoutReady = librarySurface
+    ? domReady.then(() => new Promise((resolve) => {
+        let finished = false;
+        let timer = 0;
+        let observer = null;
+        const isReady = () => {
+          const density = document.getElementById('cover-size-control');
+          const toolbar = document.querySelector('.library-view-toolbar');
+          const tabs = document.querySelector('.catalog-tabs');
+          return Boolean(density?.classList.contains('library-density-ready'))
+            && (!toolbar || !tabs || toolbar.parentElement === tabs);
+        };
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          window.clearTimeout(timer);
+          observer?.disconnect();
+          resolve();
+        };
+        if (isReady()) {
+          finish();
+          return;
+        }
+        observer = new MutationObserver(() => {
+          if (isReady()) finish();
+        });
+        observer.observe(document.body, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ['class'],
+        });
+        timer = window.setTimeout(finish, 1500);
+      }))
+    : Promise.resolve();
+
   /* record_search is a one-shot server marker used by a committed global search.
      The server has already persisted that search before this page renders. Remove
      it immediately so live Library filtering, view hydration, and other partial
@@ -130,7 +191,8 @@
     await Promise.all(controllers);
   });
 
-  Promise.all([domReady, pageControllersReady, ...criticalStyles]).then(() => {
+  const shellCriticalReady = Promise.all([domReady, pageControllersReady, ...criticalStyles]);
+  Promise.all([shellCriticalReady, libraryLayoutReady]).then(() => {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       body.classList.remove('shell-preparing');
       guard.remove();
