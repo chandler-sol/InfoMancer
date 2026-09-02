@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
+import json
+import os
 import platform
 import stat
 import urllib.request
@@ -104,6 +106,27 @@ def _write_notice(output: Path) -> None:
     )
 
 
+def _write_build_identity() -> Path:
+    commit = (
+        os.environ.get("PREVIEW_SHA")
+        or os.environ.get("GITHUB_SHA")
+        or "local"
+    ).strip()
+    short_commit = commit[:8] if commit != "local" else "local"
+    path = Path("app/static/build-info.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {"commit": commit, "short_commit": short_commit},
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(f"Stamped InfoMancer runtime build identity: {short_commit}")
+    return path
+
+
 def _reuse_verified_stage(output: Path, key: tuple[str, str], asset: dict) -> Path | None:
     """Reuse a cached stage only after re-verifying the pinned binary and license."""
     binary_name = "ffprobe.exe" if key[0] == "windows" else "ffprobe"
@@ -165,6 +188,7 @@ def main() -> int:
     )
     parser.add_argument("--output", default="build/ffprobe")
     args = parser.parse_args()
+    _write_build_identity()
     stage(Path(args.output))
     return 0
 
