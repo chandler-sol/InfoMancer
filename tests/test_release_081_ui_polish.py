@@ -36,6 +36,18 @@ class Release081UiPolishContracts(unittest.TestCase):
         self.assertIn("view-transition-name: infomancer-chrome", modern)
         self.assertIn("view-transition-name: infomancer-content", modern)
 
+    def test_library_navigation_avoids_snapshot_scaling_and_waits_for_final_geometry(self):
+        bootstrap = self.read("app/static/app-shell-bootstrap.js")
+        self.assertIn("const librarySurface = ['/library', '/movies', '/shows'].includes(path)", bootstrap)
+        self.assertIn("library-surface-route", bootstrap)
+        self.assertIn("view-transition-name: none !important", bootstrap)
+        self.assertIn("const libraryLayoutReady", bootstrap)
+        self.assertIn("library-density-ready", bootstrap)
+        self.assertIn("toolbar.parentElement === tabs", bootstrap)
+        self.assertIn("MutationObserver", bootstrap)
+        self.assertIn("window.setTimeout(finish, 1500)", bootstrap)
+        self.assertIn("Promise.all([shellCriticalReady, libraryLayoutReady])", bootstrap)
+
     def test_disabled_controls_are_not_reported_as_busy(self):
         css = self.read("app/static/release-081-ui-polish.css")
         self.assertIn("button:disabled", css)
