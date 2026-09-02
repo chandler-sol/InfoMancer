@@ -11,10 +11,15 @@ class Release081UiPolishContracts(unittest.TestCase):
     def read(self, path: str) -> str:
         return (self.root / path).read_text(encoding="utf-8")
 
-    def test_navigation_paint_guard_waits_for_critical_styles_and_controllers(self):
+    def test_navigation_paint_guard_waits_for_critical_styles_without_blank_shell(self):
         bootstrap = self.read("app/static/app-shell-bootstrap.js")
         self.assertIn("shell-preparing", bootstrap)
-        self.assertIn("body.shell-preparing > footer", bootstrap)
+        self.assertIn("navigation-paint-stability.css", bootstrap)
+        self.assertIn("body.shell-preparing .library-table", bootstrap)
+        self.assertIn("body.shell-preparing #cover-library", bootstrap)
+        self.assertIn("visibility: visible !important", bootstrap)
+        self.assertIn("body.shell-preparing .library-view-toolbar", bootstrap)
+        self.assertNotIn("body.shell-preparing > footer { visibility: hidden", bootstrap)
         self.assertIn("release-081-ui-polish.css", bootstrap)
         self.assertIn("action-menu.css", bootstrap)
         self.assertIn("library-controls.css", bootstrap)
@@ -22,22 +27,29 @@ class Release081UiPolishContracts(unittest.TestCase):
         self.assertIn("Promise.all([domReady, pageControllersReady, ...criticalStyles])", bootstrap)
         self.assertIn("release-081-ui-polish.js", bootstrap)
 
-    def test_full_page_navigation_keeps_chrome_and_blanks_only_workspace(self):
+    def test_full_page_navigation_keeps_old_workspace_painted_and_avoids_content_morph(self):
         script = self.read("app/static/app-navigation.js")
         styles = self.read("app/static/app-navigation.css")
         modern = self.read("app/static/modern.css")
+        stable = self.read("app/static/navigation-paint-stability.css")
         self.assertIn("coverOutgoingPage", script)
         self.assertIn("app-navigation-leaving", script)
         self.assertNotIn("html.app-navigation-leaving::before", styles)
-        self.assertIn("body.has-app-sidebar main.shell", styles)
-        self.assertIn("body.has-app-sidebar > footer", styles)
         self.assertIn("visibility:hidden !important", styles)
+        self.assertIn("html.app-navigation-leaving body.has-app-sidebar main.shell", stable)
+        self.assertIn("visibility: visible !important", stable)
         self.assertIn("@view-transition", modern)
         self.assertIn("view-transition-name: infomancer-chrome", modern)
         self.assertIn("view-transition-name: infomancer-content", modern)
+        self.assertIn("main.shell,", stable)
+        self.assertIn("view-transition-name: none !important", stable)
+        self.assertIn("::view-transition-old(root)", stable)
+        self.assertIn("::view-transition-new(root)", stable)
+        self.assertIn("infomancer-root-reveal", stable)
 
-    def test_library_navigation_avoids_snapshot_scaling_and_waits_for_final_geometry(self):
+    def test_library_navigation_waits_only_for_moving_controls(self):
         bootstrap = self.read("app/static/app-shell-bootstrap.js")
+        stable = self.read("app/static/navigation-paint-stability.css")
         self.assertIn("const librarySurface = ['/library', '/movies', '/shows'].includes(path)", bootstrap)
         self.assertIn("library-surface-route", bootstrap)
         self.assertIn("view-transition-name: none !important", bootstrap)
@@ -47,6 +59,10 @@ class Release081UiPolishContracts(unittest.TestCase):
         self.assertIn("MutationObserver", bootstrap)
         self.assertIn("window.setTimeout(finish, 1500)", bootstrap)
         self.assertIn("Promise.all([shellCriticalReady, libraryLayoutReady])", bootstrap)
+        self.assertIn("body.shell-preparing .library-view-toolbar", bootstrap)
+        self.assertIn("body.shell-preparing #cover-size-control", bootstrap)
+        self.assertIn("#cover-library", stable)
+        self.assertIn("animation: none !important", stable)
 
     def test_disabled_controls_are_not_reported_as_busy(self):
         css = self.read("app/static/release-081-ui-polish.css")
