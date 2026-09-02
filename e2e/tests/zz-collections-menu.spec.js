@@ -23,13 +23,13 @@ test('Collections card exposes its action menu on hover', async ({ page }) => {
   const name = 'Acceptance Hover Collection';
   const existing = page.locator('.collection-picker-card', { hasText: name });
   if (!(await existing.count())) {
-    await page.getByRole('button', { name: /Create Collection/i }).click();
+    await page.locator('.collection-create-launcher > button').click();
     const dialog = page.locator('dialog.collection-create-dialog');
     await expect(dialog).toBeVisible();
     await dialog.locator('form.collection-create input[name="name"]').fill(name);
     await Promise.all([
       page.waitForURL((url) => /^\/collections\/\d+$/.test(url.pathname)),
-      dialog.getByRole('button', { name: 'Create collection' }).click(),
+      dialog.locator('form.collection-create button.primary').click(),
     ]);
     await page.goto(`${sandboxUrl}/collections`);
   }
