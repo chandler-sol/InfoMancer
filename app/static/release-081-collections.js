@@ -12,6 +12,23 @@
     });
   });
 
+  /* Library cover view relies on a fine-pointer hover contract. Chromium honors the
+     same CSS on Collections, but packaged WebView2 can occasionally fail to promote
+     the parent article's :hover state until mouse-down. Mirror the Library behavior
+     with pointerenter/pointerleave as a fallback while leaving native :hover intact. */
+  const finePointer = window.matchMedia?.('(hover: hover) and (pointer: fine)');
+  if (finePointer?.matches) {
+    document.querySelectorAll('.collection-picker-card').forEach((card) => {
+      card.addEventListener('pointerenter', (event) => {
+        if (event.pointerType && event.pointerType !== 'mouse' && event.pointerType !== 'pen') return;
+        card.classList.add('library-hover-match');
+      });
+      card.addEventListener('pointerleave', () => {
+        card.classList.remove('library-hover-match');
+      });
+    });
+  }
+
   document.addEventListener('click', (event) => {
     const active = event.target.closest('.collection-picker-menu');
     if (!active) closePickerMenus();

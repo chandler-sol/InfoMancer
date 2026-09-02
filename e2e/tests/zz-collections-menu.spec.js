@@ -13,7 +13,7 @@ async function signIn(page) {
   ]);
 }
 
-test('Collections card exposes its action menu on hover', async ({ page }) => {
+test('Collections card exposes its action menu with Library-style pointer hover', async ({ page }) => {
   await signIn(page);
   await page.goto(`${sandboxUrl}/collections`);
 
@@ -42,9 +42,16 @@ test('Collections card exposes its action menu on hover', async ({ page }) => {
   await expect(actions).toBeHidden();
 
   await card.hover();
+  await expect(card).toHaveClass(/library-hover-match/);
   await expect(actions).toBeVisible();
   await expect(trigger).toBeVisible();
 
+  await page.mouse.move(0, 0);
+  await expect(card).not.toHaveClass(/library-hover-match/);
+  await expect(actions).toBeHidden();
+
+  await card.hover();
+  await expect(actions).toBeVisible();
   await trigger.click();
   await expect(card.locator('.collection-picker-menu')).toHaveAttribute('open', '');
   await expect(card.getByRole('link', { name: 'Edit collection' })).toBeVisible();

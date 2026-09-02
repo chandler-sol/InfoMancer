@@ -1,6 +1,6 @@
-/* 0.8.1 RC fix: Collection action menus are primary management affordances.
-   The Collections picker owns its hover/focus behavior directly, while touch layouts
-   keep the trigger visible because they do not have a dependable hover state. */
+/* 0.8.1 RC fix: Collection action menus should behave exactly like the Library
+   cover-view controls. Fine pointers reveal after the same half-second hover dwell;
+   keyboard focus stays immediate; touch layouts keep the trigger visible. */
 
 .collection-picker-card-actions {
   display: block !important;
@@ -8,10 +8,11 @@
   opacity: 0 !important;
   pointer-events: none !important;
   transform: none !important;
-  transition: opacity .12s ease, visibility 0s linear .12s !important;
+  transition: opacity .16s ease, visibility 0s linear .16s !important;
 }
 
-.collection-picker-card:hover .collection-picker-card-actions,
+/* Keyboard users should never have to wait for a hover delay. Keeping an open menu
+   visible also prevents it disappearing when focus moves into the popover. */
 .collection-picker-card:focus-within .collection-picker-card-actions,
 .collection-picker-card-actions:has(.collection-picker-menu[open]) {
   visibility: visible !important;
@@ -75,6 +76,20 @@
   border-color: var(--lime) !important;
   color: var(--lime) !important;
   background: rgba(12, 18, 24, .98) !important;
+}
+
+/* This is deliberately the Library cover-view contract. The native :hover path is
+   the normal browser behavior. .library-hover-match is a WebView2 fallback driven
+   by pointerenter/pointerleave so packaged Windows builds cannot fall back to only
+   showing the control after mouse-down/focus. */
+@media (hover: hover) and (pointer: fine) {
+  .collection-picker-card:hover .collection-picker-card-actions,
+  .collection-picker-card.library-hover-match .collection-picker-card-actions {
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    transition: opacity .16s ease .5s, visibility 0s linear .5s !important;
+  }
 }
 
 /* Collection detail cards used the Library's full-poster hover overlay merely to
