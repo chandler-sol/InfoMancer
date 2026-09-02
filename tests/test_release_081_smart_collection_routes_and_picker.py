@@ -78,22 +78,26 @@ class Release081SmartCollectionRouteTests(unittest.TestCase):
 
 
 class Release081CollectionPickerContractTests(unittest.TestCase):
-    def test_picker_cards_have_library_style_hover_action_menu(self):
+    def test_picker_cards_reuse_library_cover_hover_action_menu(self):
         template = (ROOT / "app/templates/collections.html").read_text(encoding="utf-8")
-        css = (ROOT / "app/static/release-081-collections.css").read_text(encoding="utf-8")
+        library_css = (ROOT / "app/static/library.css").read_text(encoding="utf-8")
+        collection_css = (ROOT / "app/static/release-081-collections.css").read_text(encoding="utf-8")
         script = (ROOT / "app/static/release-081-collections.js").read_text(encoding="utf-8")
 
-        self.assertIn('class="collection-picker-card"', template)
-        self.assertIn("collection-picker-card-actions", template)
-        self.assertIn("item-action-menu collection-picker-menu", template)
+        self.assertIn('class="cover-card collection-picker-card"', template)
+        self.assertIn('class="cover-card-link collection-card collection-picker-card-link"', template)
+        self.assertIn('class="cover-card-actions collection-picker-card-actions"', template)
+        self.assertIn("cover-row-menu item-action-menu collection-picker-menu", template)
         self.assertIn("Edit Smart Collection", template)
         self.assertIn("?action=add", template)
         self.assertIn("?action=edit", template)
         self.assertIn("?action=reorder", template)
         self.assertIn('/collections/{{ collection.id }}/delete', template)
-        self.assertIn(".collection-picker-card:hover .collection-picker-card-actions", css)
-        self.assertIn(".collection-picker-card:focus-within .collection-picker-card-actions", css)
+        self.assertIn(".cover-card:hover .cover-card-actions", library_css)
+        self.assertIn(".cover-card:hover .cover-row-menu", library_css)
+        self.assertNotIn(".collection-picker-card:hover .collection-picker-card-actions", collection_css)
         self.assertIn("closePickerMenus", script)
+        self.assertNotIn("library-hover-match", script)
 
     def test_picker_deep_links_reuse_existing_manual_collection_ui(self):
         script = (ROOT / "app/static/release-081-collection-polish.js").read_text(encoding="utf-8")

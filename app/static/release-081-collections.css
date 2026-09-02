@@ -98,13 +98,15 @@
   overflow-wrap: anywhere;
 }
 
-/* The Collections picker now follows the Library card interaction model: the card
-   remains the large navigation target while the Librarian's action trigger appears
-   on hover/focus without nesting interactive controls inside that link. */
+/* Collection picker cards now use the real Library cover-card action contract.
+   These rules only preserve the Collections 16:9 geometry. Visibility, hover delay,
+   focus behavior, pointer events, and menu trigger styling come from library.css. */
 .collection-picker-card {
   position: relative;
   min-width: 0;
   isolation: isolate;
+  flex-basis: auto;
+  width: auto;
 }
 
 .collection-picker-card-link {
@@ -138,55 +140,26 @@
   background: rgba(3, 7, 10, .34);
 }
 
-.collection-picker-card-actions {
-  position: absolute;
-  top: 10px;
-  right: 10px;
+.collection-picker-card .cover-card-actions {
   z-index: 30;
-  visibility: hidden;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(2px);
-  transition: opacity .16s ease, visibility 0s linear .16s, transform .18s ease;
+  aspect-ratio: 16 / 9;
 }
 
-.collection-picker-card:hover .collection-picker-card-actions,
-.collection-picker-card:focus-within .collection-picker-card-actions,
-.collection-picker-card-actions:has(.collection-picker-menu[open]) {
-  visibility: visible;
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0);
-  transition: opacity .16s ease .16s, visibility 0s linear .16s, transform .18s ease;
-}
-
-.collection-picker-menu {
-  position: relative;
-}
-
-.collection-picker-menu > div {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 1200;
-  width: min(285px, calc(100vw - 24px));
-}
-
-.collection-picker-menu > div > form {
+.collection-picker-card .cover-row-menu > div > form {
   margin: 0;
 }
 
-.collection-picker-menu > div > form > button {
+.collection-picker-card .cover-row-menu > div > form > button {
   width: 100%;
   text-align: left;
 }
 
-.collection-picker-menu > div > form > button.danger {
+.collection-picker-card .cover-row-menu > div > form > button.danger {
   color: var(--danger);
 }
 
-.collection-picker-menu > div > form > button.danger:hover,
-.collection-picker-menu > div > form > button.danger:focus-visible {
+.collection-picker-card .cover-row-menu > div > form > button.danger:hover,
+.collection-picker-card .cover-row-menu > div > form > button.danger:focus-visible {
   color: #10140b;
 }
 
@@ -291,15 +264,6 @@
   margin-top: 6px;
 }
 
-@media (hover: none), (pointer: coarse) {
-  .collection-picker-card-actions {
-    visibility: visible;
-    opacity: 1;
-    pointer-events: auto;
-    transform: none;
-  }
-}
-
 @media (max-width: 900px) {
   .smart-collection-create .smart-filter-grid,
   .smart-collection-editor-form {
@@ -328,10 +292,6 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .collection-picker-menu > div {
-    width: min(285px, calc(100vw - 16px));
-  }
-
   .notice.collection-undo-notice {
     align-items: stretch;
     flex-direction: column;
@@ -349,8 +309,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .collection-picker-card .collection-art,
-  .collection-picker-card .collection-art::after,
-  .collection-picker-card-actions {
+  .collection-picker-card .collection-art::after {
     transition: none;
   }
 }
