@@ -143,57 +143,8 @@ button[aria-busy="true"],
   margin: 18px 0 22px;
 }
 
-.collection-picker-card-actions {
-  z-index: 80 !important;
-}
-
-/* Do not rely on the later action-menu stylesheet to make the trigger exist. */
-.collection-picker-menu > summary {
-  position: relative;
-  box-sizing: border-box;
-  display: grid !important;
-  place-items: center;
-  width: 42px;
-  min-width: 42px;
-  height: 42px;
-  min-height: 42px;
-  padding: 0 !important;
-  border: 1px solid var(--line) !important;
-  border-radius: 4px !important;
-  background: #0c1117 !important;
-  color: var(--text) !important;
-  font-size: 0 !important;
-  list-style: none;
-  cursor: pointer;
-}
-
-.collection-picker-menu > summary::before {
-  content: "•••";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%,-52%) rotate(90deg);
-  color: currentColor;
-  font-size: 15px;
-  letter-spacing: 2px;
-  line-height: 1;
-}
-
-.collection-picker-menu > summary:hover,
-.collection-picker-menu > summary:focus-visible,
-.collection-picker-menu[open] > summary {
-  border-color: var(--lime) !important;
-  color: var(--lime) !important;
-}
-
-.collection-picker-card:hover .collection-picker-card-actions,
-.collection-picker-card:focus-within .collection-picker-card-actions,
-.collection-picker-card-actions:has(.collection-picker-menu[open]) {
-  visibility: visible !important;
-  opacity: 1 !important;
-  pointer-events: auto !important;
-}
-
+/* Collection card action visibility is intentionally absent here. The picker now
+   uses Library's real cover-card / cover-card-actions / cover-row-menu contract. */
 .collection-picker-editor-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
