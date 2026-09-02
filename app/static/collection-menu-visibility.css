@@ -1,0 +1,90 @@
+/* 0.8.1 RC fix: Collection action menus are primary management affordances.
+   Do not make the trigger depend on hover timing or inherited Library overlays. */
+
+.collection-picker-card-actions {
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  transition: none !important;
+}
+
+.collection-picker-menu > summary,
+.collection-cover-card .cover-row-menu > summary {
+  position: relative;
+  box-sizing: border-box;
+  display: grid !important;
+  place-items: center;
+  width: 40px !important;
+  min-width: 40px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  padding: 0 !important;
+  border: 1px solid rgba(255, 255, 255, .28) !important;
+  border-radius: 5px !important;
+  background: rgba(9, 14, 19, .92) !important;
+  color: #fff !important;
+  font-size: 0 !important;
+  line-height: 1 !important;
+  list-style: none;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, .3);
+  cursor: pointer;
+}
+
+.collection-picker-menu > summary::-webkit-details-marker,
+.collection-cover-card .cover-row-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.collection-picker-menu > summary::before,
+.collection-cover-card .cover-row-menu > summary::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 20px;
+  transform: translate(-50%, -50%);
+  background:
+    radial-gradient(circle at 50% 2px, currentColor 0 2px, transparent 2.2px),
+    radial-gradient(circle at 50% 10px, currentColor 0 2px, transparent 2.2px),
+    radial-gradient(circle at 50% 18px, currentColor 0 2px, transparent 2.2px);
+}
+
+.collection-picker-menu > summary:hover,
+.collection-picker-menu > summary:focus-visible,
+.collection-picker-menu[open] > summary,
+.collection-cover-card .cover-row-menu > summary:hover,
+.collection-cover-card .cover-row-menu > summary:focus-visible,
+.collection-cover-card .cover-row-menu[open] > summary {
+  border-color: var(--lime) !important;
+  color: var(--lime) !important;
+  background: rgba(12, 18, 24, .98) !important;
+}
+
+/* Collection detail cards used the Library's full-poster hover overlay merely to
+   expose the action trigger. Keep the overlay transparent and the trigger visible. */
+.collection-cover-card .cover-card-actions {
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: none !important;
+  background: transparent !important;
+  transform: none !important;
+  transition: none !important;
+}
+
+.collection-cover-card .cover-row-menu {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+.collection-cover-library.is-reordering .cover-card-actions {
+  display: none !important;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .collection-picker-card-actions,
+  .collection-cover-card .cover-card-actions {
+    transition: none !important;
+  }
+}
