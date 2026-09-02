@@ -209,25 +209,15 @@ textarea:focus {
   column-gap: clamp(16px, 1.8vw, 28px);
 }
 
-/* The Library script restores the saved List/Covers preference at the end of the
-   document. Hold the view surface only briefly so the browser cannot paint the
-   server-default List view before preference restore, without adding perceptible lag. */
+/* The server sees the saved List/Covers cookie before rendering and already emits
+   the correct initial Library surface. Do not hide that server-rendered result while
+   the enhancement scripts start. Keeping the destination visible also gives
+   cross-document navigation a complete first snapshot instead of an empty stage. */
 .library-table,
 #cover-library,
 .library-view-toolbar {
-  animation: library-first-paint-fallback 0s linear .08s both;
-}
-
-html.library-view-ready .library-table,
-html.library-view-ready #cover-library,
-html.library-view-ready .library-view-toolbar {
   visibility: visible;
   animation: none;
-}
-
-@keyframes library-first-paint-fallback {
-  0% { visibility: hidden; }
-  100% { visibility: visible; }
 }
 
 @media (max-width: 760px) {
@@ -385,9 +375,10 @@ html.library-view-ready .library-view-toolbar {
   }
 }
 
-/* Same-origin document navigation keeps the application chrome visually anchored
-   while the page body makes a very short transition. Browsers without cross-document
-   View Transitions simply ignore this block and retain normal navigation behavior. */
+/* Same-origin document navigation keeps the application chrome visually anchored.
+   Only the fixed viewport/root snapshot transitions. Never give main content its own
+   named transition: Dashboard, Library, Review, and Settings have very different
+   bounds, and interpolating those bounds makes one page visibly stretch into another. */
 @view-transition {
   navigation: auto;
 }
@@ -396,39 +387,35 @@ html.library-view-ready .library-view-toolbar {
   view-transition-name: infomancer-chrome;
 }
 
-main.shell {
-  view-transition-name: infomancer-content;
-}
-
-footer {
-  view-transition-name: infomancer-footer;
-}
-
+::view-transition-group(infomancer-chrome),
 ::view-transition-old(infomancer-chrome),
 ::view-transition-new(infomancer-chrome) {
   animation: none;
   mix-blend-mode: normal;
 }
 
-::view-transition-old(infomancer-content) {
-  animation: infomancer-page-out .08s ease-out both;
-}
-
-::view-transition-new(infomancer-content) {
-  animation: infomancer-page-in .14s ease-out both;
-}
-
-::view-transition-old(infomancer-footer),
-::view-transition-new(infomancer-footer) {
+/* Keep the outgoing viewport fully painted underneath the destination. The new
+   document only fades over it once ready, so a slower destination never exposes an
+   empty shell between pages. The root viewport has stable geometry and therefore
+   cannot perform the size/position morph that the old named main element did. */
+::view-transition-group(root) {
   animation-duration: .1s;
+  animation-timing-function: ease-out;
 }
 
-@keyframes infomancer-page-out {
-  to { opacity: .94; transform: translateY(-2px); }
+::view-transition-old(root) {
+  animation: none;
+  mix-blend-mode: normal;
 }
 
-@keyframes infomancer-page-in {
-  from { opacity: .94; transform: translateY(3px); }
+::view-transition-new(root) {
+  animation: infomancer-page-reveal .1s ease-out both;
+  mix-blend-mode: normal;
+}
+
+@keyframes infomancer-page-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* Cover libraries can contain hundreds of cards. Let the browser skip layout/paint
@@ -439,10 +426,12 @@ footer {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  ::view-transition-old(infomancer-content),
-  ::view-transition-new(infomancer-content),
-  ::view-transition-old(infomancer-footer),
-  ::view-transition-new(infomancer-footer) {
+  ::view-transition-group(root),
+  ::view-transition-old(root),
+  ::view-transition-new(root),
+  ::view-transition-group(infomancer-chrome),
+  ::view-transition-old(infomancer-chrome),
+  ::view-transition-new(infomancer-chrome) {
     animation: none;
   }
 }
