@@ -1,0 +1,59 @@
+/* 0.8.1 navigation paint stabilization.
+   Keep the persistent application chrome named for cross-document handoff, but let
+   the workspace/footer stay inside the root snapshot. Their geometry changes too
+   much between Dashboard, Library, Review, and Settings for element interpolation
+   to look natural in Chromium/WebView2. */
+main.shell,
+body > footer {
+  view-transition-name: none !important;
+}
+
+/* The previous navigation cover deliberately blanked the outgoing workspace before
+   navigation. That made the shell feel stable, but it also exposed a dark empty frame
+   whenever the next document needed a little longer to become ready. Leave the old
+   page painted until the browser has the destination snapshot. */
+html.app-navigation-leaving body.has-app-sidebar main.shell,
+html.app-navigation-leaving body.has-app-sidebar > footer {
+  visibility: visible !important;
+}
+
+/* The server already knows the saved List/Covers preference. Do not hide a correctly
+   rendered Library surface while enhancement code starts. Controls that genuinely
+   change geometry are still held by app-shell-bootstrap until density placement is
+   complete. */
+.library-table,
+#cover-library {
+  visibility: visible !important;
+  animation: none !important;
+}
+
+/* Root geometry is the viewport, so it cannot perform the grow/shrink interpolation
+   that a named main.shell did. Keep the outgoing viewport fixed underneath and reveal
+   the ready destination with one short opacity handoff. */
+::view-transition-group(root) {
+  animation-duration: .1s;
+  animation-timing-function: ease-out;
+}
+
+::view-transition-old(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-new(root) {
+  animation: infomancer-root-reveal .1s ease-out both;
+  mix-blend-mode: normal;
+}
+
+@keyframes infomancer-root-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(root),
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}
