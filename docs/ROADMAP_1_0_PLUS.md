@@ -59,6 +59,17 @@ Support provider-defined and user-defined episode ordering without breaking stab
 - Reuse InfoMancer's existing drag-and-drop ordering interaction for custom episode sequences.
 - Preserve TVDB/provider episode IDs underneath the selected presentation order so metadata, missing-episode detection, renaming, and future Plex/Jellyfin integration can all reference the same canonical episodes.
 
+## SPA-style persistent shell navigation
+
+Evaluate a future persistent-shell navigation architecture so InfoMancer behaves more like a native desktop application during page changes.
+
+- Keep long-lived application chrome such as the sidebar, header, global search, task widget, and other shell state mounted while only the workspace content changes.
+- Prefer incremental migration from the existing FastAPI/Jinja application rather than requiring an all-at-once frontend rewrite.
+- Consider PJAX-style server-rendered partial navigation as an intermediate step, with a fuller SPA architecture only where it provides a clear maintenance or interaction benefit.
+- Give page controllers explicit mount/unmount lifecycle hooks so partial navigation cannot accumulate duplicate listeners, stale inspectors, or abandoned modal state.
+- Preserve browser history, deep linking, refresh behavior, accessibility, and server-rendered fallbacks.
+- Use content-only transitions so desktop WebView, browser, and future native-shell builds keep stable chrome while the new page workspace loads atomically.
+
 ## Pre-release Feature Requests
 
 Dev, Alpha, and Beta builds should expose a Feature Requests section for structured product feedback.

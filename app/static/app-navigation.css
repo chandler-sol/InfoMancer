@@ -2,16 +2,19 @@ html {
   scrollbar-gutter: stable;
 }
 
-/* Full-document navigations should never expose a mixed old/new frame. Cover the
-   outgoing document with the application background immediately, then let the
-   incoming bootstrap reveal its fully styled shell only when ready. */
-html.app-navigation-leaving::before {
-  content:"";
-  position:fixed;
-  inset:0;
-  z-index:2147483646;
-  pointer-events:auto;
+/* Keep the desktop application shell visually anchored during same-origin page
+   changes. The outgoing workspace disappears immediately to the normal app
+   background, but the header/sidebar remain painted while Chromium/WebView2's
+   cross-document View Transition hands them to the next document. Firefox and
+   other browsers that do not support that transition simply keep their normal
+   document navigation behavior without a whole-window masking layer. */
+html.app-navigation-leaving body.has-app-sidebar {
   background:#090d11;
+}
+
+html.app-navigation-leaving body.has-app-sidebar main.shell,
+html.app-navigation-leaving body.has-app-sidebar > footer {
+  visibility:hidden !important;
 }
 
 html.app-navigation-pending::after {

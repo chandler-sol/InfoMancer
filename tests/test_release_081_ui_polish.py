@@ -14,6 +14,7 @@ class Release081UiPolishContracts(unittest.TestCase):
     def test_navigation_paint_guard_waits_for_critical_styles_and_controllers(self):
         bootstrap = self.read("app/static/app-shell-bootstrap.js")
         self.assertIn("shell-preparing", bootstrap)
+        self.assertIn("body.shell-preparing > footer", bootstrap)
         self.assertIn("release-081-ui-polish.css", bootstrap)
         self.assertIn("action-menu.css", bootstrap)
         self.assertIn("library-controls.css", bootstrap)
@@ -21,14 +22,19 @@ class Release081UiPolishContracts(unittest.TestCase):
         self.assertIn("Promise.all([domReady, pageControllersReady, ...criticalStyles])", bootstrap)
         self.assertIn("release-081-ui-polish.js", bootstrap)
 
-    def test_full_page_navigation_blanks_outgoing_document_before_next_shell(self):
+    def test_full_page_navigation_keeps_chrome_and_blanks_only_workspace(self):
         script = self.read("app/static/app-navigation.js")
         styles = self.read("app/static/app-navigation.css")
+        modern = self.read("app/static/modern.css")
         self.assertIn("coverOutgoingPage", script)
         self.assertIn("app-navigation-leaving", script)
-        self.assertIn("html.app-navigation-leaving::before", styles)
-        self.assertIn("background:#090d11", styles)
-        self.assertIn("z-index:2147483646", styles)
+        self.assertNotIn("html.app-navigation-leaving::before", styles)
+        self.assertIn("body.has-app-sidebar main.shell", styles)
+        self.assertIn("body.has-app-sidebar > footer", styles)
+        self.assertIn("visibility:hidden !important", styles)
+        self.assertIn("@view-transition", modern)
+        self.assertIn("view-transition-name: infomancer-chrome", modern)
+        self.assertIn("view-transition-name: infomancer-content", modern)
 
     def test_disabled_controls_are_not_reported_as_busy(self):
         css = self.read("app/static/release-081-ui-polish.css")

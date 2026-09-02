@@ -10,11 +10,13 @@
   /* Keep page content hidden until parser-discovered markup, deferred controllers,
      and the small set of late 0.8 styles have settled. The application chrome stays
      visible, so navigation feels continuous instead of flashing an intermediate
-     layout. */
+     layout. The footer follows the workspace so it cannot flash at the top of an
+     otherwise empty content surface while the next page is preparing. */
   body.classList.add('shell-preparing');
   const guard = document.createElement('style');
   guard.textContent = `
-    body.shell-preparing .shell { visibility: hidden !important; }
+    body.shell-preparing .shell,
+    body.shell-preparing > footer { visibility: hidden !important; }
     body.shell-preparing { background: #090d11; }
   `;
   document.head.append(guard);
