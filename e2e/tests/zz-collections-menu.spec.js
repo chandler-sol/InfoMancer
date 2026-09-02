@@ -13,12 +13,9 @@ async function signIn(page) {
   ]);
 }
 
-test('Collections card exposes its action menu with Library-style pointer hover', async ({ page }) => {
+test('Collections card uses the Library cover hover action contract', async ({ page }) => {
   await signIn(page);
   await page.goto(`${sandboxUrl}/collections`);
-
-  const directStylesheet = page.locator('link[rel="stylesheet"][href*="collection-menu-visibility.css"]');
-  expect(await directStylesheet.count()).toBeGreaterThan(0);
 
   const name = 'Acceptance Hover Collection';
   const existing = page.locator('.collection-picker-card', { hasText: name });
@@ -36,23 +33,27 @@ test('Collections card exposes its action menu with Library-style pointer hover'
 
   const card = page.locator('.collection-picker-card', { hasText: name }).first();
   const actions = card.locator('.collection-picker-card-actions');
-  const trigger = card.locator('.collection-picker-menu > summary');
+  const menu = card.locator('.collection-picker-menu');
+  const trigger = menu.locator('> summary');
 
   await expect(card).toBeVisible();
-  await expect(actions).toBeHidden();
-
-  await card.hover();
-  await expect(card).toHaveClass(/library-hover-match/);
-  await expect(actions).toBeVisible();
-  await expect(trigger).toBeVisible();
-
-  await page.mouse.move(0, 0);
+  await expect(card).toHaveClass(/\bcover-card\b/);
+  await expect(card.locator('.collection-picker-card-link')).toHaveClass(/\bcover-card-link\b/);
+  await expect(actions).toHaveClass(/\bcover-card-actions\b/);
+  await expect(menu).toHaveClass(/\bcover-row-menu\b/);
   await expect(card).not.toHaveClass(/library-hover-match/);
   await expect(actions).toBeHidden();
 
   await card.hover();
   await expect(actions).toBeVisible();
+  await expect(trigger).toBeVisible();
+
+  await page.mouse.move(0, 0);
+  await expect(actions).toBeHidden();
+
+  await card.hover();
+  await expect(actions).toBeVisible();
   await trigger.click();
-  await expect(card.locator('.collection-picker-menu')).toHaveAttribute('open', '');
+  await expect(menu).toHaveAttribute('open', '');
   await expect(card.getByRole('link', { name: 'Edit collection' })).toBeVisible();
 });
