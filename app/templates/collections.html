@@ -39,13 +39,13 @@
 {% endif %}
 <section class="collection-grid">
 {% for collection in collections %}
-  <article class="collection-picker-card"
+  <article class="cover-card collection-picker-card"
            data-collection-id="{{ collection.id }}"
            data-collection-name="{{ collection.name }}"
            data-collection-description="{{ collection.description or '' }}"
            data-collection-type="{{ collection.collection_type }}"
            data-has-custom-artwork="{{ '1' if collection.artwork_filename else '0' }}">
-    <a class="collection-card collection-picker-card-link" href="/collections/{{ collection.id }}">
+    <a class="cover-card-link collection-card collection-picker-card-link" href="/collections/{{ collection.id }}">
       <span class="collection-art">{% if collection.artwork_url %}<img src="{{ collection.artwork_url }}" alt="" loading="lazy">{% else %}<span>{{ collection.name[:1]|upper }}</span>{% endif %}</span>
       <strong>{{ collection.name }}</strong>
       {% if collection.collection_type == 'smart' %}<span class="kind">Smart</span>{% endif %}
@@ -53,8 +53,8 @@
       {% if collection.description %}<p>{{ collection.description }}</p>{% endif %}
     </a>
     {% if current_user.is_librarian %}
-    <div class="collection-picker-card-actions" aria-label="Actions for {{ collection.name }}">
-      <details class="episode-menu item-action-menu collection-picker-menu">
+    <div class="cover-card-actions collection-picker-card-actions" aria-label="Actions for {{ collection.name }}">
+      <details class="episode-menu cover-row-menu item-action-menu collection-picker-menu">
         <summary aria-label="Actions for {{ collection.name }}" title="Collection actions">⋮</summary>
         <div>
           <a href="/collections/{{ collection.id }}?action=edit" data-collection-edit>Edit collection</a>
