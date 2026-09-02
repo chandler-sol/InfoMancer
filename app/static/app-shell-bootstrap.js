@@ -62,7 +62,7 @@
   ];
 
   const path = window.location.pathname;
-  const sourcePage = path === '/sources';
+  const sourcePage = window.location.pathname === '/sources';
   const librarySurface = ['/library', '/movies', '/shows'].includes(path);
 
   /* A Library can contain hundreds of cards and its final workspace bounds differ
