@@ -99,14 +99,22 @@ jobs:
           - os: windows-latest
             label: Windows
             slug: windows
+            asset_os: windows
             bundles: nsis
-          - os: macos-latest
-            label: macOS
-            slug: macos
+          - os: macos-26
+            label: macOS Apple Silicon
+            slug: macos-arm64
+            asset_os: macos
+            bundles: dmg
+          - os: macos-26-intel
+            label: macOS Intel
+            slug: macos-intel
+            asset_os: macos
             bundles: dmg
           - os: ubuntu-latest
             label: Linux
             slug: linux
+            asset_os: linux
             bundles: deb,appimage
     runs-on: ${{ matrix.os }}
     timeout-minutes: 75
@@ -176,7 +184,7 @@ jobs:
 
       # The dedicated Tests workflow covers the full platform test matrix. The
       # release source-package job also runs the suite once for this exact SHA.
-      # Native jobs now spend their time packaging instead of repeating it three times.
+      # Native jobs now spend their time packaging instead of repeating it on every target.
 
       - name: Build Windows bundled core
         if: runner.os == 'Windows'
@@ -272,7 +280,7 @@ jobs:
       - name: Collect native release assets
         shell: bash
         env:
-          RELEASE_OS: ${{ matrix.slug }}
+          RELEASE_OS: ${{ matrix.asset_os }}
         run: |
           python - <<'PY'
           import os
@@ -419,7 +427,7 @@ jobs:
         run: |
           RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           if [ "$SOURCE_RESULT" = "success" ] && [ "$NATIVE_RESULT" = "success" ] && [ "$RELEASE_RESULT" = "success" ]; then
-            gh issue close 30 --repo "$GITHUB_REPOSITORY" --reason completed --comment "0.8.1-alpha.1 packaging succeeded. Server/source, Windows, macOS, and Linux artifacts were assembled into the draft prerelease with SHA-256 checksums. Run: $RUN_URL"
+            gh issue close 30 --repo "$GITHUB_REPOSITORY" --reason completed --comment "0.8.1-alpha.1 packaging succeeded. Server/source, Windows, macOS Apple Silicon, macOS Intel, and Linux artifacts were assembled into the draft prerelease with SHA-256 checksums. Run: $RUN_URL"
           else
             gh issue comment 30 --repo "$GITHUB_REPOSITORY" --body "0.8.1-alpha.1 packaging did not complete successfully. source=$SOURCE_RESULT, native=$NATIVE_RESULT, draft-release=$RELEASE_RESULT. Run: $RUN_URL"
           fi
