@@ -12,24 +12,27 @@
     });
   });
 
-  /* Library cover view relies on a fine-pointer hover contract. Chromium honors the
-     same CSS on Collections, but packaged WebView2 can occasionally fail to promote
-     the parent article's :hover state until mouse-down. Mirror the Library behavior
-     with pointerenter/pointerleave as a fallback while leaving native :hover intact. */
-  const finePointer = window.matchMedia?.('(hover: hover) and (pointer: fine)');
-  if (finePointer?.matches) {
-    document.querySelectorAll('.collection-picker-card').forEach((card) => {
-      card.addEventListener('pointerenter', (event) => {
-        if (event.pointerType && event.pointerType !== 'mouse' && event.pointerType !== 'pen') return;
-        card.classList.add('library-hover-match');
-      });
-      card.addEventListener('pointerleave', () => {
-        card.classList.remove('library-hover-match');
-      });
-    });
-  }
-
+  /* Match Library cover behavior on touch/coarse pointers: the first tap exposes the
+     card actions, and a subsequent tap can follow the Collection link. Fine-pointer
+     hover is intentionally left entirely to library.css. */
   document.addEventListener('click', (event) => {
+    if (window.matchMedia('(hover: none), (pointer: coarse)').matches) {
+      const coverLink = event.target.closest('.collection-picker-card .cover-card-link');
+      if (coverLink) {
+        const card = coverLink.closest('.cover-card');
+        if (card && !card.classList.contains('actions-visible')) {
+          event.preventDefault();
+          document.querySelectorAll('.collection-picker-card.actions-visible')
+            .forEach((other) => other.classList.remove('actions-visible'));
+          card.classList.add('actions-visible');
+          return;
+        }
+      } else if (!event.target.closest('.collection-picker-card')) {
+        document.querySelectorAll('.collection-picker-card.actions-visible')
+          .forEach((card) => card.classList.remove('actions-visible'));
+      }
+    }
+
     const active = event.target.closest('.collection-picker-menu');
     if (!active) closePickerMenus();
   });
