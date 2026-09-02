@@ -90,6 +90,20 @@ jobs:
         working-directory: desktop
         run: npm run icon
 
+      - name: Stamp installer build identity
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          if (-not $env:PREVIEW_SHA) { throw 'PREVIEW_SHA is required to stamp the installer.' }
+          $shortSha = $env:PREVIEW_SHA.Substring(0, [Math]::Min(8, $env:PREVIEW_SHA.Length))
+          $hooksPath = 'src-tauri/windows/hooks.nsh'
+          $hooks = Get-Content $hooksPath -Raw
+          $hooks = $hooks.Replace('!define INFOMANCER_BUILD_COMMIT "local"', "!define INFOMANCER_BUILD_COMMIT `"$shortSha`"")
+          $hooks = $hooks.Replace('!define INFOMANCER_BUILD_COMMIT_FULL "local"', "!define INFOMANCER_BUILD_COMMIT_FULL `"$env:PREVIEW_SHA`"")
+          Set-Content -Path $hooksPath -Value $hooks -Encoding utf8
+          "PREVIEW_SHORT_SHA=$shortSha" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Installer identity: build $shortSha ($env:PREVIEW_SHA)"
+
       - name: Build Windows installer
         working-directory: desktop
         run: npm run tauri -- build --bundles nsis
@@ -106,8 +120,12 @@ jobs:
           New-Item -ItemType Directory -Force release-assets | Out-Null
           $installer = Get-ChildItem 'desktop/src-tauri/target/release/bundle/nsis/*-setup.exe' | Select-Object -First 1
           if (-not $installer) { throw 'NSIS installer was not produced.' }
-          Copy-Item $installer.FullName release-assets/
-          "PREVIEW_INSTALLER=$($installer.Name)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          if (-not $env:PREVIEW_SHORT_SHA) { throw 'PREVIEW_SHORT_SHA was not produced.' }
+          $baseName = [System.IO.Path]::GetFileNameWithoutExtension($installer.Name) -replace '-setup$', ''
+          $previewName = "$baseName-commit-$($env:PREVIEW_SHORT_SHA)-setup.exe"
+          Copy-Item $installer.FullName (Join-Path 'release-assets' $previewName)
+          "PREVIEW_INSTALLER=$previewName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Staged $previewName"
 
       - name: Upload Windows preview artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -158,5 +176,15 @@ jobs:
             fi
           fi
 
+          while IFS= read -r asset; do
+            case "$asset" in
+              *-commit-????????-setup.exe)
+                if [ "$asset" != "$PREVIEW_INSTALLER" ]; then
+                  gh release delete-asset "$TAG" "$asset" -y || true
+                fi
+                ;;
+            esac
+          done < <(gh release view "$TAG" --json assets --jq '.assets[].name')
+
           gh release upload "$TAG" "release-assets/$PREVIEW_INSTALLER" --clobber
-          echo "Latest Windows preview uploaded to draft $TAG from $PREVIEW_SHA."
+          echo "Latest Windows preview uploaded to draft $TAG from $PREVIEW_SHA as $PREVIEW_INSTALLER."
