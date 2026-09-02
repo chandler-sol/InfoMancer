@@ -115,13 +115,15 @@
       <button type="submit" class="cover-favorite-button{% if item.favorite %} active{% endif %}" aria-label="{{ 'Remove' if item.favorite else 'Add' }} {{ item.display_title }} {{ 'from' if item.favorite else 'to' }} favorites" title="{{ 'Remove from favorites' if item.favorite else 'Add to favorites' }}"><span aria-hidden="true">★</span></button>
     </form>
     {% endif %}
-    {% if current_user.is_librarian and collection.collection_type == 'manual' %}
+    {% if current_user.is_librarian and (item.item_type == 'title' or collection.collection_type == 'manual') %}
     <div class="cover-card-actions" aria-label="Actions for {{ item.display_title }}">
       <details class="episode-menu cover-row-menu item-action-menu"><summary aria-label="Actions for {{ item.display_title }}" title="Collection item actions">⋮</summary><div>
         {% if item.item_type == 'title' %}<form method="post" action="/titles/{{ item.title_id }}/favorite"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="return_to" value="/collections/{{ collection.id }}"><button class="favorite-action{% if item.favorite %} active{% endif %}"><span>★</span>{{ 'Remove favorite' if item.favorite else 'Add favorite' }}</button></form><a href="/titles/{{ item.title_id }}/libraries" data-organize-dialog>Add to Libraries</a><a href="/titles/{{ item.title_id }}/organize" data-organize-dialog>Organize &amp; Tags</a><a href="/titles/{{ item.title_id }}/collections?return_to={{ ('/collections/' ~ collection.id)|urlencode }}">Manage Collections</a>{% endif %}
+        {% if collection.collection_type == 'manual' %}
         <form method="post" action="/collections/{{ collection.id }}/{{ 'episodes' if item.item_type == 'episode' else 'titles' }}/{{ item.item_id }}/move"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="direction" value="up"><button {% if loop.first %}disabled{% endif %}>Move earlier</button></form>
         <form method="post" action="/collections/{{ collection.id }}/{{ 'episodes' if item.item_type == 'episode' else 'titles' }}/{{ item.item_id }}/move"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="direction" value="down"><button {% if loop.last %}disabled{% endif %}>Move later</button></form>
         <form method="post" action="/collections/{{ collection.id }}/{{ 'episodes' if item.item_type == 'episode' else 'titles' }}/{{ item.item_id }}/remove"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="danger">Remove from collection</button></form>
+        {% endif %}
       </div></details>
     </div>
     {% endif %}
