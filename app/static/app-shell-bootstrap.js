@@ -7,17 +7,23 @@
     versionQuery = new URL(document.currentScript?.src || '', window.location.href).search;
   } catch (_error) {}
 
-  /* Keep page content hidden until parser-discovered markup, deferred controllers,
-     and the small set of late 0.8 styles have settled. The application chrome stays
-     visible, so navigation feels continuous instead of flashing an intermediate
-     layout. The footer follows the workspace so it cannot flash at the top of an
-     otherwise empty content surface while the next page is preparing. */
+  /* Keep the real server-rendered workspace painted while late 0.8 styles and
+     controllers settle. Hiding all of main.shell created an empty-shell frame between
+     pages. Library controls that genuinely move during density setup stay hidden, but
+     the already-correct List/Covers surface remains visible from first paint. */
   body.classList.add('shell-preparing');
   const guard = document.createElement('style');
   guard.textContent = `
-    body.shell-preparing .shell,
-    body.shell-preparing > footer { visibility: hidden !important; }
     body.shell-preparing { background: #090d11; }
+    body.shell-preparing .library-table,
+    body.shell-preparing #cover-library {
+      visibility: visible !important;
+      animation: none !important;
+    }
+    body.shell-preparing .library-view-toolbar,
+    body.shell-preparing #cover-size-control {
+      visibility: hidden !important;
+    }
   `;
   document.head.append(guard);
 
@@ -59,6 +65,7 @@
     ensureStylesheet('app-navigation.css'),
     ensureStylesheet('action-menu.css'),
     ensureStylesheet('release-081-ui-polish.css'),
+    ensureStylesheet('navigation-paint-stability.css'),
   ];
 
   const path = window.location.pathname;
@@ -120,9 +127,9 @@
 
   /* The Library density controller performs two geometry changes after parsing: it
      moves the display controls beside the scope tabs and applies the saved cover
-     footprint. Keep the already-hidden workspace hidden for those few milliseconds
-     so WebView2 never paints the intermediate size. A bounded fallback prevents a
-     broken optional controller from leaving the workspace hidden indefinitely. */
+     footprint. Keep only those moving controls hidden for those few milliseconds so
+     WebView2 never paints the intermediate toolbar position. A bounded fallback
+     prevents a broken optional controller from leaving those controls hidden. */
   const libraryLayoutReady = librarySurface
     ? domReady.then(() => new Promise((resolve) => {
         let finished = false;
