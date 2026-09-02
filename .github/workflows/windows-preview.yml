@@ -121,7 +121,7 @@ jobs:
           $installer = Get-ChildItem 'desktop/src-tauri/target/release/bundle/nsis/*-setup.exe' | Select-Object -First 1
           if (-not $installer) { throw 'NSIS installer was not produced.' }
           if (-not $env:PREVIEW_SHORT_SHA) { throw 'PREVIEW_SHORT_SHA was not produced.' }
-          $baseName = $installer.Name -replace '-setup\.exe$', ''
+          $baseName = [System.IO.Path]::GetFileNameWithoutExtension($installer.Name) -replace '-setup$', ''
           $previewName = "$baseName-commit-$($env:PREVIEW_SHORT_SHA)-setup.exe"
           Copy-Item $installer.FullName (Join-Path 'release-assets' $previewName)
           "PREVIEW_INSTALLER=$previewName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
