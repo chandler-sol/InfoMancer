@@ -40,7 +40,9 @@ class Release081UiPolishContracts(unittest.TestCase):
         self.assertIn("visibility: visible !important", stable)
         self.assertIn("@view-transition", modern)
         self.assertIn("view-transition-name: infomancer-chrome", modern)
-        self.assertIn("view-transition-name: infomancer-content", modern)
+        # The release branch may still carry the older named content rule in modern.css,
+        # while testing removed it outright. The shipped stability layer must win in
+        # either case so the main shell never participates in geometry interpolation.
         self.assertIn("main.shell,", stable)
         self.assertIn("view-transition-name: none !important", stable)
         self.assertIn("::view-transition-old(root)", stable)
