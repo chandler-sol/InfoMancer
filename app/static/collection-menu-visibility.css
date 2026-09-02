@@ -1,12 +1,27 @@
 /* 0.8.1 RC fix: Collection action menus are primary management affordances.
-   Do not make the trigger depend on hover timing or inherited Library overlays. */
+   The Collections picker owns its hover/focus behavior directly, while touch layouts
+   keep the trigger visible because they do not have a dependable hover state. */
 
 .collection-picker-card-actions {
+  display: block !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transform: none !important;
+  transition: opacity .12s ease, visibility 0s linear .12s !important;
+}
+
+.collection-picker-card:hover .collection-picker-card-actions,
+.collection-picker-card:focus-within .collection-picker-card-actions,
+.collection-picker-card-actions:has(.collection-picker-menu[open]) {
   visibility: visible !important;
   opacity: 1 !important;
   pointer-events: auto !important;
-  transform: none !important;
-  transition: none !important;
+  transition-delay: 0s !important;
+}
+
+.collection-picker-menu {
+  display: block !important;
 }
 
 .collection-picker-menu > summary,
@@ -63,8 +78,9 @@
 }
 
 /* Collection detail cards used the Library's full-poster hover overlay merely to
-   expose the action trigger. Keep the overlay transparent and the trigger visible. */
+   expose the action trigger. Keep that overlay transparent and the trigger usable. */
 .collection-cover-card .cover-card-actions {
+  display: block !important;
   visibility: visible !important;
   opacity: 1 !important;
   pointer-events: none !important;
@@ -74,6 +90,7 @@
 }
 
 .collection-cover-card .cover-row-menu {
+  display: block !important;
   opacity: 1 !important;
   pointer-events: auto !important;
 }
@@ -82,7 +99,16 @@
   display: none !important;
 }
 
-@media (hover: hover) and (pointer: fine) {
+@media (hover: none), (pointer: coarse) {
+  .collection-picker-card-actions {
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    transition: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
   .collection-picker-card-actions,
   .collection-cover-card .cover-card-actions {
     transition: none !important;

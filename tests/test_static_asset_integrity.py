@@ -12,7 +12,7 @@ TEMPLATES = APP / "templates"
 
 
 STATIC_URL_RE = re.compile(
-    r"/static/([A-Za-z0-9_./-]+\.(?:css|js|svg|png|webp|ico))"
+    r"/static/([A-Za-z0-9_./-]+\.(?:css|json|js|svg|png|webp|ico))(?![A-Za-z0-9])"
 )
 LOADER_RE = re.compile(
     r"(?:loadStyle|loadScript|ensureStyle)\(\s*['\"]([^'\"]+\.(?:css|js))['\"]"

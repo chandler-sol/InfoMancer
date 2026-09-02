@@ -6,6 +6,7 @@
   <h1>InfoMancer</h1>
   <p>A local-first catalog for understanding, matching, and carefully organizing the Movies and TV Shows already stored on your server.</p>
   <span class="about-version">Version {{ app_version }}</span>
+  <span class="about-version about-build" id="about-build" title="Local or unstamped build">Build local</span>
 </header>
 
 <section class="about-principles" aria-label="InfoMancer principles">
@@ -64,4 +65,20 @@
   <h2>Independent software</h2>
   <p>InfoMancer is an independent project. It is not affiliated with, sponsored by, or endorsed by TheTVDB, IMDb, Plex, or their respective owners. Product names and trademarks belong to their respective owners.</p>
 </section>
+
+<script>
+(() => {
+  const target = document.getElementById('about-build');
+  if (!target) return;
+  fetch('/static/build-info.json?v={{ static_version }}', {cache: 'no-store'})
+    .then((response) => response.ok ? response.json() : Promise.reject(new Error('build info unavailable')))
+    .then((build) => {
+      const shortCommit = String(build.short_commit || build.commit || 'local');
+      const fullCommit = String(build.commit || shortCommit);
+      target.textContent = `Build ${shortCommit}`;
+      target.title = fullCommit === 'local' ? 'Local or unstamped build' : `Commit ${fullCommit}`;
+    })
+    .catch(() => {});
+})();
+</script>
 {% endblock %}
