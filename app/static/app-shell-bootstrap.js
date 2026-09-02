@@ -102,9 +102,11 @@
   }
   if (path === '/collections') {
     criticalStyles.push(ensureStylesheet('release-081-collections.css'));
+    criticalStyles.push(ensureStylesheet('collection-menu-visibility.css'));
   }
   if (/^\/collections\/\d+$/.test(path)) {
     criticalStyles.push(ensureStylesheet('collection-detail.css'));
+    criticalStyles.push(ensureStylesheet('collection-menu-visibility.css'));
   }
   if (path === '/admin/users') {
     criticalStyles.push(ensureStylesheet('user-management.css'));
