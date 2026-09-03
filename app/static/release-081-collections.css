@@ -115,6 +115,8 @@
 
 .collection-picker-card .collection-art {
   position: relative;
+  display: grid;
+  place-items: center;
   width: 100%;
   aspect-ratio: 16 / 9;
   margin-bottom: 12px;
