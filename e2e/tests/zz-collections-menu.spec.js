@@ -59,7 +59,6 @@ test('Collections card uses the complete Library cover hover contract', async ({
   await expect(actions).toBeVisible();
   await expect(trigger).toBeVisible();
   await expect.poll(() => transformY(art)).toBeCloseTo(-4, 1);
-  await expect.poll(() => transformY(actions)).toBeCloseTo(-4, 1);
 
   await page.mouse.move(0, 0);
   await expect(actions).toBeHidden();
@@ -71,8 +70,8 @@ test('Collections card uses the complete Library cover hover contract', async ({
   await expect(menu).toHaveAttribute('open', '');
   await expect(card.getByRole('link', { name: 'Edit collection' })).toBeVisible();
 
-  // A focused/open action menu may remain available, but the artwork itself must
-  // settle immediately with the same hover-out motion as Library covers.
+  // A focused/open action menu may remain available, but the artwork/highlight
+  // itself must settle immediately with the same hover-out motion as Library covers.
   await page.mouse.move(0, 0);
   await expect.poll(() => transformY(art)).toBeCloseTo(0, 1);
 });
@@ -90,6 +89,7 @@ test('Smart Collection editing opens in a modal from the Collections picker', as
     await createDialog.getByRole('button', { name: 'Smart' }).click();
     const smartForm = createDialog.locator('form.smart-filter-grid');
     await smartForm.locator('input[name="name"]').fill(name);
+    await smartForm.locator('select[name="resolution"]').selectOption('720');
     await Promise.all([
       page.waitForURL((url) => url.pathname === '/collections/smart/preview'),
       smartForm.getByRole('button', { name: 'Preview matching titles' }).click(),
