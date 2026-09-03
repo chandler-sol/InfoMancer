@@ -122,6 +122,17 @@
   margin-bottom: 12px;
 }
 
+/* library.css still has a legacy .collection-card:hover .collection-art rule used by
+   older/custom Collection surfaces. The picker link also carries collection-card,
+   so that later rule would otherwise override Library's -4px cover-card movement
+   with -2px. Match Library's effective hover values here without adding focus state
+   or separate transition timing. */
+.collection-picker-card .collection-card:hover .collection-art {
+  transform: translateY(-4px);
+  border-color: var(--lime);
+  box-shadow: 0 15px 34px rgba(0, 0, 0, .42);
+}
+
 .collection-picker-card .cover-card-actions {
   z-index: 30;
   aspect-ratio: 16 / 9;
