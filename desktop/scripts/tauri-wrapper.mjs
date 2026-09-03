@@ -6,19 +6,17 @@ import { spawnSync } from 'node:child_process';
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const desktopDir = resolve(scriptDir, '..');
 const args = process.argv.slice(2);
-const localTauri = join(
-  desktopDir,
-  'node_modules',
-  '.bin',
-  process.platform === 'win32' ? 'tauri.cmd' : 'tauri',
-);
+const tauriCli = join(desktopDir, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
 
-if (!existsSync(localTauri)) {
+if (!existsSync(tauriCli)) {
   console.error('Tauri CLI is not installed. Run npm ci in desktop/ first.');
   process.exit(1);
 }
 
-const result = spawnSync(localTauri, args, {
+// Invoke the JavaScript entrypoint with the current Node executable rather than
+// relying on platform-specific .cmd/.bin shims. This keeps the wrapper identical
+// on Windows, macOS, and Linux.
+const result = spawnSync(process.execPath, [tauriCli, ...args], {
   cwd: desktopDir,
   stdio: 'inherit',
   shell: false,
