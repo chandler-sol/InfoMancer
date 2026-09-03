@@ -1,7 +1,19 @@
 /* 0.8.1 RC Collection action stabilization.
    The Collections picker now uses the actual Library cover-card / cover-card-actions /
    cover-row-menu contract, so picker hover visibility belongs entirely to library.css.
-   Keep this file limited to Collection-detail exceptions. */
+   This late-loaded sheet also owns Collection-specific paint-containment exceptions. */
+
+/* modern.css uses content-visibility:auto on generic cover cards so huge Library
+   grids can skip off-screen paint work. That also establishes paint containment,
+   which clips the Collection picker's artwork when its Library hover transform moves
+   4px above the card's original top edge. Collections are small enough that the
+   optimization is unnecessary, so keep picker cards uncontained and allow the full
+   lifted lime border/shadow to paint outside the resting card box. */
+.collection-picker-card {
+  content-visibility: visible !important;
+  contain: none !important;
+  overflow: visible !important;
+}
 
 /* Collection detail cards use Library cover cards but should not darken the poster
    just to expose their collection-management trigger. */
