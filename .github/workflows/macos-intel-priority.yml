@@ -1,0 +1,210 @@
+name: Priority macOS Intel Desktop Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - testing/0.8-alpha
+      - 'release/**'
+    paths:
+      - .github/workflows/macos-intel-priority.yml
+      - desktop/**
+      - app/**
+      - scripts/stage_ffprobe.py
+      - requirements.txt
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: macos-intel-priority-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: '1'
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+
+jobs:
+  macos-intel:
+    name: macOS Intel priority DMG
+    runs-on: macos-26-intel
+    timeout-minutes: 50
+    steps:
+      - name: Check out build commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Restore Rust build cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/src-tauri/target
+          key: macos-intel-priority-cargo-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            macos-intel-priority-cargo-
+            macOS-X64-cargo-
+
+      - name: Restore verified FFprobe stage
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: build/ffprobe
+          key: macos-intel-priority-ffprobe-${{ hashFiles('scripts/stage_ffprobe.py') }}
+          restore-keys: |
+            macos-intel-priority-ffprobe-
+            macOS-X64-ffprobe-
+
+      - name: Verify toolchain
+        shell: bash
+        run: |
+          python --version
+          node --version
+          npm --version
+          rustc --version
+          cargo --version
+
+      - name: Build cryptography with static OpenSSL
+        shell: bash
+        run: |
+          brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
+          crypto_requirement="$(grep -E '^cryptography==' requirements.txt | head -n 1)"
+          if [ -z "$crypto_requirement" ]; then
+            echo 'Pinned cryptography requirement was not found.' >&2
+            exit 1
+          fi
+          env \
+            OPENSSL_DIR="$(brew --prefix openssl@3)" \
+            OPENSSL_STATIC=1 \
+            python -m pip install \
+              --no-cache-dir \
+              --no-binary cryptography \
+              "$crypto_requirement"
+
+      - name: Install Python build dependencies
+        shell: bash
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller==6.21.0
+
+      - name: Verify cryptography OpenSSL linkage
+        shell: bash
+        run: |
+          crypto_rust="$(python - <<'PY'
+          import cryptography.hazmat.bindings._rust as rust
+          print(rust.__file__)
+          PY
+          )"
+          echo "cryptography native module: $crypto_rust"
+          otool -L "$crypto_rust"
+          if otool -L "$crypto_rust" | grep -Eq 'libssl|libcrypto'; then
+            echo 'cryptography is dynamically linked to OpenSSL; refusing to package a mismatched OpenSSL pair.' >&2
+            exit 1
+          fi
+
+      - name: Build bundled core
+        shell: bash
+        run: |
+          python scripts/stage_ffprobe.py
+          python -m PyInstaller --noconfirm --onefile --name infomancer-core \
+            --add-data "app/templates:app/templates" \
+            --add-data "app/static:app/static" \
+            --add-data "build/ffprobe/FFPROBE_LICENSE.txt:third-party/ffprobe" \
+            --add-data "build/ffprobe/FFPROBE_NOTICE.txt:third-party/ffprobe" \
+            --add-binary "build/ffprobe/ffprobe:." \
+            desktop/sidecar.py
+          ./dist/infomancer-core --check-ffprobe
+          triple="$(rustc --print host-tuple)"
+          mkdir -p desktop/src-tauri/binaries
+          cp dist/infomancer-core "desktop/src-tauri/binaries/infomancer-core-$triple"
+          chmod +x "desktop/src-tauri/binaries/infomancer-core-$triple"
+
+      - name: Smoke-test packaged core startup
+        shell: bash
+        run: |
+          smoke_dir="$RUNNER_TEMP/infomancer-core-smoke"
+          smoke_log="$RUNNER_TEMP/infomancer-core-smoke.log"
+          rm -rf "$smoke_dir"
+          rm -f "$smoke_log"
+          port="$(python - <<'PY'
+          import socket
+          with socket.socket() as sock:
+              sock.bind(('127.0.0.1', 0))
+              print(sock.getsockname()[1])
+          PY
+          )"
+          export INFOMANCER_SMOKE_PORT="$port"
+          ./dist/infomancer-core --port "$port" --data-dir "$smoke_dir" >"$smoke_log" 2>&1 &
+          core_pid=$!
+          cleanup() {
+            kill "$core_pid" 2>/dev/null || true
+            wait "$core_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          ready=0
+          for _ in {1..60}; do
+            if ! kill -0 "$core_pid" 2>/dev/null; then
+              echo 'Packaged InfoMancer core exited before opening its loopback listener.' >&2
+              cat "$smoke_log" >&2 || true
+              wait "$core_pid" || true
+              exit 1
+            fi
+            if python - <<'PY'
+          import os
+          import socket
+          port = int(os.environ['INFOMANCER_SMOKE_PORT'])
+          try:
+              with socket.create_connection(('127.0.0.1', port), timeout=0.25):
+                  pass
+          except OSError:
+              raise SystemExit(1)
+          PY
+            then
+              ready=1
+              break
+            fi
+            sleep 0.5
+          done
+
+          if [ "$ready" -ne 1 ]; then
+            echo 'Packaged InfoMancer core did not become ready during the smoke-test window.' >&2
+            cat "$smoke_log" >&2 || true
+            exit 1
+          fi
+          echo "Packaged InfoMancer core became ready on 127.0.0.1:$port."
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci --prefer-offline
+
+      - name: Generate native icons
+        working-directory: desktop
+        run: npm run icon
+
+      - name: Build Intel DMG
+        working-directory: desktop
+        run: npm run tauri -- build --bundles dmg
+
+      - name: Upload Intel DMG first
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: infomancer-macos-intel-priority
+          path: desktop/src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14
