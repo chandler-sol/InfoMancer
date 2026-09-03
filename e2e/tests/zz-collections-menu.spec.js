@@ -54,15 +54,18 @@ test('Collections card uses the complete Library cover hover contract', async ({
   await expect(card).not.toHaveClass(/library-hover-match/);
   await expect(actions).toBeHidden();
   await expect.poll(() => transformY(art)).toBeCloseTo(0, 1);
+  await expect.poll(() => transformY(actions)).toBeCloseTo(0, 1);
 
   await card.hover();
   await expect(actions).toBeVisible();
   await expect(trigger).toBeVisible();
   await expect.poll(() => transformY(art)).toBeCloseTo(-4, 1);
+  await expect.poll(() => transformY(actions)).toBeCloseTo(-4, 1);
 
   await page.mouse.move(0, 0);
   await expect(actions).toBeHidden();
   await expect.poll(() => transformY(art)).toBeCloseTo(0, 1);
+  await expect.poll(() => transformY(actions)).toBeCloseTo(0, 1);
 
   await card.hover();
   await expect(actions).toBeVisible();
@@ -70,10 +73,11 @@ test('Collections card uses the complete Library cover hover contract', async ({
   await expect(menu).toHaveAttribute('open', '');
   await expect(card.getByRole('link', { name: 'Edit collection' })).toBeVisible();
 
-  // A focused/open action menu may remain available, but the artwork/highlight
-  // itself must settle immediately with the same hover-out motion as Library covers.
+  // A focused/open action menu may remain available, but both visual layers must
+  // settle together when pointer hover ends so the outline never tears apart.
   await page.mouse.move(0, 0);
   await expect.poll(() => transformY(art)).toBeCloseTo(0, 1);
+  await expect.poll(() => transformY(actions)).toBeCloseTo(0, 1);
 });
 
 test('Smart Collection editing opens in a modal from the Collections picker', async ({ page }) => {
