@@ -57,6 +57,14 @@ class CollectionMenuVisibilityTests(unittest.TestCase):
         self.assertNotIn(".collection-picker-card:focus-within .collection-art", release_css)
         self.assertNotIn(".collection-picker-card .collection-art::after", release_css)
 
+    def test_picker_action_veil_preserves_lime_artwork_border(self) -> None:
+        release_css = self.read("app/static/release-081-collections.css")
+        self.assertIn(".collection-picker-card .cover-card-actions", release_css)
+        self.assertIn("border: 1px solid transparent", release_css)
+        self.assertIn("background-clip: padding-box", release_css)
+        self.assertIn(".collection-picker-card:hover .cover-card-actions", release_css)
+        self.assertIn("transform: translateY(-4px) !important", release_css)
+
     def test_touch_layout_reuses_library_actions_visible_contract(self) -> None:
         library_css = self.read("app/static/library.css")
         script = self.read("app/static/release-081-collections.js")
