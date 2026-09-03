@@ -36,6 +36,17 @@ class CollectionMenuVisibilityTests(unittest.TestCase):
         self.assertNotIn(".collection-picker-card:hover .collection-picker-card-actions", collection_css)
         self.assertNotIn(".collection-picker-card:focus-within .collection-picker-card-actions", collection_css)
 
+    def test_picker_disables_cover_card_paint_containment_for_hover_lift(self) -> None:
+        modern_css = self.read("app/static/modern.css")
+        collection_css = self.read("app/static/collection-menu-visibility.css")
+
+        self.assertIn(".cover-card {", modern_css)
+        self.assertIn("content-visibility: auto", modern_css)
+        self.assertIn(".collection-picker-card {", collection_css)
+        self.assertIn("content-visibility: visible !important", collection_css)
+        self.assertIn("contain: none !important", collection_css)
+        self.assertIn("overflow: visible !important", collection_css)
+
     def test_picker_artwork_uses_exact_library_cover_hover_animation(self) -> None:
         template = self.read("app/templates/collections.html")
         library_css = self.read("app/static/library.css")
@@ -46,31 +57,32 @@ class CollectionMenuVisibilityTests(unittest.TestCase):
         self.assertIn("transform:translateY(-4px)", library_css)
         self.assertIn(".collection-card:hover .collection-art", library_css)
         self.assertIn(".collection-picker-card .collection-art", release_css)
+        self.assertIn("box-sizing: border-box", release_css)
         self.assertIn("aspect-ratio: 16 / 9", release_css)
-        # The older generic Collection surface still has a -2px hover rule in
-        # library.css. The picker compatibility rule must beat it while matching
-        # Library's exact -4px movement and shadow without adding a focus-held state.
         self.assertIn(".collection-picker-card .collection-card:hover .collection-art", release_css)
         self.assertIn("transform: translateY(-4px)", release_css)
+        self.assertIn("border-color: var(--lime)", release_css)
         self.assertIn("box-shadow: 0 15px 34px rgba(0, 0, 0, .42)", release_css)
         self.assertNotIn(".collection-picker-card:hover .collection-art", release_css)
         self.assertNotIn(".collection-picker-card:focus-within .collection-art", release_css)
+        self.assertNotIn(".collection-picker-card::before", release_css)
         self.assertNotIn(".collection-picker-card .collection-art::after", release_css)
 
-    def test_picker_hover_frame_moves_above_delayed_action_veil(self) -> None:
+    def test_picker_action_veil_is_inset_inside_real_lime_border(self) -> None:
         release_css = self.read("app/static/release-081-collections.css")
 
-        self.assertIn(".collection-picker-card::before", release_css)
-        self.assertIn('content: ""', release_css)
-        self.assertIn("z-index: 31", release_css)
-        self.assertIn("border: 1px solid transparent", release_css)
-        self.assertIn("pointer-events: none", release_css)
-        self.assertIn("transition: transform .18s ease, border-color .18s ease", release_css)
-        self.assertIn(".collection-picker-card:hover::before", release_css)
-        self.assertIn("transform: translateY(-4px)", release_css)
-        self.assertIn("border-color: var(--lime)", release_css)
         self.assertIn(".collection-picker-card .cover-card-actions", release_css)
         self.assertIn("z-index: 30", release_css)
+        self.assertIn("background: transparent", release_css)
+        self.assertIn(".collection-picker-card .cover-card-actions::before", release_css)
+        self.assertIn('content: ""', release_css)
+        self.assertIn("inset: 1px", release_css)
+        self.assertIn("background: rgba(3, 7, 10, .7)", release_css)
+        self.assertIn("pointer-events: none", release_css)
+        self.assertIn(".collection-picker-card:hover .cover-card-actions", release_css)
+        self.assertIn("transform: translateY(-4px) !important", release_css)
+        self.assertIn(".collection-picker-card .cover-row-menu", release_css)
+        self.assertIn("z-index: 1", release_css)
 
     def test_touch_layout_reuses_library_actions_visible_contract(self) -> None:
         library_css = self.read("app/static/library.css")
