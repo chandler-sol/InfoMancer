@@ -46,7 +46,7 @@
            data-collection-type="{{ collection.collection_type }}"
            data-has-custom-artwork="{{ '1' if collection.artwork_filename else '0' }}">
     <a class="cover-card-link collection-card collection-picker-card-link" href="/collections/{{ collection.id }}">
-      <span class="collection-art">{% if collection.artwork_url %}<img src="{{ collection.artwork_url }}" alt="" loading="lazy">{% else %}<span>{{ collection.name[:1]|upper }}</span>{% endif %}</span>
+      <span class="cover-art collection-art">{% if collection.artwork_url %}<img src="{{ collection.artwork_url }}" alt="" loading="lazy">{% else %}<span>{{ collection.name[:1]|upper }}</span>{% endif %}</span>
       <strong>{{ collection.name }}</strong>
       {% if collection.collection_type == 'smart' %}<span class="kind">Smart</span>{% endif %}
       <small>{{ collection.title_count }} item{% if collection.title_count != 1 %}s{% endif %}</small>
@@ -59,7 +59,7 @@
         <div>
           <a href="/collections/{{ collection.id }}?action=edit" data-collection-edit>Edit collection</a>
           {% if collection.collection_type == 'smart' %}
-          <a href="/collections/{{ collection.id }}/smart/edit">Edit Smart Collection</a>
+          <a href="/collections/{{ collection.id }}/smart/edit" data-smart-collection-edit>Edit Smart Collection</a>
           {% else %}
           <a href="/collections/{{ collection.id }}?action=add">Add titles</a>
           <a href="/collections/{{ collection.id }}?action=reorder">Reorder collection</a>
