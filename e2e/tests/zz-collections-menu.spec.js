@@ -83,8 +83,21 @@ test('Collections card uses the complete Library cover hover contract', async ({
   expect(hoverGeometry[1]).not.toBeNull();
   expect(Math.abs(hoverGeometry[0].y - hoverGeometry[1].y)).toBeLessThanOrEqual(1);
 
-  const hoverShot = await card.screenshot();
-  await testInfo.attach('collection-hover-border', {
+  const cardBox = await card.boundingBox();
+  const viewport = page.viewportSize();
+  expect(cardBox).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  const clipX = Math.max(0, cardBox.x - 10);
+  const clipY = Math.max(0, cardBox.y - 12);
+  const hoverShot = await page.screenshot({
+    clip: {
+      x: clipX,
+      y: clipY,
+      width: Math.min(viewport.width - clipX, cardBox.width + 20),
+      height: Math.min(viewport.height - clipY, cardBox.height + 24),
+    },
+  });
+  await testInfo.attach('collection-hover-border-expanded', {
     body: hoverShot,
     contentType: 'image/png',
   });
