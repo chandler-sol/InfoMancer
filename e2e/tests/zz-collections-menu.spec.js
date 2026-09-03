@@ -56,11 +56,32 @@ test('Collections card uses the complete Library cover hover contract', async ({
   await expect.poll(() => transformY(art)).toBeCloseTo(0, 1);
   await expect.poll(() => transformY(actions)).toBeCloseTo(0, 1);
 
+  const veilPaint = await actions.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundClip: style.backgroundClip,
+      borderTopWidth: style.borderTopWidth,
+      borderTopColor: style.borderTopColor,
+    };
+  });
+  expect(veilPaint.backgroundClip).toBe('padding-box');
+  expect(veilPaint.borderTopWidth).toBe('1px');
+  expect(veilPaint.borderTopColor).toBe('rgba(0, 0, 0, 0)');
+
   await card.hover();
   await expect(actions).toBeVisible();
   await expect(trigger).toBeVisible();
   await expect.poll(() => transformY(art)).toBeCloseTo(-4, 1);
   await expect.poll(() => transformY(actions)).toBeCloseTo(-4, 1);
+  await expect(art).toHaveCSS('border-top-color', 'rgb(185, 245, 66)');
+
+  const hoverGeometry = await Promise.all([
+    art.boundingBox(),
+    actions.boundingBox(),
+  ]);
+  expect(hoverGeometry[0]).not.toBeNull();
+  expect(hoverGeometry[1]).not.toBeNull();
+  expect(Math.abs(hoverGeometry[0].y - hoverGeometry[1].y)).toBeLessThanOrEqual(1);
 
   await page.mouse.move(0, 0);
   await expect(actions).toBeHidden();
