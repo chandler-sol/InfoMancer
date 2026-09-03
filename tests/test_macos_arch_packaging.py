@@ -23,9 +23,9 @@ class MacOsArchitecturePackagingContracts(unittest.TestCase):
         stage = (ROOT / "scripts/stage_ffprobe.py").read_text(encoding="utf-8")
 
         self.assertIn('(\"darwin\", \"x86_64\")', stage)
-        self.assertIn('\"slug\": \"darwin-x64\"', stage)
+        self.assertIn('"slug": "darwin-x64"', stage)
         self.assertIn('(\"darwin\", \"arm64\")', stage)
-        self.assertIn('\"slug\": \"darwin-arm64\"', stage)
+        self.assertIn('"slug": "darwin-arm64"', stage)
 
     def test_intel_macos_cryptography_is_built_with_static_openssl(self):
         workflow = (ROOT / ".github/workflows/draft-08-release.yml").read_text(encoding="utf-8")
@@ -45,6 +45,14 @@ class MacOsArchitecturePackagingContracts(unittest.TestCase):
         self.assertIn("./dist/infomancer-core --port", workflow)
         self.assertIn("--data-dir \"$smoke_dir\"", workflow)
         self.assertIn("socket.create_connection(('127.0.0.1', port)", workflow)
+
+    def test_macos_launcher_log_uses_persistent_application_support(self):
+        launcher = (ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
+
+        self.assertIn('home.push("Library")', launcher)
+        self.assertIn('home.push("Application Support")', launcher)
+        self.assertIn('home.push("cloud.arsenik.infomancer")', launcher)
+        self.assertIn('launcher_log_path().display()', launcher)
 
 
 if __name__ == "__main__":
