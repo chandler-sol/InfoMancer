@@ -82,6 +82,83 @@
     requestAnimationFrame(() => form.elements.name?.focus());
   };
 
+  const openSmartCollectionEditor = async (link) => {
+    const href = link?.getAttribute('href') || '';
+    if (!/^\/collections\/\d+\/smart\/edit$/.test(href)) return;
+
+    const dialog = makeDialog({
+      className: 'smart-collection-edit-dialog',
+      eyebrow: 'SMART COLLECTION',
+      title: 'Edit Smart Collection',
+      description: 'Change its name, description, or saved rules. Matching titles are recalculated when you save.',
+    });
+    const body = dialog.querySelector('.release-ui-dialog-body');
+    body.innerHTML = '<p class="muted smart-collection-editor-loading">Loading Smart Collection rules…</p>';
+    const controller = new AbortController();
+    dialog.addEventListener('close', () => {
+      controller.abort();
+      dialog.remove();
+    }, {once: true});
+    dialog.showModal();
+
+    try {
+      const response = await fetch(href, {
+        credentials: 'same-origin',
+        headers: {'Accept': 'text/html'},
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const documentSource = new DOMParser().parseFromString(await response.text(), 'text/html');
+      const sourceForm = documentSource.querySelector('form.smart-collection-editor-form');
+      if (!sourceForm) throw new Error('Smart Collection editor was not available.');
+      if (!dialog.open || !dialog.isConnected) return;
+
+      const form = document.importNode(sourceForm, true);
+      form.classList.remove('panel');
+      const cancel = form.querySelector('[data-organize-close]');
+      if (cancel) {
+        cancel.addEventListener('click', (event) => {
+          event.preventDefault();
+          dialog.close();
+        });
+      }
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const submitter = event.submitter;
+        if (submitter) {
+          submitter.disabled = true;
+          submitter.setAttribute('aria-busy', 'true');
+        }
+        try {
+          const saveResponse = await fetch(form.getAttribute('action') || href, {
+            method: 'POST',
+            body: new FormData(form),
+            credentials: 'same-origin',
+            redirect: 'follow',
+          });
+          if (!saveResponse.ok) throw new Error(`HTTP ${saveResponse.status}`);
+          const resultUrl = new URL(saveResponse.url || '/collections', window.location.href);
+          const destination = new URL('/collections', window.location.origin);
+          const message = resultUrl.searchParams.get('message');
+          if (message) destination.searchParams.set('message', message);
+          window.location.assign(destination.toString());
+        } catch (error) {
+          if (submitter) {
+            submitter.disabled = false;
+            submitter.removeAttribute('aria-busy');
+          }
+          window.alert(`Smart Collection could not be saved: ${error.message}`);
+        }
+      });
+      body.replaceChildren(form);
+      requestAnimationFrame(() => form.elements.name?.focus());
+    } catch (error) {
+      if (error?.name === 'AbortError') return;
+      dialog.close();
+      window.alert(`Smart Collection editor could not be opened: ${error.message}`);
+    }
+  };
+
   const collectionsIndex = () => {
     if (window.location.pathname !== '/collections') return;
     const manual = document.querySelector('.collection-create');
@@ -133,6 +210,14 @@
     });
 
     document.addEventListener('click', (event) => {
+      const smartEdit = event.target.closest('[data-smart-collection-edit]');
+      if (smartEdit) {
+        event.preventDefault();
+        smartEdit.closest('.collection-picker-menu')?.removeAttribute('open');
+        openSmartCollectionEditor(smartEdit);
+        return;
+      }
+
       const edit = event.target.closest('[data-collection-edit]');
       if (!edit) return;
       const card = edit.closest('.collection-picker-card');
