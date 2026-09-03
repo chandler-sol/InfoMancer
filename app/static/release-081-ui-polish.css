@@ -176,6 +176,41 @@ button[aria-busy="true"],
   margin-top: 2px;
 }
 
+/* Smart Collection editing reuses the server-rendered editor as a modal on the
+   Collections index. The standalone page remains a no-JS fallback. */
+.smart-collection-edit-dialog {
+  width: min(980px, calc(100vw - 36px));
+}
+
+.smart-collection-edit-dialog .smart-collection-editor-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 18px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.smart-collection-edit-dialog .smart-collection-editor-form label {
+  min-width: 0;
+}
+
+.smart-collection-edit-dialog .smart-collection-editor-form input,
+.smart-collection-edit-dialog .smart-collection-editor-form select {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.smart-collection-edit-dialog .smart-collection-editor-form .actions {
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.smart-collection-editor-loading {
+  margin: 0;
+}
+
 /* Collection detail hero should read as one composition instead of a thin left
    rail next to an enormous empty horizontal field. */
 .collection-detail-head {
@@ -287,6 +322,9 @@ button[aria-busy="true"],
   .collection-picker-artwork-field,
   .collection-picker-editor-form .actions {
     grid-column: auto;
+  }
+  .smart-collection-edit-dialog .smart-collection-editor-form {
+    grid-template-columns: 1fr;
   }
   .collection-detail-head {
     grid-template-columns: 1fr !important;
