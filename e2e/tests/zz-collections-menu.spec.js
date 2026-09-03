@@ -21,6 +21,24 @@ async function transformY(locator) {
   });
 }
 
+async function hoverFrameState(locator) {
+  return locator.evaluate((element) => {
+    const style = getComputedStyle(element, '::before');
+    const transform = style.transform;
+    const transformY = !transform || transform === 'none'
+      ? 0
+      : new DOMMatrixReadOnly(transform).m42;
+    const color = style.borderTopColor || '';
+    const match = color.match(/rgba?\(([^)]+)\)/i);
+    let alpha = 1;
+    if (match) {
+      const parts = match[1].split(',').map((part) => part.trim());
+      if (parts.length >= 4) alpha = Number.parseFloat(parts[3]);
+    }
+    return { transformY, color, alpha };
+  });
+}
+
 test('Collections card uses the complete Library cover hover contract', async ({ page }) => {
   await signIn(page);
   await page.goto(`${sandboxUrl}/collections`);
@@ -55,17 +73,23 @@ test('Collections card uses the complete Library cover hover contract', async ({
   await expect(actions).toBeHidden();
   await expect.poll(() => transformY(art)).toBeCloseTo(0, 1);
   await expect.poll(() => transformY(actions)).toBeCloseTo(0, 1);
+  await expect.poll(async () => (await hoverFrameState(card)).transformY).toBeCloseTo(0, 1);
+  await expect.poll(async () => (await hoverFrameState(card)).alpha).toBeCloseTo(0, 2);
 
   await card.hover();
   await expect(actions).toBeVisible();
   await expect(trigger).toBeVisible();
   await expect.poll(() => transformY(art)).toBeCloseTo(-4, 1);
   await expect.poll(() => transformY(actions)).toBeCloseTo(-4, 1);
+  await expect.poll(async () => (await hoverFrameState(card)).transformY).toBeCloseTo(-4, 1);
+  await expect.poll(async () => (await hoverFrameState(card)).alpha).toBeCloseTo(1, 2);
 
   await page.mouse.move(0, 0);
   await expect(actions).toBeHidden();
   await expect.poll(() => transformY(art)).toBeCloseTo(0, 1);
   await expect.poll(() => transformY(actions)).toBeCloseTo(0, 1);
+  await expect.poll(async () => (await hoverFrameState(card)).transformY).toBeCloseTo(0, 1);
+  await expect.poll(async () => (await hoverFrameState(card)).alpha).toBeCloseTo(0, 2);
 
   await card.hover();
   await expect(actions).toBeVisible();
@@ -73,11 +97,13 @@ test('Collections card uses the complete Library cover hover contract', async ({
   await expect(menu).toHaveAttribute('open', '');
   await expect(card.getByRole('link', { name: 'Edit collection' })).toBeVisible();
 
-  // A focused/open action menu may remain available, but both visual layers must
-  // settle together when pointer hover ends so the outline never tears apart.
+  // A focused/open action menu may remain available, but every visual layer must
+  // settle together when pointer hover ends so the moving lime frame cannot stick.
   await page.mouse.move(0, 0);
   await expect.poll(() => transformY(art)).toBeCloseTo(0, 1);
   await expect.poll(() => transformY(actions)).toBeCloseTo(0, 1);
+  await expect.poll(async () => (await hoverFrameState(card)).transformY).toBeCloseTo(0, 1);
+  await expect.poll(async () => (await hoverFrameState(card)).alpha).toBeCloseTo(0, 2);
 });
 
 test('Smart Collection editing opens in a modal from the Collections picker', async ({ page }) => {

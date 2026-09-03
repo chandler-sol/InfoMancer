@@ -99,14 +99,38 @@
 }
 
 /* Collection picker cards use the real Library cover-card contract, including the
-   same cover-art movement, border highlight, shadow timing, action-overlay movement,
-   and hover-out behavior. Collections override only the artwork geometry to 16:9. */
+   same cover-art movement, shadow timing, action-overlay movement, and hover-out
+   behavior. Collections override only the artwork geometry to 16:9. */
 .collection-picker-card {
   position: relative;
   min-width: 0;
   isolation: isolate;
   flex-basis: auto;
   width: auto;
+}
+
+/* The lime hover frame has to sit above the delayed action veil. Keeping the frame
+   on the artwork itself lets the veil cover its top edge as the card rises, which
+   makes the outline look anchored while the image moves. This dedicated frame is
+   pointer-transparent and follows the exact same 180ms / -4px Library lift. */
+.collection-picker-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 31;
+  box-sizing: border-box;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  pointer-events: none;
+  transform: translateY(0);
+  transition: transform .18s ease, border-color .18s ease;
+}
+
+.collection-picker-card:hover::before {
+  transform: translateY(-4px);
+  border-color: var(--lime);
 }
 
 .collection-picker-card-link {
@@ -125,17 +149,16 @@
 /* library.css still has a legacy .collection-card:hover .collection-art rule used by
    older/custom Collection surfaces. The picker link also carries collection-card,
    so that later rule would otherwise override Library's -4px cover-card movement
-   with -2px. Match Library's effective hover values here without adding focus state
-   or separate transition timing. */
+   with -2px. Match Library's movement/shadow here, while the dedicated frame above
+   owns the lime outline so no sibling overlay can mask one edge of it. */
 .collection-picker-card .collection-card:hover .collection-art {
   transform: translateY(-4px);
-  border-color: var(--lime);
+  border-color: var(--line);
   box-shadow: 0 15px 34px rgba(0, 0, 0, .42);
 }
 
 /* Keep the delayed action veil physically attached to the artwork. A lower-priority
-   legacy rule can leave this layer at its resting position while the artwork rises,
-   which visually masks the artwork's top lime edge as soon as the veil fades in. */
+   legacy rule can leave this layer at its resting position while the artwork rises. */
 .collection-picker-card .cover-card-actions {
   z-index: 30;
   box-sizing: border-box;
