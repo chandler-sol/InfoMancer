@@ -73,10 +73,22 @@ function renameSingleBundle(subdirectory, extension) {
 
   const source = join(directory, matches[0]);
   const destination = join(directory, `InfoMancer-${version}-${label}${extension}`);
+  const sourceSignature = `${source}.sig`;
+  const destinationSignature = `${destination}.sig`;
+
   if (source !== destination) {
     renameSync(source, destination);
+    // Signed updater builds place a signature beside the bundle. Keep the pair
+    // under the same basename so tauri-action can still match them when it builds
+    // latest.json and uploads updater assets.
+    if (existsSync(sourceSignature)) {
+      renameSync(sourceSignature, destinationSignature);
+    }
   }
   console.log(`Release package: ${destination}`);
+  if (existsSync(destinationSignature)) {
+    console.log(`Release signature: ${destinationSignature}`);
+  }
 }
 
 if (process.platform === 'win32') {
