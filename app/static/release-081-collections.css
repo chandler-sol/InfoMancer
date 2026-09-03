@@ -98,9 +98,9 @@
   overflow-wrap: anywhere;
 }
 
-/* Collection picker cards now use the real Library cover-card action contract.
-   These rules only preserve the Collections 16:9 geometry. Visibility, hover delay,
-   focus behavior, pointer events, and menu trigger styling come from library.css. */
+/* Collection picker cards use the real Library cover-card contract, including the
+   same cover-art movement, border highlight, shadow timing, action-overlay movement,
+   and hover-out behavior. Collections override only the artwork geometry to 16:9. */
 .collection-picker-card {
   position: relative;
   min-width: 0;
@@ -115,29 +115,22 @@
 
 .collection-picker-card .collection-art {
   position: relative;
-  overflow: hidden;
-  transition: transform .18s ease, border-color .16s ease, box-shadow .18s ease;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin-bottom: 12px;
 }
 
-.collection-picker-card .collection-art::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: rgba(3, 7, 10, 0);
-  pointer-events: none;
-  transition: background .16s ease;
-}
-
-.collection-picker-card:hover .collection-art,
-.collection-picker-card:focus-within .collection-art {
-  transform: translateY(-3px);
+/* library.css still has a legacy .collection-card:hover .collection-art rule used by
+   older/custom Collection surfaces. The picker link also carries collection-card,
+   so that later rule would otherwise override Library's -4px cover-card movement
+   with -2px. Match Library's effective hover values here without adding focus state
+   or separate transition timing. */
+.collection-picker-card .collection-card:hover .collection-art {
+  transform: translateY(-4px);
   border-color: var(--lime);
-  box-shadow: 0 15px 30px rgba(0, 0, 0, .28);
-}
-
-.collection-picker-card:hover .collection-art::after,
-.collection-picker-card:focus-within .collection-art::after {
-  background: rgba(3, 7, 10, .34);
+  box-shadow: 0 15px 34px rgba(0, 0, 0, .42);
 }
 
 .collection-picker-card .cover-card-actions {
@@ -304,12 +297,5 @@
   .collection-undo-form .button {
     width: 100%;
     justify-content: center;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .collection-picker-card .collection-art,
-  .collection-picker-card .collection-art::after {
-    transition: none;
   }
 }

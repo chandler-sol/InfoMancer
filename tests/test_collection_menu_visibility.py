@@ -36,6 +36,27 @@ class CollectionMenuVisibilityTests(unittest.TestCase):
         self.assertNotIn(".collection-picker-card:hover .collection-picker-card-actions", collection_css)
         self.assertNotIn(".collection-picker-card:focus-within .collection-picker-card-actions", collection_css)
 
+    def test_picker_artwork_uses_exact_library_cover_hover_animation(self) -> None:
+        template = self.read("app/templates/collections.html")
+        library_css = self.read("app/static/library.css")
+        release_css = self.read("app/static/release-081-collections.css")
+
+        self.assertIn('class="cover-art collection-art"', template)
+        self.assertIn(".cover-card:hover .cover-art", library_css)
+        self.assertIn("transform:translateY(-4px)", library_css)
+        self.assertIn(".collection-card:hover .collection-art", library_css)
+        self.assertIn(".collection-picker-card .collection-art", release_css)
+        self.assertIn("aspect-ratio: 16 / 9", release_css)
+        # The older generic Collection surface still has a -2px hover rule in
+        # library.css. The picker compatibility rule must beat it while matching
+        # Library's exact -4px visual values and must not add a focus-held state.
+        self.assertIn(".collection-picker-card .collection-card:hover .collection-art", release_css)
+        self.assertIn("transform: translateY(-4px)", release_css)
+        self.assertIn("box-shadow: 0 15px 34px rgba(0, 0, 0, .42)", release_css)
+        self.assertNotIn(".collection-picker-card:hover .collection-art", release_css)
+        self.assertNotIn(".collection-picker-card:focus-within .collection-art", release_css)
+        self.assertNotIn(".collection-picker-card .collection-art::after", release_css)
+
     def test_touch_layout_reuses_library_actions_visible_contract(self) -> None:
         library_css = self.read("app/static/library.css")
         script = self.read("app/static/release-081-collections.js")

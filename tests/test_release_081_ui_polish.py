@@ -108,6 +108,23 @@ class Release081UiPolishContracts(unittest.TestCase):
         self.assertIn("data-has-custom-artwork", template)
         self.assertIn("Edit Smart Collection", template)
 
+    def test_smart_collection_edit_opens_in_modal_with_standalone_fallback(self):
+        template = self.read("app/templates/collections.html")
+        fallback = self.read("app/templates/smart_collection_edit.html")
+        script = self.read("app/static/release-081-ui-polish.js")
+        css = self.read("app/static/release-081-ui-polish.css")
+
+        self.assertIn("data-smart-collection-edit", template)
+        self.assertIn("openSmartCollectionEditor", script)
+        self.assertIn("fetch(href", script)
+        self.assertIn("new DOMParser()", script)
+        self.assertIn("form.smart-collection-editor-form", script)
+        self.assertIn("smart-collection-edit-dialog", script)
+        self.assertIn("window.location.assign(destination.toString())", script)
+        self.assertIn(".smart-collection-edit-dialog", css)
+        self.assertIn('action="/collections/{{ collection.id }}/smart/edit"', fallback)
+        self.assertIn("Save changes", fallback)
+
     def test_bulk_add_to_collection_uses_modal_instead_of_page_form_submit(self):
         script = self.read("app/static/release-081-library-actions.js")
         self.assertIn("release-bulk-collection-dialog", script)
