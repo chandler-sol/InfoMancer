@@ -53,10 +53,11 @@ A standalone Windows installation can use local folders, drive letters, and netw
    - Intel: `InfoMancer-0.8.1-alpha.1-macOS-Intel.dmg`
 2. Open the DMG and move **InfoMancer** into Applications.
 3. Launch InfoMancer.
-4. Choose **Run on this computer** or **Connect to a server**.
-5. Complete Guided Setup for a new local installation.
+4. If macOS blocks the app, open **System Settings → Privacy & Security**, scroll to the Security section, and choose **Open Anyway** for InfoMancer. You may need to attempt to open InfoMancer once before this option appears.
+5. Choose **Run on this computer** or **Connect to a server**.
+6. Complete Guided Setup for a new local installation.
 
-The 0.8 alpha DMG is not yet Apple-notarized. If macOS blocks the first launch, try opening InfoMancer once, then open **System Settings → Privacy & Security** and choose **Open Anyway** for InfoMancer.
+> **First launch on macOS:** The 0.8 alpha DMG is not yet Apple-notarized, so the Privacy & Security approval step above will commonly be required. Only approve a package downloaded from the official InfoMancer GitHub Release.
 
 macOS may also ask for permission before InfoMancer can access external drives, mounted shares, or folders outside your normal user area.
 
