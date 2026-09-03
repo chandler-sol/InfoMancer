@@ -133,9 +133,18 @@
   box-shadow: 0 15px 34px rgba(0, 0, 0, .42);
 }
 
+/* Keep the delayed action veil physically attached to the artwork. A lower-priority
+   legacy rule can leave this layer at its resting position while the artwork rises,
+   which visually masks the artwork's top lime edge as soon as the veil fades in. */
 .collection-picker-card .cover-card-actions {
   z-index: 30;
+  box-sizing: border-box;
   aspect-ratio: 16 / 9;
+  transform: translateY(0) !important;
+}
+
+.collection-picker-card:hover .cover-card-actions {
+  transform: translateY(-4px) !important;
 }
 
 .collection-picker-card .cover-row-menu > div > form {
