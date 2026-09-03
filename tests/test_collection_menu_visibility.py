@@ -36,6 +36,20 @@ class CollectionMenuVisibilityTests(unittest.TestCase):
         self.assertNotIn(".collection-picker-card:hover .collection-picker-card-actions", collection_css)
         self.assertNotIn(".collection-picker-card:focus-within .collection-picker-card-actions", collection_css)
 
+    def test_picker_artwork_uses_exact_library_cover_hover_animation(self) -> None:
+        template = self.read("app/templates/collections.html")
+        library_css = self.read("app/static/library.css")
+        release_css = self.read("app/static/release-081-collections.css")
+
+        self.assertIn('class="cover-art collection-art"', template)
+        self.assertIn(".cover-card:hover .cover-art", library_css)
+        self.assertIn("transform:translateY(-4px)", library_css)
+        self.assertIn(".collection-picker-card .collection-art", release_css)
+        self.assertIn("aspect-ratio: 16 / 9", release_css)
+        self.assertNotIn(".collection-picker-card:hover .collection-art", release_css)
+        self.assertNotIn(".collection-picker-card:focus-within .collection-art", release_css)
+        self.assertNotIn(".collection-picker-card .collection-art::after", release_css)
+
     def test_touch_layout_reuses_library_actions_visible_contract(self) -> None:
         library_css = self.read("app/static/library.css")
         script = self.read("app/static/release-081-collections.js")
