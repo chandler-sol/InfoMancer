@@ -60,7 +60,8 @@ class WindowsDesktopContractTests(unittest.TestCase):
         self.assertIn("LOCAL_CORE_STARTUP_TIMEOUT: Duration = Duration::from_secs(60)", rust)
         self.assertIn("while started.elapsed() < LOCAL_CORE_STARTUP_TIMEOUT", rust)
         self.assertIn("Local core became HTTP-ready after", rust)
-        self.assertIn("Check desktop-launcher.log for startup details", rust)
+        self.assertIn("Check {} for startup details", rust)
+        self.assertIn("launcher_log_path().display()", rust)
         self.assertNotIn("for _ in 0..120", rust)
 
     def test_windows_onefile_core_does_not_outlive_desktop_parent(self):
