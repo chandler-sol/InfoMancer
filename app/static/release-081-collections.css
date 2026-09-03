@@ -135,11 +135,15 @@
 
 /* Keep the delayed action veil physically attached to the artwork. A lower-priority
    legacy rule can leave this layer at its resting position while the artwork rises,
-   which visually masks the artwork's top lime edge as soon as the veil fades in. */
+   which visually masks the artwork's top lime edge as soon as the veil fades in.
+   The transparent border plus padding-box clipping reserves a one-pixel clear rim,
+   so the dark veil starts inside the lime artwork border instead of painting over it. */
 .collection-picker-card .cover-card-actions {
   z-index: 30;
   box-sizing: border-box;
   aspect-ratio: 16 / 9;
+  border: 1px solid transparent;
+  background-clip: padding-box;
   transform: translateY(0) !important;
 }
 
