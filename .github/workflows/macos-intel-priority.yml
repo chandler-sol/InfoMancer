@@ -70,6 +70,13 @@ jobs:
             macos-intel-priority-ffprobe-
             macOS-X64-ffprobe-
 
+      - name: Restore static cryptography wheel
+        id: crypto-wheel-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: build/macos-intel-wheels
+          key: macos-intel-static-cryptography-py313-${{ hashFiles('requirements.txt') }}
+
       - name: Verify toolchain
         shell: bash
         run: |
@@ -79,7 +86,8 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: Build cryptography with static OpenSSL
+      - name: Build static cryptography wheel
+        if: steps.crypto-wheel-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
@@ -88,13 +96,25 @@ jobs:
             echo 'Pinned cryptography requirement was not found.' >&2
             exit 1
           fi
+          mkdir -p build/macos-intel-wheels
           env \
             OPENSSL_DIR="$(brew --prefix openssl@3)" \
             OPENSSL_STATIC=1 \
-            python -m pip install \
+            python -m pip wheel \
               --no-cache-dir \
+              --no-deps \
               --no-binary cryptography \
+              --wheel-dir build/macos-intel-wheels \
               "$crypto_requirement"
+
+      - name: Install static cryptography wheel
+        shell: bash
+        run: |
+          crypto_requirement="$(grep -E '^cryptography==' requirements.txt | head -n 1)"
+          python -m pip install \
+            --no-index \
+            --find-links build/macos-intel-wheels \
+            "$crypto_requirement"
 
       - name: Install Python build dependencies
         shell: bash
