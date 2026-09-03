@@ -46,6 +46,7 @@ class CollectionMenuVisibilityTests(unittest.TestCase):
         self.assertIn("transform:translateY(-4px)", library_css)
         self.assertIn(".collection-card:hover .collection-art", library_css)
         self.assertIn(".collection-picker-card .collection-art", release_css)
+        self.assertIn("box-sizing: border-box", release_css)
         self.assertIn("aspect-ratio: 16 / 9", release_css)
         self.assertIn(".collection-picker-card .collection-card:hover .collection-art", release_css)
         self.assertIn("transform: translateY(-4px)", release_css)
@@ -56,15 +57,21 @@ class CollectionMenuVisibilityTests(unittest.TestCase):
         self.assertNotIn(".collection-picker-card::before", release_css)
         self.assertNotIn(".collection-picker-card .collection-art::after", release_css)
 
-    def test_picker_action_veil_cannot_paint_over_real_lime_border(self) -> None:
+    def test_picker_action_veil_is_inset_inside_real_lime_border(self) -> None:
         release_css = self.read("app/static/release-081-collections.css")
 
         self.assertIn(".collection-picker-card .cover-card-actions", release_css)
         self.assertIn("z-index: 30", release_css)
-        self.assertIn("border: 1px solid transparent", release_css)
-        self.assertIn("background-clip: padding-box", release_css)
+        self.assertIn("background: transparent", release_css)
+        self.assertIn(".collection-picker-card .cover-card-actions::before", release_css)
+        self.assertIn('content: ""', release_css)
+        self.assertIn("inset: 1px", release_css)
+        self.assertIn("background: rgba(3, 7, 10, .7)", release_css)
+        self.assertIn("pointer-events: none", release_css)
         self.assertIn(".collection-picker-card:hover .cover-card-actions", release_css)
         self.assertIn("transform: translateY(-4px) !important", release_css)
+        self.assertIn(".collection-picker-card .cover-row-menu", release_css)
+        self.assertIn("z-index: 1", release_css)
 
     def test_touch_layout_reuses_library_actions_visible_contract(self) -> None:
         library_css = self.read("app/static/library.css")
