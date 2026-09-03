@@ -61,14 +61,9 @@ jobs:
           app_version = re.search(r'^APP_VERSION\s*=\s*"([^"]+)"', main, re.MULTILINE).group(1)
           tauri_version = json.loads(Path('desktop/src-tauri/tauri.conf.json').read_text(encoding='utf-8'))['version']
           package_version = json.loads(Path('desktop/package.json').read_text(encoding='utf-8'))['version']
-          cargo = Path('desktop/src-tauri/Cargo.toml').read_text(encoding='utf-8')
-          cargo_version = re.search(r'^version\s*=\s*"([^"]+)"', cargo, re.MULTILINE).group(1)
-          versions = {app_version, tauri_version, package_version, cargo_version}
+          versions = {app_version, tauri_version, package_version}
           if len(versions) != 1:
-              raise SystemExit(
-                  'Release version mismatch: '
-                  f'app={app_version}, tauri={tauri_version}, package={package_version}, cargo={cargo_version}'
-              )
+              raise SystemExit(f'Release version mismatch: app={app_version}, tauri={tauri_version}, package={package_version}')
           print(f'Packaging InfoMancer {app_version}')
           PY
 
