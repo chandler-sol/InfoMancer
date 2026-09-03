@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import unittest
 
@@ -6,8 +7,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseAssetNameContracts(unittest.TestCase):
-    def test_native_release_assets_use_human_readable_platform_names(self):
-        workflow = (ROOT / ".github/workflows/draft-08-release.yml").read_text(encoding="utf-8")
+    def test_native_builds_flow_through_human_readable_filename_wrapper(self):
+        package = json.loads((ROOT / "desktop/package.json").read_text(encoding="utf-8"))
+        wrapper = (ROOT / "desktop/scripts/tauri-wrapper.mjs").read_text(encoding="utf-8")
+        release_workflow = (ROOT / ".github/workflows/draft-08-release.yml").read_text(encoding="utf-8")
+
+        self.assertEqual(package["scripts"]["tauri"], "node scripts/tauri-wrapper.mjs")
+        self.assertIn("npm run tauri -- build --bundles ${{ matrix.bundles }}", release_workflow)
 
         for label in (
             "Windows-x64-Setup",
@@ -15,24 +21,18 @@ class ReleaseAssetNameContracts(unittest.TestCase):
             "macOS-Intel",
             "Linux-x86_64",
         ):
-            self.assertIn(f"asset_label: {label}", workflow)
+            self.assertIn(label, wrapper)
 
-        self.assertIn("ASSET_LABEL: ${{ matrix.asset_label }}", workflow)
-        self.assertIn("InfoMancer-{version}-{asset_label}{extension}", workflow)
-        self.assertIn("-Server-Source.zip", workflow)
+        self.assertIn("InfoMancer-${version}-${label}${extension}", wrapper)
 
-    def test_draft_refresh_removes_legacy_machine_oriented_asset_names(self):
-        workflow = (ROOT / ".github/workflows/draft-08-release.yml").read_text(encoding="utf-8")
+    def test_wrapper_preserves_normal_tauri_commands_and_renames_only_completed_builds(self):
+        wrapper = (ROOT / "desktop/scripts/tauri-wrapper.mjs").read_text(encoding="utf-8")
 
-        for legacy_pattern in (
-            "InfoMancer_*_aarch64.dmg",
-            "InfoMancer_*_x64.dmg",
-            "InfoMancer_*_amd64.deb",
-            "InfoMancer_*_amd64.AppImage",
-            "InfoMancer_*_x64-setup.exe",
-            "InfoMancer_*_x64-commit-*-setup.exe",
-        ):
-            self.assertIn(legacy_pattern, workflow)
+        self.assertIn("if (args[0] !== 'build')", wrapper)
+        self.assertIn("renameSingleBundle('nsis', '.exe')", wrapper)
+        self.assertIn("renameSingleBundle('dmg', '.dmg')", wrapper)
+        self.assertIn("renameSingleBundle('deb', '.deb')", wrapper)
+        self.assertIn("renameSingleBundle('appimage', '.AppImage')", wrapper)
 
 
 if __name__ == "__main__":
