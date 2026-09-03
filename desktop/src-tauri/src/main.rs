@@ -51,14 +51,29 @@ struct DesktopState {
 fn launcher_log_path() -> PathBuf {
     LAUNCH_LOG_PATH
         .get_or_init(|| {
-            let mut path = std::env::var_os("APPDATA")
-                .map(PathBuf::from)
-                .unwrap_or_else(std::env::temp_dir);
-            if std::env::var_os("APPDATA").is_some() {
-                path.push("cloud.arsenik.infomancer");
+            let mut path = if cfg!(target_os = "macos") {
+                std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .map(|mut home| {
+                        home.push("Library");
+                        home.push("Application Support");
+                        home.push("cloud.arsenik.infomancer");
+                        home
+                    })
+                    .unwrap_or_else(|| {
+                        let mut fallback = std::env::temp_dir();
+                        fallback.push("InfoMancer");
+                        fallback
+                    })
+            } else if let Some(appdata) = std::env::var_os("APPDATA") {
+                let mut appdata = PathBuf::from(appdata);
+                appdata.push("cloud.arsenik.infomancer");
+                appdata
             } else {
-                path.push("InfoMancer");
-            }
+                let mut fallback = std::env::temp_dir();
+                fallback.push("InfoMancer");
+                fallback
+            };
             path.push("logs");
             path.push("desktop-launcher.log");
             path
@@ -171,9 +186,10 @@ async fn wait_for_local_core(port: u16) -> Result<bool, String> {
         tokio::time::sleep(LOCAL_CORE_POLL_INTERVAL).await;
     }
     Err(format!(
-        "The local InfoMancer core did not become ready within {} seconds. {} Check desktop-launcher.log for startup details.",
+        "The local InfoMancer core did not become ready within {} seconds. {} Check {} for startup details.",
         LOCAL_CORE_STARTUP_TIMEOUT.as_secs(),
-        last_error
+        last_error,
+        launcher_log_path().display()
     ))
 }
 
