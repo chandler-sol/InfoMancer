@@ -57,16 +57,25 @@ test('Collections card uses the complete Library cover hover contract', async ({
   await expect.poll(() => transformY(actions)).toBeCloseTo(0, 1);
 
   const veilPaint = await actions.evaluate((element) => {
-    const style = getComputedStyle(element);
+    const container = getComputedStyle(element);
+    const veil = getComputedStyle(element, '::before');
     return {
-      backgroundClip: style.backgroundClip,
-      borderTopWidth: style.borderTopWidth,
-      borderTopColor: style.borderTopColor,
+      containerBackground: container.backgroundColor,
+      top: veil.top,
+      right: veil.right,
+      bottom: veil.bottom,
+      left: veil.left,
+      veilBackground: veil.backgroundColor,
+      veilPointerEvents: veil.pointerEvents,
     };
   });
-  expect(veilPaint.backgroundClip).toBe('padding-box');
-  expect(veilPaint.borderTopWidth).toBe('1px');
-  expect(veilPaint.borderTopColor).toBe('rgba(0, 0, 0, 0)');
+  expect(veilPaint.containerBackground).toBe('rgba(0, 0, 0, 0)');
+  expect(veilPaint.top).toBe('1px');
+  expect(veilPaint.right).toBe('1px');
+  expect(veilPaint.bottom).toBe('1px');
+  expect(veilPaint.left).toBe('1px');
+  expect(veilPaint.veilBackground).toBe('rgba(3, 7, 10, 0.7)');
+  expect(veilPaint.veilPointerEvents).toBe('none');
 
   await card.hover();
   await expect(actions).toBeVisible();
