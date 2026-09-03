@@ -34,6 +34,15 @@ class ReleaseAssetNameContracts(unittest.TestCase):
         self.assertIn("renameSingleBundle('deb', '.deb')", wrapper)
         self.assertIn("renameSingleBundle('appimage', '.AppImage')", wrapper)
 
+    def test_signed_updater_bundle_keeps_signature_on_matching_friendly_basename(self):
+        wrapper = (ROOT / "desktop/scripts/tauri-wrapper.mjs").read_text(encoding="utf-8")
+        updater_config = (ROOT / "desktop/src-tauri/tauri.release.conf.json").read_text(encoding="utf-8")
+
+        self.assertIn('"createUpdaterArtifacts": true', updater_config)
+        self.assertIn("const sourceSignature = `${source}.sig`", wrapper)
+        self.assertIn("const destinationSignature = `${destination}.sig`", wrapper)
+        self.assertIn("renameSync(sourceSignature, destinationSignature)", wrapper)
+
 
 if __name__ == "__main__":
     unittest.main()
