@@ -27,6 +27,7 @@ FILES = (
     "compose.sandbox.yaml",
     "compose.yaml",
     "Dockerfile",
+    "infomancer-lockup.svg",
     "README.md",
     "requirements.txt",
     "SECURITY.md",
