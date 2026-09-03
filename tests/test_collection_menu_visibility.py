@@ -36,6 +36,17 @@ class CollectionMenuVisibilityTests(unittest.TestCase):
         self.assertNotIn(".collection-picker-card:hover .collection-picker-card-actions", collection_css)
         self.assertNotIn(".collection-picker-card:focus-within .collection-picker-card-actions", collection_css)
 
+    def test_picker_disables_cover_card_paint_containment_for_hover_lift(self) -> None:
+        modern_css = self.read("app/static/modern.css")
+        collection_css = self.read("app/static/collection-menu-visibility.css")
+
+        self.assertIn(".cover-card {", modern_css)
+        self.assertIn("content-visibility: auto", modern_css)
+        self.assertIn(".collection-picker-card {", collection_css)
+        self.assertIn("content-visibility: visible !important", collection_css)
+        self.assertIn("contain: none !important", collection_css)
+        self.assertIn("overflow: visible !important", collection_css)
+
     def test_picker_artwork_uses_exact_library_cover_hover_animation(self) -> None:
         template = self.read("app/templates/collections.html")
         library_css = self.read("app/static/library.css")
