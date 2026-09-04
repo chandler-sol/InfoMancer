@@ -77,6 +77,7 @@ class SavedViewUiContractTests(unittest.TestCase):
         dashboard = (root / "app/templates/dashboard.html").read_text(encoding="utf-8")
         script = (root / "app/static/library-saved-views.js").read_text(encoding="utf-8")
         styles = (root / "app/static/library-saved-views.css").read_text(encoding="utf-8")
+        controller = (root / "app/static/library-controller.js").read_text(encoding="utf-8")
         self.assertIn('action="/library/views"', library)
         self.assertIn("Pin to Library and Dashboard", library)
         self.assertIn("saved-view-chip", library)
@@ -84,6 +85,7 @@ class SavedViewUiContractTests(unittest.TestCase):
         self.assertIn("bar.querySelectorAll('.saved-view-chip')", script)
         self.assertIn("chip.classList.add('catalog-saved-view-pin')", script)
         self.assertIn(".catalog-tabs .catalog-saved-view-pin", styles)
+        self.assertIn(".catalog-tabs a:not(.catalog-saved-view-pin)", controller)
         self.assertLess(script.index("tabs.append(chip)"), script.index("tabs.append(manager)"))
         self.assertLess(script.index("tabs.append(chip)"), script.index("bar.hidden = true"))
 
