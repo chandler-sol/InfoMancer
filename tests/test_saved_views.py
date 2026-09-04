@@ -72,12 +72,22 @@ class SavedViewServiceTests(unittest.TestCase):
 
 class SavedViewUiContractTests(unittest.TestCase):
     def test_library_and_dashboard_surface_saved_views(self):
-        library = (Path(__file__).resolve().parents[1] / "app/templates/library.html").read_text(encoding="utf-8")
-        dashboard = (Path(__file__).resolve().parents[1] / "app/templates/dashboard.html").read_text(encoding="utf-8")
+        root = Path(__file__).resolve().parents[1]
+        library = (root / "app/templates/library.html").read_text(encoding="utf-8")
+        dashboard = (root / "app/templates/dashboard.html").read_text(encoding="utf-8")
+        script = (root / "app/static/library-saved-views.js").read_text(encoding="utf-8")
+        styles = (root / "app/static/library-saved-views.css").read_text(encoding="utf-8")
+        controller = (root / "app/static/library-controller.js").read_text(encoding="utf-8")
         self.assertIn('action="/library/views"', library)
         self.assertIn("Pin to Library and Dashboard", library)
         self.assertIn("saved-view-chip", library)
         self.assertIn("home-saved-view-grid", dashboard)
+        self.assertIn("bar.querySelectorAll('.saved-view-chip')", script)
+        self.assertIn("chip.classList.add('catalog-saved-view-pin')", script)
+        self.assertIn(".catalog-tabs .catalog-saved-view-pin", styles)
+        self.assertIn(".catalog-tabs a:not(.catalog-saved-view-pin)", controller)
+        self.assertLess(script.index("tabs.append(chip)"), script.index("tabs.append(manager)"))
+        self.assertLess(script.index("tabs.append(chip)"), script.index("bar.hidden = true"))
 
 
 if __name__ == "__main__":

@@ -172,7 +172,7 @@
   };
 
   const updateFilterLinks = (url) => {
-    document.querySelectorAll('.alphabet a, .catalog-tabs a').forEach((link) => {
+    document.querySelectorAll('.alphabet a, .catalog-tabs a:not(.catalog-saved-view-pin)').forEach((link) => {
       if (link.closest('.alphabet')) link.classList.remove('active');
       const linkUrl = new URL(link.href, window.location.origin);
       FILTER_KEYS.forEach((key) => {

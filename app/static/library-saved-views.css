@@ -8,6 +8,14 @@
   display: none !important;
 }
 
+.catalog-tabs .catalog-saved-view-pin {
+  display: inline-block;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .catalog-tabs .catalog-saved-views {
   position: relative;
   order: 20;
