@@ -20,6 +20,16 @@
     summary.setAttribute('aria-label', existingCount ? `Saved Views, ${existingCount}` : 'Saved Views, none saved');
   }
 
+  /* Pinned views are already rendered by the server. Promote those links into the
+     Library scope row before hiding the legacy saved-view bar so pinning actually
+     produces the quick-access shortcut promised by the UI. */
+  const pinnedViews = [...bar.querySelectorAll('.saved-view-chip')];
+  for (const chip of pinnedViews) {
+    chip.classList.remove('saved-view-chip');
+    chip.classList.add('catalog-saved-view-pin');
+    tabs.append(chip);
+  }
+
   manager.classList.add('catalog-saved-views');
   tabs.append(manager);
 
