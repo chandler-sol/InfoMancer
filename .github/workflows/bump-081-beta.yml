@@ -36,10 +36,13 @@ jobs:
           new_branch = "release/0.8.1-beta.1"
 
           # Update current release-facing text and contracts while preserving the
-          # historical alpha release note as an immutable snapshot.
+          # historical alpha release note as an immutable snapshot. Workflow files
+          # are handled separately because GitHub restricts workflow-file pushes.
           binary_suffixes = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".zip", ".bin"}
           for path in Path(".").rglob("*"):
               if not path.is_file() or ".git" in path.parts:
+                  continue
+              if path.parts[:2] == (".github", "workflows"):
                   continue
               if path.as_posix() == "docs/releases/0.8.1-alpha.1.md":
                   continue
