@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - testing/0.8-alpha
+      - testing/0.8-beta
     paths:
       - desktop/**
       - app/**
