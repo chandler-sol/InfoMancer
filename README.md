@@ -108,12 +108,12 @@ Choose the package whose name matches your platform:
 
 | Platform | Download |
 | --- | --- |
-| Windows 10/11 x64 | `InfoMancer-0.8.1-alpha.1-Windows-x64-Setup.exe` |
-| macOS, Apple Silicon | `InfoMancer-0.8.1-alpha.1-macOS-Apple-Silicon.dmg` |
-| macOS, Intel | `InfoMancer-0.8.1-alpha.1-macOS-Intel.dmg` |
-| Debian / Ubuntu / Linux Mint x86-64 | `InfoMancer-0.8.1-alpha.1-Linux-x86_64.deb` |
-| Other Linux x86-64 desktops | `InfoMancer-0.8.1-alpha.1-Linux-x86_64.AppImage` |
-| Server / Docker | `InfoMancer-0.8.1-alpha.1.zip` |
+| Windows 10/11 x64 | `InfoMancer-0.8.1-beta.1-Windows-x64-Setup.exe` |
+| macOS, Apple Silicon | `InfoMancer-0.8.1-beta.1-macOS-Apple-Silicon.dmg` |
+| macOS, Intel | `InfoMancer-0.8.1-beta.1-macOS-Intel.dmg` |
+| Debian / Ubuntu / Linux Mint x86-64 | `InfoMancer-0.8.1-beta.1-Linux-x86_64.deb` |
+| Other Linux x86-64 desktops | `InfoMancer-0.8.1-beta.1-Linux-x86_64.AppImage` |
+| Server / Docker | `InfoMancer-0.8.1-beta.1.zip` |
 
 Then follow **[Install InfoMancer](docs/INSTALLATION.md)**.
 

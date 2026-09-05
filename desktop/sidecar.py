@@ -10,7 +10,7 @@ import threading
 import time
 from pathlib import Path
 
-DESKTOP_VERSION = "0.8.1-alpha.1"
+DESKTOP_VERSION = "0.8.1-beta.1"
 
 
 def _root_is_accessible(root: Path) -> bool:

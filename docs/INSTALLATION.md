@@ -23,12 +23,12 @@ From the GitHub Release, choose exactly one native package or the server ZIP:
 
 | Platform | File |
 | --- | --- |
-| Windows 10/11 x64 | `InfoMancer-0.8.1-alpha.1-Windows-x64-Setup.exe` |
-| Mac with Apple Silicon | `InfoMancer-0.8.1-alpha.1-macOS-Apple-Silicon.dmg` |
-| Mac with Intel processor | `InfoMancer-0.8.1-alpha.1-macOS-Intel.dmg` |
-| Debian / Ubuntu / Linux Mint x86-64 | `InfoMancer-0.8.1-alpha.1-Linux-x86_64.deb` |
-| Other Linux x86-64 desktops | `InfoMancer-0.8.1-alpha.1-Linux-x86_64.AppImage` |
-| Docker / server | `InfoMancer-0.8.1-alpha.1.zip` |
+| Windows 10/11 x64 | `InfoMancer-0.8.1-beta.1-Windows-x64-Setup.exe` |
+| Mac with Apple Silicon | `InfoMancer-0.8.1-beta.1-macOS-Apple-Silicon.dmg` |
+| Mac with Intel processor | `InfoMancer-0.8.1-beta.1-macOS-Intel.dmg` |
+| Debian / Ubuntu / Linux Mint x86-64 | `InfoMancer-0.8.1-beta.1-Linux-x86_64.deb` |
+| Other Linux x86-64 desktops | `InfoMancer-0.8.1-beta.1-Linux-x86_64.AppImage` |
+| Docker / server | `InfoMancer-0.8.1-beta.1.zip` |
 
 If you are unsure which Mac you have, open **Apple menu → About This Mac**. A Mac showing an Apple M-series chip uses **Apple Silicon**. A Mac showing an Intel processor uses **Intel**.
 
@@ -36,7 +36,7 @@ Native 0.8 packages include the FFprobe component used for technical media inspe
 
 ## Windows
 
-1. Download `InfoMancer-0.8.1-alpha.1-Windows-x64-Setup.exe`.
+1. Download `InfoMancer-0.8.1-beta.1-Windows-x64-Setup.exe`.
 2. Run the installer.
 3. Launch **InfoMancer** from the Start menu.
 4. Choose **Run on this computer** for a new local installation, or **Connect to a server** for an existing InfoMancer server.
@@ -49,8 +49,8 @@ A standalone Windows installation can use local folders, drive letters, and netw
 ## macOS
 
 1. Download the DMG that matches your Mac:
-   - Apple Silicon: `InfoMancer-0.8.1-alpha.1-macOS-Apple-Silicon.dmg`
-   - Intel: `InfoMancer-0.8.1-alpha.1-macOS-Intel.dmg`
+   - Apple Silicon: `InfoMancer-0.8.1-beta.1-macOS-Apple-Silicon.dmg`
+   - Intel: `InfoMancer-0.8.1-beta.1-macOS-Intel.dmg`
 2. Open the DMG and move **InfoMancer** into Applications.
 3. Launch InfoMancer.
 4. If macOS blocks the app, open **System Settings → Privacy & Security**, scroll to the Security section, and choose **Open Anyway** for InfoMancer. You may need to attempt to open InfoMancer once before this option appears.
@@ -68,7 +68,7 @@ macOS may also ask for permission before InfoMancer can access external drives, 
 The DEB is the preferred package on compatible systems:
 
 ```bash
-sudo apt install ./InfoMancer-0.8.1-alpha.1-Linux-x86_64.deb
+sudo apt install ./InfoMancer-0.8.1-beta.1-Linux-x86_64.deb
 ```
 
 Then launch InfoMancer from your desktop application menu.
@@ -78,8 +78,8 @@ Then launch InfoMancer from your desktop application menu.
 For other x86-64 desktop distributions:
 
 ```bash
-chmod +x InfoMancer-0.8.1-alpha.1-Linux-x86_64.AppImage
-./InfoMancer-0.8.1-alpha.1-Linux-x86_64.AppImage
+chmod +x InfoMancer-0.8.1-beta.1-Linux-x86_64.AppImage
+./InfoMancer-0.8.1-beta.1-Linux-x86_64.AppImage
 ```
 
 Some distributions require FUSE compatibility for AppImage execution.
@@ -117,7 +117,7 @@ Install Docker Desktop on Windows/macOS or Docker Engine plus the Docker Compose
 
 Download and extract:
 
-`InfoMancer-0.8.1-alpha.1.zip`
+`InfoMancer-0.8.1-beta.1.zip`
 
 Keep the extracted folder somewhere permanent.
 
