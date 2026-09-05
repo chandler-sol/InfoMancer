@@ -1,4 +1,4 @@
-name: Rename 0.8 testing branch to beta
+name: Inspect stale 0.8 alpha branch references
 
 on:
   push:
@@ -8,57 +8,25 @@ on:
       - .github/workflows/rename-08-testing-beta.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  rename:
+  inspect:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Update branch-name references and retire alpha branch
+      - name: List stale branch references
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name "arsenik"
-          git config user.email "64607629+chandler-sol@users.noreply.github.com"
           git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
-
-          update_branch() {
-            branch="$1"
-            git checkout -B "$branch" "origin/$branch"
-            python - <<'PY'
-          from pathlib import Path
-
-          old = "testing/0.8-" + "alpha"
-          new = "testing/0.8-beta"
-          binary_suffixes = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".zip", ".bin", ".exe", ".dmg"}
-          skip = Path('.github/workflows/rename-08-testing-beta.yml')
-          for path in Path('.').rglob('*'):
-              if not path.is_file() or '.git' in path.parts or path == skip:
-                  continue
-              if path.suffix.lower() in binary_suffixes:
-                  continue
-              try:
-                  text = path.read_text(encoding='utf-8')
-              except (UnicodeDecodeError, OSError):
-                  continue
-              updated = text.replace(old, new)
-              if updated != text:
-                  path.write_text(updated, encoding='utf-8')
-          PY
-            git add -A
-            if ! git diff --cached --quiet; then
-              git commit -m "Rename 0.8 testing branch references to beta"
-              git push origin "HEAD:$branch"
-            fi
-          }
-
-          update_branch testing/0.8-beta
-          update_branch release/0.8.1-beta.1
-
-          OLD_BRANCH='testing/0.8-'
-          OLD_BRANCH="${OLD_BRANCH}alpha"
-          git push origin --delete "$OLD_BRANCH"
+          old='testing/0.8-'
+          old="${old}alpha"
+          for branch in testing/0.8-beta release/0.8.1-beta.1; do
+            echo "=== $branch ==="
+            git checkout -B "$branch" "origin/$branch" >/dev/null 2>&1
+            grep -RIl --exclude-dir=.git --exclude=rename-08-testing-beta.yml -- "$old" . || true
+          done
