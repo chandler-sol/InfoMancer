@@ -3,7 +3,7 @@ name: Showcase Screenshots
 on:
   pull_request:
     branches:
-      - testing/0.8-alpha
+      - testing/0.8-beta
   workflow_dispatch:
 
 permissions:
