@@ -1,0 +1,93 @@
+name: Promote 0.8.1 to beta
+
+on:
+  push:
+    branches:
+      - release/0.8.1-beta.1
+    paths:
+      - .github/workflows/bump-081-beta.yml
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Promote release identity to 0.8.1-beta.1
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          old = "0.8.1-alpha.1"
+          new = "0.8.1-beta.1"
+          old_branch = "release/0.8.1-alpha.1"
+          new_branch = "release/0.8.1-beta.1"
+
+          # Update current release-facing text and contracts while preserving the
+          # historical alpha release note as an immutable snapshot.
+          binary_suffixes = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".zip", ".bin"}
+          for path in Path(".").rglob("*"):
+              if not path.is_file() or ".git" in path.parts:
+                  continue
+              if path.as_posix() == "docs/releases/0.8.1-alpha.1.md":
+                  continue
+              if path.suffix.lower() in binary_suffixes:
+                  continue
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except (UnicodeDecodeError, OSError):
+                  continue
+              updated = text.replace(old, new).replace(old_branch, new_branch)
+              if updated != text:
+                  path.write_text(updated, encoding="utf-8")
+
+          # Cargo's root package version had lagged behind the rest of the app.
+          cargo_toml = Path("desktop/src-tauri/Cargo.toml")
+          text = cargo_toml.read_text(encoding="utf-8")
+          text = re.sub(
+              r'(?ms)^(\[package\]\s+name\s*=\s*"infomancer-desktop"\s+version\s*=\s*")[^"]+("\s*)',
+              rf'\g<1>{new}\2',
+              text,
+              count=1,
+          )
+          cargo_toml.write_text(text, encoding="utf-8")
+
+          cargo_lock = Path("desktop/src-tauri/Cargo.lock")
+          text = cargo_lock.read_text(encoding="utf-8")
+          text = re.sub(
+              r'(?ms)^(\[\[package\]\]\s+name\s*=\s*"infomancer-desktop"\s+version\s*=\s*")[^"]+("\s*)',
+              rf'\g<1>{new}\2',
+              text,
+              count=1,
+          )
+          cargo_lock.write_text(text, encoding="utf-8")
+
+          # Carry the release notes forward without overwriting the alpha record.
+          alpha_note = Path("docs/releases/0.8.1-alpha.1.md")
+          beta_note = Path("docs/releases/0.8.1-beta.1.md")
+          if alpha_note.exists() and not beta_note.exists():
+              note = alpha_note.read_text(encoding="utf-8")
+              note = note.replace(old, new)
+              note = re.sub(r'(?i)\balpha\b', 'beta', note)
+              beta_note.write_text(note, encoding="utf-8")
+
+          # Remove this one-shot workflow from the promoted branch.
+          Path(".github/workflows/bump-081-beta.yml").unlink(missing_ok=True)
+          PY
+
+      - name: Commit beta promotion
+        shell: bash
+        run: |
+          git config user.name "arsenik"
+          git config user.email "64607629+chandler-sol@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Promote 0.8.1 release to beta.1"
+          git push origin HEAD:release/0.8.1-beta.1
