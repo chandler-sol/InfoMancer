@@ -6,17 +6,22 @@ on:
       - release/0.8.1-beta.1
     paths:
       - .github/workflows/bump-081-beta.yml
+  pull_request:
+    branches:
+      - testing/0.8-alpha
 
 permissions:
   contents: write
 
 jobs:
   promote:
+    if: github.head_ref == 'release/0.8.1-beta.1' || github.ref_name == 'release/0.8.1-beta.1'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: release/0.8.1-beta.1
 
       - name: Promote release identity to 0.8.1-beta.1
         shell: bash
