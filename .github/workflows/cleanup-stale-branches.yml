@@ -1,0 +1,94 @@
+name: Clean stale branches
+
+on:
+  push:
+    branches:
+      - release/0.8.1-beta.1
+    paths:
+      - .github/workflows/cleanup-stale-branches.yml
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Delete branches that are safely obsolete
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+
+          keep_branch() {
+            case "$1" in
+              main|release/0.8.1-beta.1|testing/0.8-alpha|testing/0.9-alpha) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          explicitly_stale() {
+            case "$1" in
+              release/0.8.1-alpha.1|experiment/electron-0.8.1-alpha.1|experiment/electron-0.8.1-alpha.1-backup|experiment/electron-0.8.1-alpha.1-safety|tmp-do-not-use|tmp-do-not-use-2) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          is_ancestor_of_active_line() {
+            local branch="$1"
+            local active
+            for active in release/0.8.1-beta.1 testing/0.8-alpha testing/0.9-alpha main; do
+              if git show-ref --verify --quiet "refs/remotes/origin/$active" && \
+                 git merge-base --is-ancestor "refs/remotes/origin/$branch" "refs/remotes/origin/$active"; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          has_merged_pr() {
+            local branch="$1"
+            local count
+            count=$(gh api --method GET "repos/$GITHUB_REPOSITORY/pulls" \
+              -f state=closed \
+              -f head="$GITHUB_REPOSITORY_OWNER:$branch" \
+              -f per_page=100 \
+              --jq '[.[] | select(.merged_at != null)] | length')
+            [ "${count:-0}" -gt 0 ]
+          }
+
+          mapfile -t branches < <(git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin | sort)
+
+          echo "Active branches preserved: main, release/0.8.1-beta.1, testing/0.8-alpha, testing/0.9-alpha"
+          echo
+
+          for branch in "${branches[@]}"; do
+            [ "$branch" = "HEAD" ] && continue
+            if keep_branch "$branch"; then
+              echo "KEEP   $branch (active line)"
+              continue
+            fi
+
+            reason=""
+            if explicitly_stale "$branch"; then
+              reason="explicitly retired"
+            elif is_ancestor_of_active_line "$branch"; then
+              reason="already contained in an active line"
+            elif has_merged_pr "$branch"; then
+              reason="merged pull request"
+            fi
+
+            if [ -n "$reason" ]; then
+              echo "DELETE $branch ($reason)"
+              git push origin --delete "$branch"
+            else
+              echo "REVIEW $branch (not proven obsolete, leaving it intact)"
+            fi
+          done
