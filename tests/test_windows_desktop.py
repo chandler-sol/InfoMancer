@@ -12,8 +12,13 @@ class WindowsDesktopContractTests(unittest.TestCase):
         main = (ROOT / "app/main.py").read_text(encoding="utf-8")
         match = re.search(r'APP_VERSION = "([^"]+)"', main)
         self.assertIsNotNone(match)
+        expected_version = match.group(1)
         config = json.loads((ROOT / "desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
-        self.assertEqual(config["version"], match.group(1))
+        sidecar = (ROOT / "desktop/sidecar.py").read_text(encoding="utf-8")
+        sidecar_match = re.search(r'DESKTOP_VERSION = "([^"]+)"', sidecar)
+        self.assertIsNotNone(sidecar_match)
+        self.assertEqual(config["version"], expected_version)
+        self.assertEqual(sidecar_match.group(1), expected_version)
         self.assertEqual(config["productName"], "InfoMancer")
         self.assertEqual(config["identifier"], "cloud.arsenik.infomancer")
 
@@ -50,6 +55,42 @@ class WindowsDesktopContractTests(unittest.TestCase):
         self.assertIn('os.getenv("INFOMANCER_BOOTSTRAP_TOKEN", "")', sidecar)
         self.assertIn('os.environ["INFOMANCER_BOOTSTRAP_TOKEN"] = bootstrap_token', sidecar)
 
+    def test_local_core_startup_allows_windows_cold_boot(self):
+        rust = (ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
+        self.assertIn("LOCAL_CORE_STARTUP_TIMEOUT: Duration = Duration::from_secs(60)", rust)
+        self.assertIn("while started.elapsed() < LOCAL_CORE_STARTUP_TIMEOUT", rust)
+        self.assertIn("Local core became HTTP-ready after", rust)
+        self.assertIn("Check {} for startup details", rust)
+        self.assertIn("launcher_log_path().display()", rust)
+        self.assertNotIn("for _ in 0..120", rust)
+
+    def test_windows_onefile_core_does_not_outlive_desktop_parent(self):
+        sidecar = (ROOT / "desktop/sidecar.py").read_text(encoding="utf-8")
+        runtime = (ROOT / "app/runtime.py").read_text(encoding="utf-8")
+        self.assertIn("_start_onefile_parent_watchdog()", sidecar)
+        self.assertIn("os.getppid()", sidecar)
+        self.assertIn('os.environ["INFOMANCER_RUNTIME_CONTEXT"] = "desktop"', sidecar)
+        self.assertIn('f"desktop:{host}:{os.getpid()}', runtime)
+        self.assertIn("_desktop_owner_pid", runtime)
+        self.assertIn("_process_is_alive", runtime)
+
+    def test_windows_core_log_survives_tauri_stream_capture(self):
+        sidecar = (ROOT / "desktop/sidecar.py").read_text(encoding="utf-8")
+        self.assertIn('log_dir / "desktop-core.log"', sidecar)
+        self.assertIn("class _TeeStream", sidecar)
+        self.assertIn("_TeeStream(original_stdout, stream)", sidecar)
+        self.assertIn("_TeeStream(original_stderr, stream)", sidecar)
+        self.assertNotIn("sys.stdout is not None and sys.stderr is not None", sidecar)
+
+    def test_large_desktop_launcher_scales_up_without_global_zoom(self):
+        launcher = (ROOT / "desktop/ui/index.html").read_text(encoding="utf-8")
+        self.assertIn("@media(min-width:1600px) and (min-height:900px)", launcher)
+        self.assertIn("width:min(1180px,calc(100vw - 72px))", launcher)
+        self.assertIn(".mark { width:52px; height:52px", launcher)
+        self.assertIn("button { padding:12px 15px", launcher)
+        self.assertIn("input { padding:11px 12px", launcher)
+        self.assertNotIn("zoom:", launcher)
+
     def test_remote_http_pages_are_not_granted_tauri_ipc(self):
         capability = json.loads((ROOT / "desktop/src-tauri/capabilities/launcher.json").read_text(encoding="utf-8"))
         config = json.loads((ROOT / "desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
@@ -60,6 +101,7 @@ class WindowsDesktopContractTests(unittest.TestCase):
 
     def test_updater_uses_signed_github_release_channel(self):
         rust = (ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
+        sidecar = (ROOT / "desktop/sidecar.py").read_text(encoding="utf-8")
         self.assertIn("tauri_plugin_updater", rust)
         self.assertIn("desktop-alpha/latest.json", rust)
         self.assertIn("INFOMANCER_UPDATER_PUBLIC_KEY", rust)

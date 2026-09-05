@@ -7,14 +7,15 @@
 <div class="page-head sources-page-head"><div><p class="eyebrow">CONFIGURATION</p><h1>Sources</h1><p class="muted">Manage the folders InfoMancer is allowed to catalog.</p></div></div>
 {% if setup_assistant_active %}<section class="setup-handoff-banner"><div><p class="eyebrow">GUIDED SETUP · SOURCE STEP</p><strong>Add every Movie and TV Shows folder you want InfoMancer to catalog.</strong><span>You can return to the assistant after adding one or several sources.</span></div><a class="button primary" href="/getting-started/sources">Continue guided setup</a></section>{% endif %}
 <div class="split">
-  <section class="panel grow"><div class="panel-head"><div><p class="eyebrow">CONFIGURED</p><h2>Library roots</h2></div><div class="actions sources-global-actions"><form method="post" action="/scan-all"><button class="button primary">Scan all sources</button></form></div></div>
+  <section class="panel grow"><div class="panel-head"><div><p class="eyebrow">CONFIGURED</p><h2>Library roots</h2></div><div class="actions sources-global-actions"><form method="post" action="/roots/check-all"><button class="button">Check all connections</button></form><form method="post" action="/scan-all"><button class="button primary">Scan all sources</button></form></div></div>
     {% if roots %}<div class="root-list">{% for root in roots %}
-      <article class="root-row">
+      <article class="root-row" data-scan-active="{{ '1' if jobs.get(root.id, {}).get('status') in ('starting', 'running') else '0' }}">
         <span class="kind {{ root.kind }}">{{ root.kind }}</span>
         <a class="grow root-library-link" href="/{{ 'movies' if root.kind == 'movie' else 'shows' }}?root={{ root.id }}" data-source-id="{{ root.id }}" aria-label="Browse media on {{ root.label or root.path }}"><strong>{{ root.label or root.path }}</strong>{% if root.label %}<small>{{ root.path }}</small>{% endif %}
           <small>{{ root.title_count }} titles · {{ root.file_count }} video files{% if root.last_scanned_at %} · scanned {{ local_time(root.last_scanned_at) }}{% endif %}</small>
+          <span class="source-scan-status" data-source-scan-status role="status" aria-live="polite" {% if jobs.get(root.id, {}).get('status') not in ('starting', 'running') %}hidden{% endif %}>Scanning{% if jobs.get(root.id, {}).get('files') is not none %} · {{ jobs.get(root.id, {}).get('files', 0) }} video files · {{ jobs.get(root.id, {}).get('titles', 0) }} titles{% endif %}</span>
           <span class="source-health source-health-{{ root.health_status or 'unknown' }}">{{ (root.health_status or 'unknown')|title }}{% if root.last_seen_at %} · last seen {{ local_time(root.last_seen_at) }}{% endif %}</span>
-          {% if root.health_status in ('offline','degraded') %}<small class="source-health-guidance">{{ root.last_error or 'Check the storage connection before scanning.' }} Source Guard is protecting {{ root.guard_preserved_count or root.file_count }} catalog files.</small>{% endif %}</a>
+          {% if root.health_status in ('offline','degraded') %}{% set protected_count = root.guard_preserved_count if root.health_status == 'degraded' else root.file_count %}<small class="source-health-guidance">{{ root.last_error or 'Check the storage connection before scanning.' }} Source Guard is protecting {{ protected_count }} catalog files.</small>{% endif %}</a>
         <div class="actions source-action-rail">
           <form method="post" action="/roots/{{ root.id }}/check"><button class="button">Check connection</button></form>
           <form method="post" action="/roots/{{ root.id }}/scan"><button class="button">Scan</button></form>
@@ -47,206 +48,8 @@
     </div>
   </section>
 </div>
-<dialog class="source-browser" id="source-browser" aria-labelledby="source-browser-title">
-  <div class="source-browser-shell">
-    <header class="source-browser-head">
-      <div><p class="eyebrow">ADD MEDIA SOURCE</p><h2 id="source-browser-title">Choose a folder</h2></div>
-      <button type="button" class="source-browser-close" data-close-source-browser aria-label="Close folder browser">×</button>
-    </header>
-    <div class="source-browser-nav">
-      <button class="button small" type="button" id="source-browser-back" disabled>← Back</button>
-      <nav id="source-browser-crumbs" class="source-browser-crumbs" aria-label="Current folder"></nav>
-    </div>
-    <div id="source-browser-error" class="source-browser-error" role="alert" hidden></div>
-    <div id="source-browser-list" class="source-browser-list" aria-live="polite"></div>
-    <div id="source-current" class="source-current" hidden>
-      <div><small>Current folder</small><strong id="source-current-name"></strong><code id="source-current-path"></code></div>
-      <button type="button" class="button" id="source-use-current">Preview this folder</button>
-    </div>
-    <section id="source-preview" class="source-preview" hidden>
-      <div class="source-preview-head"><div><p class="eyebrow">MEDIA PREVIEW</p><h3 id="source-preview-title">Review this source</h3></div><span id="source-recommendation" class="source-recommendation"></span></div>
-      <div class="source-preview-stats" id="source-preview-stats"></div>
-      <p id="source-preview-warning" class="source-preview-warning" hidden></p>
-      <form method="post" action="/roots" id="source-add-form" class="source-final-form">
-        <input type="hidden" name="path" id="source-final-path">
-        <input type="hidden" name="kind" id="source-final-kind">
-        <input type="hidden" name="scan_after" value="1">
-        <label>Library type<select id="source-kind-choice"><option value="auto">Auto-detect</option><option value="movie">Movies</option><option value="tv">TV Shows</option></select></label>
-        <label>Label <span class="muted">optional</span><input name="label" id="source-final-label" placeholder="For example, Main TV Library"></label>
-        <button class="button primary" id="source-add-submit" disabled>Add &amp; Scan</button>
-      </form>
-    </section>
-  </div>
-</dialog>
-<section class="panel settings-handoff">
-  <div><p class="eyebrow">APPLICATION SETTINGS</p><h2>Metadata and maintenance have moved</h2><p class="muted">Source Management now stays focused on storage folders and scans. Provider status, IMDb updates, database tools, and restart controls live in App Settings.</p></div>
-  <div class="actions"><a class="button" href="/settings/metadata">Metadata settings</a><a class="button" href="/settings/system">System settings</a></div>
-</section>
-<script>
-(() => {
-  const dialog = document.getElementById("source-browser");
-  const list = document.getElementById("source-browser-list");
-  const back = document.getElementById("source-browser-back");
-  const crumbs = document.getElementById("source-browser-crumbs");
-  const error = document.getElementById("source-browser-error");
-  const currentPanel = document.getElementById("source-current");
-  const currentName = document.getElementById("source-current-name");
-  const currentPath = document.getElementById("source-current-path");
-  const useCurrent = document.getElementById("source-use-current");
-  const preview = document.getElementById("source-preview");
-  const previewTitle = document.getElementById("source-preview-title");
-  const recommendation = document.getElementById("source-recommendation");
-  const stats = document.getElementById("source-preview-stats");
-  const warning = document.getElementById("source-preview-warning");
-  const kindChoice = document.getElementById("source-kind-choice");
-  const finalPath = document.getElementById("source-final-path");
-  const finalKind = document.getElementById("source-final-kind");
-  const finalLabel = document.getElementById("source-final-label");
-  const submit = document.getElementById("source-add-submit");
-  let current = "";
-  let previewData = null;
-
-  const showError = (message = "") => {
-    error.hidden = !message;
-    error.textContent = message;
-  };
-  const fetchJson = async (url) => {
-    const response = await fetch(url, {cache: "no-store"});
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || "InfoMancer could not read that folder");
-    return data;
-  };
-  const folderButton = (folder, location = false) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "source-folder";
-    const icon = document.createElement("span");
-    icon.className = "source-folder-icon";
-    icon.textContent = location ? "◉" : "▰";
-    const text = document.createElement("span");
-    const name = document.createElement("strong");
-    name.textContent = folder.name;
-    const path = document.createElement("small");
-    path.textContent = folder.path;
-    text.append(name, path);
-    const action = document.createElement("span");
-    action.textContent = folder.accessible === false ? "Unavailable" : "Open →";
-    button.append(icon, text, action);
-    button.disabled = folder.accessible === false;
-    button.addEventListener("click", () => load(folder.path));
-    return button;
-  };
-  const load = async (path = "") => {
-    showError();
-    preview.hidden = true;
-    previewData = null;
-    list.innerHTML = '<div class="source-browser-loading">Reading folders…</div>';
-    try {
-      const data = await fetchJson(`/api/source-browser?path=${encodeURIComponent(path)}`);
-      current = data.current || "";
-      back.disabled = !data.parent;
-      back.onclick = data.parent ? () => load(data.parent) : null;
-      crumbs.replaceChildren();
-      for (const crumb of data.breadcrumbs || []) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.textContent = crumb.name;
-        button.addEventListener("click", () => load(crumb.path));
-        crumbs.append(button);
-      }
-      const choices = data.locations?.length ? data.locations : data.folders;
-      list.replaceChildren(...choices.map(item => folderButton(item, Boolean(data.locations?.length))));
-      if (!choices.length) list.innerHTML = '<div class="empty">No subfolders here.</div>';
-      currentPanel.hidden = !current;
-      if (current) {
-        currentName.textContent = data.name;
-        currentPath.textContent = current;
-      }
-    } catch (reason) {
-      list.replaceChildren();
-      currentPanel.hidden = true;
-      showError(reason.message);
-    }
-  };
-  const renderPreview = () => {
-    if (!previewData) return;
-    const choice = kindChoice.value;
-    const detected = previewData.recommended_kind;
-    const kind = choice === "auto" ? detected : choice;
-    finalKind.value = ["movie", "tv"].includes(kind) ? kind : "";
-    submit.disabled = !finalKind.value;
-    recommendation.className = `source-recommendation ${detected}`;
-    recommendation.textContent = detected === "movie" ? "Movies detected" : detected === "tv" ? "TV Shows detected" : detected === "mixed" ? "Mixed media" : "Type needed";
-    stats.replaceChildren();
-    const values = kind === "tv"
-      ? [[previewData.show_count, "series folders"], [previewData.episode_count, "recognized episodes"], [previewData.video_count, "video files"]]
-      : [[previewData.movie_count, "movie titles"], [previewData.video_count, "video files"], [previewData.bucket_count, "A–Z / number buckets"]];
-    for (const [value, label] of values) {
-      const card = document.createElement("div");
-      const strong = document.createElement("strong");
-      strong.textContent = Number(value).toLocaleString();
-      const span = document.createElement("span");
-      span.textContent = label;
-      card.append(strong, span);
-      stats.append(card);
-    }
-    let message = previewData.warning || "";
-    if (choice === "auto" && !finalKind.value) message ||= "Choose Movies or TV Shows to continue.";
-    warning.hidden = !message;
-    warning.textContent = message;
-  };
-  useCurrent.addEventListener("click", async () => {
-    showError();
-    preview.hidden = false;
-    previewTitle.textContent = "Analyzing this folder…";
-    stats.replaceChildren();
-    warning.hidden = true;
-    submit.disabled = true;
-    try {
-      previewData = await fetchJson(`/api/source-preview?path=${encodeURIComponent(current)}`);
-      previewTitle.textContent = previewData.name;
-      finalPath.value = previewData.path;
-      if (!finalLabel.value) finalLabel.value = previewData.name;
-      renderPreview();
-      preview.scrollIntoView({behavior: "smooth", block: "nearest"});
-    } catch (reason) {
-      preview.hidden = true;
-      showError(reason.message);
-    }
-  });
-  kindChoice.addEventListener("change", renderPreview);
-  document.querySelectorAll("[data-open-source-browser]").forEach(button => button.addEventListener("click", () => {
-    dialog.showModal();
-    load();
-  }));
-  document.querySelectorAll("[data-close-source-browser]").forEach(button => button.addEventListener("click", () => dialog.close()));
-  dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); });
-})();
-</script>
-<script>
-(() => {
-  const editors = [...document.querySelectorAll(".root-name-editor")];
-  const closeEditors = except => editors.forEach(editor => { if (editor !== except) editor.removeAttribute("open"); });
-  editors.forEach(editor => editor.addEventListener("toggle", () => { if (editor.open) closeEditors(editor); }));
-  document.querySelectorAll("[data-cancel-root-name]").forEach(button => {
-    button.addEventListener("click", () => button.closest("details")?.removeAttribute("open"));
-  });
-  document.addEventListener("click", event => {
-    editors.forEach(editor => { if (editor.open && !editor.contains(event.target)) editor.removeAttribute("open"); });
-  });
-  document.addEventListener("keydown", event => {
-    if (event.key === "Escape") closeEditors(null);
-  });
-})();
-</script>
-<script>
-(() => {
-  document.querySelectorAll('.root-library-link[data-source-id]').forEach(link => {
-    const key = `infomancer-source-opened:${link.dataset.sourceId}`;
-    if (sessionStorage.getItem(key)) link.classList.add('session-opened');
-    link.addEventListener('click', () => sessionStorage.setItem(key, '1'));
-  });
-})();
-</script>
+{% set source_return_to = '/sources' %}
+{% include '_source_browser.html' %}
+<script src="{{ url_for('static', path='source-browser.js') }}?v={{ static_version }}" defer></script>
 <script src="{{ url_for('static', path='source-actions.js') }}?v={{ static_version }}" defer></script>
 {% endblock %}

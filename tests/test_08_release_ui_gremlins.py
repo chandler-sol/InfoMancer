@@ -76,7 +76,7 @@ class ReleaseUiGremlinContracts(unittest.TestCase):
         self.assertIn("if (filterSearch.classList.contains('open')) input.focus()", source)
 
     def test_expanded_library_search_has_readable_width_and_stable_first_paint(self):
-        controls = (ROOT / "app/static/library-controls-polish.css").read_text(encoding="utf-8")
+        controls = (ROOT / "app/static/library-controls.css").read_text(encoding="utf-8")
         loader = (ROOT / "app/static/workspace-ui.js").read_text(encoding="utf-8")
 
         self.assertIn("max-width: 420px", controls)

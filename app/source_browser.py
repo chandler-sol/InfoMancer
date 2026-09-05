@@ -1,23 +1,108 @@
 from __future__ import annotations
 
 import os
+import time
 from collections import deque
 from pathlib import Path
+from threading import RLock
 
 from .scanner import EPISODE_RE, MOVIE_BUCKET_RE, VIDEO_EXTENSIONS
 
 
 IGNORED_DIRECTORIES = {"lost+found", "$recycle.bin", "system volume information"}
+ALLOWED_ROOTS_CACHE_TTL_SECONDS = 15.0
+_allowed_roots_cache: dict[tuple[str, ...], tuple[float, tuple[Path, ...]]] = {}
+_allowed_roots_cache_lock = RLock()
 
 
 class SourceBrowserError(ValueError):
     pass
 
 
+def _access_hint(exc: OSError) -> str:
+    # WinError 1272 can surface while Windows resolves a network drive even when
+    # the mapping is NFS rather than SMB. Avoid guessing which redirector/provider
+    # produced it. _resolved() only reaches this hint after direct access to the
+    # mapped path has also failed, so point the operator at the session/credential
+    # causes that can actually be corrected.
+    if getattr(exc, "winerror", None) == 1272:
+        return (
+            f"{exc} Windows denied this network mapping to InfoMancer, and the folder "
+            "could not be opened directly either. If this is an NFS drive, make sure "
+            "the drive is mounted in the same Windows user session that runs InfoMancer "
+            "and avoid launching InfoMancer elevated when the mapping was created by a "
+            "non-elevated session. If this is SMB, map the share with authenticated "
+            "credentials, or explicitly allow guest logons only when guest access is "
+            "intentional."
+        )
+    return str(exc)
+
+
+def _lexical_absolute(path: Path | str) -> Path:
+    """Normalize an absolute path without resolving it through the filesystem."""
+    expanded = Path(path).expanduser()
+    if expanded.is_absolute():
+        return Path(os.path.normpath(os.fspath(expanded)))
+    return Path(os.path.abspath(os.fspath(expanded)))
+
+
 def _resolved(path: Path | str) -> Path:
     # Browser input is rejected by validate_browse_path unless the resolved
-    # result remains inside a configured media-browse root.
-    return Path(path).expanduser().resolve(strict=False)
+    # result remains inside a configured media-browse root. Windows network
+    # providers can raise WinError 1272 while realpath/final-path resolution is
+    # attempted even though the same mapped NFS/SMB folder can still be opened
+    # directly. In that one case, prove the lexical path is actually readable
+    # before using it. This avoids turning a resolver quirk into a false offline
+    # result while preserving normal real-path containment everywhere else.
+    candidate = Path(path).expanduser()
+    try:
+        return candidate.resolve(strict=False)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1272:
+            lexical = _lexical_absolute(candidate)
+            if _root_is_accessible(lexical):
+                return lexical
+        raise SourceBrowserError(
+            f"InfoMancer cannot access that folder: {_access_hint(exc)}"
+        ) from exc
+
+
+def _root_is_accessible(path: Path) -> bool:
+    """Return whether a configured browse root can actually be opened now."""
+    try:
+        with os.scandir(path):
+            return True
+    except OSError:
+        return False
+
+
+def _root_cache_key(values: tuple[Path, ...]) -> tuple[str, ...]:
+    """Build an OS-appropriate lexical key without touching the filesystem."""
+    return tuple(
+        os.path.normcase(os.path.abspath(os.fspath(value)))
+        for value in values
+    )
+
+
+def _configured_roots(values: tuple[Path, ...]) -> tuple[Path, ...]:
+    """Return configured roots without resolving or probing their filesystems."""
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for value in values:
+        expanded = Path(value).expanduser()
+        root = Path(os.path.abspath(os.fspath(expanded)))
+        key = os.path.normcase(os.fspath(root))
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(root)
+    return tuple(roots)
+
+
+def _clear_allowed_roots_cache() -> None:
+    """Clear the short-lived browse-root cache, primarily for tests and reconfiguration."""
+    with _allowed_roots_cache_lock:
+        _allowed_roots_cache.clear()
 
 
 def _inside(path: Path, roots: tuple[Path, ...]) -> bool:
@@ -31,14 +116,51 @@ def _inside(path: Path, roots: tuple[Path, ...]) -> bool:
 
 
 def allowed_roots(values: tuple[Path, ...]) -> tuple[Path, ...]:
-    return tuple(_resolved(value) for value in values)
+    cache_key = _root_cache_key(values)
+    now = time.monotonic()
+    with _allowed_roots_cache_lock:
+        cached = _allowed_roots_cache.get(cache_key)
+        if cached and cached[0] >= now:
+            return cached[1]
+
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for value in values:
+        try:
+            root = _resolved(value)
+        except SourceBrowserError:
+            continue
+        if not _root_is_accessible(root):
+            continue
+        # normcase performs case folding on Windows while leaving POSIX paths
+        # case-sensitive. Do not add casefold(), because /media/Movies and
+        # /media/movies can legitimately be different Linux directories.
+        key = os.path.normcase(os.path.abspath(os.fspath(root)))
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(root)
+
+    result = tuple(roots)
+    with _allowed_roots_cache_lock:
+        _allowed_roots_cache[cache_key] = (
+            time.monotonic() + ALLOWED_ROOTS_CACHE_TTL_SECONDS,
+            result,
+        )
+        if len(_allowed_roots_cache) > 64:
+            expired = [key for key, value in _allowed_roots_cache.items() if value[0] < now]
+            for key in expired:
+                _allowed_roots_cache.pop(key, None)
+            while len(_allowed_roots_cache) > 64:
+                _allowed_roots_cache.pop(next(iter(_allowed_roots_cache)))
+    return result
 
 
 def validate_browse_path(path: Path | str, roots: tuple[Path, ...]) -> Path:
     resolved = _resolved(path)
     if not _inside(resolved, roots):
         raise SourceBrowserError("That folder is outside the allowed media locations")
-    if not resolved.is_dir():
+    if not _root_is_accessible(resolved):
         raise SourceBrowserError("That folder is not accessible to InfoMancer")
     return resolved
 
@@ -54,16 +176,16 @@ def _visible_directory(entry: os.DirEntry[str]) -> bool:
 
 
 def list_folders(path: str, configured_roots: tuple[Path, ...]) -> dict:
-    roots = allowed_roots(configured_roots)
     if not path:
         locations = []
-        for root in roots:
+        for root in _configured_roots(configured_roots):
             locations.append({
                 "name": root.name or str(root), "path": str(root),
-                "accessible": root.is_dir(),
+                "accessible": _root_is_accessible(root),
             })
         return {"locations": locations, "current": "", "parent": None, "folders": []}
 
+    roots = allowed_roots(configured_roots)
     current = validate_browse_path(path, roots)
     folders = []
     try:
@@ -73,7 +195,10 @@ def list_folders(path: str, configured_roots: tuple[Path, ...]) -> dict:
     for entry in entries:
         if not _visible_directory(entry):
             continue
-        child = _resolved(entry.path)
+        try:
+            child = _resolved(entry.path)
+        except SourceBrowserError:
+            continue
         if not _inside(child, roots):
             continue
         folders.append({"name": entry.name, "path": str(child)})
@@ -127,7 +252,10 @@ def preview_folder(
                 if entry.is_dir(follow_symlinks=False):
                     if not _visible_directory(entry):
                         continue
-                    child = _resolved(entry.path)
+                    try:
+                        child = _resolved(entry.path)
+                    except SourceBrowserError:
+                        continue
                     if not _inside(child, roots):
                         continue
                     if entry.name.casefold().startswith("season "):

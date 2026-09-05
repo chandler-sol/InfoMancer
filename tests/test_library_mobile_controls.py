@@ -48,7 +48,7 @@ class LibraryMobileControlTests(unittest.TestCase):
 
     def test_multi_selection_promotes_common_actions_and_collapses_secondary_work(self):
         script = (ROOT / "app/static/library-selection-toolbar.js").read_text(encoding="utf-8")
-        css = (ROOT / "app/static/library-selection-compact.css").read_text(encoding="utf-8")
+        css = (ROOT / "app/static/library-selection.css").read_text(encoding="utf-8")
 
         self.assertIn("library-selection-summary", script)
         self.assertIn("library-selection-primary", script)
@@ -64,7 +64,7 @@ class LibraryMobileControlTests(unittest.TestCase):
         loader = (ROOT / "app/static/workspace-ui.js").read_text(encoding="utf-8")
 
         self.assertIn("loadStyle('library-density.css')", loader)
-        self.assertIn("loadStyle('library-selection-compact.css')", loader)
+        self.assertIn("loadStyle('library-selection.css')", loader)
         self.assertIn("'library-density.js'", loader)
         self.assertLess(loader.index("'library-density.js'"), loader.index("'library-selection-toolbar.js'"))
 

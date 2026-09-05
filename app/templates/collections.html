@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Collections · InfoMancer{% endblock %}
 {% block content %}
+<link rel="stylesheet" href="{{ url_for('static', path='release-081-collections.css') }}?v={{ static_version }}">
+<link rel="stylesheet" href="{{ url_for('static', path='collection-menu-visibility.css') }}?v={{ static_version }}">
 <header class="page-head collections-head">
   <div><p class="eyebrow">CURATED LIBRARY</p><h1>Collections</h1><p>Build ordered timelines from movies, TV series, and individual episodes without adding extra items to the Library.</p></div>
 </header>
@@ -12,8 +14,14 @@
   <label>Description <span class="muted">optional</span><input name="description" maxlength="1000" placeholder="What belongs in this collection?"></label>
   <button class="button primary">Create collection</button>
 </form>
-<details class="panel collection-create smart-collection-create">
-  <summary><strong>Create a Smart Collection</strong> <span class="muted">Saved filters that update automatically</span></summary>
+<details class="panel smart-collection-create">
+  <summary>
+    <span class="smart-collection-summary-copy"><strong>Create a Smart Collection</strong><span class="muted">A dynamic view built from saved Library rules</span></span>
+  </summary>
+  <div class="smart-collection-explainer">
+    <strong>Smart Collections fill themselves.</strong>
+    <p>Choose rules such as genre, year, resolution, source, favorites, or Library Health. InfoMancer saves those filters and recalculates what belongs here as your catalog changes. Nothing is copied, moved, or deleted from your media library, and you can edit or delete the Smart Collection later.</p>
+  </div>
   <form method="post" action="/collections/smart/preview" class="smart-filter-grid">
     <label>Name<input name="name" maxlength="80" required placeholder="For example, Favorite 4K Movies"></label>
     <label>Genre<select name="genre"><option value="">Any genre</option>{% for genre in genres %}<option>{{ genre }}</option>{% endfor %}</select></label>
@@ -24,22 +32,50 @@
     <label>Favorite<select name="favorite"><option value="">Either</option><option value="yes">Favorite</option><option value="no">Not favorite</option></select></label>
     <label>Missing episodes<select name="missing_episodes"><option value="">Either</option><option value="yes">Has gaps</option><option value="no">Complete</option></select></label>
     <label>Health category<select name="health_category"><option value="">Any</option>{% for category in health_categories %}<option value="{{ category }}">{{ category.replace('-', ' ')|title }}</option>{% endfor %}</select></label>
-    <label class="full-width">Description <span class="muted">optional</span><input name="description" maxlength="1000"></label>
+    <label class="full-width">Description <span class="muted">optional</span><input name="description" maxlength="1000" placeholder="Why did you make this Smart Collection?"></label>
     <button class="button primary full-width">Preview matching titles</button>
   </form>
 </details>
 {% endif %}
 <section class="collection-grid">
 {% for collection in collections %}
-  <a class="collection-card" href="/collections/{{ collection.id }}">
-    <span class="collection-art">{% if collection.artwork_url %}<img src="{{ collection.artwork_url }}" alt="" loading="lazy">{% else %}<span>{{ collection.name[:1]|upper }}</span>{% endif %}</span>
-    <strong>{{ collection.name }}</strong>
-    {% if collection.collection_type == 'smart' %}<span class="kind">Smart</span>{% endif %}
-    <small>{{ collection.title_count }} item{% if collection.title_count != 1 %}s{% endif %}</small>
-    {% if collection.description %}<p>{{ collection.description }}</p>{% endif %}
-  </a>
+  <article class="cover-card collection-picker-card"
+           data-collection-id="{{ collection.id }}"
+           data-collection-name="{{ collection.name }}"
+           data-collection-description="{{ collection.description or '' }}"
+           data-collection-type="{{ collection.collection_type }}"
+           data-has-custom-artwork="{{ '1' if collection.artwork_filename else '0' }}">
+    <a class="cover-card-link collection-card collection-picker-card-link" href="/collections/{{ collection.id }}">
+      <span class="cover-art collection-art">{% if collection.artwork_url %}<img src="{{ collection.artwork_url }}" alt="" loading="lazy">{% else %}<span>{{ collection.name[:1]|upper }}</span>{% endif %}</span>
+      <strong>{{ collection.name }}</strong>
+      {% if collection.collection_type == 'smart' %}<span class="kind">Smart</span>{% endif %}
+      <small>{{ collection.title_count }} item{% if collection.title_count != 1 %}s{% endif %}</small>
+      {% if collection.description %}<p>{{ collection.description }}</p>{% endif %}
+    </a>
+    {% if current_user.is_librarian %}
+    <div class="cover-card-actions collection-picker-card-actions" aria-label="Actions for {{ collection.name }}">
+      <details class="episode-menu cover-row-menu item-action-menu collection-picker-menu">
+        <summary aria-label="Actions for {{ collection.name }}" title="Collection actions">⋮</summary>
+        <div>
+          <a href="/collections/{{ collection.id }}?action=edit" data-collection-edit>Edit collection</a>
+          {% if collection.collection_type == 'smart' %}
+          <a href="/collections/{{ collection.id }}/smart/edit" data-smart-collection-edit>Edit Smart Collection</a>
+          {% else %}
+          <a href="/collections/{{ collection.id }}?action=add">Add titles</a>
+          <a href="/collections/{{ collection.id }}?action=reorder">Reorder collection</a>
+          {% endif %}
+          <form method="post" action="/collections/{{ collection.id }}/delete" data-workspace-confirm="Delete {{ collection.name }}? The collection and its saved organization will be removed, but no media files will be deleted. InfoMancer will offer Undo immediately afterward.">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="danger">Delete {{ 'Smart Collection' if collection.collection_type == 'smart' else 'collection' }}</button>
+          </form>
+        </div>
+      </details>
+    </div>
+    {% endif %}
+  </article>
 {% else %}
   <div class="panel empty"><h2>No collections yet</h2><p>{% if current_user.is_librarian %}Create the first collection above, then add movies, TV series, or individual episodes in the order you want them shown.{% else %}A Librarian has not created any collections yet.{% endif %}</p></div>
 {% endfor %}
 </section>
+<script src="{{ url_for('static', path='release-081-collections.js') }}?v={{ static_version }}" defer></script>
 {% endblock %}

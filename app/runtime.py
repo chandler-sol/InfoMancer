@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 import secrets
+import socket
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
@@ -11,6 +13,68 @@ from .db import Database
 
 class RuntimeLeaseError(RuntimeError):
     pass
+
+
+def _desktop_owner() -> str:
+    host = socket.gethostname().replace(":", "_")
+    return f"desktop:{host}:{os.getpid()}:{secrets.token_urlsafe(12)}"
+
+
+def _desktop_owner_pid(owner: str) -> int | None:
+    parts = str(owner or "").split(":", 3)
+    if len(parts) != 4 or parts[0] != "desktop":
+        return None
+    host = socket.gethostname().replace(":", "_")
+    if parts[1] != host:
+        return None
+    try:
+        pid = int(parts[2])
+    except (TypeError, ValueError):
+        return None
+    return pid if pid > 0 else None
+
+
+def _process_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+
+        process_query_limited_information = 0x1000
+        still_active = 259
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        open_process.restype = ctypes.c_void_p
+        get_exit_code = kernel32.GetExitCodeProcess
+        get_exit_code.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)]
+        get_exit_code.restype = ctypes.c_int
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = [ctypes.c_void_p]
+        close_handle.restype = ctypes.c_int
+
+        handle = open_process(process_query_limited_information, 0, pid)
+        if not handle:
+            # Access denied means the PID exists but is not queryable. Treat that
+            # conservatively as live so a lease is never stolen from a real process.
+            return ctypes.get_last_error() == 5
+        try:
+            exit_code = ctypes.c_uint32()
+            if not get_exit_code(handle, ctypes.byref(exit_code)):
+                return True
+            return exit_code.value == still_active
+        finally:
+            close_handle(handle)
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
 
 
 class RuntimeLease:
@@ -25,7 +89,15 @@ class RuntimeLease:
         self.name = name
         self.ttl_seconds = max(30, int(ttl_seconds))
         self.heartbeat_seconds = max(10, min(int(heartbeat_seconds), self.ttl_seconds // 2))
-        self.owner = owner or secrets.token_urlsafe(24)
+        if owner:
+            self.owner = owner
+        elif os.getenv("INFOMANCER_RUNTIME_CONTEXT", "").strip().casefold() == "desktop":
+            # Desktop owns a local catalog through a short-lived bundled core. Put
+            # its PID in the lease so a dead one-file worker can be distinguished
+            # from a genuinely live second InfoMancer process after a restart.
+            self.owner = _desktop_owner()
+        else:
+            self.owner = secrets.token_urlsafe(24)
         self.on_lost = on_lost or self._terminate_after_lease_loss
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -58,6 +130,20 @@ class RuntimeLease:
                     fresh = now - self._parse(row["heartbeat_at"]) < timedelta(seconds=self.ttl_seconds)
                 except (TypeError, ValueError):
                     fresh = False
+
+                # PyInstaller one-file Windows bundles have a bootloader parent and
+                # an application child. Killing only the bootloader can leave the
+                # child alive briefly. Desktop leases carry the worker PID so a
+                # restart can reclaim a fresh lease as soon as that PID is gone,
+                # instead of forcing the user to wait for the 90-second TTL.
+                desktop_pid = _desktop_owner_pid(str(row["owner"])) if fresh else None
+                if desktop_pid is not None:
+                    for _ in range(10):
+                        if not _process_is_alive(desktop_pid):
+                            fresh = False
+                            break
+                        time.sleep(0.05)
+
                 if fresh:
                     raise RuntimeLeaseError(
                         "Another InfoMancer process is already using this database. "

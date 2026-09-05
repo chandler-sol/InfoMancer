@@ -52,15 +52,23 @@
     Promise.all([
       loadStyle("onboarding-tour.css", tourVersion),
       loadStyle("onboarding-tour-inspector-preview.css", tourVersion),
-      loadStyle("onboarding-tour-mobile-polish.css", tourVersion),
+      loadStyle("onboarding-tour-mobile.css", tourVersion),
     ])
       .then(() => loadScript("onboarding-tour.js", tourVersion))
       .then(() => loadScript("onboarding-tour-inspector-preview.js", tourVersion))
-      .then(() => loadScript("onboarding-tour-mobile-polish.js", tourVersion));
+      .then(() => loadScript("onboarding-tour-mobile.js", tourVersion));
   }
 
   const popup = document.getElementById("announcement-popup");
   if (popup) {
+    // Guided setup already owns the user's attention. Keep legitimate notices due
+    // so they can appear afterward, but do not stack announcement modals on every
+    // setup step.
+    if (window.location.pathname.startsWith("/getting-started/")) {
+      popup.remove();
+      return;
+    }
+
     const dismiss = document.getElementById("announcement-dismiss");
     const seen = () => post(
       `/engagement/announcements/${popup.dataset.announcementId}/seen`,

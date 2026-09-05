@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -77,6 +78,11 @@ def plex_movie_filename(
 
 def contained_destination(source: Path, new_name: str) -> Path:
     destination = source.with_name(new_name)
-    if destination.parent.resolve() != source.parent.resolve():
+    # This is a lexical containment check. Resolving the parent through the
+    # filesystem is unnecessary for a same-directory rename and can itself fail on
+    # temporarily unavailable Windows shares before InfoMancer can show a preview.
+    source_parent = os.path.normcase(os.path.abspath(os.fspath(source.parent)))
+    destination_parent = os.path.normcase(os.path.abspath(os.fspath(destination.parent)))
+    if destination_parent != source_parent:
         raise ValueError("Rename destination escaped its source directory")
     return destination

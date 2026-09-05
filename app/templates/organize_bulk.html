@@ -2,7 +2,7 @@
 {% block title %}Organize selected titles · InfoMancer{% endblock %}
 {% block content %}
 <div class="organize-page organize-bulk-page" data-organize-content data-organize-bulk>
-<link rel="stylesheet" href="{{ url_for('static', path='organize-bulk-polish.css') }}?v={{ static_version }}">
+<link rel="stylesheet" href="{{ url_for('static', path='organize-bulk.css') }}?v={{ static_version }}">
 <header class="page-head"><div><p class="eyebrow">PERSONAL LIBRARY</p><h1>Organize selected titles</h1><p>Apply shared organization to {{ titles|length }} selected movie{% if titles|length != 1 %}s or TV series{% endif %}.</p></div><a class="button" href="/tags">Manage tags</a></header>
 <form class="panel organize-form organize-title-form" method="post" action="/titles/organize-bulk" data-organize-bulk>
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

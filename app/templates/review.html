@@ -1,6 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Review · {{ app_name }}{% endblock %}
 {% block content %}
+<style>
+.workspace-drawer-scrim:hover,
+.workspace-drawer-scrim:focus,
+.workspace-drawer-scrim:focus-visible {
+  background: rgba(2, 6, 9, .40);
+}
+</style>
 <section class="review-workspace" data-review-queue data-review-status="{{ filters.status }}">
   <header class="review-page-head">
     <div>
@@ -66,6 +73,7 @@
 
   <section class="review-queue-list" aria-live="polite" data-review-list>
     {% for item in queue["items"] %}
+    {% set item_review_href = '/titles/' ~ item.title_id ~ '/identity' if item.rule_key == 'metadata-identifiers-missing' and item.title_id else item.href %}
     <article class="review-queue-item severity-{{ item.severity }}" data-review-item data-review-key="{{ item.key }}" data-review-severity="{{ item.severity }}" data-review-bucket="{{ item.bucket }}">
       <button class="review-item-open" type="button" data-workspace-drawer-url="{{ item.drawer_url }}" data-workspace-drawer-key="{{ item.key }}" data-workspace-drawer-param="review" aria-label="Inspect {{ item.summary }}">
         <span class="review-item-signal" aria-hidden="true"></span>
@@ -80,7 +88,7 @@
         <button class="workspace-context-toggle" type="button" data-workspace-menu-toggle aria-label="More actions for {{ item.summary }}" aria-expanded="false">•••</button>
         <div class="workspace-context-popover" data-workspace-menu hidden>
           <button type="button" data-workspace-drawer-url="{{ item.drawer_url }}" data-workspace-drawer-key="{{ item.key }}" data-workspace-drawer-param="review">Inspect evidence</button>
-          <a href="{{ item.href }}">{{ item.review_label }}</a>
+          <a href="{{ item_review_href }}">{{ item.review_label }}</a>
         </div>
       </div>
     </article>

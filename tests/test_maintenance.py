@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from app.db import Database
 from app.maintenance import (
@@ -56,6 +57,13 @@ class MaintenanceTests(unittest.TestCase):
         with self.assertRaisesRegex(MaintenanceError, "not valid"):
             resolve_backup(self.path, "../infomancer.db")
 
+    def test_backup_listing_fails_safe_when_backup_folder_is_unavailable(self):
+        with mock.patch(
+            "app.maintenance.backup_directory",
+            side_effect=MaintenanceError("backup folder unavailable"),
+        ):
+            self.assertEqual(list_database_backups(self.path), [])
+
     def test_backup_listing_and_resolver_reject_symlinked_database(self):
         outside = self.base / "outside.db"
         outside.write_bytes(self.path.read_bytes())
@@ -90,8 +98,7 @@ class MaintenanceTests(unittest.TestCase):
                 return True
             return real_is_symlink(candidate)
 
-        from unittest.mock import patch
-        with patch.object(Path, "exists", fake_exists), patch.object(Path, "is_symlink", fake_is_symlink):
+        with mock.patch.object(Path, "exists", fake_exists), mock.patch.object(Path, "is_symlink", fake_is_symlink):
             backup = create_database_backup(self.path)
         self.assertTrue(collision_seen["value"])
         self.assertTrue(backup.name.endswith("-2.db"))

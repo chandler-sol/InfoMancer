@@ -54,7 +54,10 @@ jobs:
       - name: Build bundled InfoMancer core
         shell: pwsh
         run: |
-          python -m PyInstaller --noconfirm --clean --onefile --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" desktop/sidecar.py
+          python scripts/stage_ffprobe.py
+          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
+          & .\dist\infomancer-core.exe --check-ffprobe
+          if ($LASTEXITCODE -ne 0) { throw "Bundled FFprobe self-check failed: $LASTEXITCODE" }
           $triple = (rustc --print host-tuple).Trim()
           New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
           Copy-Item dist/infomancer-core.exe "desktop/src-tauri/binaries/infomancer-core-$triple.exe"
@@ -70,6 +73,14 @@ jobs:
       - name: Generate native icons
         working-directory: desktop
         run: npm run icon
+
+      - name: Verify release launcher source uses GUI subsystem
+        shell: pwsh
+        run: |
+          $source = Get-Content 'desktop/src-tauri/src/main.rs' -Raw
+          if (-not $source.Contains('#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]')) {
+            throw 'Windows release launcher is not configured for the GUI subsystem.'
+          }
 
       - name: Build, sign, and publish Windows updater
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5

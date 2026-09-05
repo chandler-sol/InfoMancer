@@ -435,25 +435,3 @@ textarea:focus {
     animation: none;
   }
 }
-
-/* Dialog close buttons should be optically centered regardless of the modal-specific
-   button font or inherited line-height. The modal still owns its shape and colors. */
-dialog button[aria-label^="Close"] {
-  display: grid !important;
-  place-items: center !important;
-  padding: 0 !important;
-  text-align: center !important;
-  line-height: 1 !important;
-  font-size: 0 !important;
-}
-
-dialog button[aria-label^="Close"] > * {
-  display: none !important;
-}
-
-dialog button[aria-label^="Close"]::before {
-  content: "×";
-  display: block;
-  font: 400 24px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  transform: translateY(-1px);
-}

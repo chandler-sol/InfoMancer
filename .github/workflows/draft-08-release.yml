@@ -7,11 +7,25 @@ on:
       - testing/0.8-beta
     paths:
       - .github/workflows/draft-08-release.yml
+      - desktop/**
+      - app/**
+      - scripts/stage_ffprobe.py
+      - requirements.txt
+  pull_request:
+    branches:
+      - testing/0.8-alpha
+    paths:
+      # Validate packaging-workflow edits in PRs without rebuilding every OS for
+      # ordinary application changes. The Fast Windows Preview workflow handles
+      # the normal development loop.
+      - .github/workflows/draft-08-release.yml
 
 permissions:
   actions: read
-  contents: write
-  issues: write
+  contents: read
+
+env:
+  RELEASE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 concurrency:
   group: draft-08-release
@@ -26,6 +40,7 @@ jobs:
       - name: Check out release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
 
       - name: Set up Python
@@ -55,7 +70,7 @@ jobs:
       - name: Install Python dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Run application tests
+      - name: Run application tests once for release packaging
         run: python -m unittest discover -s tests -v
 
       - name: Build credential-free release ZIP
@@ -84,14 +99,22 @@ jobs:
           - os: windows-latest
             label: Windows
             slug: windows
+            asset_os: windows
             bundles: nsis
-          - os: macos-latest
-            label: macOS
-            slug: macos
+          - os: macos-26
+            label: macOS Apple Silicon
+            slug: macos-arm64
+            asset_os: macos
+            bundles: dmg
+          - os: macos-26-intel
+            label: macOS Intel
+            slug: macos-intel
+            asset_os: macos
             bundles: dmg
           - os: ubuntu-latest
             label: Linux
             slug: linux
+            asset_os: linux
             bundles: deb,appimage
     runs-on: ${{ matrix.os }}
     timeout-minutes: 75
@@ -99,6 +122,7 @@ jobs:
       - name: Check out release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
 
       - name: Set up Python
@@ -106,6 +130,32 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
+
+      - name: Set up Node with npm cache
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Restore Rust build cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/src-tauri/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-
+
+      - name: Restore verified FFprobe stage
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: build/ffprobe
+          key: ${{ runner.os }}-${{ runner.arch }}-ffprobe-${{ hashFiles('scripts/stage_ffprobe.py') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-ffprobe-
 
       - name: Install Linux desktop build dependencies
         if: runner.os == 'Linux'
@@ -127,19 +177,57 @@ jobs:
           rustc --version
           cargo --version
 
+      - name: Build Intel macOS cryptography with static OpenSSL
+        if: matrix.slug == 'macos-intel'
+        shell: bash
+        run: |
+          brew install openssl@3
+          crypto_requirement="$(grep -E '^cryptography==' requirements.txt | head -n 1)"
+          if [ -z "$crypto_requirement" ]; then
+            echo 'Pinned cryptography requirement was not found.' >&2
+            exit 1
+          fi
+          env \
+            OPENSSL_DIR="$(brew --prefix openssl@3)" \
+            OPENSSL_STATIC=1 \
+            python -m pip install \
+              --no-cache-dir \
+              --no-binary cryptography \
+              "$crypto_requirement"
+
       - name: Install Python build dependencies
         run: |
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller==6.21.0
 
-      - name: Run application tests
-        run: python -m unittest discover -s tests -v
+      - name: Verify macOS cryptography OpenSSL linkage
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          crypto_rust="$(python - <<'PY'
+          import cryptography.hazmat.bindings._rust as rust
+          print(rust.__file__)
+          PY
+          )"
+          echo "cryptography native module: $crypto_rust"
+          otool -L "$crypto_rust"
+          if otool -L "$crypto_rust" | grep -Eq 'libssl|libcrypto'; then
+            echo 'cryptography is dynamically linked to OpenSSL; refusing to package a potentially mismatched libssl/libcrypto pair.' >&2
+            exit 1
+          fi
+
+      # The dedicated Tests workflow covers the full platform test matrix. The
+      # release source-package job also runs the suite once for this exact SHA.
+      # Native jobs now spend their time packaging instead of repeating it on every target.
 
       - name: Build Windows bundled core
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          python -m PyInstaller --noconfirm --clean --onefile --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" desktop/sidecar.py
+          python scripts/stage_ffprobe.py
+          python -m PyInstaller --noconfirm --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
+          & .\dist\infomancer-core.exe --check-ffprobe
+          if ($LASTEXITCODE -ne 0) { throw "Bundled FFprobe self-check failed: $LASTEXITCODE" }
           $triple = (rustc --print host-tuple).Trim()
           New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
           Copy-Item dist/infomancer-core.exe "desktop/src-tauri/binaries/infomancer-core-$triple.exe"
@@ -148,15 +236,74 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          python -m PyInstaller --noconfirm --clean --onefile --name infomancer-core --add-data "app/templates:app/templates" --add-data "app/static:app/static" desktop/sidecar.py
+          python scripts/stage_ffprobe.py
+          python -m PyInstaller --noconfirm --onefile --name infomancer-core --add-data "app/templates:app/templates" --add-data "app/static:app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt:third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt:third-party/ffprobe" --add-binary "build/ffprobe/ffprobe:." desktop/sidecar.py
+          ./dist/infomancer-core --check-ffprobe
           triple="$(rustc --print host-tuple)"
           mkdir -p desktop/src-tauri/binaries
           cp dist/infomancer-core "desktop/src-tauri/binaries/infomancer-core-$triple"
           chmod +x "desktop/src-tauri/binaries/infomancer-core-$triple"
 
+      - name: Smoke-test packaged macOS core startup
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          smoke_dir="$RUNNER_TEMP/infomancer-core-smoke"
+          smoke_log="$RUNNER_TEMP/infomancer-core-smoke.log"
+          rm -rf "$smoke_dir"
+          rm -f "$smoke_log"
+          port="$(python - <<'PY'
+          import socket
+          with socket.socket() as sock:
+              sock.bind(('127.0.0.1', 0))
+              print(sock.getsockname()[1])
+          PY
+          )"
+          export INFOMANCER_SMOKE_PORT="$port"
+          ./dist/infomancer-core --port "$port" --data-dir "$smoke_dir" >"$smoke_log" 2>&1 &
+          core_pid=$!
+          cleanup() {
+            kill "$core_pid" 2>/dev/null || true
+            wait "$core_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          ready=0
+          for _ in {1..60}; do
+            if ! kill -0 "$core_pid" 2>/dev/null; then
+              echo 'Packaged InfoMancer core exited before opening its loopback listener.' >&2
+              cat "$smoke_log" >&2 || true
+              wait "$core_pid" || true
+              exit 1
+            fi
+            if python - <<'PY'
+          import os
+          import socket
+          port = int(os.environ['INFOMANCER_SMOKE_PORT'])
+          try:
+              with socket.create_connection(('127.0.0.1', port), timeout=0.25):
+                  pass
+          except OSError:
+              raise SystemExit(1)
+          PY
+            then
+              ready=1
+              break
+            fi
+            sleep 0.5
+          done
+
+          if [ "$ready" -ne 1 ]; then
+            echo 'Packaged InfoMancer core did not become ready during the smoke-test window.' >&2
+            cat "$smoke_log" >&2 || true
+            exit 1
+          fi
+          echo "Packaged InfoMancer core became ready on 127.0.0.1:$port."
+          cat "$smoke_log" || true
+
       - name: Install desktop dependencies
         working-directory: desktop
-        run: npm ci
+        run: npm ci --prefer-offline
 
       - name: Audit desktop dependencies
         working-directory: desktop
@@ -170,10 +317,61 @@ jobs:
         working-directory: desktop
         run: npm run tauri -- build --bundles ${{ matrix.bundles }}
 
+      - name: Verify Windows launcher uses GUI subsystem
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:INFOMANCER_PE = (Resolve-Path 'desktop/src-tauri/target/release/infomancer-desktop.exe').Path
+          python -c "import os,struct; data=open(os.environ['INFOMANCER_PE'],'rb').read(); pe=struct.unpack_from('<I',data,0x3c)[0]; subsystem=struct.unpack_from('<H',data,pe+24+68)[0]; print(f'Windows PE subsystem={subsystem}'); assert subsystem == 2, 'InfoMancer launcher was built as a console application'"
+
+      - name: Smoke-test installed Windows desktop launch
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem 'desktop/src-tauri/target/release/bundle/nsis/*-setup.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'NSIS installer was not produced.' }
+
+          $install = Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Silent install failed: $($install.ExitCode)" }
+
+          $installDir = Join-Path $env:LOCALAPPDATA 'InfoMancer'
+          if (-not (Test-Path $installDir)) { throw "InfoMancer install directory was not created: $installDir" }
+          $launcher = Get-ChildItem $installDir -Filter '*.exe' |
+            Where-Object { $_.Name -ne 'uninstall.exe' -and $_.Name -ne 'infomancer-core.exe' } |
+            Select-Object -First 1
+          if (-not $launcher) { throw "Installed InfoMancer launcher was not found under $installDir" }
+
+          $log = Join-Path $env:APPDATA 'cloud.arsenik.infomancer\logs\desktop-launcher.log'
+          Remove-Item $log -Force -ErrorAction SilentlyContinue
+          $process = Start-Process -FilePath $launcher.FullName -PassThru
+          Start-Sleep -Seconds 8
+          $process.Refresh()
+          if ($process.HasExited) {
+            if (Test-Path $log) { Get-Content $log | Write-Host }
+            throw "Installed InfoMancer exited during startup with code $($process.ExitCode)."
+          }
+          if (-not (Test-Path $log)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw "InfoMancer stayed alive but did not create its launcher diagnostic log at $log."
+          }
+          $logText = Get-Content $log -Raw
+          $logText | Write-Host
+          if (-not $logText.Contains('Tauri application built successfully; entering the desktop event loop.')) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw 'InfoMancer process stayed alive but never completed Tauri desktop startup.'
+          }
+          Stop-Process -Id $process.Id -Force
+          Start-Sleep -Seconds 1
+
+          $uninstaller = Join-Path $installDir 'uninstall.exe'
+          if (-not (Test-Path $uninstaller)) { throw 'Installed uninstaller was not found.' }
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "Silent uninstall failed: $($uninstall.ExitCode)" }
+
       - name: Collect native release assets
         shell: bash
         env:
-          RELEASE_OS: ${{ matrix.slug }}
+          RELEASE_OS: ${{ matrix.asset_os }}
         run: |
           python - <<'PY'
           import os
@@ -210,17 +408,22 @@ jobs:
 
   draft-release:
     name: Assemble draft GitHub release
+    if: ${{ github.actor == github.repository_owner }}
     needs:
       - source-package
       - native-package
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Check out release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
 
       - name: Download build artifacts
@@ -265,15 +468,25 @@ jobs:
               echo "Release $TAG already exists and is published; refusing to replace it." >&2
               exit 1
             fi
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+              gh api --method PATCH \
+                "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" \
+                -f sha="$RELEASE_SHA" \
+                -F force=true >/dev/null
+            else
+              gh api --method POST \
+                "repos/$GITHUB_REPOSITORY/git/refs" \
+                -f ref="refs/tags/$TAG" \
+                -f sha="$RELEASE_SHA" >/dev/null
+            fi
             gh release edit "$TAG" \
-              --target "$GITHUB_SHA" \
               --title "$TITLE" \
               --notes-file "$NOTES" \
               --draft \
               --prerelease
           else
             gh release create "$TAG" \
-              --target "$GITHUB_SHA" \
+              --target "$RELEASE_SHA" \
               --title "$TITLE" \
               --notes-file "$NOTES" \
               --draft \
@@ -281,17 +494,19 @@ jobs:
           fi
 
           gh release upload "$TAG" publish/* --clobber
-          echo "Draft release $TAG assembled from commit $GITHUB_SHA."
+          echo "Draft release $TAG assembled from commit $RELEASE_SHA."
 
   status-report:
     name: Report packaging status
-    if: ${{ always() }}
+    if: ${{ always() && github.actor == github.repository_owner }}
     needs:
       - source-package
       - native-package
       - draft-release
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      issues: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       SOURCE_RESULT: ${{ needs.source-package.result }}
@@ -303,7 +518,7 @@ jobs:
         run: |
           RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           if [ "$SOURCE_RESULT" = "success" ] && [ "$NATIVE_RESULT" = "success" ] && [ "$RELEASE_RESULT" = "success" ]; then
-            gh issue close 30 --reason completed --comment "0.8.0-alpha.1 packaging succeeded. Server/source, Windows, macOS, and Linux artifacts were assembled into the draft prerelease with SHA-256 checksums. Run: $RUN_URL"
+            gh issue close 30 --repo "$GITHUB_REPOSITORY" --reason completed --comment "0.8.1-alpha.1 packaging succeeded. Server/source, Windows, macOS Apple Silicon, macOS Intel, and Linux artifacts were assembled into the draft prerelease with SHA-256 checksums. Run: $RUN_URL"
           else
-            gh issue comment 30 --body "0.8.0-alpha.1 packaging did not complete successfully. source=$SOURCE_RESULT, native=$NATIVE_RESULT, draft-release=$RELEASE_RESULT. Run: $RUN_URL"
+            gh issue comment 30 --repo "$GITHUB_REPOSITORY" --body "0.8.1-alpha.1 packaging did not complete successfully. source=$SOURCE_RESULT, native=$NATIVE_RESULT, draft-release=$RELEASE_RESULT. Run: $RUN_URL"
           fi

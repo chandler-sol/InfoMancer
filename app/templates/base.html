@@ -21,6 +21,7 @@
   <link rel="stylesheet" href="{{ url_for('static', path='workspace.css') }}?v={{ static_version }}">
   <link rel="stylesheet" href="{{ url_for('static', path='workspace-ui.css') }}?v={{ static_version }}">
   <link rel="stylesheet" href="{{ url_for('static', path='review.css') }}?v={{ static_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='dialog-controls.css') }}?v={{ static_version }}">
   <script src="{{ url_for('static', path='organize-dialog.js') }}?v={{ static_version }}" defer></script>
   <script src="{{ url_for('static', path='password-visibility.js') }}?v={{ static_version }}" defer></script>
   <script src="{{ url_for('static', path='engagement.js') }}?v={{ static_version }}" defer></script>
@@ -179,7 +180,7 @@
       </div>
     </section>
   </div>
-  {% elif next_announcement %}
+  {% elif next_announcement and not request.url.path.startswith('/getting-started/') %}
   <div class="announcement-layer" id="announcement-popup" role="dialog" aria-modal="true" aria-labelledby="announcement-title" data-announcement-id="{{ next_announcement.id }}" data-csrf-token="{{ csrf_token }}">
     <div class="announcement-scrim"></div>
     <article class="announcement-popup {{ next_announcement.category }}">

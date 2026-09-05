@@ -13,7 +13,7 @@ def css_block(source: str, selector: str, *, start: int = 0) -> str:
 
 class MobileLibraryControlTests(unittest.TestCase):
     def setUp(self):
-        self.css = (ROOT / "app/static/library-controls-polish.css").read_text(encoding="utf-8")
+        self.css = (ROOT / "app/static/library-controls.css").read_text(encoding="utf-8")
         self.js = (ROOT / "app/static/library-controller.js").read_text(encoding="utf-8")
 
     def test_library_selects_leave_room_for_descenders(self):

@@ -41,7 +41,7 @@ class MobileUiContractTests(unittest.TestCase):
         self.assertIn("infomancer:open-dialog", script)
 
     def test_mobile_library_display_toolbar_keeps_compact_control_rows(self):
-        toolbar = Path("app/static/library-selection-toolbar.css").read_text(encoding="utf-8")
+        toolbar = Path("app/static/library-selection.css").read_text(encoding="utf-8")
 
         self.assertIn("@media (max-width: 760px)", toolbar)
         self.assertIn("display: contents;", toolbar)

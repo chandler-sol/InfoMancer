@@ -7,6 +7,167 @@
     versionQuery = new URL(document.currentScript?.src || '', window.location.href).search;
   } catch (_error) {}
 
+  /* Keep the real server-rendered workspace painted while late 0.8 styles and
+     controllers settle. Hiding all of main.shell created an empty-shell frame between
+     pages. Library controls that genuinely move during density setup stay hidden, but
+     the already-correct List/Covers surface remains visible from first paint. */
+  body.classList.add('shell-preparing');
+  const guard = document.createElement('style');
+  guard.textContent = `
+    body.shell-preparing { background: #090d11; }
+    body.shell-preparing .library-table,
+    body.shell-preparing #cover-library {
+      visibility: visible !important;
+      animation: none !important;
+    }
+    body.shell-preparing .library-view-toolbar,
+    body.shell-preparing #cover-size-control {
+      visibility: hidden !important;
+    }
+  `;
+  document.head.append(guard);
+
+  const ensureStylesheet = (path, {versioned = false} = {}) => new Promise((resolve) => {
+    const base = path.startsWith('/static/') ? path : `/static/${path}`;
+    const href = versioned ? base : `${base}${versionQuery}`;
+    let absolute = href;
+    try { absolute = new URL(href, window.location.href).href; } catch (_error) {}
+    const existing = [...document.querySelectorAll('link[rel="stylesheet"]')]
+      .find((link) => link.href === absolute);
+    if (existing) {
+      if (existing.sheet) resolve(existing);
+      else {
+        existing.addEventListener('load', () => resolve(existing), {once: true});
+        existing.addEventListener('error', () => resolve(existing), {once: true});
+      }
+      return;
+    }
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = href;
+    link.addEventListener('load', () => resolve(link), {once: true});
+    link.addEventListener('error', () => resolve(link), {once: true});
+    document.head.append(link);
+  });
+
+  const loadScript = (path, {async = false} = {}) => new Promise((resolve) => {
+    const script = document.createElement('script');
+    script.src = `/static/${path}${versionQuery}`;
+    script.async = async;
+    script.addEventListener('load', () => resolve(script), {once: true});
+    script.addEventListener('error', () => resolve(script), {once: true});
+    document.head.append(script);
+  });
+
+  const criticalStyles = [
+    ensureStylesheet(`/static/mobile.css${versionQuery}`, {versioned: true}),
+    ensureStylesheet('task-widget.css'),
+    ensureStylesheet('app-navigation.css'),
+    ensureStylesheet('action-menu.css'),
+    ensureStylesheet('release-081-ui-polish.css'),
+    ensureStylesheet('navigation-paint-stability.css'),
+  ];
+
+  const path = window.location.pathname;
+  const sourcePage = window.location.pathname === '/sources';
+  const librarySurface = ['/library', '/movies', '/shows'].includes(path);
+
+  /* A Library can contain hundreds of cards and its final workspace bounds differ
+     dramatically from most other pages. Letting Chromium/WebView2 treat main.shell
+     as a named cross-document snapshot makes the whole Library interpolate between
+     the old and new bounds, which reads as a grow/shrink animation and can stutter
+     while compositing a large cover grid. Keep only the application chrome in the
+     View Transition on these routes; the Library workspace will reveal atomically. */
+  if (librarySurface) {
+    document.documentElement.classList.add('library-surface-route');
+    const libraryTransitionGuard = document.createElement('style');
+    libraryTransitionGuard.textContent = `
+      html.library-surface-route main.shell,
+      html.library-surface-route body > footer {
+        view-transition-name: none !important;
+      }
+    `;
+    document.head.append(libraryTransitionGuard);
+  }
+
+  if (librarySurface) {
+    [
+      'library-controls.css',
+      'library-performance.css',
+      'library-density.css',
+      'library-selection.css',
+      'library-saved-views.css',
+      'library-letter-jump.css',
+    ].forEach((stylesheet) => criticalStyles.push(ensureStylesheet(stylesheet)));
+  }
+  if (path === '/collections') {
+    criticalStyles.push(ensureStylesheet('release-081-collections.css'));
+    criticalStyles.push(ensureStylesheet('collection-menu-visibility.css'));
+  }
+  if (/^\/collections\/\d+$/.test(path)) {
+    criticalStyles.push(ensureStylesheet('collection-detail.css'));
+    criticalStyles.push(ensureStylesheet('collection-menu-visibility.css'));
+  }
+  if (path === '/admin/users') {
+    criticalStyles.push(ensureStylesheet('user-management.css'));
+  }
+  if (path === '/settings/metadata') {
+    body.classList.add('metadata-maintenance-enhanced');
+    criticalStyles.push(ensureStylesheet('metadata-maintenance.css'));
+  }
+  if (path === '/settings/system') {
+    criticalStyles.push(ensureStylesheet('settings-system-nav.css'));
+  }
+  if (sourcePage) {
+    criticalStyles.push(ensureStylesheet('source-health.css'));
+  }
+
+  const domReady = new Promise((resolve) => {
+    if (document.readyState !== 'loading') resolve();
+    else document.addEventListener('DOMContentLoaded', resolve, {once: true});
+  });
+
+  /* The Library density controller performs two geometry changes after parsing: it
+     moves the display controls beside the scope tabs and applies the saved cover
+     footprint. Keep only those moving controls hidden for those few milliseconds so
+     WebView2 never paints the intermediate toolbar position. A bounded fallback
+     prevents a broken optional controller from leaving those controls hidden. */
+  const libraryLayoutReady = librarySurface
+    ? domReady.then(() => new Promise((resolve) => {
+        let finished = false;
+        let timer = 0;
+        let observer = null;
+        const isReady = () => {
+          const density = document.getElementById('cover-size-control');
+          const toolbar = document.querySelector('.library-view-toolbar');
+          const tabs = document.querySelector('.catalog-tabs');
+          return Boolean(density?.classList.contains('library-density-ready'))
+            && (!toolbar || !tabs || toolbar.parentElement === tabs);
+        };
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          window.clearTimeout(timer);
+          observer?.disconnect();
+          resolve();
+        };
+        if (isReady()) {
+          finish();
+          return;
+        }
+        observer = new MutationObserver(() => {
+          if (isReady()) finish();
+        });
+        observer.observe(document.body, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ['class'],
+        });
+        timer = window.setTimeout(finish, 1500);
+      }))
+    : Promise.resolve();
+
   /* record_search is a one-shot server marker used by a committed global search.
      The server has already persisted that search before this page renders. Remove
      it immediately so live Library filtering, view hydration, and other partial
@@ -23,78 +184,33 @@
     }
   } catch (_error) {}
 
-  /* Modal close controls are shared shell chrome. Load one versioned owner for
-     every native dialog instead of letting individual fetched modal bodies patch
-     their own X glyphs. */
-  const dialogControlsStylesheet = document.createElement('link');
-  dialogControlsStylesheet.rel = 'stylesheet';
-  dialogControlsStylesheet.href = `/static/dialog-controls-polish.css${versionQuery}`;
-  document.head.append(dialogControlsStylesheet);
-
-  /* Library control polish was split into its own stylesheet during the 0.8 cleanup.
-     Load it explicitly on every catalog surface. Keeping the version query attached
-     makes the file participate in the same deployment cache-busting contract as the
-     rest of the shell assets. */
-  if (['/library', '/movies', '/shows'].includes(window.location.pathname)) {
-    const libraryControlsStylesheet = document.createElement('link');
-    libraryControlsStylesheet.rel = 'stylesheet';
-    libraryControlsStylesheet.href = `/static/library-controls-polish.css${versionQuery}`;
-    document.head.append(libraryControlsStylesheet);
-  }
-
-  /* Final release polish is loaded from bootstrap so structural mobile fixes are
-     present before the Settings and task controllers perform their late handoff. */
-  const polishStylesheet = document.createElement('link');
-  polishStylesheet.rel = 'stylesheet';
-  polishStylesheet.href = `/static/final-mobile-polish.css${versionQuery}`;
-  document.head.append(polishStylesheet);
-
-  /* Header-specific mobile chrome has its own small owner so account/focus geometry
-     and announcement icon sizing do not get buried inside broader responsive rules. */
-  const mobileHeaderStylesheet = document.createElement('link');
-  mobileHeaderStylesheet.rel = 'stylesheet';
-  mobileHeaderStylesheet.href = `/static/mobile-header.css${versionQuery}`;
-  document.head.append(mobileHeaderStylesheet);
-
-  /* Detail-page phone layout has a dedicated owner so the mobile dossier can be
-     simplified without weakening the richer desktop/tablet presentation. */
-  const mobileDetailStylesheet = document.createElement('link');
-  mobileDetailStylesheet.rel = 'stylesheet';
-  mobileDetailStylesheet.href = `/static/mobile-detail.css${versionQuery}`;
-  document.head.append(mobileDetailStylesheet);
-
   const polishController = document.createElement('script');
   polishController.src = `/static/final-mobile-polish.js${versionQuery}`;
   polishController.async = false;
   document.head.append(polishController);
 
-  /* Page-specific Settings features get their own owners. Bootstrap only marks the
-     page and loads their version-matched assets early enough to avoid a first-paint
-     flash of the legacy fallback surface. */
-  if (window.location.pathname === '/settings/metadata') {
-    body.classList.add('metadata-maintenance-enhanced');
+  const pageControllersReady = domReady.then(async () => {
+    const controllers = [loadScript('release-081-ui-polish.js')];
+    if (path === '/settings/metadata') {
+      controllers.push(loadScript('metadata-maintenance.js', {async: true}));
+    }
+    if (sourcePage) {
+      controllers.push(loadScript('source-health.js', {async: true}));
+    }
+    await Promise.all(controllers);
+  });
 
-    const stylesheet = document.createElement('link');
-    stylesheet.rel = 'stylesheet';
-    stylesheet.href = `/static/metadata-maintenance.css${versionQuery}`;
-    document.head.append(stylesheet);
+  const shellCriticalReady = Promise.all([domReady, pageControllersReady, ...criticalStyles]);
+  Promise.all([shellCriticalReady, libraryLayoutReady]).then(() => {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      body.classList.remove('shell-preparing');
+      guard.remove();
+    }));
+  });
 
-    document.addEventListener('DOMContentLoaded', () => {
-      const controller = document.createElement('script');
-      controller.src = `/static/metadata-maintenance.js${versionQuery}`;
-      controller.async = true;
-      document.head.append(controller);
-    }, {once: true});
-  }
-
-  if (window.location.pathname === '/sources') {
-    document.addEventListener('DOMContentLoaded', () => {
-      const controller = document.createElement('script');
-      controller.src = `/static/source-bulk-actions.js${versionQuery}`;
-      controller.async = true;
-      document.head.append(controller);
-    }, {once: true});
-  }
+  /* Bulk Match owns its Apply controller directly from each page template. Keeping
+     one canonical loader avoids duplicate document-level submit handlers and keeps
+     Apply/progressive lifecycle ownership deterministic across browsers and WebViews. */
 
   if (!body.classList.contains('has-app-sidebar')) return;
   try {

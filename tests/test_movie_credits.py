@@ -479,9 +479,6 @@ class MovieCreditViewTests(unittest.TestCase):
                 f'/titles/{unmatched_id}/tvdb?q=Other%20Movie', bulk_review.text
             )
             self.assertIn(f'href="/movies?root={root_id}"', sources.text)
-            self.assertIn("Metadata and maintenance have moved", sources.text)
-            self.assertIn('href="/settings/metadata"', sources.text)
-            self.assertIn('href="/settings/system"', sources.text)
             self.assertEqual(unchanged_preview.status_code, 200)
             self.assertIn("No changes needed", unchanged_preview.text)
             self.assertNotIn("Apply rename", unchanged_preview.text)

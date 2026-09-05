@@ -1,0 +1,327 @@
+/* 0.8.1 release-stabilization polish for Collections.
+   Keep these rules intentionally scoped so the broader 0.9 visual pass can replace
+   them without changing unrelated Library surfaces. */
+
+.smart-collection-create {
+  box-sizing: border-box;
+  width: min(1180px, 100%);
+  margin-right: auto;
+}
+
+.smart-collection-create > summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  cursor: pointer;
+}
+
+.smart-collection-summary-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.smart-collection-summary-copy > span {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.smart-collection-explainer {
+  display: grid;
+  gap: 5px;
+  margin: 15px 0 18px;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.smart-collection-explainer strong {
+  font-size: 13px;
+}
+
+.smart-collection-explainer p {
+  max-width: 86ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.smart-collection-create .smart-filter-grid {
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
+.smart-collection-edit-shell {
+  width: min(1180px, 100%);
+}
+
+.smart-collection-edit-head p:last-child {
+  max-width: 86ch;
+}
+
+.smart-collection-editor-form {
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
+.smart-collection-danger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 16px;
+}
+
+.smart-collection-danger > div {
+  min-width: 0;
+}
+
+.smart-collection-danger h2 {
+  margin: 3px 0 0;
+}
+
+.smart-collection-danger p:last-child {
+  max-width: 760px;
+  margin: 6px 0 0;
+  line-height: 1.5;
+}
+
+.smart-collection-delete-confirm {
+  flex: 0 0 auto;
+}
+
+.collection-grid {
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+}
+
+.collection-card strong,
+.collection-card p {
+  overflow-wrap: anywhere;
+}
+
+/* Collection picker cards use the real Library cover-card contract, including the
+   same cover-art movement, border highlight, shadow timing, action-overlay movement,
+   and hover-out behavior. Collections override only the artwork geometry to 16:9. */
+.collection-picker-card {
+  position: relative;
+  min-width: 0;
+  isolation: isolate;
+  flex-basis: auto;
+  width: auto;
+}
+
+.collection-picker-card-link {
+  display: block;
+}
+
+.collection-picker-card .collection-art {
+  position: relative;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin-bottom: 12px;
+}
+
+/* library.css still has a legacy .collection-card:hover .collection-art rule used by
+   older/custom Collection surfaces. The picker link also carries collection-card,
+   so that later rule would otherwise override Library's -4px cover-card movement
+   with -2px. Match Library's exact hover values here without adding a focus-held
+   state or a second synthetic border owner. */
+.collection-picker-card .collection-card:hover .collection-art {
+  transform: translateY(-4px);
+  border-color: var(--lime);
+  box-shadow: 0 15px 34px rgba(0, 0, 0, .42);
+}
+
+/* The action container itself paints nothing. Its dark veil is an inset pseudo-layer,
+   so there is physically no dark paint on the one-pixel perimeter owned by the real
+   artwork border. The menu remains above the inset veil, and both container and art
+   keep the same Library -4px motion. */
+.collection-picker-card .cover-card-actions {
+  z-index: 30;
+  box-sizing: border-box;
+  aspect-ratio: 16 / 9;
+  background: transparent;
+  transform: translateY(0) !important;
+}
+
+.collection-picker-card .cover-card-actions::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  z-index: 0;
+  border-radius: 3px;
+  background: rgba(3, 7, 10, .7);
+  pointer-events: none;
+}
+
+.collection-picker-card:hover .cover-card-actions {
+  transform: translateY(-4px) !important;
+}
+
+.collection-picker-card .cover-row-menu {
+  z-index: 1;
+}
+
+.collection-picker-card .cover-row-menu > div > form {
+  margin: 0;
+}
+
+.collection-picker-card .cover-row-menu > div > form > button {
+  width: 100%;
+  text-align: left;
+}
+
+.collection-picker-card .cover-row-menu > div > form > button.danger {
+  color: var(--danger);
+}
+
+.collection-picker-card .cover-row-menu > div > form > button.danger:hover,
+.collection-picker-card .cover-row-menu > div > form > button.danger:focus-visible {
+  color: #10140b;
+}
+
+/* Collection sort controls have appeared in more than one markup shape during the
+   alpha. The release script marks the live label/toolbar by its visible text, while
+   these named selectors also cover the server-rendered variants. */
+.collection-sort-control,
+.collection-sort-controls,
+.collection-sort-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px !important;
+  overflow: visible !important;
+}
+
+.collection-sort-label,
+.collection-sort-control > strong,
+.collection-sort-control > span:first-child,
+.collection-sort-controls > strong,
+.collection-sort-controls > span:first-child,
+.collection-sort-toolbar > strong,
+.collection-sort-toolbar > span:first-child {
+  flex: 0 0 auto;
+  margin-right: 6px !important;
+}
+
+.collection-sort-overflow-scope,
+.collection-sort-menu,
+.collection-sort-popover,
+.collection-sort-control details,
+.collection-sort-controls details,
+.collection-sort-toolbar details,
+.collection-detail-head,
+.collection-detail-copy,
+.collection-header-toolbar,
+.collection-header-actions {
+  overflow: visible !important;
+}
+
+.collection-sort-toolbar details,
+.collection-sort-menu {
+  position: relative;
+  z-index: 90;
+}
+
+.collection-sort-toolbar details[open],
+.collection-sort-menu[open] {
+  z-index: 900;
+}
+
+.collection-sort-toolbar details > div,
+.collection-sort-menu > div,
+.collection-sort-popover {
+  z-index: 1000;
+  max-width: min(360px, calc(100vw - 24px));
+}
+
+.notice.collection-undo-notice {
+  position: sticky;
+  top: 12px;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .38);
+}
+
+.collection-undo-form {
+  margin: 0 0 0 auto;
+  flex: 0 0 auto;
+}
+
+.collection-undo-form .button {
+  min-height: 34px;
+  padding: 6px 11px;
+}
+
+.bulk-collection-form {
+  display: grid;
+  gap: 20px;
+}
+
+.bulk-collection-selected p {
+  margin: 6px 0 0;
+}
+
+.bulk-collection-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+}
+
+.bulk-collection-options legend {
+  padding: 0 6px;
+}
+
+.bulk-collection-new input {
+  margin-top: 6px;
+}
+
+@media (max-width: 900px) {
+  .smart-collection-create .smart-filter-grid,
+  .smart-collection-editor-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .smart-collection-create .smart-filter-grid,
+  .smart-collection-editor-form,
+  .bulk-collection-options {
+    grid-template-columns: 1fr;
+  }
+
+  .smart-collection-danger {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .smart-collection-delete-confirm,
+  .smart-collection-delete-confirm > summary {
+    width: 100%;
+  }
+
+  .collection-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .notice.collection-undo-notice {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .collection-undo-form {
+    margin-left: 0;
+  }
+
+  .collection-undo-form .button {
+    width: 100%;
+    justify-content: center;
+  }
+}

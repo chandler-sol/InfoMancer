@@ -237,6 +237,37 @@ def _shared_chrome_indexes(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def _announcement_onboarding_receipts(conn: sqlite3.Connection) -> None:
+    """Do not treat release notes from before an account existed as unread."""
+    conn.execute(
+        """INSERT OR IGNORE INTO announcement_receipts(announcement_id,user_id)
+           SELECT a.id,u.id
+           FROM announcements a
+           JOIN users u ON datetime(u.created_at) > datetime(a.starts_at)
+           WHERE a.source='official'"""
+    )
+    conn.execute(
+        """CREATE TRIGGER IF NOT EXISTS trg_users_skip_historical_official_announcements
+           AFTER INSERT ON users
+           BEGIN
+             INSERT OR IGNORE INTO announcement_receipts(announcement_id,user_id)
+             SELECT id,NEW.id FROM announcements
+             WHERE source='official'
+               AND datetime(NEW.created_at) > datetime(starts_at);
+           END"""
+    )
+    conn.execute(
+        """CREATE TRIGGER IF NOT EXISTS trg_official_announcements_skip_newer_users
+           AFTER INSERT ON announcements
+           WHEN NEW.source='official'
+           BEGIN
+             INSERT OR IGNORE INTO announcement_receipts(announcement_id,user_id)
+             SELECT NEW.id,id FROM users
+             WHERE datetime(created_at) > datetime(NEW.starts_at);
+           END"""
+    )
+
+
 MIGRATIONS = (
     Migration(1, "title metadata columns", _titles),
     Migration(2, "source health columns", _roots),
@@ -254,6 +285,7 @@ MIGRATIONS = (
     Migration(14, "persisted global rename proposals", _rename_proposals),
     Migration(15, "library read-path indexes", _library_read_indexes),
     Migration(16, "shared chrome read indexes", _shared_chrome_indexes),
+    Migration(17, "historical announcement onboarding receipts", _announcement_onboarding_receipts),
 )
 
 

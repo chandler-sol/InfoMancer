@@ -1,26 +1,29 @@
 {% extends "base.html" %}
 {% block title %}Bulk movie matching · InfoMancer{% endblock %}
 {% block content %}
-{% macro review_actions(position='bottom') %}<div class="review-actions review-actions-{{ position }}"><a class="button" href="/movies/bulk-match">{{ 'Back to Movie Bulk Match' if direct_selection else 'Choose another batch' }}</a><div class="actions">{% if offset > 0 %}<a class="button" href="/movies/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}&amp;offset={{ [0, offset - 50]|max }}">Previous 50</a>{% endif %}{% if offset + 50 < cached_count %}<a class="button" href="/movies/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}&amp;offset={{ offset + 50 }}">Next 50</a>{% endif %}<button class="button primary">Apply selected matches</button></div></div>{% endmacro %}
+<link rel="stylesheet" href="{{ url_for('static', path='bulk-match.css') }}?v={{ static_version }}">
+{% macro review_actions(position='bottom') %}<div class="review-actions review-actions-{{ position }}"><a class="button" href="/movies/bulk-match">Back to Movie Bulk Match</a><div class="actions"><button class="button" type="button" data-bulk-clear-selection>Clear selection</button><button class="button primary" data-bulk-apply-button>Apply selected matches</button></div></div>{% endmacro %}
 <a class="back" href="/movies">← Movies</a>
+<div data-bulk-match-controller data-bulk-match-task="movie-match-analysis" data-bulk-match-active="{{ '1' if job.status in ['starting', 'running'] else '0' }}" data-bulk-match-complete-url="/movies/bulk-match?review=true{% if direct_selection %}&amp;selected=true{% endif %}" data-bulk-match-progress-url="/api/movies/bulk-match/progress" data-bulk-match-origin="{{ 'bulk-movie-selected' if direct_selection else 'bulk-movie' }}"></div>
 <div class="page-head"><div><p class="eyebrow">REVIEW QUEUE</p><h1>{{ 'Match selected movies' if direct_selection else 'Bulk movie matching' }}</h1><p class="muted">{% if direct_selection %}Review matches for only the movies you selected. Nothing is applied until you approve it here.{% else %}Analyze a small batch, any selection, or every unmatched movie. Suggestions are stored locally and nothing is applied without review.{% endif %}</p></div></div>
 {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
 {% if not analyzed %}
 <section class="panel bulk-match-start"><div><h2>{{ available_count }} unmatched movies</h2><p class="muted">{{ cached_count }} already analyzed. Searches run as a paced background task and results are cached for review.</p></div><div class="actions">{% if cached_count %}<a class="button" href="/movies/bulk-match?review=true">Review analyzed matches</a>{% endif %}{% if no_result_count %}<form method="post" action="/movies/bulk-match/analyze"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="mode" value="no_results"><button class="button">Retry no results ({{ no_result_count }})</button></form>{% endif %}<form method="post" action="/movies/bulk-match/analyze"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="mode" value="next"><button class="button">Analyze next 20</button></form><form method="post" action="/movies/bulk-match/analyze" class="large-movie-batch" data-batch-count="{{ unanalyzed_count }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="mode" value="all"><button class="button primary">Analyze all unmatched</button></form></div></section>
 <form method="post" action="/movies/bulk-match/analyze" id="bulk-selection-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="mode" value="selected">
   {% if movies %}<div class="review-actions selection-actions" id="selection-actions" hidden><span class="selection-count" id="selection-count">0 selected</span><div class="selection-action-buttons"><button class="button" type="button" id="clear-all-movies">Clear selection</button><button class="button primary" id="analyze-selected">Analyze selected</button></div></div>{% endif %}
-  <section class="panel table-wrap"><table><thead><tr><th class="bulk-select-heading"><button class="batch-select-all" type="button" id="select-all-movies" aria-pressed="false"><span class="batch-select-all-box" aria-hidden="true"></span><span id="select-all-label">Select all</span></button></th><th>Library movie</th><th>Source</th></tr></thead><tbody>
-  {% for movie in movies %}<tr><td><input class="batch-choice" type="checkbox" name="selected" value="{{ movie.id }}" aria-label="Select {{ movie.title }}"></td><td><strong>{{ movie.title }}</strong>{% if movie.year %} ({{ movie.year }}){% endif %}<small>{{ movie.folder_path }}</small></td><td>{{ movie.root_label or movie.root_path }}</td></tr>{% else %}<tr><td colspan="3" class="empty good">No unmatched movies remain.</td></tr>{% endfor %}
+  <section class="panel table-wrap"><table><thead><tr><th class="bulk-select-heading"><button class="batch-select-all" type="button" id="select-all-movies" aria-pressed="false"><span class="batch-select-all-box" aria-hidden="true"></span><span id="select-all-label">Select all</span></button></th><th>Library movie</th><th>Source</th>{% if job.status in ['starting', 'running'] %}<th>Suggested TVDB result</th><th>Confidence</th>{% endif %}</tr></thead><tbody>
+  {% for movie in movies %}<tr data-bulk-movie-id="{{ movie.id }}"><td><input class="batch-choice" type="checkbox" name="selected" value="{{ movie.id }}" aria-label="Select {{ movie.title }}"></td><td><strong>{{ movie.title }}</strong>{% if movie.year %} ({{ movie.year }}){% endif %}<small>{{ movie.folder_path }}</small></td><td>{{ movie.root_label or movie.root_path }}</td>{% if job.status in ['starting', 'running'] %}<td data-bulk-suggestion-cell><span class="muted">Waiting to search…</span></td><td data-bulk-confidence-cell>-</td>{% endif %}</tr>{% else %}<tr><td colspan="{{ 5 if job.status in ['starting', 'running'] else 3 }}" class="empty good">No unmatched movies remain.</td></tr>{% endfor %}
   </tbody></table></section>
 </form>
 {% else %}
-<form method="post" action="/movies/bulk-match">
+<form method="post" action="/movies/bulk-match" data-bulk-match-review-form data-bulk-match-item-label="movie">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   {% if direct_selection %}<input type="hidden" name="selected_scope" value="1">{% endif %}
-  {% if direct_selection and job.status in ['starting', 'running'] %}<section class="panel bulk-direct-progress"><div><h2>Finding matches for {{ job.total }} selected movies</h2><p class="muted">{{ job.processed or 0 }} analyzed{% if job.current %} · currently searching {{ job.current }}{% endif %}. This page will update automatically.</p></div><span class="task-track"><i></i></span></section>{% endif %}
+  {% if direct_selection %}<section class="panel bulk-direct-progress bulk-workflow-progress" data-bulk-match-progress data-bulk-match-progress-phase="{{ 'analysis' if job.status in ['starting', 'running'] else 'ready' }}"><div><h2 data-bulk-match-progress-heading>Finding matches for {{ job.total or suggestions|length }} selected movies</h2><p class="muted" data-bulk-match-progress-copy>{% if job.status in ['starting', 'running'] %}{% if job.processed %}{{ job.processed }} of {{ job.total }} checked{% if job.current %} · currently searching {{ job.current }}{% endif %}. This page will update automatically.{% else %}Preparing TVDB searches… This page will update automatically.{% endif %}{% else %}Analysis complete.{% endif %}</p></div><span class="task-track" aria-hidden="true"><i data-bulk-match-progress-fill></i></span></section>{% endif %}
+  <div class="notice" data-bulk-apply-status role="status" aria-live="polite" hidden></div>
   {{ review_actions('top') }}
-  <section class="panel table-wrap"><table><thead><tr><th>Apply</th><th>Library movie</th><th>Suggested TVDB result</th><th>Confidence</th></tr></thead><tbody>
-  {% for item in suggestions %}<tr><td>{% if item.candidate %}<input class="match-check" type="checkbox" name="matches" value="{{ item.title.id }}:{{ item.candidate.tvdb_id or item.candidate.id }}" {% if item.exact %}checked{% endif %}>{% endif %}</td><td><strong>{{ item.title.title }}</strong>{% if item.title.year %} ({{ item.title.year }}){% endif %}<small>{{ item.title.folder_path }}</small></td><td>{% if item.candidate %}<div class="title-cell">{% if item.candidate.image_url %}<img class="poster-thumb" src="{{ item.candidate.image_url }}" alt="">{% endif %}<div>{% if item.candidate._possible_match or (item.confidence and item.confidence.score < 80) %}<span class="possible-match-label">Possible match</span>{% endif %}<strong>{{ item.candidate.name }}</strong>{% if item.candidate.year %} ({{ item.candidate.year }}){% endif %}<small>TVDB {{ item.candidate.tvdb_id or item.candidate.id }} · {{ item.result_count }} search result(s)</small><a class="possible-match-link" href="/titles/{{ item.title.id }}/tvdb?q={{ (item.candidate._search_query or item.title.title)|urlencode }}">{% if item.candidate._possible_match or (item.confidence and item.confidence.score < 80) %}Review all possible matches{% else %}Find another match{% endif %}</a></div></div>{% elif item.pending and job.status in ['starting', 'running'] %}<span class="muted">Waiting to search…</span>{% else %}<span class="muted">No result</span><a class="possible-match-link" href="/titles/{{ item.title.id }}/tvdb">Try manual search</a>{% endif %}</td><td>{% if item.confidence %}<span class="confidence-badge {% if item.confidence.score >= 95 %}very-high{% elif item.confidence.score >= 80 %}high{% elif item.confidence.score >= 60 %}medium{% else %}low{% endif %}">{{ item.confidence.score }}% · {{ item.confidence.label }}</span>{% else %}—{% endif %}</td></tr>{% else %}<tr><td colspan="4" class="empty">No selected unmatched movies remain.</td></tr>{% endfor %}
+  <section class="panel table-wrap"><table><thead><tr><th class="bulk-select-heading"><button class="batch-select-all" type="button" id="review-select-all-movies" aria-pressed="false"><span class="batch-select-all-box" aria-hidden="true"></span><span id="review-select-all-label">Select all</span></button></th><th>Library movie</th><th>Suggested TVDB result</th><th>Confidence</th></tr></thead><tbody>
+  {% for item in suggestions %}<tr id="bulk-title-{{ item.title.id }}" data-bulk-movie-id="{{ item.title.id }}"><td data-bulk-apply-cell>{% if item.candidate %}<input class="match-check" type="checkbox" name="matches" value="{{ item.title.id }}:{{ item.candidate.tvdb_id or item.candidate.id }}" {% if item.exact %}checked{% endif %}>{% endif %}</td><td><strong>{{ item.title.title }}</strong>{% if item.title.year %} ({{ item.title.year }}){% endif %}<small>{{ item.title.folder_path }}</small></td><td data-bulk-suggestion-cell>{% if item.candidate %}<div class="title-cell">{% if item.candidate.image_url %}<img class="poster-thumb" src="{{ item.candidate.image_url }}" alt="">{% endif %}<div>{% if item.candidate._possible_match or (item.confidence and item.confidence.score < 80) %}<span class="possible-match-label">Possible match</span>{% endif %}<strong>{{ item.candidate.name }}</strong>{% if item.candidate.year %} ({{ item.candidate.year }}){% endif %}<small>TVDB {{ item.candidate.tvdb_id or item.candidate.id }} · {{ item.result_count }} search result(s)</small><a class="possible-match-link" href="/titles/{{ item.title.id }}/tvdb?q={{ (item.candidate._search_query or item.title.title)|urlencode }}">{% if item.candidate._possible_match or (item.confidence and item.confidence.score < 80) %}Review all possible matches{% else %}Find another match{% endif %}</a></div></div>{% elif item.pending and job.status in ['starting', 'running'] %}<span class="muted">Waiting to search…</span>{% else %}<span class="muted">No result</span><a class="possible-match-link" href="/titles/{{ item.title.id }}/tvdb">Try manual search</a>{% endif %}</td><td data-bulk-confidence-cell>{% if item.confidence %}<span class="confidence-badge {% if item.confidence.score >= 95 %}very-high{% elif item.confidence.score >= 80 %}high{% elif item.confidence.score >= 60 %}medium{% else %}low{% endif %}">{{ item.confidence.score }}% · {{ item.confidence.label }}</span>{% else %}-{% endif %}</td></tr>{% else %}<tr><td colspan="4" class="empty">No selected unmatched movies remain.</td></tr>{% endfor %}
   </tbody></table></section>
   {{ review_actions() }}
 </form>
@@ -35,17 +38,63 @@
   const selectAll = document.getElementById("select-all-movies");
   const selectAllLabel = document.getElementById("select-all-label");
   const clearAll = document.getElementById("clear-all-movies");
+  const reviewForm = document.querySelector("[data-bulk-match-review-form]");
+  const reviewSelectAll = document.getElementById("review-select-all-movies");
+  const reviewSelectAllLabel = document.getElementById("review-select-all-label");
   const warningThreshold = 50;
   const confirmLargeBatch = (amount) => window.confirm(
     `You are about to analyze ${amount.toLocaleString()} movies. ` +
     "This may take a while because provider requests are paced to avoid rate limits. " +
     "The analysis will run in the background and remain visible in the task widget. Continue?"
   );
+  const reviewChoices = () => Array.from(document.querySelectorAll(".match-check"));
+  const updateReviewSelection = () => {
+    if (!reviewSelectAll) return;
+    const matches = reviewChoices();
+    const selectedCount = matches.filter(choice => choice.checked).length;
+    const allSelected = matches.length > 0 && selectedCount === matches.length;
+    const partiallySelected = selectedCount > 0 && !allSelected;
+    reviewSelectAll.setAttribute("aria-pressed", String(allSelected));
+    reviewSelectAll.classList.toggle("is-partial", partiallySelected);
+    reviewSelectAll.classList.toggle("is-selected", allSelected);
+    if (reviewSelectAllLabel) {
+      reviewSelectAllLabel.textContent = allSelected ? "All selected" : (partiallySelected ? "Select remaining" : "Select all");
+    }
+  };
+  const signalReviewSelectionChange = () => {
+    const first = reviewChoices()[0];
+    first?.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const setReviewSelection = (checked) => {
+    reviewChoices().forEach((choice) => { choice.checked = checked; });
+    signalReviewSelectionChange();
+    updateReviewSelection();
+  };
   document.querySelectorAll(".possible-match-link").forEach((link) => {
     const url = new URL(link.href, window.location.origin);
     url.searchParams.set("from", "{{ 'bulk-movie-selected' if direct_selection else 'bulk-movie' }}");
+    url.searchParams.set("return_to", window.location.pathname + window.location.search);
     link.href = url.pathname + url.search;
   });
+  document.querySelectorAll("[data-bulk-clear-selection]").forEach((button) => {
+    button.addEventListener("click", () => setReviewSelection(false));
+  });
+  reviewSelectAll?.addEventListener("click", () => {
+    const matches = reviewChoices();
+    if (!matches.length) return;
+    setReviewSelection(!matches.every(choice => choice.checked));
+  });
+  reviewForm?.addEventListener("change", (event) => {
+    if (event.target instanceof HTMLInputElement && event.target.name === "matches") {
+      updateReviewSelection();
+    }
+  });
+  const reviewBody = reviewForm?.querySelector("tbody");
+  if (reviewBody && reviewSelectAll) {
+    const reviewObserver = new MutationObserver(updateReviewSelection);
+    reviewObserver.observe(reviewBody, { childList: true, subtree: true });
+    updateReviewSelection();
+  }
   if (choices.length && count && analyze && actions) {
     const update = () => {
       const selected = choices.filter(choice => choice.checked);
@@ -89,19 +138,8 @@
       }
     });
   });
-
-  {% if job.status in ['starting', 'running'] %}
-  const waitForAnalysis = window.setInterval(async () => {
-    try {
-      const response = await fetch("/api/movie-match-analysis", {cache: "no-store"});
-      const status = await response.json();
-      if (status.status === "complete") {
-        window.clearInterval(waitForAnalysis);
-        window.location.assign("/movies/bulk-match?review=true{% if direct_selection %}&selected=true{% endif %}");
-      }
-    } catch (_) {}
-  }, 2500);
-  {% endif %}
 })();
 </script>
+<script src="{{ url_for('static', path='bulk-match-apply.js') }}?v={{ static_version }}" defer></script>
+<script src="{{ url_for('static', path='bulk-match-feedback.js') }}?v={{ static_version }}" defer></script>
 {% endblock %}

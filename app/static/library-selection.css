@@ -1,0 +1,987 @@
+/* Consolidated Library selection styles.
+   Merged from library-selection-toolbar.css, library-selection-polish.css,
+   and library-selection-compact.css in their original lazy-load cascade order.
+   Loaded by workspace-ui.js when a Library surface is present. */
+/* ---- from library-selection-toolbar.css ---- */
+
+/* Keep bulk work on the same horizontal control plane as Jump to and the
+   List/Covers controls. A single selection uses the Inspector only; this command
+   surface appears once two or more titles are selected. */
+body:not(.library-multi-selection) .library-display-toolbar.library-selection-toolbar-ready .library-selection-actions {
+  display: none !important;
+}
+
+.library-display-toolbar.has-letter-jump.library-selection-toolbar-ready {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr) minmax(260px, auto);
+  align-items: center;
+  gap: 14px;
+  flex-wrap: nowrap;
+}
+
+.library-display-toolbar.library-selection-toolbar-ready .letter-jump-menu {
+  justify-self: start;
+}
+
+.library-display-toolbar.library-selection-toolbar-ready .library-view-toolbar {
+  justify-self: end;
+}
+
+.library-display-toolbar.library-selection-toolbar-ready .library-selection-actions {
+  position: static;
+  top: auto;
+  z-index: auto;
+  justify-self: center;
+  width: max-content;
+  max-width: 100%;
+  min-height: 42px;
+  margin: 0;
+  padding: 5px 8px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  white-space: nowrap;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.library-display-toolbar.library-selection-toolbar-ready .library-selection-actions .button,
+.library-display-toolbar.library-selection-toolbar-ready .library-bulk-match-summary {
+  min-height: 36px;
+  padding-inline: 12px;
+}
+
+/* Use the same visual vocabulary as the Inspector Favorite control without making
+   another full-width toolbar button. */
+.library-display-toolbar .library-bulk-favorite {
+  flex: 0 0 auto;
+  min-width: 52px;
+  min-height: 40px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.library-display-toolbar .library-bulk-favorite:disabled {
+  cursor: wait;
+  opacity: .58;
+}
+
+.library-bulk-separator {
+  width: 1px;
+  height: 24px;
+  flex: 0 0 1px;
+  margin-inline: 2px;
+  background: var(--line);
+}
+
+.library-bulk-match-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.library-bulk-match-menu > summary {
+  display: inline-flex;
+  align-items: center;
+  list-style: none;
+  cursor: pointer;
+}
+.library-bulk-match-menu > summary::-webkit-details-marker { display: none; }
+/* Use a text disclosure glyph rather than a rotated 5px border box. Mobile Safari
+   can clip one leg of the border-drawn chevron, leaving a stray vertical stroke
+   beside “Match”. The glyph is both more robust and easier to align in nested menus. */
+.library-bulk-match-menu > summary::after {
+  content: "⌄";
+  width: auto;
+  height: auto;
+  margin-left: auto;
+  padding-left: 10px;
+  flex: 0 0 auto;
+  border: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  transform: translateY(-1px);
+  transform-origin: center;
+  transition: transform .14s ease, color .14s ease;
+}
+.library-bulk-match-menu[open] > summary::after {
+  color: currentColor;
+  transform: translateY(1px) rotate(180deg);
+}
+.library-bulk-match-menu[open] > summary,
+.library-bulk-match-menu > summary:hover {
+  border-color: var(--lime);
+  color: var(--lime);
+}
+
+.library-bulk-match-options {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  min-width: 170px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #10171f;
+  box-shadow: 0 16px 36px rgba(0,0,0,.38);
+}
+.library-bulk-match-options .button {
+  width: 100%;
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+}
+.library-bulk-match-options .button:hover {
+  border-color: rgba(174,255,48,.28);
+  background: rgba(174,255,48,.07);
+}
+
+/* The selection outline makes a previously harmless zero-inset caption look like
+   it is touching the frame. Give every cover caption a small, consistent content
+   gutter so selected and unselected cards keep identical geometry. */
+#cover-library .cover-card-link > strong {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  padding: 8px 8px 0;
+}
+#cover-library .cover-card-meta {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 3px 8px 8px;
+}
+
+/* A missing poster used to remove an entire grid cell from the Sort Titles row,
+   shifting the title into the 42px artwork column and every control after it one
+   position to the left. Always render a poster slot and style the fallback like a
+   small piece of artwork so every row keeps identical geometry. */
+.sort-title-poster-placeholder {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 700;
+}
+.organize-dialog .sort-title-order li {
+  grid-template-columns: 40px 42px minmax(180px, 1fr) 76px 88px minmax(120px, auto) auto;
+}
+
+.library-display-toolbar.library-selection-toolbar-ready.has-selection-actions {
+  position: sticky;
+  top: 76px;
+  z-index: 18;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(12, 17, 23, .985);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .24);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.library-display-toolbar.library-selection-toolbar-ready.has-selection-actions .library-selection-actions {
+  border-color: #4c6b2d;
+  background: rgba(18, 24, 32, .98);
+}
+
+@media (max-width: 1180px) {
+  .library-display-toolbar.has-letter-jump.library-selection-toolbar-ready {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+  .library-display-toolbar.library-selection-toolbar-ready .library-selection-actions {
+    max-width: 100%;
+  }
+  .library-display-toolbar.library-selection-toolbar-ready .library-selection-actions .button,
+  .library-display-toolbar.library-selection-toolbar-ready .library-bulk-match-summary {
+    padding-inline: 9px;
+    font-size: 12px;
+  }
+  .library-display-toolbar.library-selection-toolbar-ready .selection-count {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 900px) {
+  .library-display-toolbar.has-letter-jump.library-selection-toolbar-ready {
+    grid-template-columns: 1fr auto;
+  }
+  .library-display-toolbar.library-selection-toolbar-ready .library-selection-actions {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: stretch;
+    justify-content: flex-start;
+    width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+  }
+  .library-display-toolbar.library-selection-toolbar-ready .library-view-toolbar {
+    grid-column: 2;
+  }
+  .organize-dialog .sort-title-order li {
+    grid-template-columns: 40px 32px minmax(0,1fr) 68px 78px;
+  }
+}
+
+/* The base Library stylesheet stacks the display controls below 760px. That made
+   the right side turn into a tall card on phones: List/Covers occupied one line,
+   the slider occupied another inside the same wrapper, and Jump to was squeezed
+   enough to wrap its label. Flatten those wrappers into the toolbar grid on mobile.
+   Row one is navigation + view mode; cover density becomes a quiet full-width row
+   only when Covers is active. Bulk actions naturally auto-place after that row. */
+@media (max-width: 760px) {
+  .library-display-toolbar.has-letter-jump.library-selection-toolbar-ready {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px 12px;
+  }
+
+  .library-display-toolbar.library-selection-toolbar-ready .letter-jump-menu {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+  }
+
+  .library-display-toolbar.library-selection-toolbar-ready .letter-jump-menu > summary,
+  .library-display-toolbar.library-selection-toolbar-ready .letter-jump-label,
+  .library-display-toolbar.library-selection-toolbar-ready .letter-jump-current {
+    white-space: nowrap;
+  }
+
+  .library-display-toolbar.library-selection-toolbar-ready .letter-jump-menu > summary {
+    width: max-content;
+    min-width: 132px;
+    max-width: 100%;
+  }
+
+  .library-display-toolbar.library-selection-toolbar-ready .library-view-toolbar,
+  .library-display-toolbar.library-selection-toolbar-ready .library-view-controls {
+    display: contents;
+  }
+
+  .library-display-toolbar.library-selection-toolbar-ready .library-view-toggle {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+    align-self: center;
+  }
+
+  .library-display-toolbar.library-selection-toolbar-ready .cover-size-control {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: stretch;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: none;
+    grid-template-columns: 32px minmax(0, 1fr) 32px;
+    gap: 8px;
+    padding: 9px 2px 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .library-display-toolbar.library-selection-toolbar-ready .library-selection-actions {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+}
+
+@media (max-width: 680px) {
+  .library-display-toolbar.library-selection-toolbar-ready.has-selection-actions {
+    top: 70px;
+    padding: 5px;
+  }
+}
+
+@media (max-width: 420px) {
+  .library-display-toolbar.library-selection-toolbar-ready .letter-jump-menu > summary {
+    min-width: 76px;
+  }
+}
+/* ---- from library-selection-polish.css ---- */
+
+/* Library selection and Inspector workflow.
+   Cyan means the title currently being inspected. Lime means selected for work. */
+
+/* The Inspector is a true overlay on Library. Opening it must never resize or
+   recenter the cover grid underneath it. Its surface is deliberately opaque: the
+   earlier near-transparent background let poster/text shapes show through large
+   empty summary areas and also forced an unnecessary compositing blur. */
+.workspace-inspector {
+  background: #0d1218;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+@media (min-width: 1180px) {
+  body.has-app-sidebar.workspace-inspector-open main.shell:has(> .catalog-tabs) {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    margin-inline: 0 !important;
+    padding-right: 24px !important;
+  }
+}
+
+body.library-drag-selecting,
+body.library-drag-selecting #cover-library,
+body.library-drag-selecting #cover-library * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+body.library-drag-selecting #cover-library .cover-card {
+  cursor: copy;
+}
+
+.cover-card.workspace-selected .cover-art {
+  position: relative;
+}
+.cover-card.workspace-selected .cover-art::after {
+  content: "INSPECTING";
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 7;
+  display: inline-flex;
+  padding: 4px 7px;
+  border: 1px solid rgba(81, 214, 230, .58);
+  border-radius: 999px;
+  background: rgba(7, 13, 18, .93);
+  color: var(--cyan);
+  box-shadow: 0 4px 14px rgba(0,0,0,.3);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: .1em;
+  line-height: 1;
+}
+
+/* Single selection keeps the quieter cyan inspection frame while still showing a
+   real checked checkbox. The check itself remains lime because it represents the
+   selection state, not the Inspector state. */
+body:not(.library-multi-selection) .cover-card.workspace-selected:has(.library-cover-choice:checked) {
+  background: rgba(81, 214, 230, .035);
+  box-shadow: 0 0 0 2px rgba(81, 214, 230, .68), 0 12px 32px rgba(0, 0, 0, .24);
+}
+body:not(.library-multi-selection) .cover-card.workspace-selected:has(.library-cover-choice:checked) .cover-art {
+  border-color: rgba(81, 214, 230, .7);
+}
+
+/* Multi-selection is the stronger lime working state. */
+.cover-card:has(.library-cover-choice:checked) {
+  background: rgba(185, 245, 66, .045);
+  box-shadow: 0 0 0 2px rgba(185, 245, 66, .78), 0 12px 32px rgba(0, 0, 0, .26);
+}
+.cover-card:has(.library-cover-choice:checked) .cover-art {
+  border-color: rgba(185, 245, 66, .78);
+}
+.cover-card:has(.library-cover-choice:checked) .cover-card-link > strong {
+  color: var(--lime);
+}
+.cover-card:has(.library-cover-choice:checked).workspace-selected::after {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 1px rgba(81, 214, 230, .12);
+}
+
+.cover-select-control:has(input:checked) {
+  opacity: 1;
+  transform: scale(1);
+}
+.cover-select-control input:checked + span {
+  color: #0b1008;
+  border-color: var(--lime);
+  background: var(--lime);
+  box-shadow: 0 4px 14px rgba(0,0,0,.38), 0 0 0 2px rgba(185,245,66,.16);
+}
+
+/* List mode follows the same state language. */
+.library-title-row:has(.library-title-choice:checked) > td {
+  background: rgba(185, 245, 66, .055);
+}
+.library-title-row:has(.library-title-choice:checked) > td:first-child {
+  box-shadow: inset 3px 0 0 var(--lime);
+}
+body:not(.library-multi-selection) .library-title-row.workspace-selected:has(.library-title-choice:checked) > td {
+  background: rgba(81, 214, 230, .045);
+}
+body:not(.library-multi-selection) .library-title-row.workspace-selected:has(.library-title-choice:checked) > td:first-child {
+  box-shadow: inset 3px 0 0 var(--cyan);
+}
+
+/* Selection-aware controls live directly below the Inspector chrome. */
+.library-inspector-selection-bar {
+  position: sticky;
+  z-index: 3;
+  top: 48px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #33404d;
+  background: #0d1218;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.library-inspector-selection-bar[hidden] {
+  display: none;
+}
+.library-inspector-selection-count {
+  align-self: center;
+  color: var(--lime);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.library-inspector-selection-chooser {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+.library-inspector-selection-chooser[hidden] {
+  display: none;
+}
+.library-inspector-selection-chooser > span {
+  color: var(--cyan);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.library-inspector-selection-chooser select {
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+  padding: 7px 30px 7px 9px;
+  font-size: 11px;
+}
+.library-selection-compare {
+  align-self: end;
+  min-height: 34px;
+  padding: 7px 10px;
+}
+.library-selection-compare[hidden] {
+  display: none;
+}
+
+/* Side-by-side selected-title comparison. */
+.library-selection-compare-dialog {
+  width: min(920px, calc(100vw - 32px));
+  max-height: min(82vh, 760px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #3a4857;
+  border-radius: 12px;
+  background: #10171f;
+  color: var(--text);
+  box-shadow: 0 28px 90px rgba(0,0,0,.6);
+}
+.library-selection-compare-dialog::backdrop {
+  background: rgba(3, 7, 11, .72);
+  backdrop-filter: blur(3px);
+}
+.library-compare-card {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  max-height: inherit;
+}
+.library-compare-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.library-compare-head > span {
+  display: grid;
+  gap: 2px;
+}
+.library-compare-head small {
+  color: var(--lime);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: .12em;
+}
+.library-compare-head strong {
+  font-size: 19px;
+}
+.library-compare-head button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 20px;
+}
+.library-compare-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(8, 13, 18, .5);
+}
+.library-compare-controls label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+}
+.library-compare-controls select {
+  margin: 0;
+}
+.library-compare-differences {
+  display: flex !important;
+  align-items: center;
+  gap: 7px !important;
+  min-height: 42px;
+  white-space: nowrap;
+}
+.library-compare-differences input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--lime);
+}
+.library-compare-body {
+  min-height: 180px;
+  overflow: auto;
+  padding: 14px 18px 18px;
+}
+.library-compare-state {
+  margin: 0;
+  padding: 38px 12px;
+  color: var(--muted);
+  text-align: center;
+}
+.library-compare-table {
+  display: grid;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+}
+.library-compare-row {
+  display: grid;
+  grid-template-columns: minmax(120px, .65fr) minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  min-height: 48px;
+  border-bottom: 1px solid var(--line);
+}
+.library-compare-row > * {
+  min-width: 0;
+  padding: 10px 12px;
+  overflow-wrap: anywhere;
+}
+.library-compare-row > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.library-compare-row > strong {
+  border-left: 1px solid var(--line);
+  font-size: 12px;
+}
+.library-compare-row.different > strong {
+  color: #fff;
+  background: rgba(185, 245, 66, .035);
+}
+.library-compare-row.same > strong {
+  color: #aab5c0;
+}
+
+@media (max-width: 680px) {
+  .library-inspector-selection-bar {
+    top: 47px;
+    grid-template-columns: 1fr auto;
+  }
+  .library-inspector-selection-count {
+    grid-column: 1 / -1;
+  }
+  .library-compare-controls {
+    grid-template-columns: 1fr;
+  }
+  .library-compare-differences {
+    min-height: 0;
+  }
+  .library-compare-row {
+    grid-template-columns: 95px minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .cover-select-control {
+    opacity: .78;
+  }
+  .cover-select-control:has(input:checked) {
+    opacity: 1;
+  }
+}
+
+/* On phones and compact tablets the Inspector is a deterministic viewport sheet,
+   not a content-sized bottom drawer. The previous 72/82vh caps meant short and
+   long titles opened at different vertical positions, and iOS Safari could let the
+   sticky Inspector chrome drift under the app header as its visual viewport moved. */
+@media (max-width: 900px) {
+  body.workspace-inspector-open {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  .workspace-inspector {
+    top: 68px !important;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: auto;
+    max-height: none !important;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    border-top: 1px solid #33404d;
+    border-left: 0;
+    border-radius: 16px 16px 0 0;
+    scroll-padding-top: 54px;
+    transform: translateY(calc(100% + 2px));
+  }
+
+  body.workspace-inspector-open .workspace-inspector {
+    transform: translateY(0);
+  }
+
+  .workspace-inspector-head {
+    top: 0;
+    z-index: 8;
+    background: #0d1218;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .workspace-inspector-close {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (max-width: 760px) {
+  .workspace-inspector {
+    top: 62px !important;
+  }
+}
+/* ---- from library-selection-compact.css ---- */
+
+/* Compact multi-selection command bar.
+   The previous responsive layout stacked every bulk operation into its own full-width
+   row on phones. Keep selection state visible, promote the common commands, and move
+   secondary catalog work under More. */
+
+.library-display-toolbar.library-selection-toolbar-ready .library-selection-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: max-content;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 5px 7px;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.library-selection-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: max-content;
+  padding-right: 8px;
+  border-right: 1px solid var(--line);
+}
+
+.library-selection-summary .selection-count {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.library-selection-clear {
+  min-height: 30px !important;
+  padding: 4px 8px !important;
+  border-color: transparent !important;
+  background: transparent !important;
+  color: var(--muted) !important;
+  font-size: 12px !important;
+}
+
+.library-selection-clear:hover,
+.library-selection-clear:focus-visible {
+  color: var(--lime) !important;
+  border-color: rgba(174,255,48,.22) !important;
+  outline: 0;
+}
+
+.library-selection-primary {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.library-selection-command {
+  min-height: 34px !important;
+  padding: 5px 10px !important;
+  font-size: 12px !important;
+}
+
+.library-selection-command-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.library-display-toolbar .library-bulk-favorite.library-selection-command {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.library-display-toolbar .library-bulk-favorite.library-selection-command > span {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.library-display-toolbar .library-bulk-favorite.library-selection-command small {
+  color: inherit;
+  font-size: 12px;
+  line-height: 1;
+  text-transform: none;
+}
+
+.library-display-toolbar .library-bulk-favorite.library-selection-command:hover,
+.library-display-toolbar .library-bulk-favorite.library-selection-command:focus-visible,
+.library-display-toolbar .library-bulk-favorite.library-selection-command.active {
+  border-color: var(--lime);
+  color: var(--lime);
+  outline: 0;
+}
+
+.library-bulk-more-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.library-bulk-more-menu > summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.library-bulk-more-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.library-bulk-more-menu[open] > summary,
+.library-bulk-more-menu > summary:hover {
+  border-color: var(--lime);
+  color: var(--lime);
+}
+
+.library-bulk-more-options {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  z-index: 40;
+  display: grid;
+  gap: 3px;
+  min-width: 210px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #10171f;
+  box-shadow: 0 16px 36px rgba(0,0,0,.42);
+}
+
+.library-bulk-more-options > .button,
+.library-bulk-more-options > button,
+.library-bulk-more-options .library-bulk-match-summary {
+  width: 100%;
+  min-height: 36px;
+  justify-content: flex-start;
+  padding: 7px 9px;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+}
+
+.library-bulk-more-options > .button:hover,
+.library-bulk-more-options > button:hover,
+.library-bulk-more-options .library-bulk-match-summary:hover {
+  border-color: rgba(174,255,48,.24);
+  background: rgba(174,255,48,.06);
+}
+
+.library-bulk-more-options .library-bulk-match-menu {
+  width: 100%;
+}
+
+.library-bulk-more-options .library-bulk-match-options {
+  position: static;
+  min-width: 0;
+  margin-top: 3px;
+  padding: 3px 0 0 8px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.library-bulk-more-options .library-bulk-match-options .button {
+  min-height: 34px;
+  padding: 6px 8px;
+}
+
+@media (max-width: 760px) {
+  /* Density remains a quiet second row beneath Jump to and List/Covers. */
+  .library-display-toolbar.library-selection-toolbar-ready .cover-size-control.library-density-ready {
+    display: flex;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    max-width: none;
+    padding: 7px 2px 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .library-display-toolbar.library-selection-toolbar-ready .cover-size-control.library-density-ready[hidden] {
+    display: none;
+  }
+
+  .library-display-toolbar.library-selection-toolbar-ready .library-selection-actions {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    justify-self: stretch;
+    width: 100%;
+    max-width: none;
+    min-height: 0;
+    padding: 5px 6px 6px;
+    overflow: visible;
+  }
+
+  .library-selection-summary {
+    min-width: 0;
+    min-height: 28px;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 2px 4px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255,255,255,.07);
+  }
+
+  .library-selection-summary .selection-count {
+    font-size: 12px;
+  }
+
+  .library-selection-clear {
+    min-height: 26px !important;
+    padding: 2px 6px !important;
+  }
+
+  .library-selection-primary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    width: 100%;
+  }
+
+  .library-selection-primary > .library-selection-command,
+  .library-selection-primary > .library-bulk-more-menu > summary,
+  .library-display-toolbar .library-bulk-favorite.library-selection-command {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    min-height: 40px !important;
+    padding: 5px 4px !important;
+    justify-content: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .library-selection-primary > .library-selection-command,
+  .library-selection-primary > .library-bulk-more-menu > summary {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .library-display-toolbar .library-bulk-favorite.library-selection-command {
+    flex-direction: row;
+  }
+
+  .library-display-toolbar .library-bulk-favorite.library-selection-command small,
+  .library-selection-primary > .library-selection-command span:last-child,
+  .library-bulk-more-summary span:last-child {
+    font-size: 11px;
+  }
+
+  .library-bulk-more-menu {
+    min-width: 0;
+  }
+
+  .library-bulk-more-options {
+    top: calc(100% + 5px);
+    right: 0;
+    width: min(270px, calc(100vw - 34px));
+    min-width: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .library-display-toolbar.library-selection-toolbar-ready .cover-size-control.library-density-ready {
+    min-height: 42px;
+  }
+
+  .library-display-toolbar.library-selection-toolbar-ready.has-selection-actions {
+    padding: 5px 6px;
+  }
+}
+
+@media (max-width: 390px) {
+  .library-selection-primary > .library-selection-command,
+  .library-selection-primary > .library-bulk-more-menu > summary,
+  .library-display-toolbar .library-bulk-favorite.library-selection-command {
+    min-height: 38px !important;
+  }
+
+  .library-selection-command-icon {
+    display: none;
+  }
+}

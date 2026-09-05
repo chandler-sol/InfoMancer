@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Activity · InfoMancer{% endblock %}
 {% block content %}
-<header class="page-head"><div><p class="eyebrow">ACCOUNT ACTIVITY</p><h1>Activity</h1><p>Completed work, new findings, and failures from InfoMancer's existing action history.</p></div><div class="actions">{% if current_user.is_librarian %}<a class="button" href="/operations">Operation history</a>{% endif %}<a class="button" href="/activity{% if not unread_only %}?unread=1{% endif %}">{{ 'Show all' if unread_only else 'Unread only' }}</a>{% if activity_unread_count %}<form method="post" action="/activity/read"><input type="hidden" name="all_events" value="1"><button class="button">Mark all read</button></form>{% endif %}</div></header>
+<link rel="stylesheet" href="{{ url_for('static', path='activity.css') }}?v={{ static_version }}">
+<header class="page-head"><div><p class="eyebrow">ACCOUNT ACTIVITY</p><h1>Activity</h1><p>Completed work, new findings, and failures from InfoMancer's existing action history.</p></div><div class="actions activity-page-actions">{% if current_user.is_librarian %}<a class="button" href="/operations">Operation history</a>{% endif %}<a class="button" href="/activity{% if not unread_only %}?unread=1{% endif %}">{{ 'Show all' if unread_only else 'Unread only' }}</a>{% if activity_unread_count %}<form method="post" action="/activity/read"><input type="hidden" name="all_events" value="1"><button class="button">Mark all read</button></form>{% endif %}</div></header>
 <section class="activity-list">
 {% for item in items %}
 <article class="panel activity-item{% if item.unread %} unread{% endif %}">

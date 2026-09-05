@@ -48,6 +48,16 @@ class TaskWidgetStateContracts(unittest.TestCase):
         self.assertIn("event.key !== 'Escape'", script)
         self.assertIn("toggle.focus()", script)
 
+    def test_task_center_open_polish_cannot_reenter_on_class_mutations(self):
+        polish = (ROOT / "app/static/task-widget-open-polish.js").read_text(encoding="utf-8")
+
+        self.assertNotIn("MutationObserver", polish)
+        self.assertNotIn("attributeFilter", polish)
+        self.assertIn("action.textContent.trim() !== 'Clear'", polish)
+        self.assertIn("!widget.classList.contains('visible')", polish)
+        self.assertIn("queueMicrotask(preserveOpenVisibility)", polish)
+        self.assertIn("requestAnimationFrame(preserveOpenVisibility)", polish)
+
 
 if __name__ == "__main__":
     unittest.main()

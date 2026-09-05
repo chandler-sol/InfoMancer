@@ -2,9 +2,25 @@
 ; A normal uninstall is intentionally zero-residue. Updates are explicitly excluded
 ; so the updater can replace binaries without deleting the user's local catalog.
 
+; Preview CI replaces these local defaults immediately before the NSIS build. Keeping
+; safe defaults here means hand-built/local installers remain valid without requiring
+; Git or GitHub Actions environment variables.
+!ifndef INFOMANCER_BUILD_COMMIT
+  !define INFOMANCER_BUILD_COMMIT "local"
+!endif
+!ifndef INFOMANCER_BUILD_COMMIT_FULL
+  !define INFOMANCER_BUILD_COMMIT_FULL "local"
+!endif
+
+; Put the short build identity on every installer page so a tester can tell which
+; candidate is open without digging into file properties or the Actions run.
+BrandingText "InfoMancer build ${INFOMANCER_BUILD_COMMIT}"
+
 Var InfoMancerBackupPath
 
 !macro NSIS_HOOK_PREINSTALL
+  DetailPrint "InfoMancer build commit: ${INFOMANCER_BUILD_COMMIT_FULL}"
+
   ; A stale or running PyInstaller sidecar can otherwise survive a same-version
   ; reinstall. The main process is handled by Tauri's normal running-app guard.
   nsExec::Exec 'taskkill /F /IM infomancer-core.exe'

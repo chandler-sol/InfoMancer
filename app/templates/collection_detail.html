@@ -11,11 +11,15 @@
     {% if collection.description %}<p>{{ collection.description }}</p>{% endif %}
     <small data-collection-count-meta><span data-collection-item-count>{{ items|length }}</span> item{% if items|length != 1 %}s{% endif %} · {{ 'updates automatically' if collection.collection_type == 'smart' else 'manual order' }}</small>
     <div class="collection-header-toolbar">
-      {% if current_user.is_librarian and collection.collection_type == 'manual' %}
+      {% if current_user.is_librarian %}
       <div class="collection-header-actions">
+        {% if collection.collection_type == 'manual' %}
         <button type="button" class="button primary" data-collection-dialog-open="collection-add-dialog">+ Add titles</button>
         <button type="button" class="button" data-collection-reorder-toggle>Reorder</button>
         <button type="button" class="button" data-collection-dialog-open="collection-edit-dialog">Edit collection</button>
+        {% else %}
+        <a class="button primary" href="/collections/{{ collection.id }}/smart/edit">Edit Smart Collection</a>
+        {% endif %}
       </div>
       {% endif %}
       {% if items %}
@@ -70,7 +74,7 @@
         <summary class="button danger">Delete collection</summary>
         <form method="post" action="/collections/{{ collection.id }}/delete">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <p>This cannot be undone. The collection itself will be removed, but none of its media will be deleted.</p>
+          <p>The collection itself will be removed, but none of its media will be deleted. InfoMancer will offer an Undo on the Collections page immediately afterward.</p>
           <div class="collection-delete-actions"><button type="button" class="button" data-collection-delete-cancel>Cancel</button><button class="button danger">Delete {{ collection.name }}</button></div>
         </form>
       </details>
@@ -111,19 +115,21 @@
       <button type="submit" class="cover-favorite-button{% if item.favorite %} active{% endif %}" aria-label="{{ 'Remove' if item.favorite else 'Add' }} {{ item.display_title }} {{ 'from' if item.favorite else 'to' }} favorites" title="{{ 'Remove from favorites' if item.favorite else 'Add to favorites' }}"><span aria-hidden="true">★</span></button>
     </form>
     {% endif %}
-    {% if current_user.is_librarian and collection.collection_type == 'manual' %}
+    {% if current_user.is_librarian and (item.item_type == 'title' or collection.collection_type == 'manual') %}
     <div class="cover-card-actions" aria-label="Actions for {{ item.display_title }}">
       <details class="episode-menu cover-row-menu item-action-menu"><summary aria-label="Actions for {{ item.display_title }}" title="Collection item actions">⋮</summary><div>
         {% if item.item_type == 'title' %}<form method="post" action="/titles/{{ item.title_id }}/favorite"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="return_to" value="/collections/{{ collection.id }}"><button class="favorite-action{% if item.favorite %} active{% endif %}"><span>★</span>{{ 'Remove favorite' if item.favorite else 'Add favorite' }}</button></form><a href="/titles/{{ item.title_id }}/libraries" data-organize-dialog>Add to Libraries</a><a href="/titles/{{ item.title_id }}/organize" data-organize-dialog>Organize &amp; Tags</a><a href="/titles/{{ item.title_id }}/collections?return_to={{ ('/collections/' ~ collection.id)|urlencode }}">Manage Collections</a>{% endif %}
+        {% if collection.collection_type == 'manual' %}
         <form method="post" action="/collections/{{ collection.id }}/{{ 'episodes' if item.item_type == 'episode' else 'titles' }}/{{ item.item_id }}/move"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="direction" value="up"><button {% if loop.first %}disabled{% endif %}>Move earlier</button></form>
         <form method="post" action="/collections/{{ collection.id }}/{{ 'episodes' if item.item_type == 'episode' else 'titles' }}/{{ item.item_id }}/move"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="direction" value="down"><button {% if loop.last %}disabled{% endif %}>Move later</button></form>
         <form method="post" action="/collections/{{ collection.id }}/{{ 'episodes' if item.item_type == 'episode' else 'titles' }}/{{ item.item_id }}/remove"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="danger">Remove from collection</button></form>
+        {% endif %}
       </div></details>
     </div>
     {% endif %}
   </article>
 {% else %}
-  <div class="panel empty"><h2>This collection is empty</h2><p>{% if current_user.is_librarian %}Use Add titles to begin this collection.{% else %}A Librarian has not added any items yet.{% endif %}</p></div>
+  <div class="panel empty"><h2>This collection is empty</h2><p>{% if current_user.is_librarian and collection.collection_type == 'smart' %}This Smart Collection currently has no matches. Edit its saved rules if you expected titles here.{% elif current_user.is_librarian %}Use Add titles to begin this collection.{% else %}A Librarian has not added any items yet.{% endif %}</p></div>
 {% endfor %}
 </section>
 <script src="{{ url_for('static', path='collection-detail.js') }}?v={{ static_version }}" defer></script>

@@ -11,7 +11,7 @@ class WorkspaceFoundationTests(unittest.TestCase):
     def test_08_alpha_version_and_workspace_assets_are_enabled(self):
         main = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
         base = (ROOT / "app" / "templates" / "base.html").read_text(encoding="utf-8")
-        self.assertIn('APP_VERSION = "0.8.0-alpha.1"', main)
+        self.assertIn('APP_VERSION = "0.8.1-beta.1"', main)
         self.assertIn("path='workspace.css'", base)
         self.assertIn("path='workspace.js'", base)
         self.assertIn("path='workspace-ui.js'", base)

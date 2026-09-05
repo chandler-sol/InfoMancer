@@ -1,0 +1,631 @@
+/* Consolidated mobile chrome styles.
+   Merged from final-mobile-polish.css, mobile-header.css, and mobile-detail.css
+   in their original bootstrap injection order (general polish, header, detail).
+   Loaded by app-shell-bootstrap.js on every page. */
+/* ---- from final-mobile-polish.css ---- */
+
+/* Final 0.8 mobile polish. Keep these overrides narrow and structural so the
+   desktop workspace design remains unchanged. */
+
+/* Fingerprint cadence has one owner: Scheduled Tasks. Keep these controls in the
+   form for backwards-compatible submission, but do not present a second editor. */
+#hashing-settings-form label:has([name="hash_schedule_frequency"]),
+#hashing-settings-form label:has([name="hash_schedule_day"]),
+#hashing-settings-form label:has([name="hash_schedule_time"]) {
+  display: none !important;
+}
+
+.fingerprint-schedule-handoff {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid #2d3945;
+  border-radius: 7px;
+  background: #0e151c;
+}
+
+.fingerprint-schedule-handoff span {
+  min-width: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.fingerprint-schedule-handoff a {
+  flex: 0 0 auto;
+}
+
+.task-active .task-cancel-action {
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  margin: 10px 0 0 auto;
+  border-color: #704244;
+  color: #ff9b96;
+  white-space: normal;
+}
+
+.task-active .task-cancel-action:hover,
+.task-active .task-cancel-action:focus-visible {
+  border-color: #a75c59;
+  color: #ffc0bc;
+  background: #231619;
+}
+
+.task-active .task-cancel-action[disabled] {
+  cursor: wait;
+  opacity: .7;
+}
+
+/* Background panels, modal cards, and suggestion lists must stay inside the live
+   browser viewport. Mobile Safari's visible height changes as its address/tool bars
+   move, so use dynamic viewport units for these application-chrome surfaces. */
+.global-search-suggestions {
+  max-height: min(60dvh, 480px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.task-popover {
+  max-height: min(70dvh, 560px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.source-browser {
+  max-height: min(880px, calc(100dvh - 24px));
+}
+
+.collection-management-dialog {
+  max-height: calc(100dvh - var(--collection-dialog-top, 24px) - 12px);
+}
+
+.collection-dialog-card {
+  max-height: calc(100dvh - var(--collection-dialog-top, 24px) - 12px);
+}
+
+.collection-floating-menu {
+  max-height: min(520px, calc(100dvh - 24px));
+}
+
+.workspace-confirm-dialog,
+.workspace-command-palette,
+.title-overview-dialog,
+.cast-dialog,
+.tour-card,
+.announcement-popup,
+.setup-choice-card {
+  box-sizing: border-box;
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.workspace-toast-host {
+  top: calc(10px + env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+}
+
+/* Duplicate Review has a hover/focus explanation that was wider than the narrowest
+   supported phone viewport. Keep its existing alignment but cap its footprint. */
+.duplicate-fingerprint-tooltip {
+  width: min(310px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+}
+
+@media (max-width: 760px) {
+  /* Preserve content around display cutouts as well as the top/bottom Safari chrome.
+     Portrait devices normally report zero side insets; in landscape these values
+     keep the header and app shell clear of a notch or Dynamic Island cutout. */
+  .topbar {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+
+  .shell {
+    padding-left: max(15px, env(safe-area-inset-left));
+    padding-right: max(15px, env(safe-area-inset-right));
+  }
+
+  /* Metric values and labels were inheriting an inline layout on narrow screens,
+     producing strings such as 503Fresh. Give every metric an explicit stack. */
+  body .settings-metrics > div {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    align-content: center;
+    align-items: start;
+    gap: 4px !important;
+    min-width: 0;
+    padding: 14px 16px;
+  }
+
+  body .settings-metrics strong,
+  body .settings-metrics span {
+    display: block !important;
+    width: 100%;
+    margin: 0;
+    text-align: left;
+  }
+
+  body .settings-metrics strong {
+    line-height: 1.05;
+  }
+
+  body .settings-metrics span {
+    line-height: 1.28;
+  }
+
+  /* The mobile search expands into header real estate. Temporarily yielding the
+     two secondary header actions gives the field useful width without covering
+     interactive controls. Navigation and account controls remain available. */
+  .topbar .task-widget,
+  .topbar .announcement-button {
+    transition: opacity .14s ease, visibility .14s ease;
+  }
+
+  .topbar:has(.global-search.open) .task-widget,
+  .topbar:has(.global-search.open) .announcement-button {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .topbar .global-search.open {
+    left: 58px;
+    right: 108px;
+    width: auto;
+    max-width: none;
+  }
+
+  /* Popovers attached to the 62px mobile header need their own scroll container.
+     Without this, a long task list or navigation menu can disappear under Safari's
+     bottom chrome and leave its final actions unreachable. */
+  .topbar .global-search-suggestions,
+  .topbar .task-popover,
+  .topbar .site-menu-panel,
+  .topbar .account-menu-popover {
+    max-height: calc(100dvh - 84px - env(safe-area-inset-bottom));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .task-popover-controls button,
+  .source-browser-close,
+  .collection-dialog-close,
+  .workspace-drawer-chrome button,
+  .title-overview-dialog .overview-dialog-close {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .source-browser {
+    max-height: calc(100dvh - 16px);
+  }
+
+  .source-browser-shell {
+    padding-bottom: calc(17px + env(safe-area-inset-bottom));
+  }
+
+  .root-name-form {
+    max-height: calc(100dvh - 30px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .collection-management-dialog {
+    --collection-dialog-top: max(12px, env(safe-area-inset-top));
+    max-height: calc(100dvh - var(--collection-dialog-top) - 12px);
+  }
+
+  .collection-dialog-card {
+    max-height: calc(100dvh - var(--collection-dialog-top) - 12px);
+  }
+
+  .workspace-drawer-panel {
+    top: max(62px, 12dvh);
+  }
+
+  .workspace-toast-host {
+    top: calc(8px + env(safe-area-inset-top));
+    right: max(10px, env(safe-area-inset-right));
+  }
+
+  /* Settings navigation is intentionally horizontal on phones. Give it predictable
+     touch scrolling and let the active page snap to a useful resting position. */
+  body .settings-section-nav {
+    scroll-padding-inline: 12px;
+    scroll-snap-type: x proximity;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body .settings-section-nav a {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    scroll-snap-align: center;
+  }
+
+  .table-wrap,
+  .settings-history,
+  .settings-table-wrap,
+  .mie-history-table {
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Metadata search results are useful cards on desktop but too crowded when the
+     poster, copy, and action all compete for one phone-width flex row. Keep artwork
+     beside the copy and move the commit action onto its own full-width row. */
+  .results > .result {
+    display: grid;
+    grid-template-columns: 70px minmax(0, 1fr);
+    align-items: start;
+    gap: 12px 14px;
+    width: 100%;
+  }
+
+  .results > .result > div:first-child {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .results > .result > .grow {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .results > .result > form {
+    grid-column: 1 / -1;
+    width: 100%;
+    margin: 0;
+  }
+
+  .results > .result > form .button,
+  .results > .result > form button {
+    width: 100%;
+  }
+
+  /* File-protection choices are two-column rows: control plus copy. This removes
+     the detached radio/centered-copy appearance seen on iOS. */
+  body .safety-mode-choice {
+    display: grid !important;
+    grid-template-columns: 24px minmax(0, 1fr) !important;
+    align-items: start !important;
+    justify-items: stretch;
+    gap: 14px !important;
+    text-align: left !important;
+  }
+
+  body .safety-mode-choice > input[type="radio"] {
+    width: 20px !important;
+    height: 20px !important;
+    margin: 3px 0 0 !important;
+    justify-self: start;
+  }
+
+  body .safety-mode-choice > span {
+    display: grid !important;
+    gap: 4px;
+    min-width: 0;
+    text-align: left !important;
+  }
+
+  body .safety-mode-choice strong,
+  body .safety-mode-choice small {
+    display: block;
+    text-align: left !important;
+  }
+
+  /* Header actions on long System cards need their own row on phones. */
+  body #logging .settings-card-head {
+    flex-direction: column;
+    align-items: stretch;
+    min-height: 0;
+  }
+
+  body #logging .settings-card-head > .button-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    width: 100%;
+  }
+
+  body #logging .settings-card-head > .button-row .button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+  }
+
+  .fingerprint-schedule-handoff {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .fingerprint-schedule-handoff .button {
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+  }
+}
+
+/* Short landscape viewports are a different failure mode from narrow portrait
+   screens: there is plenty of width, but only a few hundred vertical pixels once
+   browser chrome is present. Preserve the side cutouts and reclaim vertical space
+   for sheets, drawers, and anchored popovers without changing desktop geometry. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .topbar {
+    padding-left: max(24px, env(safe-area-inset-left));
+    padding-right: max(24px, env(safe-area-inset-right));
+  }
+
+  .shell {
+    padding-left: max(24px, env(safe-area-inset-left));
+    padding-right: max(24px, env(safe-area-inset-right));
+  }
+
+  .topbar .global-search-suggestions,
+  .topbar .task-popover,
+  .topbar .site-menu-panel,
+  .topbar .account-menu-popover {
+    max-height: calc(100dvh - 76px - env(safe-area-inset-bottom));
+  }
+
+  .source-browser,
+  .workspace-confirm-dialog,
+  .workspace-command-palette,
+  .title-overview-dialog,
+  .cast-dialog,
+  .tour-card,
+  .announcement-popup,
+  .setup-choice-card {
+    max-width: calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 16px);
+    max-height: calc(100dvh - 12px);
+  }
+
+  .source-browser {
+    max-height: calc(100dvh - 8px);
+  }
+
+  .workspace-drawer-panel {
+    top: max(8px, env(safe-area-inset-top));
+    right: env(safe-area-inset-right);
+  }
+
+  .workspace-dialog-card {
+    padding: 18px;
+  }
+
+  .source-browser-shell {
+    padding-top: 18px;
+  }
+}
+
+@media (max-width: 520px) {
+  .workspace-dialog-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .workspace-dialog-actions .button,
+  .workspace-dialog-actions button {
+    width: 100%;
+  }
+
+  .page-head .search {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .page-head .search .button,
+  .page-head .search button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 420px) {
+  .results > .result {
+    grid-template-columns: 58px minmax(0, 1fr);
+    padding-inline: 14px;
+  }
+
+  .results > .result img {
+    width: 58px;
+    height: 87px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar .task-widget,
+  .topbar .announcement-button {
+    transition: none;
+  }
+}
+/* ---- from mobile-header.css ---- */
+
+/* Mobile-only header geometry. Keep account and announcement controls optically
+   centered and prevent WebKit tap/focus chrome from painting stray rings. */
+@media (max-width: 760px) {
+  .topbar .account-menu {
+    flex: 0 0 42px;
+    width: 42px;
+    min-width: 42px;
+  }
+
+  .topbar .account-menu > summary {
+    position: relative;
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
+    min-height: 42px;
+    padding: 0;
+    overflow: hidden;
+    border-color: #45641f;
+    outline: 0;
+    box-shadow: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .topbar .account-menu > summary:focus {
+    outline: 0;
+  }
+
+  .topbar .account-menu > summary:focus-visible {
+    overflow: visible;
+    box-shadow: 0 0 0 3px rgba(81, 214, 230, .28);
+  }
+
+  .topbar .account-avatar {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    border-radius: inherit;
+    background: var(--lime);
+    color: #081008;
+  }
+
+  .topbar .announcement-button {
+    overflow: visible;
+  }
+
+  .topbar .announcement-button svg {
+    width: 18px;
+    height: 18px;
+    overflow: visible;
+    transform: translateX(1px);
+  }
+}
+/* ---- from mobile-detail.css ---- */
+
+/* Mobile title pages should read as one continuous dossier rather than a desktop
+   grid squeezed into a phone. The poster and identity share the first row; Overview
+   and Cast & crew then use the full card width on a single typographic axis. */
+@media (max-width: 620px) {
+  body.has-app-sidebar .media-dossier .detail-page-head {
+    grid-template-columns: clamp(108px, 31vw, 138px) minmax(0, 1fr);
+    column-gap: 16px;
+    row-gap: 0;
+    align-items: start;
+    padding: 14px;
+  }
+
+  body.has-app-sidebar .media-dossier .detail-page-head .detail-poster-column {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: start;
+    width: 100%;
+    min-height: 0;
+    max-width: 138px;
+  }
+
+  body.has-app-sidebar .media-dossier .detail-page-head .detail-poster,
+  body.has-app-sidebar .media-dossier .detail-page-head .detail-poster-placeholder {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    max-width: none;
+    aspect-ratio: 2 / 3;
+    align-self: start;
+    object-fit: cover;
+  }
+
+  body.has-app-sidebar .media-dossier .detail-page-head .detail-copy {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+    padding-top: 0;
+  }
+
+  body.has-app-sidebar .media-dossier .detail-page-head .detail-copy h1 {
+    margin-top: 0;
+    font-size: clamp(27px, 7.8vw, 36px);
+  }
+
+  body.has-app-sidebar .media-dossier .title-hero-aside {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    min-width: 0;
+    gap: 0;
+    margin: 16px 0 0;
+    padding: 14px 0 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  body.has-app-sidebar .media-dossier .title-synopsis,
+  body.has-app-sidebar .media-dossier .movie-credits {
+    width: 100%;
+    margin: 0;
+    padding: 16px 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  body.has-app-sidebar .media-dossier .movie-credits {
+    border-top: 1px solid var(--line);
+  }
+
+  body.has-app-sidebar .media-dossier .movie-credits > div {
+    grid-template-columns: 78px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  body.has-app-sidebar .media-dossier .title-synopsis h2,
+  body.has-app-sidebar .media-dossier .movie-credits h2 {
+    margin-top: 0;
+  }
+
+  body.has-app-sidebar .media-dossier .title-overview {
+    margin-bottom: 0;
+  }
+
+  /* The On Disk header should share the file list's left/right axes instead of
+     centering the label while the count and file details pull in opposite directions. */
+  body.has-app-sidebar .media-dossier .dossier-on-disk > .panel-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+  }
+
+  body.has-app-sidebar .media-dossier.detail-kind-movie .dossier-on-disk .panel-head {
+    margin-inline: 0;
+    padding: 12px 0;
+    row-gap: 0;
+  }
+
+  body.has-app-sidebar .media-dossier .dossier-on-disk .on-disk-copy {
+    justify-self: start;
+    text-align: left;
+  }
+
+  body.has-app-sidebar .media-dossier .dossier-on-disk .dossier-file-count {
+    justify-self: end;
+    text-align: right;
+  }
+
+  body.has-app-sidebar .media-dossier .dossier-on-disk .series-controls {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+  }
+
+  /* The template keeps a shared series-controls host for movies and TV. Movies with
+     files do not put anything in that host, so the generic mobile margin used to turn
+     the empty element into a large blank row between the On Disk title and divider. */
+  body.has-app-sidebar .media-dossier.detail-kind-movie
+  .dossier-on-disk .series-controls:not(:has(> *)) {
+    display: none;
+    margin: 0;
+  }
+}

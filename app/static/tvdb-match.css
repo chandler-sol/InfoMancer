@@ -1,0 +1,96 @@
+.manual-tvdb-match {
+  display: grid;
+  grid-template-columns: minmax(0, .95fr) minmax(420px, 1.05fr);
+  grid-template-areas:
+    "heading heading"
+    "help form";
+  align-items: start;
+  gap: 18px 42px;
+}
+
+.manual-tvdb-heading {
+  grid-area: heading;
+}
+
+.manual-tvdb-heading .eyebrow,
+.manual-tvdb-heading h2,
+.manual-tvdb-help p {
+  margin-top: 0;
+}
+
+.manual-tvdb-heading h2 {
+  margin-bottom: 0;
+}
+
+.manual-tvdb-help {
+  grid-area: help;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.manual-tvdb-help p {
+  max-width: 760px;
+  margin-bottom: 0;
+  line-height: 1.55;
+}
+
+.manual-tvdb-web-search {
+  justify-self: start;
+  margin-top: 2px;
+}
+
+.manual-tvdb-form {
+  grid-area: form;
+  display: grid;
+  align-self: end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.manual-tvdb-form > label {
+  margin: 0;
+}
+
+.manual-tvdb-form .actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 10px;
+  margin: 0;
+}
+
+.manual-tvdb-form input {
+  width: 100%;
+  min-width: 0;
+}
+
+.manual-tvdb-form .button {
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .manual-tvdb-match {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "heading"
+      "help"
+      "form";
+    gap: 16px;
+  }
+
+  .manual-tvdb-form {
+    align-self: auto;
+  }
+}
+
+@media (max-width: 600px) {
+  .manual-tvdb-form .actions {
+    grid-template-columns: 1fr;
+  }
+
+  .manual-tvdb-form .button {
+    width: 100%;
+  }
+}

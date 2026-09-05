@@ -37,12 +37,17 @@ class ProfileLibraryPolishContracts(unittest.TestCase):
 
     def test_cross_document_navigation_keeps_app_chrome_stable(self):
         css = (STATIC / "modern.css").read_text(encoding="utf-8")
+        stable = (STATIC / "navigation-paint-stability.css").read_text(encoding="utf-8")
         self.assertIn("@view-transition", css)
         self.assertIn("navigation: auto", css)
         self.assertIn("view-transition-name: infomancer-chrome", css)
-        self.assertIn("view-transition-name: infomancer-content", css)
-        self.assertIn("infomancer-page-in", css)
-        self.assertIn("infomancer-page-out", css)
+        # Branches may differ on whether modern.css still carries the retired named
+        # content rule. The release-owned final layer must neutralize it either way.
+        self.assertIn("main.shell,", stable)
+        self.assertIn("view-transition-name: none !important", stable)
+        self.assertIn("::view-transition-old(root)", stable)
+        self.assertIn("::view-transition-new(root)", stable)
+        self.assertIn("infomancer-root-reveal", stable)
         self.assertIn("content-visibility: auto", css)
         self.assertIn("contain-intrinsic-size: 280px 420px", css)
         self.assertIn("@media (prefers-reduced-motion: reduce)", css)

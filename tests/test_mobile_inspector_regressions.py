@@ -10,7 +10,7 @@ STATIC = ROOT / "app" / "static"
 
 class MobileInspectorRegressionTests(unittest.TestCase):
     def test_mobile_inspector_uses_deterministic_header_to_bottom_track(self):
-        styles = (STATIC / "library-selection-polish.css").read_text(encoding="utf-8")
+        styles = (STATIC / "library-selection.css").read_text(encoding="utf-8")
         self.assertIn("top: 68px !important", styles)
         self.assertIn("top: 62px !important", styles)
         self.assertIn("bottom: 0", styles)
@@ -25,12 +25,14 @@ class MobileInspectorRegressionTests(unittest.TestCase):
         self.assertIn("panel.scrollTop = 0", source)
         self.assertIn("panel.scrollLeft = 0", source)
 
-    def test_consolidated_workspace_css_satisfies_legacy_core_guard(self):
+    def test_retired_workspace_polish_loader_is_fully_removed(self):
         loader = (STATIC / "workspace.js").read_text(encoding="utf-8")
-        self.assertIn("consolidatedWorkspacePolish", loader)
-        self.assertIn("/static/review.css", loader)
-        self.assertIn("dataset.workspaceDetailPolish = \"1\"", loader)
+        core = (STATIC / "workspace-core.js").read_text(encoding="utf-8")
         self.assertFalse((STATIC / "workspace-detail-polish.css").exists())
+        self.assertNotIn("workspace-detail-polish.css", loader)
+        self.assertNotIn("workspace-detail-polish.css", core)
+        self.assertNotIn("workspaceDetailPolish", loader)
+        self.assertNotIn("workspaceDetailPolish", core)
 
 
 if __name__ == "__main__":

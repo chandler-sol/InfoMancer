@@ -160,8 +160,9 @@
   const coverSizeControl = document.getElementById('cover-size-control');
   const letterJump = Boolean(letterJumpAlphabet);
   const library = Boolean(document.querySelector('.library-table') && document.getElementById('cover-library'));
+  const collectionPage = window.location.pathname === '/collections' || window.location.pathname.startsWith('/collections/');
   const detail = Boolean(document.querySelector('.media-dossier'));
-  const review = Boolean(document.querySelector('.review-workspace'));
+  const mediaFailures = Boolean(document.querySelector('.media-failures-heading'));
 
   if (letterJumpAlphabet) {
     letterJumpAlphabet.style.visibility = 'hidden';
@@ -197,24 +198,25 @@
     ? Promise.all([loadStyle('settings-system-nav.css')])
     : Promise.resolve();
   const savedViewStyles = savedViews
-    ? Promise.all([loadStyle('library-saved-views-polish.css')])
+    ? Promise.all([loadStyle('library-saved-views.css')])
     : Promise.resolve();
   const letterJumpStyles = letterJump
     ? Promise.all([loadStyle('library-letter-jump.css')])
     : Promise.resolve();
   const libraryStyles = library ? Promise.all([
-    loadStyle('library-controls-polish.css'),
+    loadStyle('library-controls.css'),
     loadStyle('library-performance.css'),
     loadStyle('library-density.css'),
-    loadStyle('library-selection-polish.css'),
-    loadStyle('library-selection-toolbar.css'),
-    loadStyle('library-selection-compact.css'),
+    loadStyle('library-selection.css'),
   ]) : Promise.resolve();
-  const detailStyles = detail
-    ? Promise.all([loadStyle('detail-page-polish.css')])
+  const collectionStyles = collectionPage
+    ? Promise.all([loadStyle('release-081-collections.css')])
     : Promise.resolve();
-  const reviewStyles = review
-    ? Promise.all([loadStyle('review-queue-polish.css')])
+  const detailStyles = detail
+    ? Promise.all([loadStyle('detail-page.css')])
+    : Promise.resolve();
+  const mediaFailureStyles = mediaFailures
+    ? Promise.all([loadStyle('media-failures.css')])
     : Promise.resolve();
   const letterJumpReady = letterJump
     ? letterJumpStyles.then(() => loadScript('library-letter-jump.js'))
@@ -230,7 +232,7 @@
 
   globalStyles.then(() => Promise.all([
     loadScript('workspace-ui-core.js'),
-    loadScript('task-widget.js'),
+    loadScript('task-widget.js').then(() => loadScript('task-widget-open-polish.js')),
     loadScript('app-navigation.js'),
   ]));
 
@@ -239,13 +241,17 @@
   });
   if (settingsCoverDensity) loadScript('settings-cover-density.js');
   savedViewStyles.then(() => {
-    if (savedViews) return loadScript('library-saved-views-polish.js');
+    if (savedViews) return loadScript('library-saved-views.js');
   });
   letterJumpReady.then(() => {
     if (!letterJump) return;
     letterJumpAlphabet.style.removeProperty('visibility');
     letterJumpAlphabet.removeAttribute('aria-hidden');
     letterJumpToolbar?.style.removeProperty('justify-content');
+  });
+
+  collectionStyles.then(() => {
+    if (collectionPage) return loadScript('release-081-collection-polish.js');
   });
 
   libraryStyles.then(async () => {
@@ -265,7 +271,9 @@
       'library-selection-polish.js',
       'library-inspector-lifecycle.js',
       'library-selection-toolbar.js',
+      'library-filter-dismiss.js',
     ].map((path) => loadScript(path));
+    pending.push(pending[4].then(() => loadScript('release-081-library-actions.js')));
     pending[0].then(() => {
       coverSizeControl?.style.removeProperty('visibility');
       coverSizeControl?.removeAttribute('aria-hidden');
@@ -276,7 +284,7 @@
   });
 
   detailStyles.then(() => {
-    if (detail) return loadScript('detail-page-polish.js');
+    if (detail) return loadScript('detail-page.js');
   });
-  reviewStyles.then(() => undefined);
+  mediaFailureStyles.then(() => undefined);
 })();

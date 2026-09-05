@@ -16,6 +16,7 @@ import zipfile
 import urllib.error
 import urllib.request
 from xml.etree import ElementTree
+from contextlib import asynccontextmanager
 from difflib import SequenceMatcher
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -101,10 +102,18 @@ try:
 except ProviderSecretError as exc:
     stored_provider_secrets = {}
     provider_secret_error = str(exc)
-APP_VERSION = "0.8.0-alpha.1"
+APP_VERSION = "0.8.1-beta.1"
+@asynccontextmanager
+async def _infomancer_lifespan(_app: FastAPI):
+    background.start()
+    yield
+    background.stop()
+
+
 app = FastAPI(
     title="InfoMancer", version=APP_VERSION,
     docs_url=None, redoc_url=None, openapi_url=None,
+    lifespan=_infomancer_lifespan,
 )
 
 
@@ -291,16 +300,6 @@ trash_retention_days = background.trash_retention_days
 maybe_start_trash_cleanup = background.maybe_start_trash_cleanup
 
 
-@app.on_event("startup")
-def start_background_scheduler() -> None:
-    background.start()
-
-
-@app.on_event("shutdown")
-def stop_background_scheduler() -> None:
-    background.stop()
-
-
 PUBLIC_PATHS = {"/health", "/login", "/setup", "/forgot-password"}
 
 def public_path(path: str) -> bool:
@@ -356,11 +355,18 @@ async def authentication_middleware(request: Request, call_next):
         response.headers.setdefault(
             "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
         )
+        # Template-rendered responses carry a request-local nonce (routes/security_hardening).
+        # When one exists, mirror it so the header policy is strict as well; responses that
+        # never rendered a template keep the legacy permissive fallback.
+        csp_nonce = getattr(request.state, "csp_nonce", "")
+        script_src = (
+            f"'self' 'nonce-{csp_nonce}'" if csp_nonce else "'self' 'unsafe-inline'"
+        )
         response.headers.setdefault(
             "Content-Security-Policy",
-            "default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; "
-            "script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; "
-            "base-uri 'self'; form-action 'self'",
+            f"default-src 'self'; object-src 'none'; img-src 'self' https: data:; "
+            f"style-src 'self' 'unsafe-inline'; script-src {script_src}; "
+            f"connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
         )
         return response
 

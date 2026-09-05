@@ -13,6 +13,15 @@
     catalogTabs.append(viewToolbar);
   }
 
+  /* Density is secondary to the List/Covers choice. Keep the view toggle as the
+     right-most anchored control so revealing Density grows the toolbar to the left
+     instead of moving the control the user just clicked. */
+  const viewControls = viewToolbar?.querySelector('.library-view-controls');
+  const viewToggle = viewControls?.querySelector('.library-view-toggle');
+  if (viewControls && viewToggle && control.nextElementSibling !== viewToggle) {
+    viewControls.insertBefore(control, viewToggle);
+  }
+
   const DESKTOP_KEY = 'infomancer-cover-density-desktop';
   const MOBILE_KEY = 'infomancer-cover-density-mobile';
   const LEGACY_KEY = 'infomancer-cover-size';
@@ -111,8 +120,13 @@
     return button;
   });
 
+  const initiallyVisible = !control.hidden;
   control.replaceChildren(label, desktop, mobile);
   control.classList.add('library-density-ready');
+  control.classList.toggle('is-collapsed', !initiallyVisible);
+  control.setAttribute('aria-hidden', String(!initiallyVisible));
+  control.inert = !initiallyVisible;
+  control.hidden = false;
 
   const applyDesktop = (value, persist = true) => {
     desktopValue = clampDesktop(value);

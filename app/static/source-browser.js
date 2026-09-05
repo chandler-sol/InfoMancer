@@ -28,8 +28,23 @@
   };
   const fetchJson = async (url) => {
     const response = await fetch(url, {cache: "no-store"});
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || "InfoMancer could not read that folder. Check the server permissions and try again.");
+    const text = await response.text();
+    let data = null;
+    if (text) {
+      try { data = JSON.parse(text); }
+      catch (_) {
+        if (!response.ok) {
+          throw new Error("InfoMancer could not read that folder. One of the available drives may be disconnected, unavailable, or blocked by Windows permissions.");
+        }
+        throw new Error("InfoMancer received an invalid response while reading that folder. Refresh the page and try again.");
+      }
+    }
+    if (!response.ok) {
+      throw new Error(data?.detail || "InfoMancer could not read that folder. Check the server permissions and try again.");
+    }
+    if (!data || typeof data !== "object") {
+      throw new Error("InfoMancer received an empty response while reading that folder. Refresh the page and try again.");
+    }
     return data;
   };
   const folderButton = (folder, location = false) => {
@@ -60,8 +75,12 @@
     try {
       const data = await fetchJson(`/api/source-browser?path=${encodeURIComponent(path)}`);
       current = data.current || "";
-      back.disabled = !data.parent;
-      back.onclick = data.parent ? () => load(data.parent) : null;
+      // A filesystem root such as L:\ has no parent, but it does have a logical
+      // parent in this UI: the list of available storage locations. Treat that
+      // location chooser as the Back target instead of disabling the button.
+      const backTarget = data.parent || (current ? "" : null);
+      back.disabled = backTarget === null;
+      back.onclick = backTarget !== null ? () => load(backTarget) : null;
       crumbs.replaceChildren();
       for (const crumb of data.breadcrumbs || []) {
         const button = document.createElement("button");
@@ -72,7 +91,7 @@
       }
       const choices = data.locations?.length ? data.locations : data.folders;
       list.replaceChildren(...choices.map(item => folderButton(item, Boolean(data.locations?.length))));
-      if (!choices.length) list.innerHTML = '<div class="empty">No subfolders are available here.</div>';
+      if (!choices.length) list.innerHTML = '<div class="empty">No accessible media locations are available here.</div>';
       currentPanel.hidden = !current;
       if (current) {
         currentName.textContent = data.name;

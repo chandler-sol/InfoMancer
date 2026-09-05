@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -25,6 +28,42 @@ class MediaInspectionError(RuntimeError):
         if not self.technical_detail:
             return self.user_message
         return f"{self.user_message}\n\nFFprobe output:\n{self.technical_detail}"
+
+
+def ffprobe_executable() -> str:
+    """Resolve FFprobe from an override, native bundle, or the host PATH."""
+    override = os.environ.get("INFOMANCER_FFPROBE", "").strip()
+    if override:
+        return override
+
+    bundle_dir = getattr(sys, "_MEIPASS", "")
+    if bundle_dir:
+        candidate = Path(bundle_dir) / ("ffprobe.exe" if os.name == "nt" else "ffprobe")
+        if candidate.is_file():
+            return str(candidate)
+
+    return shutil.which("ffprobe") or "ffprobe"
+
+
+def _quiet_subprocess_options() -> dict[str, object]:
+    """Keep helper executables invisible in native Windows desktop builds."""
+    if os.name != "nt":
+        return {}
+
+    options: dict[str, object] = {}
+    create_no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if create_no_window:
+        options["creationflags"] = create_no_window
+
+    startupinfo_type = getattr(subprocess, "STARTUPINFO", None)
+    startf_use_showwindow = getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+    sw_hide = getattr(subprocess, "SW_HIDE", 0)
+    if startupinfo_type is not None and startf_use_showwindow:
+        startupinfo = startupinfo_type()
+        startupinfo.dwFlags |= startf_use_showwindow
+        startupinfo.wShowWindow = sw_hide
+        options["startupinfo"] = startupinfo
+    return options
 
 
 def _ffprobe_error(path: Path, technical: str) -> MediaInspectionError:
@@ -121,19 +160,21 @@ def inspect_media(path: Path, timeout: int = 90) -> dict:
             headline="The cataloged file is no longer available",
         )
     command = [
-        "ffprobe", "-v", "error", "-show_entries",
+        ffprobe_executable(), "-v", "error", "-show_entries",
         "format=duration,bit_rate,format_name:stream=index,codec_type,codec_name,width,height,channels,color_transfer,color_primaries:stream_side_data",
         "-of", "json", str(path),
     ]
     try:
         result = subprocess.run(
             command, capture_output=True, text=True, timeout=timeout, check=False,
+            **_quiet_subprocess_options(),
         )
     except FileNotFoundError as exc:
         raise MediaInspectionError(
-            "FFprobe is not installed in the InfoMancer environment. Rebuild "
-            "the application image or install FFmpeg, then try again.",
-            headline="FFprobe is not installed",
+            "FFprobe is unavailable. Native InfoMancer builds include it; update "
+            "or reinstall InfoMancer, or configure INFOMANCER_FFPROBE for a "
+            "source/server installation, then try again.",
+            headline="FFprobe is unavailable",
         ) from exc
     except subprocess.TimeoutExpired as exc:
         raise MediaInspectionError(
@@ -141,6 +182,12 @@ def inspect_media(path: Path, timeout: int = 90) -> dict:
             "the storage is responsive and the file plays normally, then try "
             "again. A consistently slow or failing file may need to be recopied.",
             headline="Media inspection timed out",
+        ) from exc
+    except OSError as exc:
+        raise MediaInspectionError(
+            "InfoMancer could not start FFprobe for this file. Check that the media storage is connected and readable and that FFprobe can run on this system, then try again.",
+            headline="Media inspection could not start",
+            technical_detail=str(exc),
         ) from exc
     if result.returncode:
         technical = (result.stderr or "").strip()

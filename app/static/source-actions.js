@@ -38,6 +38,121 @@
     return "scan";
   };
 
+  const sourceRows = [...document.querySelectorAll(".root-row")];
+  const rowForSourceId = (sourceId) => sourceRows.find((row) => (
+    row.querySelector(".root-library-link[data-source-id]")?.dataset.sourceId === String(sourceId)
+  ));
+  const rowForSourceLabel = (label) => sourceRows.find((row) => (
+    row.querySelector(".root-library-link strong")?.textContent?.trim() === label
+  ));
+  const rowForScanAllTask = (task) => {
+    const detail = String(task?.detail || "");
+    const separator = " · ";
+    if (!detail.includes(separator)) return null;
+    return rowForSourceLabel(detail.slice(detail.lastIndexOf(separator) + separator.length).trim());
+  };
+  const setRowScanState = (row, active, detail = "") => {
+    if (!row) return;
+    const status = row.querySelector("[data-source-scan-status]");
+    const scanButton = row.querySelector('.source-action-rail form[action$="/scan"] button');
+    row.classList.toggle("source-row-scanning", active);
+    row.dataset.scanActive = active ? "1" : "0";
+
+    if (status) {
+      if (active) {
+        const copy = String(detail || "").trim();
+        status.textContent = copy
+          ? (copy.toLowerCase().startsWith("scanning") ? copy : `Scanning · ${copy}`)
+          : "Scanning…";
+        status.hidden = false;
+      } else {
+        status.hidden = true;
+      }
+    }
+
+    if (scanButton) {
+      if (!scanButton.dataset.sourceScanIdleText) {
+        scanButton.dataset.sourceScanIdleText = scanButton.textContent.trim() || "Scan";
+      }
+      if (active) {
+        scanButton.disabled = true;
+        scanButton.textContent = "Scanning…";
+      } else if (scanButton.dataset.sourceScanIdleText) {
+        scanButton.disabled = false;
+        scanButton.textContent = scanButton.dataset.sourceScanIdleText;
+      }
+    }
+  };
+
+  sourceRows.forEach((row) => {
+    if (row.dataset.scanActive !== "1") return;
+    const existing = row.querySelector("[data-source-scan-status]")?.textContent?.trim() || "Scanning…";
+    setRowScanState(row, true, existing);
+  });
+
+  // The task center already owns background-task polling. Observe its task snapshots
+  // instead of adding a second poller to Sources, then refresh the server-rendered
+  // counts and health state once a source scan disappears from the active task list.
+  const isSourceScanTaskId = (id) => id === "scan-all" || /^scan-\d+$/.test(id);
+  const scanTaskIdFor = (form, kind) => {
+    if (kind === "scan-all") return "scan-all";
+    if (kind !== "scan") return "";
+    const match = actionPath(form).match(/^\/roots\/(\d+)\/scan$/);
+    return match ? `scan-${match[1]}` : "";
+  };
+  const observedScanTasks = new Set();
+  document.querySelectorAll('.root-row[data-scan-active="1"] .root-library-link[data-source-id]').forEach((link) => {
+    if (link.dataset.sourceId) observedScanTasks.add(`scan-${link.dataset.sourceId}`);
+  });
+  let scanRefreshScheduled = false;
+  const scheduleScanRefresh = () => {
+    if (scanRefreshScheduled) return;
+    scanRefreshScheduled = true;
+    showFeedback("Scan complete. Refreshing source totals…", "success", 0);
+    window.setTimeout(() => window.location.reload(), 250);
+  };
+  const rememberScanTask = (form, kind) => {
+    const taskId = scanTaskIdFor(form, kind);
+    if (taskId) observedScanTasks.add(taskId);
+  };
+  document.addEventListener("infomancer:tasks", (event) => {
+    const tasks = Array.isArray(event.detail?.tasks) ? event.detail.tasks : [];
+    const scanTasks = tasks.filter((task) => isSourceScanTaskId(String(task?.id || "")));
+    const currentScanTasks = new Set(scanTasks.map((task) => String(task?.id || "")));
+    const activeRows = new Set();
+
+    scanTasks.forEach((task) => {
+      const taskId = String(task?.id || "");
+      let row = null;
+      let detail = String(task?.detail || "");
+      if (taskId === "scan-all") {
+        row = rowForScanAllTask(task);
+        detail = row ? "Scanning now · Scan all in progress" : detail;
+      } else {
+        const sourceId = taskId.replace(/^scan-/, "");
+        row = rowForSourceId(sourceId);
+      }
+      if (row) {
+        activeRows.add(row);
+        setRowScanState(row, true, detail);
+      }
+    });
+
+    sourceRows.forEach((row) => {
+      if (row.classList.contains("source-row-scanning") && !activeRows.has(row)) {
+        setRowScanState(row, false);
+      }
+    });
+
+    for (const taskId of observedScanTasks) {
+      if (!currentScanTasks.has(taskId)) {
+        scheduleScanRefresh();
+        return;
+      }
+    }
+    currentScanTasks.forEach((taskId) => observedScanTasks.add(taskId));
+  });
+
   const optimisticTaskWidget = (kind, label) => {
     if (kind === "check") return;
     const widget = document.getElementById("task-widget");
@@ -141,7 +256,11 @@
         }
 
         if (kind === "check") refreshConnectionState(freshDocument, form);
-        else optimisticTaskWidget(kind, label);
+        else {
+          rememberScanTask(form, kind);
+          optimisticTaskWidget(kind, label);
+          if (kind === "scan") setRowScanState(row, true, "Starting…");
+        }
 
         const serverMessage = flashMessageFrom(freshDocument);
         const fallbackMessage = kind === "check"
@@ -152,8 +271,10 @@
         showFeedback(serverMessage || fallbackMessage, "success");
 
         if (kind !== "check") {
-          button.textContent = "Started";
-          window.setTimeout(() => resetButton(button, originalText), 900);
+          if (kind === "scan-all") {
+            button.textContent = "Started";
+            window.setTimeout(() => resetButton(button, originalText), 900);
+          }
         } else {
           resetButton(button, originalText);
         }
@@ -163,11 +284,47 @@
           "error",
           6500,
         );
+        if (kind === "scan") setRowScanState(row, false);
         resetButton(button, originalText);
       } finally {
         form.dataset.sourceSubmitting = "0";
         row?.classList.remove("source-row-working");
       }
     });
+  });
+})();
+
+(() => {
+  const editors = [...document.querySelectorAll(".root-name-editor")];
+  const closeEditors = (except = null) => {
+    editors.forEach((editor) => {
+      if (editor !== except) editor.removeAttribute("open");
+    });
+  };
+
+  editors.forEach((editor) => {
+    editor.addEventListener("toggle", () => {
+      if (editor.open) closeEditors(editor);
+    });
+  });
+
+  document.querySelectorAll("[data-cancel-root-name]").forEach((button) => {
+    button.addEventListener("click", () => button.closest("details")?.removeAttribute("open"));
+  });
+
+  document.addEventListener("click", (event) => {
+    editors.forEach((editor) => {
+      if (editor.open && !editor.contains(event.target)) editor.removeAttribute("open");
+    });
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeEditors();
+  });
+
+  document.querySelectorAll(".root-library-link[data-source-id]").forEach((link) => {
+    const key = `infomancer-source-opened:${link.dataset.sourceId}`;
+    if (sessionStorage.getItem(key)) link.classList.add("session-opened");
+    link.addEventListener("click", () => sessionStorage.setItem(key, "1"));
   });
 })();

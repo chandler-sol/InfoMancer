@@ -1,0 +1,81 @@
+/* Canonical close-mark rendering for shared application chrome.
+   Modal-specific styles own button size, border, and color. This file alone owns
+   close-mark geometry so no font glyph or page stylesheet can distort the X. */
+.source-browser-close,
+.organize-dialog-close,
+.overview-dialog-close,
+.title-cast-dialog-close,
+.profile-account-dialog-close,
+.profile-avatar-dialog-close,
+.workspace-inspector-close,
+.metadata-maintenance-close,
+.tvdb-credentials-close,
+#task-dismiss {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  font-size: 0 !important;
+  line-height: 0 !important;
+}
+
+.source-browser-close::before,
+.source-browser-close::after,
+.organize-dialog-close::before,
+.organize-dialog-close::after,
+.overview-dialog-close::before,
+.overview-dialog-close::after,
+.title-cast-dialog-close::before,
+.title-cast-dialog-close::after,
+.profile-account-dialog-close::before,
+.profile-account-dialog-close::after,
+.profile-avatar-dialog-close::before,
+.profile-avatar-dialog-close::after,
+.workspace-inspector-close::before,
+.workspace-inspector-close::after,
+.metadata-maintenance-close::before,
+.metadata-maintenance-close::after,
+.tvdb-credentials-close::before,
+.tvdb-credentials-close::after,
+#task-dismiss::before,
+#task-dismiss::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: block;
+  width: 17px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  transform-origin: center;
+  pointer-events: none;
+}
+
+.source-browser-close::before,
+.organize-dialog-close::before,
+.overview-dialog-close::before,
+.title-cast-dialog-close::before,
+.profile-account-dialog-close::before,
+.profile-avatar-dialog-close::before,
+.workspace-inspector-close::before,
+.metadata-maintenance-close::before,
+.tvdb-credentials-close::before,
+#task-dismiss::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.source-browser-close::after,
+.organize-dialog-close::after,
+.overview-dialog-close::after,
+.title-cast-dialog-close::after,
+.profile-account-dialog-close::after,
+.profile-avatar-dialog-close::after,
+.workspace-inspector-close::after,
+.metadata-maintenance-close::after,
+.tvdb-credentials-close::after,
+#task-dismiss::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}

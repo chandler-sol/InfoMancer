@@ -266,7 +266,9 @@ class MetadataMaintenanceTests(unittest.TestCase):
         task_widget = (root / "app/static/task-widget.js").read_text(
             encoding="utf-8"
         )
-        modern = (root / "app/static/modern.css").read_text(encoding="utf-8")
+        dialog_controls = (root / "app/static/dialog-controls.css").read_text(
+            encoding="utf-8"
+        )
         title_route = (root / "app/routes/title_metadata_async.py").read_text(
             encoding="utf-8"
         )
@@ -300,9 +302,16 @@ class MetadataMaintenanceTests(unittest.TestCase):
         self.assertNotIn("threading.Thread", title_route)
         self.assertNotIn("queue_metadata_refresh =", title_route)
 
-        self.assertIn('dialog button[aria-label^="Close"]', modern)
-        self.assertIn('content: "×"', modern)
-        self.assertIn("place-items: center !important", modern)
+        self.assertIn(".metadata-maintenance-close,", dialog_controls)
+        self.assertIn(".tvdb-credentials-close,", dialog_controls)
+        self.assertIn(".metadata-maintenance-close::before,", dialog_controls)
+        self.assertIn('content: "";', dialog_controls)
+        self.assertIn(
+            "transform: translate(-50%, -50%) rotate(45deg)", dialog_controls
+        )
+        self.assertIn(
+            "transform: translate(-50%, -50%) rotate(-45deg)", dialog_controls
+        )
 
 
 if __name__ == "__main__":

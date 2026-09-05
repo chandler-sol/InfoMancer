@@ -31,6 +31,18 @@
     try { localStorage.setItem(STORAGE_KEY, view); } catch (_error) {}
   };
 
+  const setDensityVisible = (visible) => {
+    if (!densityControl) return;
+    if (!densityControl.classList.contains('library-density-ready')) {
+      densityControl.hidden = !visible;
+      return;
+    }
+    densityControl.hidden = false;
+    densityControl.classList.toggle('is-collapsed', !visible);
+    densityControl.setAttribute('aria-hidden', String(!visible));
+    densityControl.inert = !visible;
+  };
+
   const markLoading = (view) => {
     if (view === 'covers') {
       if (!coverSurface.querySelector('.library-surface-loading')) {
@@ -145,7 +157,7 @@
     const covers = next === 'covers';
     listSurface.hidden = covers;
     coverSurface.hidden = !covers;
-    if (densityControl) densityControl.hidden = !covers;
+    setDensityVisible(covers);
     listButton.classList.toggle('active', !covers);
     coverButton.classList.toggle('active', covers);
     listButton.setAttribute('aria-pressed', String(!covers));

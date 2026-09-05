@@ -19,7 +19,7 @@
       </div>
       <div class="announcement-form-row dates">
         <label>Starts<input type="datetime-local" name="starts_at" value="{{ announcement_form.starts_at or announcement_now }}" required><small>Uses the installation time zone.</small></label>
-        <label>Ends <span class="muted">required when recurring</span><input type="datetime-local" name="ends_at" value="{{ announcement_form.ends_at or '' }}"></label>
+        <label>Ends<input type="datetime-local" name="ends_at" value="{{ announcement_form.ends_at or '' }}"><small>Required when recurring.</small></label>
       </div>
       <button class="button primary">Publish announcement</button>
     </form>

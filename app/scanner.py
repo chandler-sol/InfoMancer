@@ -21,12 +21,57 @@ class SourceUnavailableError(ValueError):
     """The configured source could not be reached safely."""
 
 
+def _lexical_absolute(path: Path) -> Path:
+    """Normalize an absolute path without asking the filesystem to resolve it."""
+    expanded = path.expanduser()
+    if expanded.is_absolute():
+        return Path(os.path.normpath(os.fspath(expanded)))
+    return Path(os.path.abspath(os.fspath(expanded)))
+
+
+def _resolve_scan_path(path: Path, *, directory: bool = False) -> tuple[Path, bool]:
+    """Resolve a scan path while tolerating WinError 1272 on readable mappings.
+
+    Windows can reject final-path resolution for a mapped NFS/SMB location even
+    though normal directory enumeration and file access work. The source browser
+    already has to tolerate that provider quirk. Scanning must do the same or a
+    folder can preview successfully and then immediately degrade with zero files.
+
+    The fallback is deliberately narrow: only WinError 1272 is accepted, and the
+    lexical path must still be directly readable before it is used. Callers keep
+    the existing symlink/junction and containment checks around this helper.
+    """
+    try:
+        return path.resolve(strict=True), False
+    except OSError as exc:
+        if getattr(exc, "winerror", None) != 1272:
+            raise
+        lexical = _lexical_absolute(path)
+        try:
+            if directory:
+                with os.scandir(lexical):
+                    pass
+            else:
+                os.stat(lexical)
+        except OSError:
+            raise exc
+        return lexical, True
+
+
+def _readable_directory(path: Path) -> bool:
+    try:
+        with os.scandir(path):
+            return True
+    except OSError:
+        return False
+
+
 def _walk_files(root: Path, errors: list[str]):
     def on_error(error: OSError) -> None:
         errors.append(str(error))
 
     try:
-        resolved_root = root.resolve(strict=True)
+        resolved_root, lexical_root = _resolve_scan_path(root, directory=True)
     except OSError as exc:
         errors.append(str(exc))
         return
@@ -57,7 +102,11 @@ def _walk_files(root: Path, errors: list[str]):
                 # files whose resolved path remains under the configured root.
                 if candidate.is_symlink() or candidate.is_junction():
                     continue
-                candidate.resolve(strict=True).relative_to(resolved_root)
+                if lexical_root:
+                    resolved_candidate = _lexical_absolute(candidate)
+                else:
+                    resolved_candidate, _ = _resolve_scan_path(candidate)
+                resolved_candidate.relative_to(resolved_root)
             except ValueError:
                 errors.append(f"Skipped a file that resolves outside the configured source: {candidate}")
                 continue
@@ -65,6 +114,31 @@ def _walk_files(root: Path, errors: list[str]):
                 errors.append(str(exc))
                 continue
             yield candidate
+
+
+def _catalog_fully_accounted(
+    previous_count: int, file_count: int, preserved_count: int,
+) -> bool:
+    """Return true when a rescan proved every known catalog file is still visible."""
+    return previous_count > 0 and preserved_count == 0 and file_count >= previous_count
+
+
+def _read_errors_block_health(
+    errors: list[str], *, previous_count: int, file_count: int, preserved_count: int,
+) -> bool:
+    """Block Source Guard only when read errors coincide with an incomplete view.
+
+    Filesystem providers can report metadata or enumeration errors for entries that
+    do not hide any previously cataloged media. When a complete rescan independently
+    accounts for every known catalog file and nothing must be preserved, keep the
+    source healthy and surface the errors as non-blocking scan warnings instead.
+    Any read error on a first scan or alongside missing catalog files remains blocking.
+    """
+    if not errors:
+        return False
+    return not _catalog_fully_accounted(previous_count, file_count, preserved_count)
+
+
 EPISODE_RE = re.compile(
     r"(?i)(?:^|[. _\-])s(?P<season>\d{1,3})[. _\-]*e(?P<start>\d{1,3})"
     r"(?:[. _\-]*(?:e|-e?)(?P<end>\d{1,3}))?"
@@ -109,7 +183,10 @@ class ParsedTitle:
 
 def clean_words(value: str) -> str:
     value = ID_TAG_RE.sub(" ", value)
-    value = value.replace(".", " ").replace("_", " ")
+    # Periods are common filename separators, but a period between digits can be
+    # meaningful title punctuation (for example "Jackass 3.5"). Preserve only
+    # digit-to-digit periods while normalizing the rest like ordinary separators.
+    value = re.sub(r"(?<!\d)\.|\.(?!\d)", " ", value).replace("_", " ")
     return re.sub(r"\s+", " ", value).strip(" -")
 
 
@@ -202,7 +279,7 @@ def scan_root(
     *, force_cleanup: bool = False,
 ) -> dict[str, int | str]:
     root = Path(root_row["path"])
-    if not root.exists() or not root.is_dir():
+    if not _readable_directory(root):
         raise SourceUnavailableError(f"Media path is not an accessible directory: {root}")
 
     scan_id = uuid.uuid4().hex
@@ -285,12 +362,18 @@ def scan_root(
     suspicious_drop = previous_count > 0 and (
         file_count == 0 or (previous_count >= 10 and file_count * 4 < previous_count)
     )
-    degraded = bool(read_errors or (suspicious_drop and not force_cleanup))
     preserved_count = int(conn.execute(
         """SELECT COUNT(*) FROM files f JOIN titles t ON t.id=f.title_id
            WHERE t.root_id=? AND f.seen_scan!=?""",
         (root_row["id"], scan_id),
     ).fetchone()[0])
+    read_errors_blocking = _read_errors_block_health(
+        read_errors,
+        previous_count=previous_count,
+        file_count=file_count,
+        preserved_count=preserved_count,
+    )
+    degraded = bool(read_errors_blocking or (suspicious_drop and not force_cleanup))
     if not degraded:
         conn.execute(
             "DELETE FROM files WHERE title_id IN (SELECT id FROM titles WHERE root_id = ?) AND seen_scan != ?",
@@ -305,11 +388,16 @@ def scan_root(
             "UPDATE titles SET last_scanned_at=? WHERE id=?", (now, title_id)
         )
     if degraded:
-        reason = (
-            f"The source returned {len(read_errors)} read error(s)."
-            if read_errors else
-            f"Only {file_count:,} of the previous {previous_count:,} files were visible."
-        )
+        if read_errors_blocking:
+            detail = str(read_errors[0]).strip()[:700] if read_errors else ""
+            extra = f" (+{len(read_errors) - 1} more)" if len(read_errors) > 1 else ""
+            reason = f"The source returned {len(read_errors)} read error(s)"
+            if detail:
+                reason += f": {detail}{extra}"
+            else:
+                reason += "."
+        else:
+            reason = f"Only {file_count:,} of the previous {previous_count:,} files were visible."
         conn.execute(
             """UPDATE roots SET health_status='degraded',last_checked_at=?,last_seen_at=?,
                last_error=?,last_observed_file_count=?,guard_preserved_count=? WHERE id=?""",
@@ -329,6 +417,8 @@ def scan_root(
         "source_status": "degraded" if degraded else "healthy",
         "preserved": preserved_count if degraded else 0,
         "read_errors": len(read_errors),
+        "read_warnings": len(read_errors) if read_errors and not degraded else 0,
+        "read_error_detail": str(read_errors[0])[:1000] if read_errors else "",
     }
 
 
@@ -338,7 +428,7 @@ def scan_title(
     progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, int | str]:
     folder = Path(title_row["folder_path"])
-    if title_row["kind"] != "tv" or not folder.exists() or not folder.is_dir():
+    if title_row["kind"] != "tv" or not _readable_directory(folder):
         raise SourceUnavailableError(f"Series path is not an accessible directory: {folder}")
 
     scan_id = uuid.uuid4().hex
@@ -389,22 +479,33 @@ def scan_title(
     suspicious_drop = previous_count > 0 and (
         file_count == 0 or (previous_count >= 10 and file_count * 4 < previous_count)
     )
-    degraded = bool(read_errors or suspicious_drop)
     preserved_count = int(conn.execute(
         "SELECT COUNT(*) FROM files WHERE title_id=? AND seen_scan!=?",
         (title_row["id"], scan_id),
     ).fetchone()[0])
+    read_errors_blocking = _read_errors_block_health(
+        read_errors,
+        previous_count=previous_count,
+        file_count=file_count,
+        preserved_count=preserved_count,
+    )
+    degraded = bool(read_errors_blocking or suspicious_drop)
     if not degraded:
         conn.execute(
             "DELETE FROM files WHERE title_id=? AND seen_scan != ?",
             (title_row["id"], scan_id),
         )
     else:
-        reason = (
-            f"The series scan returned {len(read_errors)} read error(s)."
-            if read_errors else
-            f"Only {file_count:,} of the previous {previous_count:,} series files were visible."
-        )
+        if read_errors_blocking:
+            detail = str(read_errors[0]).strip()[:700] if read_errors else ""
+            extra = f" (+{len(read_errors) - 1} more)" if len(read_errors) > 1 else ""
+            reason = f"The series scan returned {len(read_errors)} read error(s)"
+            if detail:
+                reason += f": {detail}{extra}"
+            else:
+                reason += "."
+        else:
+            reason = f"Only {file_count:,} of the previous {previous_count:,} series files were visible."
         conn.execute(
             """UPDATE roots SET health_status='degraded',last_checked_at=?,last_seen_at=?,
                last_error=?,guard_preserved_count=guard_preserved_count+? WHERE id=?""",
@@ -420,4 +521,7 @@ def scan_title(
         "files": file_count, "titles": 1, "scan_id": scan_id,
         "source_status": "degraded" if degraded else "healthy",
         "preserved": preserved_count if degraded else 0,
+        "read_errors": len(read_errors),
+        "read_warnings": len(read_errors) if read_errors and not degraded else 0,
+        "read_error_detail": str(read_errors[0])[:1000] if read_errors else "",
     }

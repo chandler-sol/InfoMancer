@@ -61,13 +61,23 @@ class DuplicateTrashService:
         trash_dir = trash_root / datetime.now().strftime("%Y-%m-%d")
         destination = trash_dir / f"{uuid.uuid4().hex[:10]}-{source.name}"
         self._require_inside(destination, trash_root)
-        trash_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            trash_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise DuplicateTrashError(
+                "InfoMancer could not create its managed Trash folder because this storage location is unavailable or not writable. No file was changed."
+            ) from exc
         # Re-resolve after creation so an existing or concurrently replaced symlink
         # cannot redirect managed Trash outside the configured media root.
         trash_root = self._managed_trash_root(root)
         self._require_inside(destination, trash_root)
         snapshot = {column: row[column] for column in FILE_COLUMNS}
-        shutil.move(str(source), str(destination))
+        try:
+            shutil.move(str(source), str(destination))
+        except OSError as exc:
+            raise DuplicateTrashError(
+                "InfoMancer could not move the selected file into managed Trash. Check that the source is connected and writable. No catalog entry was changed."
+            ) from exc
         try:
             with self.database.connect() as conn:
                 cursor = conn.execute(
@@ -81,10 +91,17 @@ class DuplicateTrashService:
                 )
                 conn.execute("DELETE FROM files WHERE id=?", (file_id,))
                 return int(cursor.lastrowid)
-        except Exception:
-            source.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(destination), str(source))
-            raise
+        except Exception as exc:
+            try:
+                source.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(destination), str(source))
+            except OSError as rollback_exc:
+                raise DuplicateTrashError(
+                    "InfoMancer moved the file into managed Trash but could not finish the catalog update or restore the file automatically. Do not make additional changes until you review Logs and the managed Trash folder."
+                ) from rollback_exc
+            raise DuplicateTrashError(
+                "InfoMancer could not finish the managed Trash catalog update, so the file was restored to its original location."
+            ) from exc
 
     def verify_manually_removed(self, file_id: int, user_id: int | None = None) -> str:
         row = self._catalog_file(file_id)
@@ -227,9 +244,21 @@ class DuplicateTrashService:
             raise DuplicateTrashError(
                 "The trashed file is missing from InfoMancer’s managed trash folder, so it could not be restored."
             )
-        snapshot = json.loads(row["file_snapshot"])
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(source), str(destination))
+        try:
+            snapshot = json.loads(row["file_snapshot"])
+            if not isinstance(snapshot, dict):
+                raise TypeError("file_snapshot must be a JSON object")
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise DuplicateTrashError(
+                "InfoMancer could not restore this item because its managed Trash record is unreadable. No file was changed."
+            ) from exc
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source), str(destination))
+        except OSError as exc:
+            raise DuplicateTrashError(
+                "InfoMancer could not restore this file because the source storage is unavailable or not writable. No catalog entry was changed."
+            ) from exc
         snapshot["path"] = str(destination)
         try:
             with self.database.connect() as conn:
@@ -243,10 +272,17 @@ class DuplicateTrashService:
                     "UPDATE duplicate_trash SET status='restored',restored_at=CURRENT_TIMESTAMP WHERE id=?",
                     (trash_id,),
                 )
-        except Exception:
-            source.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(destination), str(source))
-            raise
+        except Exception as exc:
+            try:
+                source.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(destination), str(source))
+            except OSError as rollback_exc:
+                raise DuplicateTrashError(
+                    "InfoMancer restored the file but could not finish the catalog update or return it to managed Trash automatically. Do not make additional changes until you review Logs."
+                ) from rollback_exc
+            raise DuplicateTrashError(
+                "InfoMancer could not finish the restore catalog update, so the file was returned to managed Trash."
+            ) from exc
         return str(destination)
 
     def purge_expired(self) -> int:
@@ -306,6 +342,10 @@ class DuplicateTrashService:
     def _require_inside(path: Path, parent: Path) -> None:
         try:
             path.resolve(strict=False).relative_to(parent.resolve(strict=False))
+        except OSError as exc:
+            raise DuplicateTrashError(
+                "InfoMancer could not verify this storage path because the source is unavailable or unreadable. Reconnect the source and try again. No file was changed."
+            ) from exc
         except ValueError as exc:
             raise DuplicateTrashError(
                 "InfoMancer stopped because the selected path is outside its configured source. No file was changed."

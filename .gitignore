@@ -15,13 +15,30 @@ htmlcov/
 .vscode/
 data/
 data-sandbox/
+data-before-reset/
 sandbox-media/
+
+# SQLite catalogs and sidecar files are runtime/local state, never repository source.
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-shm
+*.sqlite3-wal
+
 !.env.sandbox.example
 *.log
 *.tar.gz
 dist/
 build/
 *.spec
+im_jobs.json
 
 # Desktop build output and dependency caches are reproducible and must not be committed.
 node_modules/
@@ -36,5 +53,6 @@ showcase/screenshots/
 Thumbs.db
 Desktop.ini
 
-# graft's local graph cache — regenerable, not committed (run `graft build`).
+# Graft's local graph cache and query snapshots are regenerable, not repository source.
 graft/
+.graft-*.txt

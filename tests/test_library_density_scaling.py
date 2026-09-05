@@ -25,6 +25,22 @@ class LibraryDensityScalingTests(unittest.TestCase):
         self.assertIn('max-width: none;', mobile_rule)
         self.assertIn('justify-self: stretch;', mobile_rule)
 
+    def test_density_reveals_to_left_without_moving_view_toggle(self):
+        styles = (ROOT / "app/static/library-density.css").read_text(encoding="utf-8")
+        density = (ROOT / "app/static/library-density.js").read_text(encoding="utf-8")
+        surface = (ROOT / "app/static/library-surface-lazy.js").read_text(encoding="utf-8")
+
+        self.assertIn("viewControls.insertBefore(control, viewToggle)", density)
+        self.assertIn("control.classList.toggle('is-collapsed', !initiallyVisible)", density)
+        self.assertIn("control.inert = !initiallyVisible", density)
+        self.assertIn("setDensityVisible(covers)", surface)
+        self.assertIn("densityControl.classList.toggle('is-collapsed', !visible)", surface)
+        self.assertIn("densityControl.inert = !visible", surface)
+        self.assertIn("max-width 180ms", styles)
+        self.assertIn(".cover-size-control.library-density-ready.is-collapsed", styles)
+        self.assertIn("max-width: 0;", styles)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", styles)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -24,7 +24,18 @@
 .source-browser-head,.source-browser-nav,.source-current,.source-preview-head,.source-final-form { display:flex; align-items:center; justify-content:space-between; gap:18px; }
 .source-browser-head { padding-bottom:20px; border-bottom:1px solid var(--line); }
 .source-browser-head h2 { font-size:30px; }
-.source-browser-close { width:42px; height:42px; display:grid; place-items:center; padding:0; border-radius:50%; font-size:26px; font-weight:400; }
+.source-browser-close {
+  flex:0 0 42px;
+  width:42px;
+  height:42px;
+  display:grid;
+  place-items:center;
+  padding:0;
+  overflow:hidden;
+  border-radius:50%;
+  font-size:0!important;
+  line-height:0!important;
+}
 .source-browser-nav { justify-content:flex-start; min-height:58px; }
 .source-browser-crumbs { display:flex; align-items:center; gap:4px; min-width:0; overflow:auto; }
 .source-browser-crumbs button { border:0; background:transparent; color:var(--muted); padding:7px; }
@@ -96,6 +107,38 @@
 .source-live-status[data-state="error"]::before { background:#ff716c; box-shadow:0 0 0 4px rgba(255,113,108,.09); }
 .source-action-busy { cursor:progress!important; }
 .root-row.source-row-working { box-shadow:inset 2px 0 rgba(185,245,66,.7); }
+.root-row.source-row-scanning {
+  box-shadow:inset 3px 0 var(--lime);
+  background:linear-gradient(90deg,rgba(185,245,66,.055),transparent 34%);
+}
+.source-scan-status {
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  width:max-content;
+  max-width:100%;
+  margin-top:7px;
+  padding:4px 8px;
+  border:1px solid #49662e;
+  border-radius:999px;
+  background:#121d11;
+  color:var(--lime);
+  font-size:10px;
+  font-weight:800;
+  line-height:1.2;
+  letter-spacing:.03em;
+}
+.source-scan-status[hidden] { display:none; }
+.source-scan-status::before {
+  content:"";
+  flex:0 0 auto;
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:var(--lime);
+  animation:source-action-pulse 1.2s ease-in-out infinite;
+}
+.root-row.source-row-scanning .source-health { margin-top:7px; }
 @keyframes source-status-in { from { opacity:0; transform:translateY(-5px); } to { opacity:1; transform:translateY(0); } }
 @keyframes source-action-pulse { 50% { opacity:.38; transform:scale(.72); } }
 
@@ -114,4 +157,5 @@
 @media(prefers-reduced-motion:reduce) {
   .source-live-status { animation:none; }
   .source-live-status[data-state="working"]::before { animation:none; }
+  .source-scan-status::before { animation:none; }
 }

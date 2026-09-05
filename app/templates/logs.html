@@ -13,7 +13,7 @@
   <button class="button">Filter</button>
   <a class="button primary" href="/logs/export">Export logs</a>
 </form>
-<div class="log-live-status"><span class="task-dot"></span><span>Live updates every 3 seconds</span></div>
+<div class="log-live-status" id="log-live-status" data-state="live" role="status" aria-live="polite"><span class="task-dot"></span><span data-log-live-copy>Live updates every 3 seconds</span></div>
 <section class="panel log-viewer" id="log-viewer" data-level="{{ level }}" data-category="{{ category }}" data-search="{{ search }}">
   {% if events %}
     {% for event in events %}
@@ -30,7 +30,30 @@
 <script>
 (() => {
   const viewer = document.getElementById('log-viewer');
+  const liveStatus = document.getElementById('log-live-status');
+  const liveCopy = liveStatus?.querySelector('[data-log-live-copy]');
   if (!viewer) return;
+
+  let consecutiveFailures = 0;
+  const setLiveState = (state, message) => {
+    if (!liveStatus || !liveCopy) return;
+    liveStatus.dataset.state = state;
+    liveCopy.textContent = message;
+  };
+  const markLive = () => {
+    consecutiveFailures = 0;
+    setLiveState('live', 'Live updates every 3 seconds');
+  };
+  const markPaused = () => {
+    consecutiveFailures += 1;
+    setLiveState(
+      'paused',
+      consecutiveFailures > 1
+        ? 'Live updates are paused · retrying automatically'
+        : 'Live update missed · retrying automatically',
+    );
+  };
+
   const render = (event) => {
     const article = document.createElement('article');
     article.className = `log-event level-${event.level}`;
@@ -57,6 +80,7 @@
     }
     return article;
   };
+
   const refresh = async () => {
     try {
       const params = new URLSearchParams({
@@ -65,13 +89,34 @@
         search: viewer.dataset.search,
         limit: '250'
       });
-      const response = await fetch(`/api/logs?${params}`, {cache: 'no-store'});
-      if (!response.ok) return;
-      const events = (await response.json()).events || [];
+      const response = await fetch(`/api/logs?${params}`, {
+        cache: 'no-store',
+        headers: {'Accept': 'application/json'},
+      });
+      if (!response.ok) {
+        markPaused();
+        return;
+      }
+      const text = await response.text();
+      let payload;
+      try {
+        payload = JSON.parse(text);
+      } catch (_error) {
+        markPaused();
+        return;
+      }
+      if (!Array.isArray(payload?.events)) {
+        markPaused();
+        return;
+      }
+      const events = payload.events;
+      markLive();
       const current = viewer.querySelector('[data-log-id]');
       if (!events.length || (current && Number(current.dataset.logId) === events[0].id)) return;
       viewer.replaceChildren(...events.map(render));
-    } catch (_) {}
+    } catch (_error) {
+      markPaused();
+    }
   };
   window.setInterval(refresh, 3000);
 })();

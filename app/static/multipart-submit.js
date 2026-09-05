@@ -36,6 +36,9 @@
       if (responseUrl.origin !== window.location.origin) {
         throw new Error("Unexpected cross-origin upload redirect");
       }
+      if (!response.ok) {
+        throw new Error(`Upload failed (HTTP ${response.status})`);
+      }
       if (response.redirected) {
         window.location.assign(responseUrl.href);
         return;

@@ -1,10 +1,10 @@
 {
   "name": "infomancer-desktop",
   "private": true,
-  "version": "0.8.0-alpha.1",
+  "version": "0.8.1-beta.1",
   "scripts": {
-    "tauri": "tauri",
-    "build": "tauri build --bundles nsis",
+    "tauri": "node scripts/tauri-wrapper.mjs",
+    "build": "node scripts/tauri-wrapper.mjs build --bundles nsis",
     "icon": "tauri icon app-icon.svg"
   },
   "devDependencies": {
