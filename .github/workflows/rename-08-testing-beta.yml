@@ -1,4 +1,4 @@
-name: Inspect stale 0.8 alpha branch references
+name: Retire old 0.8 alpha testing branch
 
 on:
   push:
@@ -8,25 +8,17 @@ on:
       - .github/workflows/rename-08-testing-beta.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  inspect:
+  retire:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: List stale branch references
+      - name: Delete old testing branch
         shell: bash
         run: |
           set -euo pipefail
-          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
           old='testing/0.8-'
           old="${old}alpha"
-          for branch in testing/0.8-beta release/0.8.1-beta.1; do
-            echo "=== $branch ==="
-            git checkout -B "$branch" "origin/$branch" >/dev/null 2>&1
-            grep -RIl --exclude-dir=.git --exclude=rename-08-testing-beta.yml -- "$old" . || true
-          done
+          git push origin --delete "$old"
