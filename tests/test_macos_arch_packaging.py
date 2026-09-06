@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+import importlib.util
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_macos_auditor():
+    path = ROOT / "scripts/verify_macos_minos.py"
+    spec = importlib.util.spec_from_file_location("verify_macos_minos", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class MacOsArchitecturePackagingContracts(unittest.TestCase):
@@ -58,6 +69,32 @@ class MacOsArchitecturePackagingContracts(unittest.TestCase):
         self.assertIn("Verify finished Intel app supports macOS 13", workflow)
         self.assertIn('"xcrun", "vtool", "-show-build"', auditor)
         self.assertIn("newer than supported", auditor)
+
+    def test_macos_auditor_ignores_linker_tool_version(self):
+        auditor = _load_macos_auditor()
+        output = """
+Load command 10
+      cmd LC_BUILD_VERSION
+  cmdsize 32
+ platform MACOS
+    minos 13.0
+      sdk 26.0
+   ntools 1
+     tool LD
+  version 1267.0
+"""
+        self.assertEqual(auditor._parse_minimum_versions(output), ["13.0"])
+
+    def test_macos_auditor_accepts_legacy_version_min_command(self):
+        auditor = _load_macos_auditor()
+        output = """
+Load command 9
+      cmd LC_VERSION_MIN_MACOSX
+  cmdsize 16
+  version 12.0
+      sdk 13.3
+"""
+        self.assertEqual(auditor._parse_minimum_versions(output), ["12.0"])
 
     def test_normal_release_preserves_intel_ventura_contract(self):
         workflow = (ROOT / ".github/workflows/draft-08-release.yml").read_text(encoding="utf-8")
