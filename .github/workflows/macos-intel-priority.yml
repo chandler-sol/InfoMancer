@@ -235,15 +235,33 @@ jobs:
         working-directory: desktop
         run: npm run tauri -- build --bundles dmg
 
-      - name: Verify finished Intel app supports macOS 13
+      - name: Verify finished Intel DMG supports macOS 13
         shell: bash
         run: |
-          app_dir="$(find desktop/src-tauri/target/release/bundle/macos -maxdepth 1 -type d -name '*.app' -print -quit)"
-          if [ -z "$app_dir" ]; then
-            echo 'Built macOS application bundle was not found.' >&2
+          dmg="$(find desktop/src-tauri/target/release/bundle/dmg -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          if [ -z "$dmg" ]; then
+            echo 'Built macOS DMG was not found.' >&2
             exit 1
           fi
-          echo "Auditing final app bundle: $app_dir"
+
+          mount_dir="$RUNNER_TEMP/infomancer-dmg-audit"
+          rm -rf "$mount_dir"
+          mkdir -p "$mount_dir"
+
+          cleanup_mount() {
+            hdiutil detach "$mount_dir" -quiet 2>/dev/null || true
+          }
+          trap cleanup_mount EXIT
+
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_dir" -quiet
+          app_dir="$(find "$mount_dir" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          if [ -z "$app_dir" ]; then
+            echo 'InfoMancer.app was not found inside the built DMG.' >&2
+            find "$mount_dir" -maxdepth 2 -print >&2 || true
+            exit 1
+          fi
+
+          echo "Auditing shipped app bundle from DMG: $app_dir"
           python scripts/verify_macos_minos.py \
             --max-version "$MACOSX_DEPLOYMENT_TARGET" \
             "$app_dir"
