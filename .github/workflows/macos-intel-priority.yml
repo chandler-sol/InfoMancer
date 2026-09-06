@@ -11,6 +11,7 @@ on:
       - desktop/**
       - app/**
       - scripts/stage_ffprobe.py
+      - scripts/verify_macos_minos.py
       - requirements.txt
 
 permissions:
@@ -24,6 +25,8 @@ concurrency:
 env:
   HOMEBREW_NO_AUTO_UPDATE: '1'
   PIP_DISABLE_PIP_VERSION_CHECK: '1'
+  MACOSX_DEPLOYMENT_TARGET: '13.0'
+  CMAKE_OSX_DEPLOYMENT_TARGET: '13.0'
 
 jobs:
   macos-intel:
@@ -56,10 +59,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             desktop/src-tauri/target
-          key: macos-intel-priority-cargo-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+          key: macos-intel-priority-cargo-macos13-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
           restore-keys: |
-            macos-intel-priority-cargo-
-            macOS-X64-cargo-
+            macos-intel-priority-cargo-macos13-
 
       - name: Restore verified FFprobe stage
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -75,7 +77,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: build/macos-intel-wheels
-          key: macos-intel-static-cryptography-py313-${{ hashFiles('requirements.txt') }}
+          key: macos-intel-static-cryptography-py313-macos13-${{ hashFiles('requirements.txt') }}
 
       - name: Verify toolchain
         shell: bash
@@ -85,6 +87,7 @@ jobs:
           npm --version
           rustc --version
           cargo --version
+          echo "Intel macOS deployment target: $MACOSX_DEPLOYMENT_TARGET"
 
       - name: Build static cryptography wheel
         if: steps.crypto-wheel-cache.outputs.cache-hit != 'true'
@@ -136,6 +139,7 @@ jobs:
             echo 'cryptography is dynamically linked to OpenSSL; refusing to package a mismatched OpenSSL pair.' >&2
             exit 1
           fi
+          python scripts/verify_macos_minos.py --max-version "$MACOSX_DEPLOYMENT_TARGET" "$crypto_rust"
 
       - name: Build bundled core
         shell: bash
@@ -154,13 +158,15 @@ jobs:
           cp dist/infomancer-core "desktop/src-tauri/binaries/infomancer-core-$triple"
           chmod +x "desktop/src-tauri/binaries/infomancer-core-$triple"
 
-      - name: Smoke-test packaged core startup
+      - name: Smoke-test packaged core and audit embedded macOS compatibility
         shell: bash
         run: |
           smoke_dir="$RUNNER_TEMP/infomancer-core-smoke"
           smoke_log="$RUNNER_TEMP/infomancer-core-smoke.log"
-          rm -rf "$smoke_dir"
+          pyi_tmp="$RUNNER_TEMP/infomancer-pyi-smoke"
+          rm -rf "$smoke_dir" "$pyi_tmp"
           rm -f "$smoke_log"
+          mkdir -p "$pyi_tmp"
           port="$(python - <<'PY'
           import socket
           with socket.socket() as sock:
@@ -169,7 +175,7 @@ jobs:
           PY
           )"
           export INFOMANCER_SMOKE_PORT="$port"
-          ./dist/infomancer-core --port "$port" --data-dir "$smoke_dir" >"$smoke_log" 2>&1 &
+          TMPDIR="$pyi_tmp" ./dist/infomancer-core --port "$port" --data-dir "$smoke_dir" >"$smoke_log" 2>&1 &
           core_pid=$!
           cleanup() {
             kill "$core_pid" 2>/dev/null || true
@@ -207,7 +213,14 @@ jobs:
             cat "$smoke_log" >&2 || true
             exit 1
           fi
+
           echo "Packaged InfoMancer core became ready on 127.0.0.1:$port."
+          echo 'Auditing the one-file executable and its live PyInstaller extraction tree...'
+          python scripts/verify_macos_minos.py \
+            --max-version "$MACOSX_DEPLOYMENT_TARGET" \
+            ./dist/infomancer-core \
+            ./build/ffprobe/ffprobe \
+            "$pyi_tmp"
 
       - name: Install desktop dependencies
         working-directory: desktop
@@ -220,6 +233,19 @@ jobs:
       - name: Build Intel DMG
         working-directory: desktop
         run: npm run tauri -- build --bundles dmg
+
+      - name: Verify finished Intel app supports macOS 13
+        shell: bash
+        run: |
+          app_dir="$(find desktop/src-tauri/target/release/bundle/macos -maxdepth 1 -type d -name '*.app' -print -quit)"
+          if [ -z "$app_dir" ]; then
+            echo 'Built macOS application bundle was not found.' >&2
+            exit 1
+          fi
+          echo "Auditing final app bundle: $app_dir"
+          python scripts/verify_macos_minos.py \
+            --max-version "$MACOSX_DEPLOYMENT_TARGET" \
+            "$app_dir"
 
       - name: Upload Intel DMG first
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
