@@ -39,6 +39,23 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Stamp beta.2 application version
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/main.py')
+          text = path.read_text(encoding='utf-8')
+          old = 'APP_VERSION = "0.8.1-beta.1"'
+          new = 'APP_VERSION = "0.8.1-beta.2"'
+          if new not in text:
+              if old not in text:
+                  raise SystemExit('Could not locate the beta.1 APP_VERSION to stamp beta.2')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          print('Stamped InfoMancer application version 0.8.1-beta.2')
+          PY
+
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
