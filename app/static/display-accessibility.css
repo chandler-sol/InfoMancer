@@ -1,0 +1,71 @@
+:root {
+  --microcopy-size: .75rem;
+}
+
+/* Keep functional microcopy readable without inflating intentionally tiny decorative geometry. */
+.eyebrow,
+th,
+.task-widget-toggle,
+.task-card-copy small,
+.task-popover-heading small,
+.task-empty,
+.legal-note,
+.source-type-hints > span,
+.root-name-form label,
+.source-folder > span:last-child,
+.source-final-form label,
+.source-preview-stats span,
+.source-recommendation {
+  font-size: var(--microcopy-size);
+}
+
+.announcement-button b,
+.kind,
+.cover-size-value {
+  font-size: .6875rem;
+}
+
+/* Fixed-size popovers remain useful on desktop but may never exceed the viewport. */
+.task-popover {
+  width: min(330px, calc(100vw - 24px));
+}
+
+.root-name-form {
+  width: min(310px, calc(100vw - 32px));
+}
+
+.collection-delete > form {
+  width: min(340px, calc(100vw - 32px));
+}
+
+/* The four-column collection editor gets cramped before the mobile breakpoint. */
+@media (max-width: 980px) and (min-width: 761px) {
+  form.collection-create {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  form.collection-create > div:first-of-type {
+    grid-column: 1 / -1;
+  }
+
+  form.collection-create > button,
+  form.collection-create > .button {
+    width: 100%;
+  }
+}
+
+.ui-zoom-status {
+  position: fixed;
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  z-index: 250;
+  padding: .65rem .85rem;
+  border: 1px solid #4d682b;
+  border-radius: var(--radius-sm);
+  background: rgba(12, 17, 23, .96);
+  color: var(--text);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, .35);
+  font-size: .8rem;
+  font-weight: 700;
+  pointer-events: none;
+}
