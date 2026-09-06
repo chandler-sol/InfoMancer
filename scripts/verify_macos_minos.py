@@ -10,7 +10,9 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
-_VERSION_RE = re.compile(r"^\s*(?:minos|version)\s+([0-9]+(?:\.[0-9]+){0,2})\s*$", re.MULTILINE)
+_CMD_RE = re.compile(r"^\s*cmd\s+(LC_[A-Z0-9_]+)\s*$")
+_MINOS_RE = re.compile(r"^\s*minos\s+([0-9]+(?:\.[0-9]+){0,2})\s*$")
+_VERSION_RE = re.compile(r"^\s*version\s+([0-9]+(?:\.[0-9]+){0,2})\s*$")
 
 
 def _version_tuple(value: str) -> tuple[int, int, int]:
@@ -48,6 +50,38 @@ def _is_macho(path: Path) -> bool:
     return result.returncode == 0 and "Mach-O" in result.stdout
 
 
+def _parse_minimum_versions(output: str) -> list[str]:
+    """Extract only deployment-target fields from vtool build metadata.
+
+    Modern Mach-O binaries report their deployment target as `minos` under
+    LC_BUILD_VERSION. Older binaries may report it as `version` under
+    LC_VERSION_MIN_MACOSX. Other `version` fields, such as the linker tool
+    version, are intentionally ignored.
+    """
+
+    current_command: str | None = None
+    versions: list[str] = []
+
+    for line in output.splitlines():
+        command_match = _CMD_RE.match(line)
+        if command_match:
+            current_command = command_match.group(1)
+            continue
+
+        if current_command == "LC_BUILD_VERSION":
+            minos_match = _MINOS_RE.match(line)
+            if minos_match:
+                versions.append(minos_match.group(1))
+                continue
+
+        if current_command == "LC_VERSION_MIN_MACOSX":
+            version_match = _VERSION_RE.match(line)
+            if version_match:
+                versions.append(version_match.group(1))
+
+    return versions
+
+
 def _minimum_versions(path: Path) -> list[str]:
     result = subprocess.run(
         ["xcrun", "vtool", "-show-build", str(path)],
@@ -57,7 +91,7 @@ def _minimum_versions(path: Path) -> list[str]:
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "vtool could not inspect the binary")
-    return _VERSION_RE.findall(result.stdout)
+    return _parse_minimum_versions(result.stdout)
 
 
 def main() -> int:
