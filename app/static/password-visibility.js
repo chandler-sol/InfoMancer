@@ -107,6 +107,14 @@
     zoomStatus.hidden = true;
     document.body.append(zoomStatus);
 
+    document.querySelectorAll(".cover-card-link > strong, .home-recent-link > strong").forEach((titleNode) => {
+      const fullTitle = titleNode.textContent?.trim() || "";
+      if (!fullTitle) return;
+      titleNode.title = fullTitle;
+      const link = titleNode.closest("a");
+      if (link && !link.title) link.title = fullTitle;
+    });
+
     document.querySelectorAll("[data-password-toggle]").forEach((button) => {
       const input = document.getElementById(button.dataset.passwordToggle);
       if (!input) {
