@@ -7,6 +7,12 @@ on:
       - 'release/**'
     paths:
       - .github/workflows/publish-intel-release.yml
+      - .github/workflows/macos-intel-priority.yml
+      - desktop/**
+      - app/**
+      - scripts/stage_ffprobe.py
+      - scripts/verify_macos_minos.py
+      - requirements.txt
 
 permissions:
   actions: read
@@ -16,29 +22,54 @@ jobs:
   publish-intel:
     name: Publish latest Intel DMG
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 40
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Download latest successful Intel fast-track artifact
+      - name: Wait for matching Intel fast-track build
         shell: bash
         run: |
           set -euo pipefail
-          run_id="$(gh run list \
-            --repo "$GITHUB_REPOSITORY" \
-            --workflow macos-intel-priority.yml \
-            --branch "$GITHUB_REF_NAME" \
-            --status success \
-            --limit 1 \
-            --json databaseId \
-            --jq '.[0].databaseId')"
-          if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
-            echo "No successful Intel fast-track build found for $GITHUB_REF_NAME." >&2
+          run_id=""
+          for _ in {1..120}; do
+            row="$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow macos-intel-priority.yml \
+              --branch "$GITHUB_REF_NAME" \
+              --limit 20 \
+              --json databaseId,headSha,status,conclusion \
+              --jq ".[] | select(.headSha == \"$GITHUB_SHA\") | [.databaseId,.status,.conclusion] | @tsv" \
+              | head -n 1)"
+            if [ -n "$row" ]; then
+              IFS=$'\t' read -r candidate_id candidate_status candidate_conclusion <<< "$row"
+              echo "Intel run $candidate_id: $candidate_status ${candidate_conclusion:-}"
+              if [ "$candidate_status" = "completed" ]; then
+                if [ "$candidate_conclusion" != "success" ]; then
+                  echo "Intel fast-track build failed with conclusion $candidate_conclusion." >&2
+                  exit 1
+                fi
+                run_id="$candidate_id"
+                break
+              fi
+            else
+              echo "Waiting for Intel fast-track run for $GITHUB_SHA..."
+            fi
+            sleep 15
+          done
+
+          if [ -z "$run_id" ]; then
+            echo "Timed out waiting for a successful Intel build for $GITHUB_SHA." >&2
             exit 1
           fi
-          echo "Using Intel build run $run_id"
+
+          echo "INTEL_RUN_ID=$run_id" >> "$GITHUB_ENV"
+
+      - name: Download matching Intel artifact
+        shell: bash
+        run: |
+          set -euo pipefail
           mkdir -p release-assets
-          gh run download "$run_id" \
+          gh run download "$INTEL_RUN_ID" \
             --repo "$GITHUB_REPOSITORY" \
             --name infomancer-macos-intel-priority \
             --dir release-assets
