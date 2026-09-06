@@ -59,6 +59,19 @@ class MacOsArchitecturePackagingContracts(unittest.TestCase):
         self.assertIn('"xcrun", "vtool", "-show-build"', auditor)
         self.assertIn("newer than supported", auditor)
 
+    def test_normal_release_preserves_intel_ventura_contract(self):
+        workflow = (ROOT / ".github/workflows/draft-08-release.yml").read_text(encoding="utf-8")
+
+        self.assertIn("Configure Intel macOS 13 deployment target", workflow)
+        self.assertIn("MACOSX_DEPLOYMENT_TARGET=13.0", workflow)
+        self.assertIn("CMAKE_OSX_DEPLOYMENT_TARGET=13.0", workflow)
+        self.assertIn("compat_key: macos13", workflow)
+        self.assertIn('TMPDIR="$pyi_tmp" ./dist/infomancer-core', workflow)
+        self.assertIn("Verify finished Intel app supports macOS 13", workflow)
+        self.assertIn("scripts/verify_macos_minos.py", workflow)
+        self.assertIn("testing/0.8-beta", workflow)
+        self.assertNotIn("testing/0.8-alpha", workflow)
+
     def test_macos_launcher_log_uses_persistent_application_support(self):
         launcher = (ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
 
