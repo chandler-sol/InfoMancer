@@ -14,3 +14,56 @@
   justify-content: center;
   min-height: 40px;
 }
+
+.activity-copy {
+  min-width: 0;
+}
+
+.activity-friendly-detail {
+  max-width: 900px;
+  margin: .8rem 0 .55rem;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.activity-technical {
+  max-width: 900px;
+  margin: .65rem 0 .8rem;
+  color: var(--muted);
+  font-size: .82rem;
+}
+
+.activity-technical summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--cyan);
+  font-weight: 700;
+}
+
+.activity-technical code {
+  display: block;
+  margin-top: .55rem;
+  padding: .7rem .8rem;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, .18);
+  color: var(--muted);
+  white-space: normal;
+}
+
+.activity-item-actions > form {
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .activity-item-actions {
+    align-items: stretch;
+  }
+
+  .activity-item-actions > form,
+  .activity-item-actions > a,
+  .activity-item-actions .button {
+    width: 100%;
+  }
+}
