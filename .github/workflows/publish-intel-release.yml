@@ -1,0 +1,90 @@
+name: Publish Intel Beta to Releases
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'release/**'
+    paths:
+      - .github/workflows/publish-intel-release.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish-intel:
+    name: Publish latest Intel DMG
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Download latest successful Intel fast-track artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id="$(gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow macos-intel-priority.yml \
+            --branch "$GITHUB_REF_NAME" \
+            --status success \
+            --limit 1 \
+            --json databaseId \
+            --jq '.[0].databaseId')"
+          if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+            echo "No successful Intel fast-track build found for $GITHUB_REF_NAME." >&2
+            exit 1
+          fi
+          echo "Using Intel build run $run_id"
+          mkdir -p release-assets
+          gh run download "$run_id" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name infomancer-macos-intel-priority \
+            --dir release-assets
+
+      - name: Create or refresh draft beta release
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#release/}"
+          TAG="v$VERSION"
+          TITLE="InfoMancer $VERSION"
+          dmg="$(find release-assets -type f -name '*.dmg' -print -quit)"
+          if [ -z "$dmg" ]; then
+            echo 'Intel DMG was not found in the downloaded artifact.' >&2
+            find release-assets -maxdepth 3 -type f -print >&2 || true
+            exit 1
+          fi
+
+          publish_dir="$RUNNER_TEMP/infomancer-intel-release"
+          mkdir -p "$publish_dir"
+          asset="$publish_dir/InfoMancer-$VERSION-macOS-Intel.dmg"
+          cp "$dmg" "$asset"
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')"
+            if [ "$is_draft" != "true" ]; then
+              echo "Release $TAG is already published; refusing to replace it." >&2
+              exit 1
+            fi
+            gh release edit "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$TITLE" \
+              --draft \
+              --prerelease
+          else
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$TITLE" \
+              --notes "Intel macOS fast-track beta build. Additional platform assets can be added as their packaging completes." \
+              --draft \
+              --prerelease
+          fi
+
+          gh release upload "$TAG" "$asset" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+          echo "Uploaded $(basename "$asset") to draft release $TAG."
