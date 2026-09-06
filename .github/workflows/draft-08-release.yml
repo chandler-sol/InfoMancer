@@ -4,16 +4,17 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - testing/0.8-alpha
+      - testing/0.8-beta
     paths:
       - .github/workflows/draft-08-release.yml
       - desktop/**
       - app/**
       - scripts/stage_ffprobe.py
+      - scripts/verify_macos_minos.py
       - requirements.txt
   pull_request:
     branches:
-      - testing/0.8-alpha
+      - testing/0.8-beta
     paths:
       # Validate packaging-workflow edits in PRs without rebuilding every OS for
       # ordinary application changes. The Fast Windows Preview workflow handles
@@ -101,21 +102,25 @@ jobs:
             slug: windows
             asset_os: windows
             bundles: nsis
+            compat_key: default
           - os: macos-26
             label: macOS Apple Silicon
             slug: macos-arm64
             asset_os: macos
             bundles: dmg
+            compat_key: default
           - os: macos-26-intel
             label: macOS Intel
             slug: macos-intel
             asset_os: macos
             bundles: dmg
+            compat_key: macos13
           - os: ubuntu-latest
             label: Linux
             slug: linux
             asset_os: linux
             bundles: deb,appimage
+            compat_key: default
     runs-on: ${{ matrix.os }}
     timeout-minutes: 75
     steps:
@@ -138,6 +143,14 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
+      - name: Configure Intel macOS 13 deployment target
+        if: matrix.slug == 'macos-intel'
+        shell: bash
+        run: |
+          echo 'MACOSX_DEPLOYMENT_TARGET=13.0' >> "$GITHUB_ENV"
+          echo 'CMAKE_OSX_DEPLOYMENT_TARGET=13.0' >> "$GITHUB_ENV"
+          echo 'Intel macOS minimum supported version: 13.0 Ventura'
+
       - name: Restore Rust build cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
@@ -145,9 +158,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             desktop/src-tauri/target
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ matrix.compat_key }}-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-cargo-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-${{ matrix.compat_key }}-
 
       - name: Restore verified FFprobe stage
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -176,6 +189,9 @@ jobs:
           npm --version
           rustc --version
           cargo --version
+          if [ "${{ matrix.slug }}" = "macos-intel" ]; then
+            echo "Intel macOS deployment target: $MACOSX_DEPLOYMENT_TARGET"
+          fi
 
       - name: Build Intel macOS cryptography with static OpenSSL
         if: matrix.slug == 'macos-intel'
@@ -215,6 +231,9 @@ jobs:
             echo 'cryptography is dynamically linked to OpenSSL; refusing to package a potentially mismatched libssl/libcrypto pair.' >&2
             exit 1
           fi
+          if [ "${{ matrix.slug }}" = "macos-intel" ]; then
+            python scripts/verify_macos_minos.py --max-version "$MACOSX_DEPLOYMENT_TARGET" "$crypto_rust"
+          fi
 
       # The dedicated Tests workflow covers the full platform test matrix. The
       # release source-package job also runs the suite once for this exact SHA.
@@ -250,8 +269,10 @@ jobs:
         run: |
           smoke_dir="$RUNNER_TEMP/infomancer-core-smoke"
           smoke_log="$RUNNER_TEMP/infomancer-core-smoke.log"
-          rm -rf "$smoke_dir"
+          pyi_tmp="$RUNNER_TEMP/infomancer-pyi-smoke"
+          rm -rf "$smoke_dir" "$pyi_tmp"
           rm -f "$smoke_log"
+          mkdir -p "$pyi_tmp"
           port="$(python - <<'PY'
           import socket
           with socket.socket() as sock:
@@ -260,7 +281,11 @@ jobs:
           PY
           )"
           export INFOMANCER_SMOKE_PORT="$port"
-          ./dist/infomancer-core --port "$port" --data-dir "$smoke_dir" >"$smoke_log" 2>&1 &
+          if [ "${{ matrix.slug }}" = "macos-intel" ]; then
+            TMPDIR="$pyi_tmp" ./dist/infomancer-core --port "$port" --data-dir "$smoke_dir" >"$smoke_log" 2>&1 &
+          else
+            ./dist/infomancer-core --port "$port" --data-dir "$smoke_dir" >"$smoke_log" 2>&1 &
+          fi
           core_pid=$!
           cleanup() {
             kill "$core_pid" 2>/dev/null || true
@@ -301,6 +326,15 @@ jobs:
           echo "Packaged InfoMancer core became ready on 127.0.0.1:$port."
           cat "$smoke_log" || true
 
+          if [ "${{ matrix.slug }}" = "macos-intel" ]; then
+            echo 'Auditing Intel one-file executable and live PyInstaller extraction tree for Ventura compatibility...'
+            python scripts/verify_macos_minos.py \
+              --max-version "$MACOSX_DEPLOYMENT_TARGET" \
+              ./dist/infomancer-core \
+              ./build/ffprobe/ffprobe \
+              "$pyi_tmp"
+          fi
+
       - name: Install desktop dependencies
         working-directory: desktop
         run: npm ci --prefer-offline
@@ -316,6 +350,19 @@ jobs:
       - name: Build native desktop package
         working-directory: desktop
         run: npm run tauri -- build --bundles ${{ matrix.bundles }}
+
+      - name: Verify finished Intel app supports macOS 13
+        if: matrix.slug == 'macos-intel'
+        shell: bash
+        run: |
+          app_dir="$(find desktop/src-tauri/target/release/bundle/macos -maxdepth 1 -type d -name '*.app' -print -quit)"
+          if [ -z "$app_dir" ]; then
+            echo 'Built macOS application bundle was not found.' >&2
+            exit 1
+          fi
+          python scripts/verify_macos_minos.py \
+            --max-version "$MACOSX_DEPLOYMENT_TARGET" \
+            "$app_dir"
 
       - name: Verify Windows launcher uses GUI subsystem
         if: runner.os == 'Windows'
@@ -518,7 +565,7 @@ jobs:
         run: |
           RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           if [ "$SOURCE_RESULT" = "success" ] && [ "$NATIVE_RESULT" = "success" ] && [ "$RELEASE_RESULT" = "success" ]; then
-            gh issue close 30 --repo "$GITHUB_REPOSITORY" --reason completed --comment "0.8.1-alpha.1 packaging succeeded. Server/source, Windows, macOS Apple Silicon, macOS Intel, and Linux artifacts were assembled into the draft prerelease with SHA-256 checksums. Run: $RUN_URL"
+            gh issue close 30 --repo "$GITHUB_REPOSITORY" --reason completed --comment "0.8.1-beta.1 packaging succeeded. Server/source, Windows, macOS Apple Silicon, macOS Intel, and Linux artifacts were assembled into the draft prerelease with SHA-256 checksums. Run: $RUN_URL"
           else
-            gh issue comment 30 --repo "$GITHUB_REPOSITORY" --body "0.8.1-alpha.1 packaging did not complete successfully. source=$SOURCE_RESULT, native=$NATIVE_RESULT, draft-release=$RELEASE_RESULT. Run: $RUN_URL"
+            gh issue comment 30 --repo "$GITHUB_REPOSITORY" --body "0.8.1-beta.1 packaging did not complete successfully. source=$SOURCE_RESULT, native=$NATIVE_RESULT, draft-release=$RELEASE_RESULT. Run: $RUN_URL"
           fi
