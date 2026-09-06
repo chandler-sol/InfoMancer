@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - testing/0.8-alpha
+      - testing/0.8-beta
       - 'release/**'
     paths:
       - .github/workflows/macos-intel-priority.yml
@@ -116,6 +116,7 @@ jobs:
           crypto_requirement="$(grep -E '^cryptography==' requirements.txt | head -n 1)"
           python -m pip install \
             --no-index \
+            --no-deps \
             --find-links build/macos-intel-wheels \
             "$crypto_requirement"
 
