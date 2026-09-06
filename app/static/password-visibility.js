@@ -8,6 +8,7 @@
   const SIDEBAR_MAX = 380;
   const SIDEBAR_VIEWPORT_RATIO = .32;
   let zoomStatusTimer = 0;
+  let sidebarWasResizing = false;
 
   const storageGet = (key) => {
     try { return window.localStorage.getItem(key); }
@@ -32,12 +33,14 @@
     zoomStatusTimer = window.setTimeout(() => { status.hidden = true; }, 1200);
   };
 
-  const clampSidebarWidth = (save = false) => {
+  const clampSidebarWidth = ({save = false, preferStored = false} = {}) => {
     if (!document.body?.classList.contains("has-app-sidebar")) return;
     const style = window.getComputedStyle(document.documentElement);
     const rendered = Number.parseFloat(style.getPropertyValue("--app-sidebar-width"));
     const stored = Number.parseInt(storageGet(SIDEBAR_STORAGE_KEY) || "258", 10);
-    const requested = Number.isFinite(rendered) ? rendered : stored;
+    const requested = preferStored && Number.isFinite(stored)
+      ? stored
+      : Number.isFinite(rendered) ? rendered : stored;
     const zoomFactor = currentZoom / 100;
     const effectiveViewportWidth = window.innerWidth / zoomFactor;
     const viewportMax = Math.floor(effectiveViewportWidth * SIDEBAR_VIEWPORT_RATIO);
@@ -52,12 +55,12 @@
     document.documentElement.style.zoom = String(currentZoom / 100);
     document.documentElement.dataset.uiZoom = String(currentZoom);
     if (save) storageSet(ZOOM_STORAGE_KEY, String(currentZoom));
-    clampSidebarWidth(false);
+    clampSidebarWidth({preferStored: true});
     if (announce) showZoomStatus();
   };
 
   applyZoom(currentZoom, {save: false, announce: false});
-  clampSidebarWidth(false);
+  clampSidebarWidth({preferStored: true});
 
   document.addEventListener("keydown", (event) => {
     if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
@@ -72,13 +75,16 @@
     else applyZoom(currentZoom + (zoomIn ? ZOOM_STEP : -ZOOM_STEP));
   });
 
-  window.addEventListener("resize", () => clampSidebarWidth(false));
+  window.addEventListener("resize", () => clampSidebarWidth({preferStored: true}));
   document.addEventListener("pointermove", () => {
-    if (document.body?.classList.contains("sidebar-resizing")) clampSidebarWidth(false);
+    if (!document.body?.classList.contains("sidebar-resizing")) return;
+    sidebarWasResizing = true;
+    clampSidebarWidth();
   }, {passive: true});
   document.addEventListener("pointerup", () => {
-    if (!document.body?.classList.contains("has-app-sidebar")) return;
-    window.setTimeout(() => clampSidebarWidth(true), 0);
+    if (!sidebarWasResizing) return;
+    sidebarWasResizing = false;
+    window.setTimeout(() => clampSidebarWidth({save: true}), 0);
   }, {passive: true});
 
   document.addEventListener("DOMContentLoaded", () => {
