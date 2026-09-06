@@ -39,21 +39,39 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Stamp beta.2 application version
+      - name: Stamp release application version
         shell: bash
         run: |
+          if [[ "$GITHUB_REF_NAME" == release/* ]]; then
+            version="${GITHUB_REF_NAME#release/}"
+          else
+            version="$(python - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.loads(Path('desktop/src-tauri/tauri.conf.json').read_text(encoding='utf-8'))['version'])
+          PY
+          )"
+          fi
+          export INFOMANCER_BUILD_VERSION="$version"
           python - <<'PY'
+          import os
+          import re
           from pathlib import Path
 
+          version = os.environ['INFOMANCER_BUILD_VERSION']
           path = Path('app/main.py')
           text = path.read_text(encoding='utf-8')
-          old = 'APP_VERSION = "0.8.1-beta.1"'
-          new = 'APP_VERSION = "0.8.1-beta.2"'
-          if new not in text:
-              if old not in text:
-                  raise SystemExit('Could not locate the beta.1 APP_VERSION to stamp beta.2')
-              path.write_text(text.replace(old, new, 1), encoding='utf-8')
-          print('Stamped InfoMancer application version 0.8.1-beta.2')
+          updated, count = re.subn(
+              r'^APP_VERSION\s*=\s*"[^"]+"',
+              f'APP_VERSION = "{version}"',
+              text,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          if count != 1:
+              raise SystemExit('Could not locate APP_VERSION for release stamping')
+          path.write_text(updated, encoding='utf-8')
+          print(f'Stamped InfoMancer application version {version}')
           PY
 
       - name: Set up Python
@@ -231,6 +249,14 @@ jobs:
             cat "$smoke_log" >&2 || true
             exit 1
           fi
+
+          ca_bundle="$(find "$pyi_tmp" -type f -path '*/certifi/cacert.pem' -print -quit)"
+          if [ -z "$ca_bundle" ]; then
+            echo 'Bundled certifi CA store was not found in the live PyInstaller extraction tree.' >&2
+            find "$pyi_tmp" -maxdepth 4 -type f -name 'cacert.pem' -print >&2 || true
+            exit 1
+          fi
+          echo "Verified packaged CA bundle: $ca_bundle"
 
           echo "Packaged InfoMancer core became ready on 127.0.0.1:$port."
           echo 'Auditing the one-file executable and its live PyInstaller extraction tree...'
