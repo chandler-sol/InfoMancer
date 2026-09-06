@@ -46,6 +46,19 @@ class MacOsArchitecturePackagingContracts(unittest.TestCase):
         self.assertIn("--data-dir \"$smoke_dir\"", workflow)
         self.assertIn("socket.create_connection(('127.0.0.1', port)", workflow)
 
+    def test_intel_priority_build_targets_ventura_and_audits_embedded_binaries(self):
+        workflow = (ROOT / ".github/workflows/macos-intel-priority.yml").read_text(encoding="utf-8")
+        auditor = (ROOT / "scripts/verify_macos_minos.py").read_text(encoding="utf-8")
+
+        self.assertIn("MACOSX_DEPLOYMENT_TARGET: '13.0'", workflow)
+        self.assertIn("CMAKE_OSX_DEPLOYMENT_TARGET: '13.0'", workflow)
+        self.assertIn("macos13", workflow)
+        self.assertIn('TMPDIR="$pyi_tmp" ./dist/infomancer-core', workflow)
+        self.assertIn("verify_macos_minos.py", workflow)
+        self.assertIn("Verify finished Intel app supports macOS 13", workflow)
+        self.assertIn('"xcrun", "vtool", "-show-build"', auditor)
+        self.assertIn("newer than supported", auditor)
+
     def test_macos_launcher_log_uses_persistent_application_support(self):
         launcher = (ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
 
