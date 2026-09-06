@@ -23,7 +23,9 @@ class DisplayScalingUiTests(unittest.TestCase):
         self.assertIn("SIDEBAR_VIEWPORT_RATIO = .32", script)
         self.assertIn("window.innerWidth / zoomFactor", script)
         self.assertIn("Math.min(SIDEBAR_MAX, viewportMax)", script)
-        self.assertIn("clampSidebarWidth(true)", script)
+        self.assertIn("preferStored", script)
+        self.assertIn("sidebarWasResizing", script)
+        self.assertIn("clampSidebarWidth({save: true})", script)
 
     def test_small_text_and_fixed_popovers_have_accessibility_overrides(self):
         stylesheet = Path("app/static/modern.css").read_text(encoding="utf-8")
