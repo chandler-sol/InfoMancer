@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - testing/0.8-beta
+      - 'release/**'
     paths:
       - .github/workflows/draft-08-release.yml
       - desktop/**
@@ -29,7 +30,7 @@ env:
   RELEASE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 concurrency:
-  group: draft-08-release
+  group: draft-08-release-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -43,6 +44,32 @@ jobs:
         with:
           ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
+
+      - name: Stamp release application version
+        if: startsWith(github.ref_name, 'release/')
+        shell: bash
+        run: |
+          export INFOMANCER_BUILD_VERSION="${GITHUB_REF_NAME#release/}"
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ['INFOMANCER_BUILD_VERSION']
+          path = Path('app/main.py')
+          text = path.read_text(encoding='utf-8')
+          updated, count = re.subn(
+              r'^APP_VERSION\s*=\s*"[^"]+"',
+              f'APP_VERSION = "{version}"',
+              text,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          if count != 1:
+              raise SystemExit('Could not locate APP_VERSION for release stamping')
+          path.write_text(updated, encoding='utf-8')
+          print(f'Stamped InfoMancer application version {version}')
+          PY
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -129,6 +156,32 @@ jobs:
         with:
           ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
+
+      - name: Stamp release application version
+        if: startsWith(github.ref_name, 'release/')
+        shell: bash
+        run: |
+          export INFOMANCER_BUILD_VERSION="${GITHUB_REF_NAME#release/}"
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ['INFOMANCER_BUILD_VERSION']
+          path = Path('app/main.py')
+          text = path.read_text(encoding='utf-8')
+          updated, count = re.subn(
+              r'^APP_VERSION\s*=\s*"[^"]+"',
+              f'APP_VERSION = "{version}"',
+              text,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          if count != 1:
+              raise SystemExit('Could not locate APP_VERSION for release stamping')
+          path.write_text(updated, encoding='utf-8')
+          print(f'Stamped InfoMancer application version {version}')
+          PY
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -498,13 +551,17 @@ jobs:
       - name: Create or refresh draft prerelease
         shell: bash
         run: |
-          VERSION="$(python - <<'PY'
+          if [[ "$GITHUB_REF_NAME" == release/* ]]; then
+            VERSION="${GITHUB_REF_NAME#release/}"
+          else
+            VERSION="$(python - <<'PY'
           import re
           from pathlib import Path
           text = Path('app/main.py').read_text(encoding='utf-8')
           print(re.search(r'^APP_VERSION\s*=\s*"([^"]+)"', text, re.MULTILINE).group(1))
           PY
           )"
+          fi
           TAG="v$VERSION"
           TITLE="InfoMancer $VERSION"
           NOTES="docs/releases/$VERSION.md"
@@ -564,8 +621,9 @@ jobs:
         shell: bash
         run: |
           RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          VERSION="${GITHUB_REF_NAME#release/}"
           if [ "$SOURCE_RESULT" = "success" ] && [ "$NATIVE_RESULT" = "success" ] && [ "$RELEASE_RESULT" = "success" ]; then
-            gh issue close 30 --repo "$GITHUB_REPOSITORY" --reason completed --comment "0.8.1-beta.1 packaging succeeded. Server/source, Windows, macOS Apple Silicon, macOS Intel, and Linux artifacts were assembled into the draft prerelease with SHA-256 checksums. Run: $RUN_URL"
+            gh issue close 30 --repo "$GITHUB_REPOSITORY" --reason completed --comment "$VERSION packaging succeeded. Server/source, Windows, macOS Apple Silicon, macOS Intel, and Linux artifacts were assembled into the draft prerelease with SHA-256 checksums. Run: $RUN_URL"
           else
-            gh issue comment 30 --repo "$GITHUB_REPOSITORY" --body "0.8.1-beta.1 packaging did not complete successfully. source=$SOURCE_RESULT, native=$NATIVE_RESULT, draft-release=$RELEASE_RESULT. Run: $RUN_URL"
+            gh issue comment 30 --repo "$GITHUB_REPOSITORY" --body "$VERSION packaging did not complete successfully. source=$SOURCE_RESULT, native=$NATIVE_RESULT, draft-release=$RELEASE_RESULT. Run: $RUN_URL"
           fi
