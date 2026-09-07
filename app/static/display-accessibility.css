@@ -25,6 +25,19 @@ th,
   font-size: .6875rem;
 }
 
+/* Poster shelves keep a stable title slot so rare long names do not push year and
+   metadata rows out of alignment. The complete title remains available as a tooltip. */
+.cover-card-link > strong,
+.home-recent-link > strong {
+  display: -webkit-box;
+  min-height: 3.9em;
+  max-height: 3.9em;
+  overflow: hidden;
+  line-height: 1.3;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
 /* Fixed-size popovers remain useful on desktop but may never exceed the viewport. */
 .task-popover {
   width: min(330px, calc(100vw - 24px));

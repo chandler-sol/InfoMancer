@@ -51,6 +51,69 @@
   };
   makeFeedbackSticky(progress);
 
+  const providerError = (rawError) => {
+    const technical = String(rawError || '').trim();
+    if (!technical) return null;
+    const normalized = technical.toLowerCase();
+    if (normalized.includes('tvdb_api_key is not configured') || normalized.includes('tvdb api key is not configured')) {
+      return {
+        kind: 'configuration',
+        row: 'TVDB is not configured',
+        message: 'TVDB is not configured. Add your TVDB API credentials in Metadata Settings before matching titles.',
+        action: 'Configure TVDB',
+        technical,
+      };
+    }
+    if (normalized.includes('tvdb returned 401') || normalized.includes('did not accept that api key') || normalized.includes('authentication')) {
+      return {
+        kind: 'authentication',
+        row: 'TVDB credentials were rejected',
+        message: 'TVDB rejected the configured credentials. Check the API key and Subscriber PIN in Metadata Settings, then retry.',
+        action: 'Check TVDB credentials',
+        technical,
+      };
+    }
+    if (normalized.includes('could not be reached') || normalized.includes('disconnected') || normalized.includes('timed out') || normalized.includes('timeout')) {
+      return {
+        kind: 'network',
+        row: 'TVDB could not be reached',
+        message: 'TVDB could not be reached. Check the network connection and try the match again shortly.',
+        action: 'Open Metadata Settings',
+        technical,
+      };
+    }
+    return {
+      kind: 'provider',
+      row: 'TVDB lookup failed',
+      message: 'TVDB could not complete the lookup. The provider error is preserved on the affected row for diagnostics.',
+      action: 'Open Metadata Settings',
+      technical,
+    };
+  };
+
+  const showProviderNotice = (issue) => {
+    if (!issue || !reviewForm) return;
+    let notice = reviewForm.querySelector('[data-bulk-provider-status]');
+    if (!notice) {
+      notice = document.createElement('div');
+      notice.className = 'notice error';
+      notice.dataset.bulkProviderStatus = '';
+      notice.setAttribute('role', 'alert');
+      const anchor = reviewForm.querySelector('.review-actions');
+      if (anchor) anchor.before(notice);
+      else reviewForm.prepend(notice);
+      makeFeedbackSticky(notice);
+    }
+    notice.replaceChildren();
+    const copy = document.createElement('span');
+    copy.textContent = issue.message;
+    const link = document.createElement('a');
+    link.className = 'button small';
+    link.href = '/settings/metadata';
+    link.textContent = issue.action;
+    notice.append(copy, link);
+  };
+
   const manualMatchLink = (item, candidate, possible) => {
     const link = document.createElement('a');
     link.className = 'possible-match-link';
@@ -63,6 +126,14 @@
     link.textContent = candidate
       ? (possible ? 'Review all possible matches' : 'Find another match')
       : 'Try manual search';
+    return link;
+  };
+
+  const providerSettingsLink = (issue) => {
+    const link = document.createElement('a');
+    link.className = 'possible-match-link';
+    link.href = '/settings/metadata';
+    link.textContent = issue?.action || 'Open Metadata Settings';
     return link;
   };
 
@@ -80,6 +151,7 @@
     const confidenceCell = row.querySelector('[data-bulk-confidence-cell]');
     const applyCell = row.querySelector('[data-bulk-apply-cell]');
     const candidate = item?.candidate || null;
+    const issue = providerError(item?.error);
     const scoreValue = item?.confidence_score;
     const score = Number(scoreValue);
     const hasScore = scoreValue !== null && scoreValue !== undefined && Number.isFinite(score);
@@ -130,10 +202,17 @@
         details.append(metadata, manualMatchLink(item, candidate, possible));
         titleCell.append(details);
         suggestionCell.append(titleCell);
+      } else if (issue) {
+        const state = document.createElement('span');
+        state.className = 'error-text';
+        state.textContent = issue.row;
+        state.title = issue.technical;
+        suggestionCell.append(state, providerSettingsLink(issue));
+        showProviderNotice(issue);
       } else {
         const state = document.createElement('span');
-        state.className = item?.error ? 'error-text' : 'muted';
-        state.textContent = item?.error ? 'Lookup error' : 'No result';
+        state.className = 'muted';
+        state.textContent = 'No result';
         suggestionCell.append(state, manualMatchLink(item, null, false));
       }
     }
