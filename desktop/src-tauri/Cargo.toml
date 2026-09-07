@@ -1,6 +1,6 @@
 [package]
 name = "infomancer-desktop"
-version = "0.8.1-beta.3"
+version = "0.8.1-beta.2"
 description = "Native Windows shell for InfoMancer"
 authors = ["InfoMancer contributors"]
 edition = "2021"
