@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, renameSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, renameSync, unlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -63,28 +63,52 @@ function renameSingleBundle(subdirectory, extension) {
   const directory = join(bundleRoot, subdirectory);
   if (!existsSync(directory)) return;
 
-  const matches = readdirSync(directory).filter((name) => name.endsWith(extension));
-  if (matches.length === 0) return;
+  const destinationName = `InfoMancer-${version}-${label}${extension}`;
+  const destination = join(directory, destinationName);
+  const destinationSignature = `${destination}.sig`;
+
+  // The Rust target directory is cached between CI runs. That cache can contain
+  // a previously renamed release package beside Tauri's newly generated bundle.
+  // Do not count the canonical cached package as another build candidate.
+  const matches = readdirSync(directory).filter(
+    (name) => name.endsWith(extension) && name !== destinationName,
+  );
+
+  if (matches.length === 0) {
+    if (existsSync(destination)) {
+      console.log(`Release package: ${destination}`);
+      if (existsSync(destinationSignature)) {
+        console.log(`Release signature: ${destinationSignature}`);
+      }
+    }
+    return;
+  }
   if (matches.length !== 1) {
     throw new Error(
-      `Expected one ${extension} bundle in ${directory}, found ${matches.length}: ${matches.join(', ')}`,
+      `Expected one new ${extension} bundle in ${directory}, found ${matches.length}: ${matches.join(', ')}`,
     );
   }
 
   const source = join(directory, matches[0]);
-  const destination = join(directory, `InfoMancer-${version}-${label}${extension}`);
   const sourceSignature = `${source}.sig`;
-  const destinationSignature = `${destination}.sig`;
 
-  if (source !== destination) {
-    renameSync(source, destination);
-    // Signed updater builds place a signature beside the bundle. Keep the pair
-    // under the same basename so tauri-action can still match them when it builds
-    // latest.json and uploads updater assets.
-    if (existsSync(sourceSignature)) {
-      renameSync(sourceSignature, destinationSignature);
-    }
+  // Replace stale canonical output restored from the build cache with the bundle
+  // produced by this run.
+  if (existsSync(destination)) {
+    unlinkSync(destination);
   }
+  if (existsSync(destinationSignature)) {
+    unlinkSync(destinationSignature);
+  }
+
+  renameSync(source, destination);
+  // Signed updater builds place a signature beside the bundle. Keep the pair
+  // under the same basename so tauri-action can still match them when it builds
+  // latest.json and uploads updater assets.
+  if (existsSync(sourceSignature)) {
+    renameSync(sourceSignature, destinationSignature);
+  }
+
   console.log(`Release package: ${destination}`);
   if (existsSync(destinationSignature)) {
     console.log(`Release signature: ${destinationSignature}`);
