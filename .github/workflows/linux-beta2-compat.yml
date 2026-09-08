@@ -1,0 +1,136 @@
+name: Linux Beta 2 Compatibility Rebuild
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - release/0.8.1-beta.2
+    paths:
+      - .github/workflows/linux-beta2-compat.yml
+
+permissions:
+  contents: read
+
+jobs:
+  linux-beta2:
+    name: Linux beta.2 on Ubuntu 22.04
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    env:
+      RELEASE_SHA: d9982b00937393f23087686a4cbd0fe63985a153
+      GLIBC_MAX: '2.35'
+    steps:
+      - name: Check out exact beta.2 application commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          persist-credentials: false
+
+      - name: Confirm Linux compatibility baseline
+        shell: bash
+        run: |
+          ldd --version | head -n 1
+          actual="$(ldd --version | head -n 1 | grep -oE '[0-9]+\.[0-9]+' | tail -n 1)"
+          if [ "$actual" != "$GLIBC_MAX" ]; then
+            echo "Expected glibc $GLIBC_MAX runner baseline, got $actual" >&2
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install Linux desktop build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            binutils
+
+      - name: Install Python build dependencies
+        shell: bash
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller==6.21.0
+
+      - name: Build bundled InfoMancer core
+        shell: bash
+        run: |
+          python scripts/stage_ffprobe.py
+          python -m PyInstaller --noconfirm --onefile --name infomancer-core \
+            --add-data "app/templates:app/templates" \
+            --add-data "app/static:app/static" \
+            --add-data "build/ffprobe/FFPROBE_LICENSE.txt:third-party/ffprobe" \
+            --add-data "build/ffprobe/FFPROBE_NOTICE.txt:third-party/ffprobe" \
+            --add-binary "build/ffprobe/ffprobe:." \
+            desktop/sidecar.py
+          ./dist/infomancer-core --check-ffprobe
+          triple="$(rustc --print host-tuple)"
+          mkdir -p desktop/src-tauri/binaries
+          cp dist/infomancer-core "desktop/src-tauri/binaries/infomancer-core-$triple"
+          chmod +x "desktop/src-tauri/binaries/infomancer-core-$triple"
+
+      - name: Install and audit desktop dependencies
+        working-directory: desktop
+        shell: bash
+        run: |
+          npm ci --prefer-offline
+          npm audit --audit-level=high
+          npm run icon
+
+      - name: Build Linux beta.2 packages
+        working-directory: desktop
+        run: npm run tauri -- build --bundles deb,appimage
+
+      - name: Verify glibc compatibility floor
+        shell: bash
+        run: |
+          check_glibc() {
+            binary="$1"
+            if [ ! -f "$binary" ]; then
+              echo "Compatibility check target missing: $binary" >&2
+              exit 1
+            fi
+            max="$(objdump -T "$binary" 2>/dev/null | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sed 's/^GLIBC_//' | sort -V | tail -n 1)"
+            echo "$binary requires at most GLIBC_${max:-unknown}"
+            if [ -z "$max" ]; then
+              echo "Could not determine glibc requirement for $binary" >&2
+              exit 1
+            fi
+            newest="$(printf '%s\n%s\n' "$GLIBC_MAX" "$max" | sort -V | tail -n 1)"
+            if [ "$newest" != "$GLIBC_MAX" ]; then
+              echo "$binary requires GLIBC_$max, newer than supported GLIBC_$GLIBC_MAX" >&2
+              exit 1
+            fi
+          }
+          check_glibc desktop/src-tauri/target/release/infomancer-desktop
+          check_glibc dist/infomancer-core
+
+      - name: Collect Linux packages
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          cp desktop/src-tauri/target/release/bundle/deb/*.deb release-assets/
+          cp desktop/src-tauri/target/release/bundle/appimage/*.AppImage release-assets/
+          ls -lh release-assets
+
+      - name: Upload Linux beta.2 compatibility packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: infomancer-linux-glibc235
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
