@@ -1,0 +1,100 @@
+name: Publish Complete Beta 2 Prerelease
+
+on:
+  push:
+    branches:
+      - release/0.8.1-beta.2
+    paths:
+      - .github/workflows/publish-beta2-complete-prerelease.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    name: Publish beta.2 on Releases page
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: v0.8.1-beta.2
+      RELEASE_ID: "383709765"
+      INTEL_ASSET_ID: "551130750"
+    steps:
+      - name: Check out release branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: release/0.8.1-beta.2
+          persist-credentials: false
+
+      - name: Download successful platform artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p gathered/source gathered/macos-arm64 gathered/windows gathered/linux gathered/macos-intel
+
+          gh run download 34267126464 --repo "$GITHUB_REPOSITORY" --name infomancer-source --dir gathered/source
+          gh run download 34267126464 --repo "$GITHUB_REPOSITORY" --name infomancer-macos-arm64 --dir gathered/macos-arm64
+          gh run download 34268099633 --repo "$GITHUB_REPOSITORY" --name infomancer-windows-repair --dir gathered/windows
+          gh run download 34270493117 --repo "$GITHUB_REPOSITORY" --name infomancer-linux-glibc235 --dir gathered/linux
+
+          curl --fail --location \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/octet-stream" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/assets/$INTEL_ASSET_ID" \
+            --output gathered/macos-intel/InfoMancer-0.8.1-beta.2-macOS-Intel.dmg
+
+          find gathered -maxdepth 3 -type f -print
+
+      - name: Assemble and verify complete beta.2 asset set
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p publish
+          find gathered -type f -print0 | while IFS= read -r -d '' asset; do
+            cp "$asset" "publish/$(basename "$asset")"
+          done
+
+          expected=(
+            "InfoMancer-0.8.1-beta.2-Windows-x64-Setup.exe"
+            "InfoMancer-0.8.1-beta.2-macOS-Apple-Silicon.dmg"
+            "InfoMancer-0.8.1-beta.2-macOS-Intel.dmg"
+            "InfoMancer-0.8.1-beta.2-Linux-x86_64.deb"
+            "InfoMancer-0.8.1-beta.2-Linux-x86_64.AppImage"
+            "InfoMancer-0.8.1-beta.2.zip"
+          )
+
+          for asset in "${expected[@]}"; do
+            if [ ! -f "publish/$asset" ]; then
+              echo "Missing expected beta.2 release asset: $asset" >&2
+              exit 1
+            fi
+          done
+
+          find publish -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -print0 \
+            | sort -z \
+            | xargs -0 sha256sum \
+            | sed 's#  publish/#  #' > publish/SHA256SUMS.txt
+
+          echo "Complete beta.2 release set:"
+          ls -lh publish
+          cat publish/SHA256SUMS.txt
+
+      - name: Publish beta.2 as visible prerelease and upload all assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh api --method PATCH \
+            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -f tag_name="$TAG" \
+            -f target_commitish="d9982b00937393f23087686a4cbd0fe63985a153" \
+            -f name="InfoMancer 0.8.1-beta.2" \
+            -f body="$(cat docs/releases/0.8.1-beta.2.md)" \
+            -F draft=false \
+            -F prerelease=true >/dev/null
+
+          gh release upload "$TAG" publish/* --clobber --repo "$GITHUB_REPOSITORY"
+
+          echo "Published $TAG as a visible GitHub prerelease with the complete platform set."
