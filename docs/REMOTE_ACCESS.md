@@ -13,27 +13,16 @@ Keep a Cloudflare Access **self-hosted application** on the entire hostname:
 
 1. In Cloudflare One, open **Access controls > Applications**.
 2. Add a self-hosted web application for `infomancer.example.com`.
-3. Add an **Allow** policy containing only the exact users or identity-provider
-   group that should reach InfoMancer.
-4. Do not add an Everyone, all-email, or Bypass rule.
-5. Choose a reasonable session duration and require MFA in the identity
-   provider when possible.
+3. Add an **Allow** policy containing only the users who should reach InfoMancer.
+4. Do not add an Everyone or Bypass rule.
+5. Use MFA with your identity provider when possible.
 
-Test the policy in a private browser window. Cloudflare's sign-in page must
+Test the policy in a private browser window. Cloudflare's sign-in page should
 appear before InfoMancer.
 
-This outer policy can protect InfoMancer while the application continues using
-local accounts. To make Cloudflare the application sign-in authority too, set:
-
-```dotenv
-INFOMANCER_AUTH_MODE=cloudflare
-CF_ACCESS_TEAM_DOMAIN=https://your-team.cloudflareaccess.com
-CF_ACCESS_AUD=the-application-audience-tag-from-cloudflare
-```
-
-The first verified visitor completes Librarian setup. Afterward, a Librarian
-must create each later account with the exact email address Cloudflare asserts.
-Restart InfoMancer after changing authentication environment values.
+Cloudflare Access is an extra outer security layer. InfoMancer currently still
+uses its own local account sign-in after you pass Cloudflare Access. Direct
+third-party sign-in is planned for a later release.
 
 ## Option A: reuse an existing connector
 
@@ -50,7 +39,7 @@ rule. No InfoMancer Compose change is required.
 ## Option B: run a dedicated connector
 
 Create a remotely managed tunnel in **Cloudflare Dashboard > Networking >
-Tunnels** and copy its token. Treat the token as a password.
+Tunnels** and copy its token. Treat the token like a password.
 
 From the InfoMancer folder:
 
@@ -66,7 +55,7 @@ dashboard, add:
 - Service type: HTTP
 - Service URL: `http://infomancer:8787`
 
-Start the application, its media mapping, and the connector:
+Start InfoMancer and the connector:
 
 ```bash
 docker compose -f compose.yaml -f compose.media.yaml -f compose.cloudflare.yaml \
@@ -85,8 +74,8 @@ docker compose -f compose.yaml -f compose.media.yaml -f compose.cloudflare.yaml 
 
 1. Confirm `http://127.0.0.1:8787` still responds on the host.
 2. Open the public hostname in a private browser window.
-3. Confirm an unauthorized identity is denied by Access.
-4. Confirm HTTPS and the expected InfoMancer login.
+3. Confirm an unauthorized identity is denied by Cloudflare Access.
+4. Confirm HTTPS and the normal InfoMancer login.
 5. Preview, but do not apply, a rename as a final functional check.
 
 To remove remote access immediately, delete or disable the published route. If
