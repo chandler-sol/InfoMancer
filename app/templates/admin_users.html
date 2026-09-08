@@ -24,7 +24,7 @@
           <span class="profile-avatar">{{ user.display_name[:1]|upper }}</span>
           <span><strong>{{ user.display_name }}</strong><small>@{{ user.username }} · {{ user.role|title }}</small></span>
           <span class="account-state {% if not user.active %}disabled{% elif auth_mode == 'local' and not user.has_password %}pending{% else %}active{% endif %}">
-            {% if not user.active %}Disabled{% elif auth_mode == 'local' and not user.has_password and user.invitation_expires_at %}Pending setup{% elif auth_mode == 'local' and not user.has_password %}Setup link needed{% elif auth_mode == 'cloudflare' and not user.providers %}Awaiting Cloudflare{% else %}Active{% endif %}
+            {% if not user.active %}Disabled{% elif auth_mode == 'local' and not user.has_password and user.invitation_expires_at %}Pending setup{% elif auth_mode == 'local' and not user.has_password %}Setup link needed{% elif auth_mode != 'local' and not user.providers %}Awaiting sign-in{% else %}Active{% endif %}
           </span>
         </summary>
         <div class="admin-user-body">
@@ -53,10 +53,10 @@
   <form class="panel settings-form create-user-form" method="post" action="/admin/users">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><p class="eyebrow">ADD USER</p><h2>Invite a person</h2>
     <label>Username<input name="username" minlength="3" maxlength="50" required><small>Unique and permanent; used for local sign-in.</small></label>
-    <label>Email<input name="email" type="email" {% if auth_mode == 'cloudflare' %}required{% endif %}></label>
+    <label>Email<input name="email" type="email" {% if auth_mode != 'local' %}required{% endif %}></label>
     <label>Display name<input name="display_name" maxlength="100" required></label>
     <label>Role<select name="role"><option value="member">Member</option><option value="librarian">Librarian</option></select></label>
-    {% if auth_mode == 'local' %}<p class="auth-provider-note">InfoMancer will create a one-time setup link. The person uses it to choose their own password.</p>{% else %}<p class="auth-provider-note">Their first verified Cloudflare sign-in will link by exact email address.</p>{% endif %}
+    {% if auth_mode == 'local' %}<p class="auth-provider-note">InfoMancer will create a one-time setup link. The person uses it to choose their own password.</p>{% else %}<p class="auth-provider-note">Their first verified sign-in will link to this account by email address.</p>{% endif %}
     <button class="button primary">Create user</button>
   </form>
 </section>
