@@ -86,7 +86,7 @@ def sha256(path: Path) -> str:
 
 def build(version: str) -> Path:
     DIST.mkdir(exist_ok=True)
-    package_name = f"InfoMancer-{version}"
+    package_name = f"InfoMancer-Server-{version}"
     archive = DIST / f"{package_name}.zip"
     if archive.exists():
         archive.unlink()
@@ -105,7 +105,7 @@ def build(version: str) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Create a credential-free InfoMancer alpha release ZIP."
+        description="Create a credential-free InfoMancer Server release ZIP."
     )
     parser.add_argument(
         "--version",
