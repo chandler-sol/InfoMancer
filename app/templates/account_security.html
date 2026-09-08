@@ -11,5 +11,5 @@
   <label>Confirm new password<span class="password-control"><input id="new-password-confirm" name="password_confirm" type="password" minlength="12" maxlength="256" autocomplete="new-password" required><button type="button" class="password-visibility-toggle" data-password-toggle="new-password-confirm" aria-pressed="false" aria-label="Show new password confirmation">Show</button></span></label>
   <div class="settings-actions"><button class="button primary">Change password</button></div>
 </form>
-{% else %}<section class="panel settings-form"><h2>Managed by Cloudflare Access</h2><p class="muted">Your sign-in password and identity verification are managed by the provider connected to Cloudflare Access. No password is stored for this InfoMancer account.</p></section>{% endif %}
+{% else %}<section class="panel settings-form"><h2>Managed sign-in</h2><p class="muted">This account is using an externally managed sign-in. InfoMancer does not store a password for it.</p></section>{% endif %}
 {% endblock %}
