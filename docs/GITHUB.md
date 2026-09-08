@@ -33,7 +33,7 @@ gh auth login
 gh repo create infomancer --private --source=. --remote=origin --push
 ```
 
-## Create an alpha package
+## Create an InfoMancer Server release package
 
 The release builder uses an explicit allowlist. It does not include local
 environment files, databases, media, `compose.atlas.yaml`, Cloudflare
@@ -51,14 +51,18 @@ python3 scripts/build_release.py
 
 Upload both files created in `dist/` to the GitHub release:
 
-- `InfoMancer-VERSION.zip`
+- `InfoMancer-Server-VERSION.zip`
 - `SHA256SUMS.txt`
+
+The Server label is intentional. This is the one InfoMancer installation that
+owns the catalog and performs scans and file operations. A local installation
+still uses this same server package.
 
 After the initial commit and push, create a private prerelease with GitHub CLI:
 
 ```powershell
 gh release create v0.4.0-alpha.1 `
-  .\dist\InfoMancer-0.4.0-alpha.1.zip `
+  .\dist\InfoMancer-Server-0.4.0-alpha.1.zip `
   .\dist\SHA256SUMS.txt `
   --prerelease `
   --title "InfoMancer 0.4.0 Alpha 1" `
@@ -68,13 +72,13 @@ gh release create v0.4.0-alpha.1 `
 Only friends who have access to the private repository can open or download
 its private releases.
 
-Without GitHub CLI, create an empty private repository on GitHub (do not add a
-README, license, or `.gitignore` there), then use the `git remote add` and
+Without GitHub CLI, create an empty private repository on GitHub. Do not add a
+README, license, or `.gitignore` there. Then use the `git remote add` and
 `git push` commands GitHub displays.
 
 ## Later options
 
-- **Keep it private:** simplest for a personal administration tool.
+- **Keep it private:** simplest while the product is still changing quickly.
 - **Publish it:** perform a privacy/security review, choose a license, replace
   home-specific examples, and create contribution/security policies first.
 - **Deploy from GitHub:** add a self-hosted runner or a server pull/deploy
@@ -82,8 +86,7 @@ README, license, or `.gitignore` there), then use the `git remote add` and
   expose Docker control or media credentials to pull requests.
 
 No license is added yet. If the repository becomes public, common choices are
-MIT (permissive and short), Apache-2.0 (permissive with an explicit patent
-grant), or GPL-3.0 (derivatives distributed under the same license).
+MIT, Apache-2.0, and GPL-3.0 depending on the desired redistribution terms.
 
 The included GitHub Actions workflow installs dependencies, runs the unit
 tests, and compiles the application on pushes and pull requests. It does not
