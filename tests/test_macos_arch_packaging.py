@@ -66,7 +66,7 @@ class MacOsArchitecturePackagingContracts(unittest.TestCase):
         self.assertIn("macos13", workflow)
         self.assertIn('TMPDIR="$pyi_tmp" ./dist/infomancer-core', workflow)
         self.assertIn("verify_macos_minos.py", workflow)
-        self.assertIn("Verify finished Intel app supports macOS 13", workflow)
+        self.assertIn("Verify finished Intel DMG supports macOS 13", workflow)
         self.assertIn('"xcrun", "vtool", "-show-build"', auditor)
         self.assertIn("newer than supported", auditor)
 
