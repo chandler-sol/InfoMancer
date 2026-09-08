@@ -22,9 +22,8 @@ A local-first, lightweight movie and TV inventory for multiple disks. InfoMancer
 - Explainable Library Health findings with identity confidence and multi-episode evidence
 - Duplicate-copy review with hash verification and storage-recovery recommendations
 - Per-source quality profiles and title-level technical consistency checks
-- Local user accounts with Argon2id passwords, revocable sessions, and CSRF protection
+- Local user accounts with secure passwords, revocable sessions, and CSRF protection
 - Fixed Librarian and Member roles with Librarian-managed user access
-- Optional Cloudflare Access identity validation and account linking
 - Librarian-only application settings with validation and change history
 - Replayable new-user walkthroughs and per-user tour completion
 - Official release announcements plus scheduled Librarian messages for Members
@@ -59,43 +58,33 @@ The short version is:
 
 On the first visit, InfoMancer asks you to create the initial **Librarian** account. Librarians can scan, match, change metadata, rename files, and administer users. **Members** can browse and search without filesystem or administrative access.
 
-## Authentication
+## Accounts and sign-in
 
-`INFOMANCER_AUTH_MODE` controls how the app verifies people:
+InfoMancer currently uses its own local accounts. Sign in with a username or email and password.
 
-- `local` (default): username or email plus an Argon2id-hashed password.
-- `cloudflare`: validates the signed Cloudflare Access JWT on every request, then maps that identity to an InfoMancer account. A Librarian must pre-create later users with the exact verified email address.
-- `disabled`: intended only for an explicitly trusted loopback/private installation. It grants the browser Librarian privileges without a login.
+Librarians can open **Profile → Users** to create Member or Librarian accounts. New users receive a one-time setup link so they can choose their own password. The link expires after 24 hours and is replaced if a new one is generated.
 
-Local sessions use an opaque, `HttpOnly`, same-site cookie; only a SHA-256 hash of the session token is stored in SQLite. State-changing requests require a per-session CSRF token. Account settings provide Profile, Password, and Sessions pages, while Librarians also receive a Users page.
+Use **Profile → Password** to change your password and **Profile → Sessions** to sign out other browsers.
 
-In local mode, a Librarian creates a Member or Librarian account and gives that person a one-time setup link. The full link is shown only once, expires after 24 hours, and is replaced whenever a new link is generated. Only a SHA-256 hash of its secret is stored in SQLite. The invited person chooses their own password; using the link immediately invalidates it. Share these links privately because possession of an unused link grants access to that account.
-
-If the last Librarian cannot sign in, reset that account from a terminal. The command asks for the new temporary password interactively, signs out its existing sessions, and requires another password change after sign-in:
+If the last Librarian cannot sign in, reset that account from a terminal:
 
 ```bash
 # Docker Compose
 docker compose exec infomancer python -m app.cli reset-librarian USERNAME
-
 ```
 
-Alternatively, generate a one-hour, single-use recovery link. This lets the
-account owner choose the new password in their browser without placing any
-password in terminal history:
+Or generate a one-hour recovery link so the account owner can choose a new password in the browser:
 
 ```bash
 docker compose exec infomancer python -m app.cli recovery-link USERNAME \
   --base-url https://your-infomancer-address
 ```
 
-Treat the printed link like a password. It expires automatically, becomes
-invalid immediately after use, and revokes the account’s existing sessions.
+For a native installation, run `.venv\Scripts\python.exe -m app.cli reset-librarian USERNAME` on Windows or `.venv/bin/python -m app.cli reset-librarian USERNAME` on macOS/Linux.
 
-For a native installation, run `.venv\Scripts\python.exe -m app.cli reset-librarian USERNAME` on Windows or `.venv/bin/python -m app.cli reset-librarian USERNAME` on macOS/Linux. The recovery command accepts Librarian usernames only and never places the new password in shell history.
+Members can browse and search titles, metadata, missing episodes, and permitted external provider links. Only Librarians can manage sources and users, scan or match media, refresh metadata, or perform filesystem changes.
 
-Members can browse and search titles, metadata, missing episodes, and permitted external provider links. Only Librarians can manage sources and users, scan or match media, refresh metadata, or perform filesystem changes. These permissions are enforced by the server; the Member interface also omits controls they cannot use.
-
-Passkeys, MFA, and direct Google, Microsoft, Apple, and GitHub adapters are reserved for a later authentication phase; the provider-neutral identity table is already in place.
+Direct sign-in with providers such as Google, Microsoft, Apple, or GitHub is planned for a later authentication phase. Cloudflare Access can still be placed in front of a remote InfoMancer address as an additional outer security layer, but InfoMancer continues to use its own local login for now.
 
 The service account running InfoMancer needs read permission to catalog files and write permission only for roots where renaming is desired.
 
@@ -119,7 +108,7 @@ include catalog and account data but never copy the media files themselves.
 Installing a checked release from the interface requires the optional,
 restricted host updater; see **[Updating InfoMancer](docs/UPDATES.md)**.
 
-Safe presentation and provider preferences are stored in SQLite and take effect on subsequent page loads. TVDB credentials entered through InfoMancer are stored in a separate encrypted application-data file; `INFOMANCER_SECRET` protects that file when configured, otherwise InfoMancer creates a restricted local encryption key in its data folder. Other trust-boundary settings—including authentication mode, secure-cookie policy, Cloudflare validation, database location, and allowed browse roots—remain protected environment or Compose configuration.
+Safe presentation and provider preferences are stored in SQLite and take effect on subsequent page loads. TVDB credentials entered through InfoMancer are stored in a separate encrypted application-data file; `INFOMANCER_SECRET` protects that file when configured, otherwise InfoMancer creates a restricted local encryption key in its data folder. Trusted filesystem paths and other deployment-level options remain server configuration.
 
 ## Tours and announcements
 
@@ -176,8 +165,7 @@ macOS DMG, and native Linux packages are feasible, but require an application
 launcher, platform data locations, service/update behavior, FFprobe packaging,
 code signing, and clean-machine installer testing.
 
-See the **[cross-platform packaging plan](docs/PACKAGING.md)** and
-**[release review checklist](docs/RELEASE_REVIEW.md)**.
+See the **[cross-platform packaging plan](docs/PACKAGING.md)** and **[release review checklist](docs/RELEASE_REVIEW.md)**.
 
 ## Command line
 
@@ -201,7 +189,7 @@ InfoMancer binds to loopback by default. For access away from home, use an
 authenticated reverse proxy or VPN without exposing port 8787 directly. The
 included Cloudflare overlay can run an outbound-only tunnel beside InfoMancer.
 
-See [Remote access with Cloudflare](docs/REMOTE_ACCESS.md) for setup, verification, and rollback. Do not activate the public hostname without the Access policy: the application deliberately relies on that authenticated proxy as its security boundary.
+See [Remote access with Cloudflare](docs/REMOTE_ACCESS.md) for setup, verification, and rollback. Cloudflare Access can protect the public hostname while InfoMancer continues to use its normal local account login.
 
 ## GitHub
 
@@ -224,6 +212,6 @@ python -m unittest discover -s tests -v
 
 ## Current boundaries
 
-InfoMancer does not scrape torrent result pages, submit downloads to a client, or reorganize season directories. Direct social sign-in, passkeys, and MFA are not yet enabled; Cloudflare Access can currently provide external SSO.
+InfoMancer does not scrape torrent result pages, submit downloads to a client, or reorganize season directories. Direct social sign-in, passkeys, and MFA are not yet enabled.
 
 Season-zero specials and episodes with future air dates are excluded from the default gap report. TVDB items without an air date are included.
