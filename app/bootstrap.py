@@ -8,7 +8,7 @@ from .request_security import constant_time_equal
 
 
 class BootstrapTokenManager:
-    """Provide a one-time server-side secret for first-run account creation."""
+    """Provide the one-time setup secret for a new InfoMancer Server."""
 
     def __init__(self, path: Path, configured_token: str = ""):
         self.path = path
@@ -49,7 +49,7 @@ class BootstrapTokenManager:
                 flush=True,
             )
             print(
-                "Enter this token once during first-time Server setup. It becomes invalid after the first Librarian account is created.",
+                "Copy the token above and paste it into the first-time Server setup screen. It becomes invalid after the first Librarian account is created.",
                 flush=True,
             )
             self._announced = True
