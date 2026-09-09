@@ -188,6 +188,63 @@ def _process_is_alive(pid: int) -> bool:
     return True
 
 
+def _claim_desktop_instance(data_dir: Path) -> Path:
+    """Claim this local desktop data directory for one running core process.
+
+    The marker is intentionally a PID file rather than a permanent lock. If a
+    previous core crashed or was force-killed, the next launch can verify that
+    the recorded process is gone and safely clear the stale marker.
+    """
+    marker = data_dir / "desktop-core.pid"
+    current_pid = os.getpid()
+    for _ in range(2):
+        try:
+            fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            try:
+                existing_pid = int(marker.read_text(encoding="utf-8").strip())
+            except (OSError, ValueError):
+                existing_pid = 0
+            if existing_pid and existing_pid != current_pid and _process_is_alive(existing_pid):
+                raise RuntimeError(
+                    "Another InfoMancer desktop process is already using this local "
+                    f"installation (PID {existing_pid}). Close the existing InfoMancer "
+                    "window or process and try again."
+                )
+            try:
+                marker.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise RuntimeError(
+                    "InfoMancer found a stale local-process marker but could not clear it. "
+                    f"Restart the computer or remove {marker} after confirming InfoMancer is closed."
+                ) from exc
+            continue
+        else:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(str(current_pid))
+            return marker
+    raise RuntimeError("InfoMancer could not claim its local desktop process marker.")
+
+
+def _release_desktop_instance(marker: Path | None) -> None:
+    if marker is None:
+        return
+    try:
+        recorded_pid = int(marker.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        recorded_pid = 0
+    if recorded_pid and recorded_pid != os.getpid():
+        return
+    try:
+        marker.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+
+
 def _start_onefile_parent_watchdog() -> None:
     """Stop the real Windows one-file worker if its PyInstaller parent is killed.
 
@@ -311,17 +368,27 @@ def main() -> int:
     if not os.getenv("MEDIA_BROWSE_ROOTS", "").strip():
         os.environ["MEDIA_BROWSE_ROOTS"] = ",".join(str(path) for path in _default_media_roots())
 
-    from app.main import app
-    import uvicorn
+    marker: Path | None = None
+    try:
+        marker = _claim_desktop_instance(data_dir)
+    except RuntimeError as exc:
+        print(f"INFOMANCER_STARTUP_CONFLICT: {exc}", file=sys.stderr, flush=True)
+        return 24
 
-    uvicorn.run(
-        app,
-        host="127.0.0.1",
-        port=args.port,
-        proxy_headers=False,
-        access_log=False,
-        log_level="warning",
-    )
+    try:
+        from app.main import app
+        import uvicorn
+
+        uvicorn.run(
+            app,
+            host="127.0.0.1",
+            port=args.port,
+            proxy_headers=False,
+            access_log=False,
+            log_level="warning",
+        )
+    finally:
+        _release_desktop_instance(marker)
     return 0
 
 
