@@ -233,7 +233,9 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
-            binutils
+            binutils \
+            appstream \
+            desktop-file-utils
 
       - name: Confirm Linux compatibility baseline
         if: runner.os == 'Linux'
@@ -441,15 +443,51 @@ jobs:
           check_glibc desktop/src-tauri/target/release/infomancer-desktop
           check_glibc dist/infomancer-core
 
+      - name: Validate Linux desktop integration
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          deb="$(find desktop/src-tauri/target/release/bundle/deb -maxdepth 1 -type f -name '*.deb' -print -quit)"
+          if [ -z "$deb" ]; then
+            echo 'Built Debian package was not found.' >&2
+            exit 1
+          fi
+          root="$RUNNER_TEMP/infomancer-deb-inspect"
+          rm -rf "$root"
+          mkdir -p "$root"
+          dpkg-deb -x "$deb" "$root"
+          appstreamcli validate --no-net "$root/usr/share/metainfo/cloud.arsenik.infomancer.metainfo.xml"
+          desktop-file-validate "$root/usr/share/applications/InfoMancer.desktop"
+          grep -q '^Name=InfoMancer$' "$root/usr/share/applications/InfoMancer.desktop"
+          grep -q '^Icon=infomancer-desktop$' "$root/usr/share/applications/InfoMancer.desktop"
+          grep -q '^StartupWMClass=infomancer-desktop$' "$root/usr/share/applications/InfoMancer.desktop"
+          test -f "$root/usr/share/icons/hicolor/128x128/apps/infomancer-desktop.png"
+          echo 'Validated InfoMancer AppStream metadata, desktop identity, and installed icon.'
+
       - name: Verify finished Intel app supports macOS 13
         if: matrix.slug == 'macos-intel'
         shell: bash
         run: |
-          app_dir="$(find desktop/src-tauri/target/release/bundle/macos -maxdepth 1 -type d -name '*.app' -print -quit)"
-          if [ -z "$app_dir" ]; then
-            echo 'Built macOS application bundle was not found.' >&2
+          dmg="$(find desktop/src-tauri/target/release/bundle/dmg -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          if [ -z "$dmg" ]; then
+            echo 'Built macOS DMG was not found.' >&2
             exit 1
           fi
+          mount_dir="$RUNNER_TEMP/infomancer-dmg-audit"
+          rm -rf "$mount_dir"
+          mkdir -p "$mount_dir"
+          cleanup_mount() {
+            hdiutil detach "$mount_dir" -quiet 2>/dev/null || true
+          }
+          trap cleanup_mount EXIT
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_dir" -quiet
+          app_dir="$(find "$mount_dir" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          if [ -z "$app_dir" ]; then
+            echo 'InfoMancer.app was not found inside the built DMG.' >&2
+            find "$mount_dir" -maxdepth 2 -print >&2 || true
+            exit 1
+          fi
+          echo "Auditing shipped app bundle from DMG: $app_dir"
           python scripts/verify_macos_minos.py \
             --max-version "$MACOSX_DEPLOYMENT_TARGET" \
             "$app_dir"
