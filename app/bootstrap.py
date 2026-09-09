@@ -12,7 +12,9 @@ class BootstrapTokenManager:
 
     The guided Server setup helpers prime the normal ``/setup`` route, then read
     this protected token file from the local ``data/`` bind mount so the user
-    does not have to hunt through Docker logs during first-time setup.
+    does not have to hunt through Docker logs during first-time setup. The helper
+    does not bypass token validation or account creation; it only presents the
+    same one-time secret the Server would otherwise print to its local logs.
     """
 
     def __init__(self, path: Path, configured_token: str = ""):
