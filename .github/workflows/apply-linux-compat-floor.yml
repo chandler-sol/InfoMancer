@@ -1,0 +1,59 @@
+name: Apply Linux Compatibility Floor
+
+on:
+  push:
+    branches:
+      - release/0.8.1-beta.2
+    paths:
+      - .github/workflows/apply-linux-compat-floor.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-release-workflow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: release/0.8.1-beta.2
+
+      - name: Make Linux 22.04 and GLIBC 2.35 the permanent release baseline
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('.github/workflows/draft-08-release.yml')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = [
+              (
+                  "          - os: ubuntu-latest\n            label: Linux\n            slug: linux\n            asset_os: linux\n            bundles: deb,appimage\n            compat_key: default",
+                  "          - os: ubuntu-22.04\n            label: Linux\n            slug: linux\n            asset_os: linux\n            bundles: deb,appimage\n            compat_key: glibc235",
+              ),
+              (
+                  "            librsvg2-dev \\\n            patchelf",
+                  "            librsvg2-dev \\\n            patchelf \\\n            binutils\n\n      - name: Confirm Linux compatibility baseline\n        if: runner.os == 'Linux'\n        shell: bash\n        run: |\n          ldd --version | head -n 1\n          actual=\"$(ldd --version | head -n 1 | grep -oE '[0-9]+\\.[0-9]+' | tail -n 1)\"\n          if [ \"$actual\" != '2.35' ]; then\n            echo \"Expected glibc 2.35 runner baseline, got $actual\" >&2\n            exit 1\n          fi",
+              ),
+              (
+                  "      - name: Verify finished Intel app supports macOS 13",
+                  "      - name: Verify Linux GLIBC compatibility floor\n        if: runner.os == 'Linux'\n        shell: bash\n        run: |\n          check_glibc() {\n            binary=\"$1\"\n            if [ ! -f \"$binary\" ]; then\n              echo \"Compatibility check target missing: $binary\" >&2\n              exit 1\n            fi\n            max=\"$(objdump -T \"$binary\" 2>/dev/null | grep -oE 'GLIBC_[0-9]+\\.[0-9]+' | sed 's/^GLIBC_//' | sort -V | tail -n 1)\"\n            echo \"$binary requires at most GLIBC_${max:-unknown}\"\n            if [ -z \"$max\" ]; then\n              echo \"Could not determine glibc requirement for $binary\" >&2\n              exit 1\n            fi\n            newest=\"$(printf '%s\\n%s\\n' '2.35' \"$max\" | sort -V | tail -n 1)\"\n            if [ \"$newest\" != '2.35' ]; then\n              echo \"$binary requires GLIBC_$max, newer than supported GLIBC_2.35\" >&2\n              exit 1\n            fi\n          }\n          check_glibc desktop/src-tauri/target/release/infomancer-desktop\n          check_glibc dist/infomancer-core\n\n      - name: Verify finished Intel app supports macOS 13",
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'Expected release-workflow block not found:\n{old}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+
+      - name: Commit compatibility floor
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/draft-08-release.yml
+          git diff --cached --check
+          git commit -m 'Pin Linux releases to GLIBC 2.35 compatibility floor'
+          git push origin HEAD:release/0.8.1-beta.2
