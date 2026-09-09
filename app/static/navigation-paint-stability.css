@@ -31,7 +31,7 @@ html.app-navigation-leaving body.has-app-sidebar > footer {
    that a named main.shell did. Keep the outgoing viewport fixed underneath and reveal
    the ready destination with one short opacity handoff. */
 ::view-transition-group(root) {
-  animation-duration: .1s;
+  animation-duration: .06s;
   animation-timing-function: ease-out;
 }
 
@@ -41,12 +41,12 @@ html.app-navigation-leaving body.has-app-sidebar > footer {
 }
 
 ::view-transition-new(root) {
-  animation: infomancer-root-reveal .1s ease-out both;
+  animation: infomancer-root-reveal .06s ease-out both;
   mix-blend-mode: normal;
 }
 
 @keyframes infomancer-root-reveal {
-  from { opacity: 0; }
+  from { opacity: .985; }
   to { opacity: 1; }
 }
 

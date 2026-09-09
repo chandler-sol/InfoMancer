@@ -34,7 +34,7 @@
     root.classList.add('app-navigation-leaving');
     /* If a browser or embedded WebView cancels navigation after the click, never
        strand the user behind the transition cover indefinitely. */
-    leavingTimer = window.setTimeout(clearLeaving, 5000);
+    leavingTimer = window.setTimeout(clearLeaving, 1800);
   };
 
   const showPendingSoon = () => {

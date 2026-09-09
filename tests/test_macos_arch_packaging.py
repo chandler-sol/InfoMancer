@@ -57,18 +57,21 @@ class MacOsArchitecturePackagingContracts(unittest.TestCase):
         self.assertIn("--data-dir \"$smoke_dir\"", workflow)
         self.assertIn("socket.create_connection(('127.0.0.1', port)", workflow)
 
-    def test_intel_priority_build_targets_ventura_and_audits_embedded_binaries(self):
-        workflow = (ROOT / ".github/workflows/macos-intel-priority.yml").read_text(encoding="utf-8")
-        auditor = (ROOT / "scripts/verify_macos_minos.py").read_text(encoding="utf-8")
 
-        self.assertIn("MACOSX_DEPLOYMENT_TARGET: '13.0'", workflow)
-        self.assertIn("CMAKE_OSX_DEPLOYMENT_TARGET: '13.0'", workflow)
-        self.assertIn("macos13", workflow)
-        self.assertIn('TMPDIR="$pyi_tmp" ./dist/infomancer-core', workflow)
-        self.assertIn("verify_macos_minos.py", workflow)
-        self.assertIn("Verify finished Intel DMG supports macOS 13", workflow)
-        self.assertIn('"xcrun", "vtool", "-show-build"', auditor)
-        self.assertIn("newer than supported", auditor)
+def test_canonical_intel_build_targets_ventura_and_audits_finished_dmg(self):
+    workflow = (ROOT / ".github/workflows/draft-08-release.yml").read_text(encoding="utf-8")
+    auditor = (ROOT / "scripts/verify_macos_minos.py").read_text(encoding="utf-8")
+
+    self.assertFalse((ROOT / ".github/workflows/macos-intel-priority.yml").exists())
+    self.assertIn("MACOSX_DEPLOYMENT_TARGET=13.0", workflow)
+    self.assertIn("CMAKE_OSX_DEPLOYMENT_TARGET=13.0", workflow)
+    self.assertIn("macos13", workflow)
+    self.assertIn('TMPDIR="$pyi_tmp" ./dist/infomancer-core', workflow)
+    self.assertIn("Verify finished Intel app supports macOS 13", workflow)
+    self.assertIn('hdiutil attach "$dmg"', workflow)
+    self.assertIn("verify_macos_minos.py", workflow)
+    self.assertIn('"xcrun", "vtool", "-show-build"', auditor)
+    self.assertIn("newer than supported", auditor)
 
     def test_macos_auditor_ignores_linker_tool_version(self):
         auditor = _load_macos_auditor()
@@ -105,6 +108,7 @@ Load command 9
         self.assertIn("compat_key: macos13", workflow)
         self.assertIn('TMPDIR="$pyi_tmp" ./dist/infomancer-core', workflow)
         self.assertIn("Verify finished Intel app supports macOS 13", workflow)
+        self.assertIn('hdiutil attach "$dmg"', workflow)
         self.assertIn("scripts/verify_macos_minos.py", workflow)
         self.assertIn("testing/0.8-beta", workflow)
         self.assertNotIn("testing/0.8-alpha", workflow)

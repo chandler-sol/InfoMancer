@@ -25,10 +25,23 @@
 {% elif section == 'metadata' %}
 <div class="settings-page-grid">
   <section class="panel settings-card">
-    <div class="settings-card-head"><div><p class="eyebrow">TVDB</p><h2>Matching provider</h2></div><span class="settings-state {{ 'good' if tvdb_status.configured else 'warn' }}">{{ 'Configured' if tvdb_status.configured else 'Needs configuration' }}</span></div>
-    <dl class="settings-facts"><div><dt>API key</dt><dd>{{ tvdb_status.key_hint }}</dd></div><div><dt>Subscriber PIN</dt><dd>{{ 'Configured' if tvdb_status.pin_configured else 'Not configured' }}</dd></div><div><dt>Storage</dt><dd>Encrypted application data</dd></div></dl>
+    <div class="settings-card-head"><div><p class="eyebrow">TVDB</p><h2>Matching provider</h2></div><span id="tvdb-settings-state" class="settings-state {{ 'good' if tvdb_status.configured else 'warn' }}">{{ 'Configured' if tvdb_status.configured else 'Needs configuration' }}</span></div>
+    <dl class="settings-facts"><div><dt>API key</dt><dd id="tvdb-key-hint">{{ tvdb_status.key_hint }}</dd></div><div><dt>Subscriber PIN</dt><dd id="tvdb-pin-state">{{ 'Configured' if tvdb_status.pin_configured else 'Not configured' }}</dd></div><div><dt>Storage</dt><dd>Encrypted application data</dd></div></dl>
     <p class="muted">Credentials entered through InfoMancer are encrypted separately from the media catalog. Server environment credentials remain supported as an initial fallback.</p>
-    <div class="actions"><a class="button" href="/getting-started/metadata">Manage TVDB credentials</a><form method="post" action="/settings/metadata/tvdb-test"><button class="button" {% if not tvdb_status.configured %}disabled{% endif %}>Test TVDB connection</button></form></div>
+    <div class="actions"><button class="button" id="tvdb-credentials-manage" type="button">Manage TVDB credentials</button><form method="post" action="/settings/metadata/tvdb-test"><button class="button" {% if not tvdb_status.configured %}disabled{% endif %}>Test TVDB connection</button></form></div>
+<dialog class="tvdb-credential-dialog" id="tvdb-credential-dialog">
+  <form class="tvdb-credential-form" id="tvdb-credential-form" method="post" action="/settings/metadata/tvdb-credentials">
+    <div class="tvdb-credential-head"><div><p class="eyebrow">TVDB CREDENTIALS</p><h2>{{ 'Update TheTVDB connection' if tvdb_status.configured else 'Connect TheTVDB' }}</h2></div><button class="tvdb-dialog-close" type="button" aria-label="Close">×</button></div>
+    <p class="muted">InfoMancer uses a project API key to retrieve movie and TV metadata. The credentials are tested before they are saved, then stored encrypted in this installation's application data.</p>
+    <div class="tvdb-credential-fields">
+      <label><span><b>Project API key</b><small>{{ 'Leave blank to keep the saved key' if tvdb_status.configured else 'Required' }}</small></span><input name="api_key" type="password" autocomplete="new-password" {% if not tvdb_status.configured %}required{% endif %} placeholder="{{ 'Keep current API key' if tvdb_status.configured else 'Paste your TVDB project API key' }}"></label>
+      <label><span><b>Subscriber PIN</b><small>Only if TVDB requires one</small></span><input name="subscriber_pin" type="password" autocomplete="new-password" placeholder="{{ 'Keep current PIN' if tvdb_status.pin_configured else 'Paste your subscriber PIN, if required' }}"></label>
+    </div>
+    <p class="tvdb-credential-help">Need credentials? <a href="https://thetvdb.com/api-information" target="_blank" rel="noopener noreferrer">Open TheTVDB API &amp; licensing</a> or <a href="https://support.thetvdb.com/kb/faq.php?id=81" target="_blank" rel="noopener noreferrer">read the key/PIN guide</a>.</p>
+    <p class="tvdb-credential-status" id="tvdb-credential-status" role="status" aria-live="polite"></p>
+    <div class="workspace-dialog-actions"><button class="button" type="button" data-tvdb-cancel>Cancel</button><button class="button primary" type="submit">Test &amp; save</button></div>
+  </form>
+</dialog>
   </section>
   <section class="panel settings-card">
     <div class="settings-card-head"><div><p class="eyebrow">IMDb</p><h2>Local metadata</h2></div><span class="settings-state {{ 'active' if imdb_job.status in ['starting','running'] else 'good' }}">{{ 'Updating' if imdb_job.status in ['starting','running'] else 'Ready' }}</span></div>
@@ -45,6 +58,7 @@
   </section>
   <section class="panel settings-card full-width"><p class="eyebrow">MATCHING POLICY</p><h2>Current behavior</h2><p class="muted">All automatic movie and TV suggestions still require review before they are applied. Confidence-threshold customization will be added with the next matching-safety pass.</p></section>
 </div>
+<script src="{{ url_for('static', path='settings-tvdb-credentials.js') }}?v={{ static_version }}" defer></script>
 
 {% elif section == 'external-search' %}
 <form class="settings-page-grid" method="post" action="/settings/external-search">

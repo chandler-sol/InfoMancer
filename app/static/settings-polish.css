@@ -546,3 +546,33 @@ body :is(#storage,#fingerprints,#safety,#backups,#updates,#media-information,#lo
     scroll-behavior: auto;
   }
 }
+
+
+/* TVDB credentials stay inside Metadata Settings instead of sending users
+   back through the first-run assistant. */
+.tvdb-credential-dialog {
+  width: min(620px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid #344453;
+  border-radius: 14px;
+  background: #111920;
+  color: var(--text);
+  box-shadow: 0 30px 90px rgba(0,0,0,.58);
+}
+.tvdb-credential-dialog::backdrop { background: rgba(3,7,10,.72); backdrop-filter: blur(5px); }
+.tvdb-credential-form { display: grid; gap: 16px; padding: 24px; }
+.tvdb-credential-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+.tvdb-credential-head h2 { margin:3px 0 0; }
+.tvdb-dialog-close { display:grid; place-items:center; width:34px; height:34px; padding:0; border:0; border-radius:8px; background:transparent; color:var(--muted); font-size:24px; cursor:pointer; }
+.tvdb-dialog-close:hover,.tvdb-dialog-close:focus-visible { background:rgba(255,255,255,.055); color:var(--text); }
+.tvdb-credential-fields { display:grid; gap:13px; }
+.tvdb-credential-fields label { display:grid; gap:7px; }
+.tvdb-credential-fields label > span { display:flex; justify-content:space-between; gap:12px; }
+.tvdb-credential-fields small { color:var(--muted); font-weight:500; }
+.tvdb-credential-fields input { width:100%; box-sizing:border-box; }
+.tvdb-credential-help { margin:0; color:var(--muted); font-size:13px; line-height:1.5; }
+.tvdb-credential-help a { color:var(--cyan); }
+.tvdb-credential-status { min-height:20px; margin:0; color:var(--muted); font-size:13px; }
+.tvdb-credential-status.success { color:var(--lime); }
+.tvdb-credential-status.error { color:#ff8b8b; }
+@media(max-width:600px){.tvdb-credential-form{padding:18px}.tvdb-credential-fields label>span{display:grid;gap:2px}.tvdb-credential-dialog .workspace-dialog-actions{align-items:stretch;flex-direction:column-reverse}.tvdb-credential-dialog .workspace-dialog-actions .button{width:100%}}

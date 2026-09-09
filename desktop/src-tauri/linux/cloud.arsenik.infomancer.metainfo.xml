@@ -16,6 +16,7 @@
     </screenshot>
   </screenshots>
   <provides>
+    <id>InfoMancer.desktop</id>
     <binary>infomancer-desktop</binary>
   </provides>
   <categories>

@@ -59,32 +59,56 @@ struct CoreObservation {
     stderr_lines: Vec<String>,
 }
 
-fn launcher_log_path() -> PathBuf {
-    LAUNCH_LOG_PATH
-        .get_or_init(|| {
-            let mut path = if cfg!(target_os = "macos") {
-                std::env::var_os("HOME")
-                    .map(PathBuf::from)
-                    .map(|mut home| {
-                        home.push("Library");
-                        home.push("Application Support");
-                        home.push("cloud.arsenik.infomancer");
-                        home
-                    })
-                    .unwrap_or_else(|| {
-                        let mut fallback = std::env::temp_dir();
-                        fallback.push("InfoMancer");
-                        fallback
-                    })
-            } else if let Some(appdata) = std::env::var_os("APPDATA") {
-                let mut appdata = PathBuf::from(appdata);
-                appdata.push("cloud.arsenik.infomancer");
-                appdata
-            } else {
+fn launcher_data_dir() -> PathBuf {
+    if cfg!(target_os = "macos") {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|mut home| {
+                home.push("Library");
+                home.push("Application Support");
+                home.push("cloud.arsenik.infomancer");
+                home
+            })
+            .unwrap_or_else(|| {
                 let mut fallback = std::env::temp_dir();
                 fallback.push("InfoMancer");
                 fallback
-            };
+            })
+    } else if cfg!(target_os = "windows") {
+        std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .map(|mut appdata| {
+                appdata.push("cloud.arsenik.infomancer");
+                appdata
+            })
+            .unwrap_or_else(|| {
+                let mut fallback = std::env::temp_dir();
+                fallback.push("InfoMancer");
+                fallback
+            })
+    } else if let Some(xdg_data_home) = std::env::var_os("XDG_DATA_HOME")
+        .filter(|value| !value.is_empty())
+    {
+        let mut data = PathBuf::from(xdg_data_home);
+        data.push("cloud.arsenik.infomancer");
+        data
+    } else if let Some(home) = std::env::var_os("HOME") {
+        let mut data = PathBuf::from(home);
+        data.push(".local");
+        data.push("share");
+        data.push("cloud.arsenik.infomancer");
+        data
+    } else {
+        let mut fallback = std::env::temp_dir();
+        fallback.push("InfoMancer");
+        fallback
+    }
+}
+
+fn launcher_log_path() -> PathBuf {
+    LAUNCH_LOG_PATH
+        .get_or_init(|| {
+            let mut path = launcher_data_dir();
             path.push("logs");
             path.push("desktop-launcher.log");
             path

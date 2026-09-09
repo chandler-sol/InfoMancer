@@ -50,6 +50,11 @@
     .update-card strong { display:block; font-size:11px; }
     .update-card p { margin:3px 0 0; color:var(--muted); font-size:10px; line-height:1.4; }
     .update-actions { display:flex; gap:7px; }
+    .update-heading { display:flex; flex-wrap:wrap; align-items:baseline; gap:7px; }
+    .update-heading span { color:#61707d; font-size:9px; }
+    .update-notes { max-width:680px; max-height:72px; overflow:auto; white-space:pre-line; }
+    .update-card.error { border-color:rgba(239,144,144,.38); }
+    .update-card.error #update-status { color:var(--danger); }
     #install-update { display:none; }
     #install-update.visible { display:inline-block; }
     footer { margin-top:18px; color:#61707d; font-size:9px; line-height:1.5; }
@@ -122,13 +127,14 @@
         <div class="remote-row"><input id="server-url" type="url" spellcheck="false" placeholder="https://infomancer.example.com" aria-label="InfoMancer server URL"><button id="connect-server" class="secondary" type="button">Connect</button></div><div id="remote-status" class="status" role="status"></div>
       </article>
     </section>
-    <section class="update-card" aria-live="polite"><div><strong>Desktop updates</strong><p id="update-status">Checking the signed GitHub release channel...</p></div><div class="update-actions"><button id="check-update" class="secondary" type="button">Check again</button><button id="install-update" class="primary" type="button">Install update</button></div></section>
+    <section id="update-card" class="update-card" aria-live="polite"><div><div class="update-heading"><strong>Desktop updates</strong><span id="current-version"></span></div><p id="update-status">Checking the signed GitHub release channel...</p><p id="update-notes" class="update-notes" hidden></p></div><div class="update-actions"><button id="check-update" class="secondary" type="button">Check again</button><button id="install-update" class="primary" type="button">Install update</button></div></section>
     <footer>The bundled launcher alone has native Tauri command access. Once it connects to the InfoMancer HTTP application, that remote content is not granted updater or shell IPC permissions.</footer>
   </main>
   <script>
     const invoke = window.__TAURI__.core.invoke;
     const TARGET_KEY = 'infomancer.desktop.launch-target.v1';
-    const AUTO_LAUNCH_DELAY_MS = 550;
+    const AUTO_LAUNCH_DELAY_MS = 180;
+    const UPDATE_AUTO_CHECK_BUDGET_MS = 500;
     const splash = document.getElementById('startup-splash');
     const startupPhase = document.getElementById('startup-phase');
     const startupDetail = document.getElementById('startup-detail');
@@ -247,9 +253,72 @@
     tokenValue.addEventListener('click',()=>{const selection=window.getSelection();const range=document.createRange();range.selectNodeContents(tokenValue);selection.removeAllRanges();selection.addRange(range);});
     openSetup.addEventListener('click',()=>{if(startup)window.location.assign(startup.setup_url);});
 
-    const updateStatus=document.getElementById('update-status'),checkUpdate=document.getElementById('check-update'),installUpdate=document.getElementById('install-update');
-    const check=async()=>{checkUpdate.disabled=true;installUpdate.classList.remove('visible');updateStatus.textContent='Checking the signed GitHub release channel...';try{const result=await invoke('check_for_update');updateStatus.textContent=result.message;if(result.available)installUpdate.classList.add('visible');}catch(error){updateStatus.textContent=String(error);}finally{checkUpdate.disabled=false;}};
-    checkUpdate.addEventListener('click',check); installUpdate.addEventListener('click',async()=>{installUpdate.disabled=true;updateStatus.textContent='Downloading and verifying the signed update...';try{const installed=await invoke('install_update');if(!installed){updateStatus.textContent='InfoMancer is already up to date.';installUpdate.classList.remove('visible');}else{updateStatus.textContent='Installing update...';}}catch(error){updateStatus.textContent=String(error);installUpdate.disabled=false;}});
+    const updateCard=document.getElementById('update-card'),updateStatus=document.getElementById('update-status'),updateNotes=document.getElementById('update-notes'),currentVersion=document.getElementById('current-version'),checkUpdate=document.getElementById('check-update'),installUpdate=document.getElementById('install-update');
+    const renderUpdate=result=>{
+      updateCard.classList.remove('error');
+      installUpdate.classList.remove('visible');
+      updateNotes.hidden=true;
+      updateNotes.textContent='';
+      checkUpdate.hidden=false;
+      currentVersion.textContent=result?.current_version?`Current ${result.current_version}`:'';
+      if(!result)return;
+      updateStatus.textContent=result.message||'Update status is unavailable.';
+      if(result.notes&&String(result.notes).trim()){
+        updateNotes.textContent=String(result.notes).trim();
+        updateNotes.hidden=false;
+      }
+      if(result.available)installUpdate.classList.add('visible');
+      if(result.configured===false)checkUpdate.hidden=true;
+    };
+    const check=async()=>{
+      checkUpdate.disabled=true;
+      installUpdate.classList.remove('visible');
+      updateCard.classList.remove('error');
+      updateStatus.textContent='Checking the signed InfoMancer release channel...';
+      try{renderUpdate(await invoke('check_for_update'));}
+      catch(error){
+        updateCard.classList.add('error');
+        updateStatus.textContent='Update check could not finish. InfoMancer can still run normally, and you can try again later.';
+        updateNotes.textContent=String(error);
+        updateNotes.hidden=false;
+      }finally{checkUpdate.disabled=false;}
+    };
+    const quickUpdateCheck=async()=>{
+      let timer=0;
+      try{
+        return await Promise.race([
+          invoke('check_for_update'),
+          new Promise(resolve=>{timer=window.setTimeout(()=>resolve(null),UPDATE_AUTO_CHECK_BUDGET_MS);}),
+        ]);
+      }catch(_){return null;}
+      finally{window.clearTimeout(timer);}
+    };
+    checkUpdate.addEventListener('click',check);
+    installUpdate.addEventListener('click',async()=>{
+      installUpdate.disabled=true;
+      checkUpdate.disabled=true;
+      updateCard.classList.remove('error');
+      updateStatus.textContent='Downloading and verifying the signed update...';
+      updateNotes.hidden=true;
+      try{
+        const installed=await invoke('install_update');
+        if(!installed){
+          updateStatus.textContent='InfoMancer is already up to date.';
+          installUpdate.classList.remove('visible');
+        }else{
+          updateStatus.textContent='Update installed. Close and reopen InfoMancer if it does not restart automatically.';
+          installUpdate.classList.remove('visible');
+        }
+      }catch(error){
+        updateCard.classList.add('error');
+        updateStatus.textContent='The update could not be installed. This build is still safe to use.';
+        updateNotes.textContent=String(error);
+        updateNotes.hidden=false;
+      }finally{
+        installUpdate.disabled=false;
+        checkUpdate.disabled=false;
+      }
+    });
 
     const forceChooser = new URLSearchParams(window.location.search).get('choose') === '1';
     const target = forceChooser ? null : savedTarget();
@@ -260,8 +329,15 @@
     } else {
       const description = target.kind === 'local' ? 'Preparing your local installation...' : 'Preparing your saved server installation...';
       showSplash('Starting InfoMancer', description, true);
-      launchTimer = window.setTimeout(() => {
+      launchTimer = window.setTimeout(async () => {
         launchTimer = null;
+        const update = await quickUpdateCheck();
+        if (update?.available) {
+          showChooser();
+          renderUpdate(update);
+          updateStatus.textContent = `${update.message} Install it now, or start InfoMancer normally and update later.`;
+          return;
+        }
         if (target.kind === 'local') openLocal({remember:false});
         else openRemote(target.url, {remember:false});
       }, AUTO_LAUNCH_DELAY_MS);
