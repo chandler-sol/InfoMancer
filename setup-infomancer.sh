@@ -41,7 +41,7 @@ prompt_path() {
     printf '%s folder (leave blank if you do not have one): ' "$label"
     IFS= read -r current || exit 1
     case "$current" in
-      ~/*) current="$HOME/${current#~/}" ;;
+      "~/"*) current="$HOME/${current#\~/}" ;;
     esac
     if [ -z "$current" ] || [ -d "$current" ]; then
       PROMPT_PATH=$current
