@@ -73,16 +73,16 @@ jobs:
       - name: Run complete test suite
         run: python -m unittest discover -s tests -v
 
-      - name: Validate patch and commit
+      - name: Commit application changes without workflow mutations
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          rm -f .github/workflows/apply-beta2-second-pass-v4.yml
+          git checkout HEAD -- .github/workflows
           git diff --check
           git status --short
           git config user.name 'InfoMancer release bot'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git commit -m 'Complete Beta 2 second-pass cleanup'
+          git commit -m 'Complete Beta 2 second-pass application cleanup'
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:release/0.8.1-beta.2
