@@ -1,7 +1,7 @@
 [package]
 name = "infomancer-desktop"
 version = "0.8.1-beta.2"
-description = "Native Windows shell for InfoMancer"
+description = "Native desktop client and local workspace for InfoMancer"
 authors = ["InfoMancer contributors"]
 edition = "2021"
 rust-version = "1.77.2"
