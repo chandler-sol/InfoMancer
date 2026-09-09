@@ -1,0 +1,29 @@
+name: Remove Legacy Server Asset
+
+on:
+  push:
+    branches:
+      - release/0.8.1-beta.2
+    paths:
+      - .github/workflows/remove-legacy-server-asset.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Remove obsolete generic Server ZIP
+        shell: bash
+        run: |
+          gh release delete-asset v0.8.1-beta.2 InfoMancer-0.8.1-beta.2.zip --repo "$GITHUB_REPOSITORY" --yes || true
+          if gh release view v0.8.1-beta.2 --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fx 'InfoMancer-0.8.1-beta.2.zip'; then
+            echo 'Legacy generic Server ZIP still exists.' >&2
+            exit 1
+          fi
+          echo 'Legacy generic Server ZIP removed.'
