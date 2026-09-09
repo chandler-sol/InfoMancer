@@ -1,6 +1,10 @@
 use std::process::Command;
 
-use tauri::{webview::NewWindowResponse, window::Color, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    webview::{NewWindowResponse, PageLoadEvent},
+    window::Color,
+    WebviewUrl, WebviewWindowBuilder,
+};
 use url::Url;
 
 const DESKTOP_EXTERNAL_LINK_BRIDGE: &str = r#"
@@ -90,10 +94,22 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .min_inner_size(960.0, 640.0)
         .center()
         .resizable(true)
+        // Keep the native shell hidden until the launcher's HTML is actually ready.
+        // This avoids exposing an empty GTK/WebView window before the InfoMancer
+        // startup splash can paint.
+        .visible(false)
         // Paint the native window and WebView dark before index.html exists. This
         // prevents the first white frame WebView2 otherwise shows while booting.
         .background_color(Color(8, 12, 16, 255))
         .initialization_script(DESKTOP_EXTERNAL_LINK_BRIDGE)
+        .on_page_load(|window, payload| {
+            if matches!(payload.event(), PageLoadEvent::Finished) {
+                if let Err(error) = window.show() {
+                    eprintln!("InfoMancer window show error: {error}");
+                }
+                let _ = window.set_focus();
+            }
+        })
         .on_navigation(|url| {
             if is_tvdb_external_url(url) {
                 if let Err(error) = launch(url) {
