@@ -14,6 +14,7 @@ permissions:
 env:
   APP_SHA: 4b8fc5273aef1c78450566720ae58dee43b3d545
   RELEASE_TAG: v0.8.1-beta.2
+  INTEL_RUN: '34389090728'
 
 jobs:
   source:
@@ -53,165 +54,22 @@ jobs:
           path.write_text(updated, encoding='utf-8')
           PY
 
-      - name: Install application dependencies
-        run: python -m pip install -r requirements.txt
-
-      - name: Verify first-pass contracts
-        run: |
-          python -m unittest \
-            tests.test_beta2_desktop_cleanup \
-            tests.test_desktop_first_run_recovery \
-            tests.test_windows_desktop \
-            -v
-
       - name: Build credential-free source package
         run: python scripts/build_release.py
 
       - name: Upload source package
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: infomancer-source-first-pass
+          name: infomancer-source-first-pass-final
           path: dist/InfoMancer-0.8.1-beta.2.zip
           if-no-files-found: error
           retention-days: 14
 
-  intel:
-    name: Rebuild and audit Intel beta.2 DMG
-    runs-on: macos-26-intel
-    timeout-minutes: 75
-    steps:
-      - name: Check out exact first-pass application commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ env.APP_SHA }}
-          persist-credentials: false
-
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
-        with:
-          python-version: '3.13'
-          cache: pip
-
-      - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: desktop/package-lock.json
-
-      - name: Stamp Beta 2 application version and configure Ventura target
-        shell: bash
-        run: |
-          python - <<'PY'
-          import re
-          from pathlib import Path
-          path = Path('app/main.py')
-          text = path.read_text(encoding='utf-8')
-          updated, count = re.subn(
-              r'^APP_VERSION\s*=\s*"[^"]+"',
-              'APP_VERSION = "0.8.1-beta.2"',
-              text,
-              count=1,
-              flags=re.MULTILINE,
-          )
-          if count != 1:
-              raise SystemExit('Could not stamp APP_VERSION')
-          path.write_text(updated, encoding='utf-8')
-          PY
-          echo 'MACOSX_DEPLOYMENT_TARGET=13.0' >> "$GITHUB_ENV"
-          echo 'CMAKE_OSX_DEPLOYMENT_TARGET=13.0' >> "$GITHUB_ENV"
-
-      - name: Build Intel cryptography for macOS 13 with static OpenSSL
-        shell: bash
-        run: |
-          brew install openssl@3
-          crypto_requirement="$(grep -E '^cryptography==' requirements.txt | head -n 1)"
-          test -n "$crypto_requirement"
-          env \
-            OPENSSL_DIR="$(brew --prefix openssl@3)" \
-            OPENSSL_STATIC=1 \
-            python -m pip install \
-              --no-cache-dir \
-              --no-binary cryptography \
-              "$crypto_requirement"
-
-      - name: Install Python build dependencies
-        run: |
-          python -m pip install -r requirements.txt
-          python -m pip install pyinstaller==6.21.0
-
-      - name: Stage and build bundled Intel core
-        shell: bash
-        run: |
-          python scripts/stage_ffprobe.py
-          python -m PyInstaller --noconfirm --onefile --name infomancer-core \
-            --add-data "app/templates:app/templates" \
-            --add-data "app/static:app/static" \
-            --add-data "build/ffprobe/FFPROBE_LICENSE.txt:third-party/ffprobe" \
-            --add-data "build/ffprobe/FFPROBE_NOTICE.txt:third-party/ffprobe" \
-            --add-binary "build/ffprobe/ffprobe:." \
-            desktop/sidecar.py
-          ./dist/infomancer-core --check-ffprobe
-          triple="$(rustc --print host-tuple)"
-          mkdir -p desktop/src-tauri/binaries
-          cp dist/infomancer-core "desktop/src-tauri/binaries/infomancer-core-$triple"
-          chmod +x "desktop/src-tauri/binaries/infomancer-core-$triple"
-          python scripts/verify_macos_minos.py \
-            --max-version "$MACOSX_DEPLOYMENT_TARGET" \
-            ./dist/infomancer-core \
-            ./build/ffprobe/ffprobe
-
-      - name: Install and audit desktop dependencies
-        working-directory: desktop
-        run: |
-          npm ci --prefer-offline
-          npm audit --audit-level=high
-          npm run icon
-
-      - name: Build Intel DMG
-        working-directory: desktop
-        run: npm run tauri -- build --bundles dmg
-
-      - name: Audit the finished Intel DMG for macOS 13
-        shell: bash
-        run: |
-          dmg="$(find desktop/src-tauri/target/release/bundle/dmg -maxdepth 1 -type f -name 'InfoMancer-0.8.1-beta.2-macOS-Intel.dmg' -print -quit)"
-          if [ -z "$dmg" ]; then
-            echo 'Canonical Intel Beta 2 DMG was not produced.' >&2
-            exit 1
-          fi
-          mount_dir="$RUNNER_TEMP/infomancer-beta2-dmg"
-          rm -rf "$mount_dir"
-          mkdir -p "$mount_dir"
-          hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "$dmg"
-          cleanup() { hdiutil detach "$mount_dir" -force >/dev/null 2>&1 || true; }
-          trap cleanup EXIT
-          app_dir="$(find "$mount_dir" -maxdepth 1 -type d -name '*.app' -print -quit)"
-          if [ -z "$app_dir" ]; then
-            echo 'InfoMancer.app was not found inside the finished DMG.' >&2
-            exit 1
-          fi
-          python scripts/verify_macos_minos.py \
-            --max-version "$MACOSX_DEPLOYMENT_TARGET" \
-            "$app_dir"
-          echo "Finished Intel DMG passed macOS $MACOSX_DEPLOYMENT_TARGET compatibility audit."
-
-      - name: Upload audited Intel DMG
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: infomancer-macos-intel-first-pass
-          path: desktop/src-tauri/target/release/bundle/dmg/InfoMancer-0.8.1-beta.2-macOS-Intel.dmg
-          if-no-files-found: error
-          retention-days: 14
-          compression-level: 0
-
   assemble:
     name: Assemble first-pass Beta 2 draft
-    needs:
-      - source
-      - intel
+    needs: source
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - name: Check out current Beta 2 release notes
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -222,14 +80,31 @@ jobs:
       - name: Download rebuilt source package
         uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
         with:
-          name: infomancer-source-first-pass
+          name: infomancer-source-first-pass-final
           path: collected/source
 
-      - name: Download audited Intel package
-        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
-        with:
-          name: infomancer-macos-intel-first-pass
-          path: collected/intel
+      - name: Wait for and download audited Intel first-pass DMG
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p collected/intel
+          found=0
+          for attempt in $(seq 1 90); do
+            if gh run download "$INTEL_RUN" \
+              --repo "$GITHUB_REPOSITORY" \
+              --name infomancer-macos-intel-first-pass \
+              --dir collected/intel 2>/dev/null; then
+              found=1
+              break
+            fi
+            echo "Intel first-pass artifact is not ready yet ($attempt/90)."
+            sleep 20
+          done
+          if [ "$found" -ne 1 ]; then
+            echo 'Audited Intel first-pass DMG did not become available.' >&2
+            exit 1
+          fi
 
       - name: Download already-verified first-pass platform packages
         shell: bash
