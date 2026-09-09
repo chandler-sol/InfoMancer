@@ -75,19 +75,21 @@ class DesktopReleaseContractTests(unittest.TestCase):
         self.assertIn('-f sha="$RELEASE_SHA"', workflow)
         self.assertIn("-F force=true", workflow)
 
-    def test_installation_guide_documents_native_packages(self):
+    def test_installation_guide_documents_current_native_packages(self):
         guide = (ROOT / "docs" / "INSTALLATION.md").read_text(encoding="utf-8")
         for expected in (
-            "InfoMancer-0.8.1-beta.1-Windows-x64-Setup.exe",
-            "InfoMancer-0.8.1-beta.1-macOS-Apple-Silicon.dmg",
-            "InfoMancer-0.8.1-beta.1-macOS-Intel.dmg",
-            "InfoMancer-0.8.1-beta.1-Linux-x86_64.deb",
-            "InfoMancer-0.8.1-beta.1-Linux-x86_64.AppImage",
+            "InfoMancer-0.8.1-beta.2-Windows-x64-Setup.exe",
+            "InfoMancer-0.8.1-beta.2-macOS-Apple-Silicon.dmg",
+            "InfoMancer-0.8.1-beta.2-macOS-Intel.dmg",
+            "InfoMancer-0.8.1-beta.2-Linux-x86_64.deb",
+            "InfoMancer-0.8.1-beta.2-Linux-x86_64.AppImage",
+            "InfoMancer-Server-0.8.1-beta.2.zip",
             "Run on this computer",
             "Connect to a server",
         ):
             with self.subTest(expected=expected):
                 self.assertIn(expected, guide)
+        self.assertNotIn("0.8.1-beta.1", guide)
 
 
 if __name__ == "__main__":
