@@ -49,7 +49,7 @@ class BootstrapTokenManager:
                 flush=True,
             )
             print(
-                "Copy the token above and paste it into the first-time Server setup screen. It becomes invalid after the first Librarian account is created.",
+                "Copy the token above and paste it into the first-time Server setup screen. Keep it private until setup finishes; it becomes invalid after the first Librarian account is created.",
                 flush=True,
             )
             self._announced = True
