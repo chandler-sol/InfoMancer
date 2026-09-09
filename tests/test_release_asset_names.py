@@ -43,6 +43,31 @@ class ReleaseAssetNameContracts(unittest.TestCase):
         self.assertIn("const destinationSignature = `${destination}.sig`", wrapper)
         self.assertIn("renameSync(sourceSignature, destinationSignature)", wrapper)
 
+    def test_shared_package_is_named_infomancer_server(self):
+        builder = (ROOT / "scripts/build_release.py").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/draft-08-release.yml").read_text(encoding="utf-8")
+        installation = (ROOT / "docs/INSTALLATION.md").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn('package_name = f"InfoMancer-Server-{version}"', builder)
+        self.assertIn("InfoMancer-Server-*.zip", workflow)
+        self.assertIn("InfoMancer-Server-0.8.1-beta.2.zip", installation)
+        self.assertIn("InfoMancer-Server-0.8.1-beta.2.zip", readme)
+        self.assertNotIn("InfoMancer-0.8.1-beta.1", installation)
+        self.assertNotIn("InfoMancer-0.8.1-beta.1", readme)
+
+    def test_server_handoff_explains_lan_bootstrap_and_media_mapping(self):
+        installation = (ROOT / "docs/INSTALLATION.md").read_text(encoding="utf-8")
+        compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+        env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+
+        self.assertIn("Only change `source:`", installation)
+        self.assertIn("InfoMancer first-run bootstrap token:", installation)
+        self.assertIn("http://SERVER-IP:8787", installation)
+        self.assertIn("Do not port-forward", installation)
+        self.assertIn("${INFOMANCER_BIND_ADDRESS:-127.0.0.1}:8787:8787", compose)
+        self.assertIn("INFOMANCER_BIND_ADDRESS=0.0.0.0", env_example)
+
 
 if __name__ == "__main__":
     unittest.main()
