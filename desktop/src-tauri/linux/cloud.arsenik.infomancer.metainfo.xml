@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>cloud.arsenik.infomancer</id>
+  <name>InfoMancer</name>
+  <summary>Self-hosted media catalog and library intelligence</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <description>
+    <p>InfoMancer catalogs, matches, inspects, and organizes movie and TV libraries from a native desktop workspace or an existing self-hosted InfoMancer server.</p>
+  </description>
+  <launchable type="desktop-id">InfoMancer.desktop</launchable>
+  <url type="homepage">https://infomancer.media/</url>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/chandler-sol/InfoMancer/d9982b00937393f23087686a4cbd0fe63985a153/docs/Infomancer1.png</image>
+      <caption>InfoMancer media library workspace</caption>
+    </screenshot>
+  </screenshots>
+  <provides>
+    <binary>infomancer-desktop</binary>
+  </provides>
+  <categories>
+    <category>Utility</category>
+  </categories>
+  <releases>
+    <release version="0.8.1-beta.2" date="2026-09-09">
+      <description>
+        <p>Current cross-platform beta testing build.</p>
+      </description>
+    </release>
+  </releases>
+</component>
