@@ -22,11 +22,19 @@ class SupplyChainTests(unittest.TestCase):
         )
         self.assertNotIn(":latest", cloudflare)
 
-    def test_server_container_drops_linux_capabilities(self):
+    def test_server_container_drops_linux_capabilities_and_binding_is_explicit(self):
         compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+        env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+        installation = (ROOT / "docs" / "INSTALLATION.md").read_text(encoding="utf-8")
         self.assertIn("cap_drop:\n      - ALL", compose)
         self.assertIn("no-new-privileges:true", compose)
-        self.assertIn('"127.0.0.1:8787:8787"', compose)
+        # Missing configuration must fail back to host-only. The distributed
+        # Server example deliberately opts into LAN access for a normal home
+        # deployment, with the install guide explicitly forbidding public
+        # port-forwarding.
+        self.assertIn('"${INFOMANCER_BIND_ADDRESS:-127.0.0.1}:8787:8787"', compose)
+        self.assertIn("INFOMANCER_BIND_ADDRESS=0.0.0.0", env_example)
+        self.assertIn("Do not port-forward port 8787", installation)
 
     def test_checkout_does_not_persist_ci_credentials(self):
         workflow_dir = ROOT / ".github" / "workflows"
