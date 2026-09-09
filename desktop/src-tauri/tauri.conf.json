@@ -28,6 +28,10 @@
       "nsis"
     ],
     "publisher": "Arsenik",
+    "homepage": "https://infomancer.media/",
+    "category": "Utility",
+    "shortDescription": "Self-hosted media catalog and library intelligence",
+    "longDescription": "InfoMancer is a native desktop client and local workspace for cataloging, matching, inspecting, and organizing movie and TV libraries.",
     "createUpdaterArtifacts": false,
     "icon": [
       "icons/32x32.png",
@@ -39,6 +43,19 @@
     "externalBin": [
       "binaries/infomancer-core"
     ],
+    "linux": {
+      "appimage": {
+        "files": {
+          "/usr/share/metainfo/cloud.arsenik.infomancer.metainfo.xml": "linux/cloud.arsenik.infomancer.metainfo.xml"
+        }
+      },
+      "deb": {
+        "desktopTemplate": "linux/InfoMancer.desktop.hbs",
+        "files": {
+          "/usr/share/metainfo/cloud.arsenik.infomancer.metainfo.xml": "linux/cloud.arsenik.infomancer.metainfo.xml"
+        }
+      }
+    },
     "windows": {
       "allowDowngrades": false,
       "nsis": {
