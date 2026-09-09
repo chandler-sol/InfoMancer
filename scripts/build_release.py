@@ -31,6 +31,11 @@ FILES = (
     "README.md",
     "requirements.txt",
     "SECURITY.md",
+    "START-HERE.txt",
+    "Setup-InfoMancer.cmd",
+    "Setup-InfoMancer.command",
+    "Setup-InfoMancer.ps1",
+    "setup-infomancer.sh",
 )
 EXCLUDED_PARTS = {
     "__pycache__",

@@ -1,6 +1,6 @@
 # Install InfoMancer
 
-InfoMancer 0.8.1-beta.2 has two clear installation types:
+InfoMancer 0.8.1-beta.2 has two installation types:
 
 | What you want | Install |
 | --- | --- |
@@ -13,7 +13,7 @@ Your Movie and TV files stay where they already are. InfoMancer catalogs them in
 
 # Install InfoMancer Server
 
-This is the version to use for a home server, NAS-capable Docker host, headless computer, or any always-on machine that should serve one InfoMancer library to other devices.
+Use Server for a home server, NAS-capable Docker host, headless computer, or any always-on machine that should serve one InfoMancer library to other devices.
 
 For a normal home-network install, you need:
 
@@ -24,21 +24,140 @@ For a normal home-network install, you need:
 
 You do **not** need Python, Node, Rust, a database server, Cloudflare, or a programming environment.
 
-## Server step 1: Download and extract
+## The easy Server install
 
-Download this file from the InfoMancer GitHub Release:
+### Step 1: Install Docker
+
+Install Docker and make sure it is running before continuing.
+
+### Step 2: Download and extract InfoMancer Server
+
+Download:
 
 `InfoMancer-Server-0.8.1-beta.2.zip`
 
-Extract it somewhere permanent. Do not run the server from your Downloads or temporary folder because this folder will also contain your InfoMancer configuration and `data/` directory.
+Extract it somewhere permanent. The extracted folder will also hold your InfoMancer configuration and `data/` directory, so do not use a temporary folder if you plan to keep the server.
 
-Open a terminal or command prompt **inside the extracted InfoMancer Server folder** for the remaining steps.
+Open `START-HERE.txt` inside the extracted folder if you want the shortest possible instructions.
 
-## Server step 2: Create the two local config files
+### Step 3: Run the setup helper
 
-Choose your server operating system.
+#### Windows
 
-### Windows PowerShell
+Double-click:
+
+`Setup-InfoMancer.cmd`
+
+A PowerShell window will open and keep itself visible when setup finishes.
+
+#### macOS
+
+Double-click:
+
+`Setup-InfoMancer.command`
+
+If macOS blocks it, right-click it and choose **Open**. You can also open Terminal in the extracted Server folder and run:
+
+```bash
+sh setup-infomancer.sh
+```
+
+#### Linux
+
+Open a terminal in the extracted Server folder and run:
+
+```bash
+./setup-infomancer.sh
+```
+
+If the executable bit was lost while copying the files, run:
+
+```bash
+sh setup-infomancer.sh
+```
+
+### Step 4: Answer two simple media questions
+
+The helper asks where your Movies and TV Shows live. You can leave one blank if you only have the other.
+
+For example:
+
+```text
+Movies folder: /media/storage/Movies
+TV Shows folder: /media/storage/TV
+```
+
+On Windows, a normal path such as `D:\Movies` is fine. The helper converts it to Docker-friendly form automatically.
+
+The helper then:
+
+1. creates `.env` if it does not already exist
+2. creates `compose.media.yaml` from your answers
+3. creates `data/`
+4. sets the correct Linux UID/GID automatically when needed
+5. checks that Docker and Docker Compose are available and running
+6. builds and starts InfoMancer Server
+7. waits for the Server to become healthy
+8. creates and reads the one-time first-run setup code
+9. prints the address to open from this computer and, when it can detect one, the LAN address for other computers
+
+It does not move, copy, rename, or delete your media during setup.
+
+### Step 5: Open InfoMancer
+
+When setup finishes, it prints something similar to:
+
+```text
+InfoMancer Server is ready.
+
+On this computer:
+  http://127.0.0.1:8787
+
+From another computer on this network:
+  http://192.168.1.50:8787
+
+One-time setup code:
+  example-code-here
+```
+
+From another computer, the general address format is:
+
+`http://SERVER-IP:8787`
+
+Create the first **Librarian** account and paste in the one-time setup code when asked.
+
+> **Do not port-forward port 8787 on your router and do not expose it directly to the public Internet.** Local-network access is built in. For access away from home, use a VPN or the documented authenticated reverse-proxy/Cloudflare setup in [Remote Access](REMOTE_ACCESS.md).
+
+## What happens if I run the helper again?
+
+The helper is designed not to casually destroy an existing setup:
+
+- existing `.env` is kept
+- existing `data/` is kept
+- if `compose.media.yaml` already exists, the helper asks whether to keep it
+- you can choose not to start Docker after creating/updating the config
+
+That makes the helper useful for the first install without turning it into an upgrade or reset tool.
+
+## Connect InfoMancer Desktop to the Server
+
+Install InfoMancer Desktop on a Windows, Mac, or Linux computer, launch it, and choose **Connect to a server**.
+
+Enter the same address you used in the browser, for example:
+
+`http://192.168.1.50:8787`
+
+The Server owns the catalog, accounts, settings, and media access. Desktop is only the client in this mode. The media folders therefore need to be accessible to the **Server**, not to every client computer.
+
+## Manual / advanced Server setup
+
+Most users should use the setup helper above. The manual steps remain available for unusual Docker setups or troubleshooting.
+
+### Create the config files yourself
+
+Choose the matching media template:
+
+#### Windows PowerShell
 
 ```powershell
 Copy-Item .env.example .env
@@ -46,7 +165,7 @@ Copy-Item deploy\windows.compose.yaml.example compose.media.yaml
 notepad compose.media.yaml
 ```
 
-### macOS
+#### macOS
 
 ```bash
 cp .env.example .env
@@ -54,7 +173,7 @@ cp deploy/macos.compose.yaml.example compose.media.yaml
 open -e compose.media.yaml
 ```
 
-### Linux
+#### Linux
 
 ```bash
 cp .env.example .env
@@ -62,13 +181,9 @@ cp deploy/linux.compose.yaml.example compose.media.yaml
 nano compose.media.yaml
 ```
 
-That is the only configuration file most first-time installs need to edit.
-
-## Server step 3: Tell InfoMancer where your media lives
-
 Open `compose.media.yaml` and change the `source:` paths to the real folders on the **server**.
 
-**Only change `source:` for a basic install. Leave the `/media/...` `target:` paths alone.**
+**Only change `source:` for a basic manual install. Leave the `/media/...` `target:` paths alone.**
 
 Linux example:
 
@@ -79,12 +194,6 @@ Linux example:
 - type: bind
   source: /mnt/media/tv
   target: /media/tv
-```
-
-If your Movies actually live at `/media/storage/Movies`, change only this line:
-
-```yaml
-source: /media/storage/Movies
 ```
 
 Windows example:
@@ -99,11 +208,7 @@ macOS example:
 source: /Volumes/Media/Movies
 ```
 
-You can add more folders later. Get one Movies folder and/or one TV folder working first.
-
-### Linux only: set file ownership
-
-Run these three commands as the normal Linux account that should own InfoMancer's data:
+On Linux, set the container user to the current account and create `data/`:
 
 ```bash
 sed -i "s/^INFOMANCER_UID=.*/INFOMANCER_UID=$(id -u)/" .env
@@ -113,17 +218,13 @@ mkdir -p data
 
 The server user needs read access to media for scanning. Rename, organize, and Managed Trash features also require write access to the affected media folders.
 
-## Server step 4: Start InfoMancer
-
-Run:
+### Start manually
 
 ```bash
 docker compose -f compose.yaml -f compose.media.yaml up -d --build
 ```
 
-The first build can take a few minutes. Later starts are normally much faster.
-
-Check that it started:
+Check status:
 
 ```bash
 docker compose -f compose.yaml -f compose.media.yaml ps
@@ -131,53 +232,21 @@ docker compose -f compose.yaml -f compose.media.yaml ps
 
 Look for the `infomancer` service to become healthy.
 
-## Server step 5: Get the one-time setup code
+### Get the first-run setup code manually
 
-A brand-new server creates a one-time bootstrap token so nobody else on your network can claim the first Librarian account.
-
-Run:
+Open `http://127.0.0.1:8787/setup` once, then run:
 
 ```bash
 docker compose -f compose.yaml -f compose.media.yaml logs --tail=100 infomancer
 ```
 
-Find the line that looks like:
+Find:
 
 ```text
 InfoMancer first-run bootstrap token: ...
 ```
 
-Copy that token. You will enter it once during first-time setup. It stops being valid after the first Librarian account is created.
-
-## Server step 6: Open InfoMancer
-
-On the server itself, open:
-
-`http://127.0.0.1:8787`
-
-From another computer on the same home/local network, open:
-
-`http://SERVER-IP:8787`
-
-For example, if the server's local IP address is `192.168.1.50`:
-
-`http://192.168.1.50:8787`
-
-Create the first **Librarian** account, enter the bootstrap token when asked, and complete Guided Setup.
-
-If another computer cannot connect but the server itself can, check the server operating system's firewall and allow TCP port `8787` on your trusted/private network.
-
-> **Do not port-forward port 8787 on your router and do not expose it directly to the public Internet.** Local-network access is built in. For access away from home, use a VPN or the documented authenticated reverse-proxy/Cloudflare setup in [Remote Access](REMOTE_ACCESS.md).
-
-## Connect InfoMancer Desktop to the Server
-
-Install InfoMancer Desktop on a Windows, Mac, or Linux computer, launch it, and choose **Connect to a server**.
-
-Enter the same address you used in the browser, for example:
-
-`http://192.168.1.50:8787`
-
-The Server owns the catalog, accounts, settings, and media access. Desktop is only the client in this mode. The media folders therefore need to be accessible to the **Server**, not to every client computer.
+That token is the one-time setup code used to claim the first Librarian account. It stops being valid after that first Librarian account is created.
 
 ## Server troubleshooting
 
@@ -204,6 +273,8 @@ docker compose -f compose.yaml -f compose.media.yaml restart infomancer
 ```bash
 docker compose -f compose.yaml -f compose.media.yaml down
 ```
+
+If another computer cannot connect but the server itself can, check the server operating system's firewall and allow TCP port `8787` on your trusted/private network.
 
 Before posting logs publicly, remove private filenames, paths, addresses, API keys, bootstrap tokens, and session information.
 

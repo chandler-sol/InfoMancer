@@ -1,0 +1,52 @@
+INFOMANCER SERVER - START HERE
+=============================
+
+Before you begin: install Docker and make sure it is running.
+
+WINDOWS
+-------
+Double-click:
+
+  Setup-InfoMancer.cmd
+
+MAC
+---
+Double-click:
+
+  Setup-InfoMancer.command
+
+If macOS blocks it, right-click it and choose Open. You can also open Terminal in
+this folder and run:
+
+  sh setup-infomancer.sh
+
+LINUX
+-----
+Open Terminal in this folder and run:
+
+  ./setup-infomancer.sh
+
+WHAT THE HELPER DOES
+--------------------
+The setup helper will:
+- create the local InfoMancer config files
+- ask where your Movies and TV Shows live
+- set Linux file ownership automatically when needed
+- create the data folder
+- check that Docker is available and running
+- build and start InfoMancer Server
+- wait for it to become healthy
+- print the local-network address to open
+- print the one-time setup code for the first Librarian account
+
+It will not move or copy your media files.
+
+TROUBLESHOOTING
+---------------
+If setup fails, run this from the InfoMancer Server folder:
+
+  docker compose -f compose.yaml -f compose.media.yaml logs --tail=200 infomancer
+
+Do not port-forward port 8787 to the public Internet.
+
+Full instructions: docs/INSTALLATION.md

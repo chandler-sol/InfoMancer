@@ -115,7 +115,7 @@ Choose the package whose name matches what you are installing:
 | Other Linux Desktop x86-64 | `InfoMancer-0.8.1-beta.2-Linux-x86_64.AppImage` |
 | **InfoMancer Server** | `InfoMancer-Server-0.8.1-beta.2.zip` |
 
-Then follow **[Install InfoMancer](docs/INSTALLATION.md)**. The Server guide starts with a six-step home-network quick start and does not require programming tools.
+Then follow **[Install InfoMancer](docs/INSTALLATION.md)**. The Server ZIP includes guided setup helpers for Windows, macOS, and Linux, plus `START-HERE.txt`. For a normal home install, you only need Docker and the paths to your media folders.
 
 Beta 2 native packages are not yet fully platform-signed/notarized, so Windows SmartScreen or macOS Gatekeeper may show a warning. Download only from the official GitHub release and verify `SHA256SUMS.txt` when desired.
 
