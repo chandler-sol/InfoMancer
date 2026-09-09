@@ -6,8 +6,8 @@
 <p align="center">A local-first media catalog, intelligence, review, and organization workspace for Movie and TV libraries.</p>
 
 <p align="center">
-  <img alt="Release 0.8.1 alpha.1" src="https://img.shields.io/badge/release-0.8.1--alpha.1-B7FF2A?style=flat-square&labelColor=11161d">
-  <img alt="Windows, macOS, Linux, Docker" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Docker-26313d?style=flat-square&labelColor=11161d">
+  <img alt="Release 0.8.1 beta.2" src="https://img.shields.io/badge/release-0.8.1--beta.2-B7FF2A?style=flat-square&labelColor=11161d">
+  <img alt="Windows, macOS, Linux, Server" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Server-26313d?style=flat-square&labelColor=11161d">
   <img alt="Local first" src="https://img.shields.io/badge/design-local--first-26313d?style=flat-square&labelColor=11161d">
 </p>
 
@@ -20,7 +20,7 @@
 
 InfoMancer is built for media libraries that have outgrown a folder browser. It catalogs media across local disks, mounted storage, and network shares, enriches titles with metadata, inspects technical characteristics, surfaces problems through the Media Intelligence Engine, and keeps potentially destructive work behind explicit review and safety checks.
 
-> **0.8 is alpha software.** Back up a catalog you care about before upgrades, and expect packaging and compatibility to keep improving on the way to 1.0.
+> **0.8.1 is beta software.** Back up a catalog you care about before upgrades, and expect packaging and compatibility to keep improving on the way to 1.0.
 
 <!-- README SCREENSHOT SLOT 1: docs/assets/readme/dashboard-hero.png
      Wide 16:9 capture of the populated Dashboard. No open menus or personal paths.
@@ -92,36 +92,36 @@ InfoMancer is designed to understand a library first, then let you decide what s
      Review Workspace with several realistic categories/items visible and no private paths.
 -->
 
-## Choose how you want to run InfoMancer
+## Choose Desktop or Server
 
-| Mode | Best for | What 0.8 does |
+| Product | Best for | What it does |
 | --- | --- | --- |
-| **Native standalone** | One Windows, Mac, or Linux computer | Runs a bundled InfoMancer core and local catalog on that computer. |
-| **Native client** | A desktop connecting to an existing server | Uses the native shell while the server owns the catalog and media access. |
-| **Docker / server** | Shared, always-on, headless, or remotely accessed installations | Runs InfoMancer independently of a desktop login and can serve multiple clients. |
+| **InfoMancer Desktop: Run on this computer** | One Windows, Mac, or Linux computer | Runs a bundled local InfoMancer core and catalog on that computer. |
+| **InfoMancer Desktop: Connect to a server** | A desktop using an existing InfoMancer Server | Uses the native shell while the Server owns the shared catalog and media access. |
+| **InfoMancer Server** | Shared, always-on, headless, or remotely accessed installations | Runs independently of a desktop login and can serve several clients. |
 
-> **Important:** In 0.8, **Run on this computer is local-only**. The bundled desktop core listens only on the local machine and is not an InfoMancer server for other devices. Use **Connect to a server** with a separate server deployment when you need shared or remote access.
+> **Desktop is not Server.** In 0.8, **Run on this computer** is local-only. Install InfoMancer Server when several computers need to share one catalog.
 
-## Download 0.8.1 alpha.1
+## Download 0.8.1-beta.2
 
-Choose the package whose name matches your platform:
+Choose the package whose name matches what you are installing:
 
-| Platform | Download |
+| Platform / product | Download |
 | --- | --- |
-| Windows 10/11 x64 | `InfoMancer-0.8.1-beta.1-Windows-x64-Setup.exe` |
-| macOS, Apple Silicon | `InfoMancer-0.8.1-beta.1-macOS-Apple-Silicon.dmg` |
-| macOS, Intel | `InfoMancer-0.8.1-beta.1-macOS-Intel.dmg` |
-| Debian / Ubuntu / Linux Mint x86-64 | `InfoMancer-0.8.1-beta.1-Linux-x86_64.deb` |
-| Other Linux x86-64 desktops | `InfoMancer-0.8.1-beta.1-Linux-x86_64.AppImage` |
-| Server / Docker | `InfoMancer-0.8.1-beta.1.zip` |
+| Windows 10/11 x64 Desktop | `InfoMancer-0.8.1-beta.2-Windows-x64-Setup.exe` |
+| macOS Desktop, Apple Silicon | `InfoMancer-0.8.1-beta.2-macOS-Apple-Silicon.dmg` |
+| macOS Desktop, Intel | `InfoMancer-0.8.1-beta.2-macOS-Intel.dmg` |
+| Debian / Ubuntu / Linux Mint Desktop x86-64 | `InfoMancer-0.8.1-beta.2-Linux-x86_64.deb` |
+| Other Linux Desktop x86-64 | `InfoMancer-0.8.1-beta.2-Linux-x86_64.AppImage` |
+| **InfoMancer Server** | `InfoMancer-Server-0.8.1-beta.2.zip` |
 
-Then follow **[Install InfoMancer](docs/INSTALLATION.md)**.
+Then follow **[Install InfoMancer](docs/INSTALLATION.md)**. The Server guide starts with a six-step home-network quick start and does not require programming tools.
 
-Native alpha packages are not yet fully platform-signed/notarized, so Windows SmartScreen or macOS Gatekeeper may show a warning. Download only from the official GitHub release and verify `SHA256SUMS.txt` when testing an alpha package.
+Beta 2 native packages are not yet fully platform-signed/notarized, so Windows SmartScreen or macOS Gatekeeper may show a warning. Download only from the official GitHub release and verify `SHA256SUMS.txt` when desired.
 
 ## Remote access
 
-For a shared or always-on installation, use the server deployment. Do not expose an InfoMancer HTTP port directly to the public internet. Use an authenticated reverse proxy, VPN, or the documented Cloudflare Access/Tunnel path.
+InfoMancer Server works on a normal local network without an Internet connection. Do not expose port 8787 directly to the public Internet or port-forward it on your router. For access away from home, use a VPN, authenticated reverse proxy, or the documented Cloudflare Access/Tunnel path.
 
 See **[Remote access](docs/REMOTE_ACCESS.md)**.
 
@@ -148,4 +148,4 @@ InfoMancer uses Python 3.13, FastAPI, SQLite, Jinja, JavaScript/CSS, and Tauri. 
 python -m unittest discover -s tests -v
 ```
 
-InfoMancer remains an alpha project and a final open-source license has not yet been selected. Current release work focuses on platform qualification, signing/notarization, performance, accessibility, data durability, and the remaining path to a stable 1.0.
+InfoMancer remains a beta project and a final open-source license has not yet been selected. Current release work focuses on platform qualification, signing/notarization, performance, accessibility, data durability, and the remaining path to a stable 1.0.
