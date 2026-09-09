@@ -12,7 +12,9 @@ class DesktopFirstRunRecoveryTests(unittest.TestCase):
         self.assertIn('write_all(b"GET /setup HTTP/1.1', rust)
         self.assertIn("200 => Ok(true)", rust)
         self.assertIn("303", rust)
-        self.assertIn("let first_run = match wait_for_local_core(port).await", rust)
+        self.assertIn("let first_run = match wait_for_local_core(port, &observation).await", rust)
+        self.assertIn("CommandEvent::Terminated", rust)
+        self.assertIn("STARTUP_CONFLICT_PREFIX", rust)
         self.assertNotIn('let first_run = !data_dir.join("infomancer.db").exists()', rust)
 
     def test_desktop_preserves_launcher_history_during_setup_and_remote_connect(self):
