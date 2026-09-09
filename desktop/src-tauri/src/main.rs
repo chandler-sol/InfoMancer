@@ -8,7 +8,7 @@ use std::{
     io::{Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream},
     path::PathBuf,
-    sync::{Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::Manager;
@@ -21,6 +21,8 @@ const UPDATE_ENDPOINT: &str =
     "https://github.com/chandler-sol/InfoMancer/releases/download/desktop-alpha/latest.json";
 const LOCAL_CORE_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 const LOCAL_CORE_POLL_INTERVAL: Duration = Duration::from_millis(150);
+const LOCAL_CORE_STDERR_HISTORY: usize = 12;
+const STARTUP_CONFLICT_PREFIX: &str = "INFOMANCER_STARTUP_CONFLICT:";
 
 static LAUNCH_LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -46,6 +48,15 @@ struct UpdateStatus {
 struct DesktopState {
     child: Mutex<Option<CommandChild>>,
     startup: Mutex<Option<LocalStartup>>,
+}
+
+#[derive(Default)]
+struct CoreObservation {
+    terminated: bool,
+    exit_code: Option<i32>,
+    signal: Option<i32>,
+    process_error: Option<String>,
+    stderr_lines: Vec<String>,
 }
 
 fn launcher_log_path() -> PathBuf {
@@ -169,10 +180,53 @@ fn probe_setup_pending(port: u16) -> Result<bool, String> {
     }
 }
 
-async fn wait_for_local_core(port: u16) -> Result<bool, String> {
+fn core_startup_failure(observation: &Arc<Mutex<CoreObservation>>) -> Option<String> {
+    let observation = observation.lock().ok()?;
+    if !observation.terminated && observation.process_error.is_none() {
+        return None;
+    }
+
+    let stderr = observation.stderr_lines.join("\n");
+    if let Some(index) = stderr.rfind(STARTUP_CONFLICT_PREFIX) {
+        let conflict = stderr[index + STARTUP_CONFLICT_PREFIX.len()..].trim();
+        if !conflict.is_empty() {
+            return Some(conflict.to_string());
+        }
+    }
+
+    if let Some(error) = observation.process_error.as_deref() {
+        return Some(format!(
+            "The bundled InfoMancer core reported a startup process error: {error}. Check {} for startup details.",
+            launcher_log_path().display()
+        ));
+    }
+
+    let status = match (observation.exit_code, observation.signal) {
+        (Some(code), _) => format!("exit code {code}"),
+        (None, Some(signal)) => format!("signal {signal}"),
+        (None, None) => "an unknown exit status".to_string(),
+    };
+    let detail = observation
+        .stderr_lines
+        .last()
+        .map(|line| format!(" Last message: {line}"))
+        .unwrap_or_default();
+    Some(format!(
+        "The bundled InfoMancer core exited before startup completed ({status}).{detail} Check {} for startup details.",
+        launcher_log_path().display()
+    ))
+}
+
+async fn wait_for_local_core(
+    port: u16,
+    observation: &Arc<Mutex<CoreObservation>>,
+) -> Result<bool, String> {
     let started = Instant::now();
     let mut last_error = String::new();
     while started.elapsed() < LOCAL_CORE_STARTUP_TIMEOUT {
+        if let Some(error) = core_startup_failure(observation) {
+            return Err(error);
+        }
         match probe_setup_pending(port) {
             Ok(setup_pending) => {
                 log_launcher(&format!(
@@ -184,6 +238,9 @@ async fn wait_for_local_core(port: u16) -> Result<bool, String> {
             Err(error) => last_error = error,
         }
         tokio::time::sleep(LOCAL_CORE_POLL_INTERVAL).await;
+    }
+    if let Some(error) = core_startup_failure(observation) {
+        return Err(error);
     }
     Err(format!(
         "The local InfoMancer core did not become ready within {} seconds. {} Check {} for startup details.",
@@ -275,15 +332,39 @@ async fn start_local(app: tauri::AppHandle) -> Result<LocalStartup, String> {
         .spawn()
         .map_err(|error| format!("Could not start the bundled InfoMancer core: {error}"))?;
 
+    let observation = Arc::new(Mutex::new(CoreObservation::default()));
+    let event_observation = Arc::clone(&observation);
     tauri::async_runtime::spawn(async move {
         while let Some(event) = events.recv().await {
             match event {
                 CommandEvent::Stderr(line) => {
-                    let message = String::from_utf8_lossy(&line);
-                    log_launcher(&format!("InfoMancer core stderr: {message}"));
+                    let message = String::from_utf8_lossy(&line).trim().to_string();
+                    if !message.is_empty() {
+                        log_launcher(&format!("InfoMancer core stderr: {message}"));
+                        if let Ok(mut observation) = event_observation.lock() {
+                            observation.stderr_lines.push(message);
+                            if observation.stderr_lines.len() > LOCAL_CORE_STDERR_HISTORY {
+                                observation.stderr_lines.remove(0);
+                            }
+                        }
+                    }
                 }
                 CommandEvent::Error(error) => {
                     log_launcher(&format!("InfoMancer core process error: {error}"));
+                    if let Ok(mut observation) = event_observation.lock() {
+                        observation.process_error = Some(error);
+                    }
+                }
+                CommandEvent::Terminated(payload) => {
+                    log_launcher(&format!(
+                        "InfoMancer core terminated before launcher shutdown: code={:?}, signal={:?}.",
+                        payload.code, payload.signal
+                    ));
+                    if let Ok(mut observation) = event_observation.lock() {
+                        observation.terminated = true;
+                        observation.exit_code = payload.code;
+                        observation.signal = payload.signal;
+                    }
                 }
                 _ => {}
             }
@@ -298,7 +379,7 @@ async fn start_local(app: tauri::AppHandle) -> Result<LocalStartup, String> {
         *child_slot = Some(child);
     }
 
-    let first_run = match wait_for_local_core(port).await {
+    let first_run = match wait_for_local_core(port, &observation).await {
         Ok(value) => value,
         Err(error) => {
             log_launcher(&format!("Local core startup failed: {error}"));
