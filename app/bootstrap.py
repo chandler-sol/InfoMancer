@@ -49,7 +49,7 @@ class BootstrapTokenManager:
                 flush=True,
             )
             print(
-                "Enter this token once at /setup. It is invalidated after the first Librarian is created.",
+                "Enter this token once during first-time Server setup. It becomes invalid after the first Librarian account is created.",
                 flush=True,
             )
             self._announced = True
