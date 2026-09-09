@@ -246,14 +246,15 @@ def _release_desktop_instance(marker: Path | None) -> None:
 
 
 def _start_onefile_parent_watchdog() -> None:
-    """Stop the real Windows one-file worker if its PyInstaller parent is killed.
+    """Stop a frozen one-file worker if its PyInstaller parent is killed.
 
     PyInstaller one-file builds run a bootloader parent plus the Python application
-    child. Tauri owns the bootloader PID. On Windows, terminating that parent can
-    leave the Python child running in the background. That orphan keeps the SQLite
-    catalog and runtime lease alive, which prevents the next desktop launch.
+    child. Tauri owns the bootloader PID. If that parent disappears during an
+    uninstall, forced close, crash, or launcher shutdown, the application child can
+    otherwise survive in the background and keep the SQLite catalog/runtime lease
+    alive. Apply the same parent watch on Windows, Linux, and macOS.
     """
-    if os.name != "nt" or not getattr(sys, "frozen", False):
+    if not getattr(sys, "frozen", False):
         return
     parent_pid = os.getppid()
     if parent_pid <= 0:
