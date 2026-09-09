@@ -121,7 +121,7 @@ Beta 2 native packages are not yet fully platform-signed/notarized, so Windows S
 
 ## Remote access
 
-InfoMancer Server works on a normal local network without an Internet connection. Do not expose port 8787 directly to the public Internet or port-forward it on your router. For access away from home, use a VPN, authenticated reverse proxy, or the documented Cloudflare Access/Tunnel path.
+InfoMancer Server can be used entirely on a trusted local network without Cloudflare or another remote-access service. The initial Docker installation/build and online metadata providers require Internet access unless their dependencies are already available locally. Do not expose port 8787 directly to the public Internet or port-forward it on your router. For access away from home, use a VPN, authenticated reverse proxy, or the documented Cloudflare Access/Tunnel path.
 
 See **[Remote access](docs/REMOTE_ACCESS.md)**.
 
