@@ -8,7 +8,12 @@ from .request_security import constant_time_equal
 
 
 class BootstrapTokenManager:
-    """Provide the one-time setup secret for a new InfoMancer Server."""
+    """Provide the one-time setup secret for a new InfoMancer Server.
+
+    The guided Server setup helpers prime the normal ``/setup`` route, then read
+    this protected token file from the local ``data/`` bind mount so the user
+    does not have to hunt through Docker logs during first-time setup.
+    """
 
     def __init__(self, path: Path, configured_token: str = ""):
         self.path = path
