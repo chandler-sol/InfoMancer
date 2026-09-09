@@ -16,8 +16,10 @@ services:
     security_opt:
       - no-new-privileges:true
     ports:
-      # Keep this loopback-only; Cloudflare Tunnel is the public entry point.
-      - "127.0.0.1:8787:8787"
+      # .env.example uses 0.0.0.0 so a normal InfoMancer Server is reachable on
+      # the local network. Do not port-forward 8787 to the public Internet.
+      # Set INFOMANCER_BIND_ADDRESS=127.0.0.1 for a host-only/Cloudflare origin.
+      - "${INFOMANCER_BIND_ADDRESS:-127.0.0.1}:8787:8787"
     volumes:
       - ./data:/app/data
       # Host media mappings belong in compose.media.yaml. Platform-specific
