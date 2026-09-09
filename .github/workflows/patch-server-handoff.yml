@@ -1,0 +1,102 @@
+name: Apply Server Handoff Cleanup
+
+on:
+  push:
+    branches:
+      - release/0.8.1-beta.2
+    paths:
+      - .github/workflows/patch-server-handoff.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out Beta 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: release/0.8.1-beta.2
+          persist-credentials: false
+
+      - name: Patch canonical release workflow
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/draft-08-release.yml')
+          text = path.read_text(encoding='utf-8')
+
+          old_paths = '''      - .github/workflows/draft-08-release.yml
+                - desktop/**
+                - app/**
+                - scripts/stage_ffprobe.py
+                - scripts/verify_macos_minos.py
+                - requirements.txt'''.replace('                ', '      ')
+          new_paths = '''      - .github/workflows/draft-08-release.yml
+                - desktop/**
+                - app/**
+                - scripts/build_release.py
+                - scripts/stage_ffprobe.py
+                - scripts/verify_macos_minos.py
+                - compose.yaml
+                - compose.cloudflare.yaml
+                - .env.example
+                - deploy/**
+                - README.md
+                - docs/INSTALLATION.md
+                - docs/REMOTE_ACCESS.md
+                - docs/releases/**
+                - requirements.txt'''.replace('                ', '      ')
+          if old_paths not in text:
+              raise SystemExit('Release workflow push path block changed unexpectedly')
+          text = text.replace(old_paths, new_paths, 1)
+
+          replacements = {
+              '    name: Server and source package': '    name: InfoMancer Server package',
+              '      - name: Build credential-free release ZIP': '      - name: Build InfoMancer Server ZIP',
+              '      - name: Stage source package': '      - name: Stage InfoMancer Server package',
+              '          cp dist/InfoMancer-*.zip release-assets/': '          cp dist/InfoMancer-Server-*.zip release-assets/',
+              '      - name: Upload source package': '      - name: Upload InfoMancer Server package',
+              '          name: infomancer-source': '          name: infomancer-server',
+              'Server/source, Windows, macOS Apple Silicon, macOS Intel, and Linux artifacts': 'InfoMancer Server, Windows, macOS Apple Silicon, macOS Intel, and Linux artifacts',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'Expected release workflow text not found: {old}')
+              text = text.replace(old, new, 1)
+
+          upload = '          gh release upload "$TAG" publish/* --clobber'
+          cleanup = '''          # Beta 2 previously used a generic InfoMancer-<version>.zip name for
+                    # the Server package. Remove that obsolete asset when refreshing the draft so
+                    # testers see one unambiguous Server download.
+                    gh release delete-asset "$TAG" "InfoMancer-${VERSION}.zip" --yes >/dev/null 2>&1 || true
+
+                    gh release upload "$TAG" publish/* --clobber'''.replace('                    ', '          ')
+          if upload not in text:
+              raise SystemExit('Release upload line changed unexpectedly')
+          text = text.replace(upload, cleanup, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Run Server handoff contract tests
+        run: python -m unittest tests.test_release_asset_names -v
+
+      - name: Validate and commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          rm .github/workflows/patch-server-handoff.yml
+          git diff --check
+          git status --short
+          git config user.name 'InfoMancer release bot'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Simplify InfoMancer Server installation handoff'
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:release/0.8.1-beta.2
