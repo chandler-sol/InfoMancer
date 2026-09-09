@@ -1,0 +1,67 @@
+name: Clean Obsolete Releases
+
+on:
+  push:
+    branches:
+      - release/0.8.1-beta.2
+    paths:
+      - .github/workflows/cleanup-old-releases.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    name: Remove obsolete release entries
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Verify current beta remains published
+        shell: bash
+        run: |
+          state="$(gh api "repos/$GITHUB_REPOSITORY/releases/383709765" --jq '[.tag_name, .draft, .prerelease] | @tsv')"
+          echo "Keeping current release: $state"
+          if [ "$state" != $'v0.8.1-beta.2\tfalse\ttrue' ]; then
+            echo 'Current beta.2 release is not in the expected published prerelease state; refusing cleanup.' >&2
+            exit 1
+          fi
+
+      - name: Remove obsolete draft and prerelease release records
+        shell: bash
+        run: |
+          # GitHub has no private per-release visibility for public repositories.
+          # Delete only the obsolete release records so they leave the Releases UI;
+          # their Git tags and commit history remain intact.
+          for release_id in \
+            383117327 \
+            376128014 \
+            375116988 \
+            359490763
+          do
+            if gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" >/dev/null 2>&1; then
+              tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq '.tag_name')"
+              echo "Removing obsolete release record $release_id ($tag), preserving tag/history."
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id"
+            else
+              echo "Release record $release_id already absent; continuing."
+            fi
+          done
+
+      - name: Verify retained release set
+        shell: bash
+        run: |
+          echo 'Remaining releases:'
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | [.tag_name, .draft, .prerelease, .name] | @tsv'
+
+          for removed_id in 383117327 376128014 375116988 359490763; do
+            if gh api "repos/$GITHUB_REPOSITORY/releases/$removed_id" >/dev/null 2>&1; then
+              echo "Obsolete release $removed_id still exists." >&2
+              exit 1
+            fi
+          done
+
+          gh api "repos/$GITHUB_REPOSITORY/releases/383709765" \
+            --jq 'select(.tag_name == "v0.8.1-beta.2" and .draft == false and .prerelease == true) | .tag_name' \
+            | grep -qx 'v0.8.1-beta.2'
