@@ -1,6 +1,10 @@
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
 
+$MinimumDockerEngine = [version]'24.0.0'
+$MinimumDockerCompose = [version]'2.20.0'
+$DockerWindowsUrl = 'https://docs.docker.com/desktop/setup/install/windows-install/'
+
 function Stop-Setup([string]$Message) {
     Write-Host ""
     Write-Host "InfoMancer Server setup stopped: $Message" -ForegroundColor Red
@@ -13,6 +17,123 @@ function Invoke-DockerCompose {
     if ($LASTEXITCODE -ne 0) {
         throw "Docker Compose command failed."
     }
+}
+
+function Convert-ToNumericVersion([string]$Value) {
+    $match = [regex]::Match($Value, '\d+(?:\.\d+){0,2}')
+    if (-not $match.Success) { return $null }
+    $parts = $match.Value.Split('.')
+    while ($parts.Count -lt 3) { $parts += '0' }
+    try {
+        return [version](($parts[0..2] -join '.'))
+    } catch {
+        return $null
+    }
+}
+
+function Test-MinimumVersion([string]$Actual, [version]$Minimum) {
+    $parsed = Convert-ToNumericVersion $Actual
+    return ($null -ne $parsed -and $parsed -ge $Minimum)
+}
+
+function Open-DockerInstructions {
+    try {
+        Start-Process $DockerWindowsUrl
+    } catch {
+        Write-Host "Open this address in your browser:"
+        Write-Host "  $DockerWindowsUrl"
+    }
+}
+
+function Install-OrUpdate-DockerDesktop {
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host 'Windows Package Manager (winget) is not available on this computer.' -ForegroundColor Yellow
+        Open-DockerInstructions
+        Stop-Setup 'Install or update Docker Desktop, start it, then run Setup-InfoMancer.cmd again.'
+    }
+
+    Write-Host ""
+    Write-Host 'Asking Windows Package Manager to install or update Docker Desktop...'
+    & winget list --id Docker.DockerDesktop --exact *> $null
+    $alreadyInstalled = $LASTEXITCODE -eq 0
+
+    if ($alreadyInstalled) {
+        & winget upgrade --id Docker.DockerDesktop --exact --accept-package-agreements --accept-source-agreements
+    } else {
+        & winget install --id Docker.DockerDesktop --exact --accept-package-agreements --accept-source-agreements
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host 'Windows Package Manager could not complete the Docker Desktop installation/update.' -ForegroundColor Yellow
+        Open-DockerInstructions
+        Stop-Setup 'Finish installing or updating Docker Desktop, then run Setup-InfoMancer.cmd again.'
+    }
+
+    Write-Host ""
+    Write-Host 'Docker Desktop installation/update finished.' -ForegroundColor Green
+    Write-Host 'Start Docker Desktop and wait until it reports that Docker is ready.'
+    Write-Host 'Then run Setup-InfoMancer.cmd again.'
+    exit 0
+}
+
+function Resolve-DockerRequirement([string]$Problem) {
+    Write-Host ""
+    Write-Host 'Docker needs attention' -ForegroundColor Yellow
+    Write-Host '----------------------' -ForegroundColor Yellow
+    Write-Host $Problem
+    Write-Host ""
+    Write-Host 'InfoMancer Server requires:'
+    Write-Host '  Docker Engine 24.0 or newer'
+    Write-Host '  Docker Compose 2.20 or newer'
+    Write-Host ""
+    Write-Host 'Official Docker instructions:'
+    Write-Host "  $DockerWindowsUrl"
+    Write-Host ""
+
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        while ($true) {
+            $choice = (Read-Host '[I] Install/update Docker Desktop with winget  [O] Open official instructions  [E] Exit').Trim().ToLowerInvariant()
+            switch ($choice) {
+                'i' { Install-OrUpdate-DockerDesktop }
+                'o' { Open-DockerInstructions; Stop-Setup 'Install or update Docker Desktop, start it, then run this helper again.' }
+                'e' { exit 1 }
+                default { Write-Host 'Choose I, O, or E.' }
+            }
+        }
+    }
+
+    while ($true) {
+        $choice = (Read-Host '[O] Open official Docker instructions  [E] Exit').Trim().ToLowerInvariant()
+        switch ($choice) {
+            'o' { Open-DockerInstructions; Stop-Setup 'Install or update Docker Desktop, start it, then run this helper again.' }
+            'e' { exit 1 }
+            default { Write-Host 'Choose O or E.' }
+        }
+    }
+}
+
+function Find-DockerDesktopExecutable {
+    $candidates = @()
+    if ($env:ProgramFiles) {
+        $candidates += (Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe')
+    }
+    if ($env:LOCALAPPDATA) {
+        $candidates += (Join-Path $env:LOCALAPPDATA 'Programs\Docker\Docker\Docker Desktop.exe')
+    }
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    }
+    return $null
+}
+
+function Wait-ForDocker([int]$Seconds = 120) {
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        & docker info *> $null
+        if ($LASTEXITCODE -eq 0) { return $true }
+        Start-Sleep -Seconds 2
+    }
+    return $false
 }
 
 function Set-EnvValue([string]$Key, [string]$Value) {
@@ -52,23 +173,62 @@ function Quote-Yaml([string]$Value) {
 Write-Host ""
 Write-Host "InfoMancer Server Setup" -ForegroundColor Cyan
 Write-Host "=======================" -ForegroundColor Cyan
-Write-Host "This helper creates the local config files, connects your media folders,"
+Write-Host "This helper checks Docker, creates the local config files, connects your media folders,"
 Write-Host "starts InfoMancer, and prints the address and one-time setup code."
 Write-Host ""
+Write-Host 'Checking Docker...'
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    Stop-Setup 'Docker was not found. Install Docker Desktop first, then run Setup-InfoMancer.cmd again.'
+    Resolve-DockerRequirement 'Docker was not found on this computer.'
 }
 
-& docker compose version *> $null
+$composeVersion = (& docker compose version --short 2>$null | Select-Object -First 1)
+if ([string]::IsNullOrWhiteSpace($composeVersion)) {
+    $composeVersion = (& docker compose version 2>$null | Select-Object -First 1)
+    if ($composeVersion) {
+        $composeVersion = ($composeVersion -split '\s+')[-1]
+    }
+}
+if ([string]::IsNullOrWhiteSpace($composeVersion)) {
+    Resolve-DockerRequirement 'Docker is installed, but the Docker Compose plugin was not found.'
+}
+$composeVersion = $composeVersion.Trim()
+if (-not (Test-MinimumVersion $composeVersion $MinimumDockerCompose)) {
+    Resolve-DockerRequirement "Docker Compose $composeVersion was found, but InfoMancer requires 2.20 or newer."
+}
+Write-Host "  Docker Compose $composeVersion ... OK" -ForegroundColor Green
+
+& docker info *> $null
 if ($LASTEXITCODE -ne 0) {
-    Stop-Setup 'Docker Compose was not found. Install or update Docker Desktop, then try again.'
+    $dockerDesktop = Find-DockerDesktopExecutable
+    if ($dockerDesktop) {
+        $answer = Read-Host 'Docker Desktop is installed but is not running. Start it now? [Y/n]'
+        if ($answer -notmatch '^(n|no)$') {
+            Start-Process -FilePath $dockerDesktop | Out-Null
+            Write-Host 'Waiting for Docker Desktop to start...'
+            if (-not (Wait-ForDocker 120)) {
+                Resolve-DockerRequirement 'Docker Desktop started, but the Docker engine did not become ready within two minutes.'
+            }
+        }
+    }
 }
 
 & docker info *> $null
 if ($LASTEXITCODE -ne 0) {
-    Stop-Setup 'Docker is installed but is not running. Start Docker Desktop, then try again.'
+    Resolve-DockerRequirement 'Docker is installed, but its engine is not running. Start Docker Desktop and wait until it reports that Docker is ready.'
 }
+
+$engineVersion = (& docker version --format '{{.Server.Version}}' 2>$null | Select-Object -First 1)
+if ([string]::IsNullOrWhiteSpace($engineVersion)) {
+    Resolve-DockerRequirement 'Docker is running, but InfoMancer could not read the Docker Engine version.'
+}
+$engineVersion = $engineVersion.Trim()
+if (-not (Test-MinimumVersion $engineVersion $MinimumDockerEngine)) {
+    Resolve-DockerRequirement "Docker Engine $engineVersion was found, but InfoMancer requires 24.0 or newer."
+}
+Write-Host "  Docker Engine $engineVersion ... OK" -ForegroundColor Green
+Write-Host '  Docker engine is running ... OK' -ForegroundColor Green
+Write-Host ""
 
 if (-not (Test-Path -LiteralPath '.env')) {
     Copy-Item -LiteralPath '.env.example' -Destination '.env'

@@ -48,11 +48,13 @@ Pick the setup that matches what you want:
 
 For a normal home Server install:
 
-1. Install Docker.
-2. Download and extract `InfoMancer-Server-0.8.1-beta.2.zip`.
-3. Run the setup helper for your operating system.
+1. Download and extract `InfoMancer-Server-0.8.1-beta.2.zip`.
+2. Run the setup helper for your operating system.
+3. Let the helper check Docker. InfoMancer Server requires Docker Engine **24.0+** and Docker Compose **2.20+**.
 4. Tell it where your Movies and TV Shows live.
 5. Open the address it prints and paste in the one-time setup code.
+
+If Docker is missing or too old, the helper tells you what needs attention and offers the official Docker installation/update instructions. On Windows, if `winget` is available, it can also offer to install or update Docker Desktop.
 
 The Server ZIP includes:
 
@@ -63,7 +65,7 @@ The Server ZIP includes:
 
 You do not need Python, Node, Rust, a separate database server, or Cloudflare for a normal local-network install.
 
-See **[Installation](docs/INSTALLATION.md)** for the full first-time walkthrough.
+See **[Installation](docs/INSTALLATION.md)** for the full first-time walkthrough and Docker links.
 
 ## What InfoMancer does
 

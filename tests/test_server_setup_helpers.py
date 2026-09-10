@@ -23,6 +23,9 @@ class ServerSetupHelperContracts(unittest.TestCase):
 
     def test_start_here_is_short_and_platform_specific(self):
         text = (ROOT / "START-HERE.txt").read_text(encoding="utf-8")
+        self.assertIn("Docker Engine 24.0 or newer", text)
+        self.assertIn("Docker Compose 2.20 or newer", text)
+        self.assertIn("checks Docker for you", text)
         self.assertIn("Double-click", text)
         self.assertIn("Setup-InfoMancer.cmd", text)
         self.assertIn("Setup-InfoMancer.command", text)
@@ -30,11 +33,17 @@ class ServerSetupHelperContracts(unittest.TestCase):
         self.assertIn("one-time setup code", text)
         self.assertIn("Do not port-forward port 8787", text)
 
-    def test_unix_helper_automates_first_run(self):
+    def test_unix_helper_automates_first_run_and_checks_docker(self):
         script = (ROOT / "setup-infomancer.sh").read_text(encoding="utf-8")
         for expected in (
-            "docker compose version",
+            'MIN_DOCKER_ENGINE="24.0.0"',
+            'MIN_DOCKER_COMPOSE="2.20.0"',
+            "version_at_least",
+            "docker compose version --short",
+            "docker version --format '{{.Server.Version}}'",
             "docker info",
+            "https://docs.docker.com/desktop/setup/install/mac-install/",
+            "https://docs.docker.com/engine/install/",
             "INFOMANCER_UID",
             "INFOMANCER_GID",
             "compose.media.yaml",
@@ -57,11 +66,18 @@ class ServerSetupHelperContracts(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_windows_helper_automates_first_run(self):
+    def test_windows_helper_automates_first_run_and_checks_docker(self):
         script = (ROOT / "Setup-InfoMancer.ps1").read_text(encoding="utf-8")
         wrapper = (ROOT / "Setup-InfoMancer.cmd").read_text(encoding="utf-8")
         for expected in (
-            "docker compose version",
+            "$MinimumDockerEngine = [version]'24.0.0'",
+            "$MinimumDockerCompose = [version]'2.20.0'",
+            "Test-MinimumVersion",
+            "docker compose version --short",
+            "docker version --format '{{.Server.Version}}'",
+            "Docker.DockerDesktop",
+            "winget",
+            "https://docs.docker.com/desktop/setup/install/windows-install/",
             "docker info",
             "compose.media.yaml",
             "up -d --build",
@@ -77,6 +93,11 @@ class ServerSetupHelperContracts(unittest.TestCase):
     def test_install_guide_makes_helper_the_default_path(self):
         guide = (ROOT / "docs/INSTALLATION.md").read_text(encoding="utf-8")
         self.assertIn("## Quick install", guide)
+        self.assertIn("Docker Engine **24.0 or newer**", guide)
+        self.assertIn("Docker Compose **2.20 or newer**", guide)
+        self.assertIn("https://docs.docker.com/desktop/setup/install/windows-install/", guide)
+        self.assertIn("https://docs.docker.com/desktop/setup/install/mac-install/", guide)
+        self.assertIn("https://docs.docker.com/engine/install/", guide)
         self.assertIn("Double-click:\n\n`Setup-InfoMancer.cmd`", guide)
         self.assertIn("`Setup-InfoMancer.command`", guide)
         self.assertIn("./setup-infomancer.sh", guide)

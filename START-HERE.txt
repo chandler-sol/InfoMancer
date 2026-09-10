@@ -1,8 +1,16 @@
 INFOMANCER SERVER - START HERE
 =============================
 
-Before you start:
-Install Docker and make sure it is running.
+You can run the InfoMancer setup helper even if you are not sure Docker is installed.
+It checks Docker for you before changing InfoMancer.
+
+InfoMancer Server requires:
+- Docker Engine 24.0 or newer
+- Docker Compose 2.20 or newer
+
+If Docker is missing or too old, the helper will tell you what needs attention and
+can open Docker's official installation/update instructions. On Windows, if winget
+is available, the helper can also offer to install or update Docker Desktop.
 
 WINDOWS
 Double-click: Setup-InfoMancer.cmd
@@ -21,6 +29,11 @@ Then it will start InfoMancer and print:
 - the one-time setup code for the first Librarian account
 
 It does not move or copy your media files.
+
+Need Docker?
+Windows: https://docs.docker.com/desktop/setup/install/windows-install/
+Mac:     https://docs.docker.com/desktop/setup/install/mac-install/
+Linux:   https://docs.docker.com/engine/install/
 
 Need help?
 docs/INSTALLATION.md

@@ -4,6 +4,11 @@ set -u
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
 cd "$SCRIPT_DIR" || exit 1
 
+MIN_DOCKER_ENGINE="24.0.0"
+MIN_DOCKER_COMPOSE="2.20.0"
+DOCKER_MAC_URL="https://docs.docker.com/desktop/setup/install/mac-install/"
+DOCKER_LINUX_URL="https://docs.docker.com/engine/install/"
+
 say() {
   printf '%s\n' "$*"
 }
@@ -15,6 +20,69 @@ fail() {
 
 dc() {
   docker compose -f compose.yaml -f compose.media.yaml "$@"
+}
+
+version_at_least() {
+  actual=$1
+  minimum=$2
+  awk -v actual="$actual" -v minimum="$minimum" '
+    BEGIN {
+      sub(/^[^0-9]*/, "", actual)
+      split(actual, a, ".")
+      split(minimum, m, ".")
+      for (i = 1; i <= 3; i++) {
+        av = a[i] + 0
+        mv = m[i] + 0
+        if (av > mv) exit 0
+        if (av < mv) exit 1
+      }
+      exit 0
+    }
+  '
+}
+
+open_url() {
+  url=$1
+  if [ "$PLATFORM" = "macos" ] && command -v open >/dev/null 2>&1; then
+    open "$url" >/dev/null 2>&1 || true
+    return
+  fi
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$url" >/dev/null 2>&1 || true
+    return
+  fi
+  if command -v gio >/dev/null 2>&1; then
+    gio open "$url" >/dev/null 2>&1 || true
+  fi
+}
+
+docker_help() {
+  problem=$1
+  if [ "$PLATFORM" = "macos" ]; then
+    url=$DOCKER_MAC_URL
+  else
+    url=$DOCKER_LINUX_URL
+  fi
+
+  say ""
+  say "Docker needs attention"
+  say "----------------------"
+  say "$problem"
+  say ""
+  say "InfoMancer Server requires:"
+  say "  Docker Engine 24.0 or newer"
+  say "  Docker Compose 2.20 or newer"
+  say ""
+  say "Official Docker instructions:"
+  say "  $url"
+  say ""
+  printf 'Open the official Docker instructions now? [Y/n]: '
+  IFS= read -r answer || exit 1
+  case "$answer" in
+    n|N|no|NO|No) ;;
+    *) open_url "$url" ;;
+  esac
+  fail "Install or update Docker, make sure it is running, then run this helper again."
 }
 
 replace_env_value() {
@@ -64,13 +132,56 @@ esac
 say ""
 say "InfoMancer Server Setup"
 say "======================="
-say "This helper creates the local config files, connects your media folders,"
+say "This helper checks Docker, creates the local config files, connects your media folders,"
 say "starts InfoMancer, and prints the address and one-time setup code."
 say ""
+say "Checking Docker..."
 
-command -v docker >/dev/null 2>&1 || fail "Docker was not found. Install Docker first, then run this helper again."
-docker compose version >/dev/null 2>&1 || fail "Docker Compose was not found. Install the Docker Compose plugin/Desktop, then try again."
-docker info >/dev/null 2>&1 || fail "Docker is installed but is not running. Start Docker, then run this helper again."
+command -v docker >/dev/null 2>&1 || docker_help "Docker was not found on this computer."
+
+COMPOSE_VERSION=$(docker compose version --short 2>/dev/null | head -n 1 || true)
+if [ -z "$COMPOSE_VERSION" ]; then
+  COMPOSE_VERSION=$(docker compose version 2>/dev/null | awk '{print $NF}' | head -n 1 || true)
+fi
+[ -n "$COMPOSE_VERSION" ] || docker_help "Docker is installed, but the Docker Compose plugin was not found."
+version_at_least "$COMPOSE_VERSION" "$MIN_DOCKER_COMPOSE" || docker_help "Docker Compose $COMPOSE_VERSION was found, but InfoMancer requires 2.20 or newer."
+say "  Docker Compose $COMPOSE_VERSION ... OK"
+
+if ! docker info >/dev/null 2>&1; then
+  if [ "$PLATFORM" = "macos" ] && [ -d "/Applications/Docker.app" ]; then
+    printf 'Docker Desktop is installed but is not running. Start it now? [Y/n]: '
+    IFS= read -r answer || exit 1
+    case "$answer" in
+      n|N|no|NO|No) ;;
+      *)
+        open -a Docker >/dev/null 2>&1 || true
+        say "Waiting for Docker Desktop to start..."
+        count=0
+        while [ "$count" -lt 60 ]; do
+          if docker info >/dev/null 2>&1; then
+            break
+          fi
+          sleep 2
+          count=$((count + 1))
+        done
+        ;;
+    esac
+  fi
+fi
+
+if ! docker info >/dev/null 2>&1; then
+  if [ "$PLATFORM" = "linux" ]; then
+    docker_help "Docker is installed, but the Docker engine is not reachable. Start the Docker service and make sure your user has permission to use Docker."
+  fi
+  docker_help "Docker Desktop is installed, but its engine is not running. Start Docker Desktop and wait until it reports that Docker is ready."
+fi
+
+ENGINE_VERSION=$(docker version --format '{{.Server.Version}}' 2>/dev/null | head -n 1 || true)
+[ -n "$ENGINE_VERSION" ] || docker_help "Docker is running, but InfoMancer could not read the Docker Engine version."
+version_at_least "$ENGINE_VERSION" "$MIN_DOCKER_ENGINE" || docker_help "Docker Engine $ENGINE_VERSION was found, but InfoMancer requires 24.0 or newer."
+say "  Docker Engine $ENGINE_VERSION ... OK"
+say "  Docker engine is running ... OK"
+say ""
 
 if [ ! -f .env ]; then
   cp .env.example .env || fail "Could not create .env from .env.example."

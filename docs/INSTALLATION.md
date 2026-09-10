@@ -15,19 +15,15 @@ Use Server when the catalog should live on an always-on computer, home server, o
 
 For a normal home install, you need only:
 
-- Docker
 - the InfoMancer Server ZIP
 - the locations of your Movies and TV Shows
+- Docker Engine **24.0 or newer** and Docker Compose **2.20 or newer**
 
 You do **not** need Python, Node, Rust, a separate database server, or Cloudflare.
 
 ## Quick install
 
-### 1. Install Docker
-
-Install Docker and make sure it is running.
-
-### 2. Download InfoMancer Server
+### 1. Download InfoMancer Server
 
 Download and extract:
 
@@ -35,7 +31,25 @@ Download and extract:
 
 Keep the extracted folder somewhere permanent. It will also hold InfoMancer's local configuration and catalog data.
 
-### 3. Run the setup helper
+### 2. Run the setup helper
+
+You can run the InfoMancer helper even if you are not sure whether Docker is installed. It checks Docker before changing the InfoMancer configuration.
+
+The helper checks for:
+
+- Docker Engine **24.0 or newer**
+- Docker Compose **2.20 or newer**
+- a running Docker engine
+
+If Docker is missing or too old, the helper stops and tells you exactly what needs attention. It can open the official Docker instructions for your operating system. On Windows, when Windows Package Manager (`winget`) is available, the helper can also offer to install or update Docker Desktop for you.
+
+Official Docker install/update instructions:
+
+- **Windows:** [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/)
+- **macOS:** [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/)
+- **Linux:** [Docker Engine installation](https://docs.docker.com/engine/install/)
+
+Once Docker is installed or updated, make sure it is running and run the InfoMancer helper again.
 
 **Windows**
 
@@ -65,7 +79,7 @@ If that reports a permission problem, run:
 sh setup-infomancer.sh
 ```
 
-### 4. Tell InfoMancer where your media lives
+### 3. Tell InfoMancer where your media lives
 
 The helper asks for your Movies folder and TV Shows folder. You can leave one blank if you do not have it.
 
@@ -81,7 +95,7 @@ The helper creates the needed config files for you. It also sets the Linux user/
 
 It does **not** move, copy, rename, or delete media during setup.
 
-### 5. Open InfoMancer
+### 4. Open InfoMancer
 
 The helper starts the Server, waits for it to become ready, then prints an address and a one-time setup code.
 
