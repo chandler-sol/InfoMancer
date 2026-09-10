@@ -17,6 +17,10 @@ class BootstrapTokenManager:
     same one-time secret the Server would otherwise print to its local logs.
     ``START-HERE.txt`` and the guided installer are the supported first-run path;
     manual Docker setup remains available for advanced deployments.
+
+    Keep the generated token-file contract stable for packaged Server helpers.
+    The file is local deployment state, is never bundled into a release, and is
+    removed after the first Librarian account successfully claims the Server.
     """
 
     def __init__(self, path: Path, configured_token: str = ""):
