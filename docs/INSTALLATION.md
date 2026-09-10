@@ -1,117 +1,94 @@
 # Install InfoMancer
 
-InfoMancer 0.8.1-beta.2 has two installation types:
+InfoMancer 0.8.1-beta.2 has two simple installation choices:
 
 | What you want | Install |
 | --- | --- |
-| One computer with its own private InfoMancer catalog | **InfoMancer Desktop** |
-| A shared catalog for several computers, a NAS, or an always-on machine | **InfoMancer Server** |
+| One computer with its own private catalog | **InfoMancer Desktop** |
+| One shared catalog for several computers | **InfoMancer Server** |
 
-> **Desktop is not Server.** Choosing **Run on this computer** in InfoMancer Desktop creates a local installation that only that computer can use. If other computers need to connect to the same catalog, install InfoMancer Server.
+Your Movie and TV files stay where they already are.
 
-Your Movie and TV files stay where they already are. InfoMancer catalogs them in place.
+# InfoMancer Server
 
-# Install InfoMancer Server
+Use Server when the catalog should live on an always-on computer, home server, or NAS-capable Docker host and be shared with other devices.
 
-Use Server for a home server, NAS-capable Docker host, headless computer, or any always-on machine that should serve one InfoMancer library to other devices.
+For a normal home install, you need only:
 
-For a normal home-network install, you need:
+- Docker
+- the InfoMancer Server ZIP
+- the locations of your Movies and TV Shows
 
-- a Windows, macOS, or Linux computer that can run Docker
-- Docker Desktop on Windows/macOS, or Docker Engine plus Docker Compose on Linux
-- the folders containing your Movies and TV Shows
-- about 10 minutes
+You do **not** need Python, Node, Rust, a separate database server, or Cloudflare.
 
-You do **not** need Python, Node, Rust, a database server, Cloudflare, or a programming environment.
+## Quick install
 
-## The easy Server install
+### 1. Install Docker
 
-### Step 1: Install Docker
+Install Docker and make sure it is running.
 
-Install Docker and make sure it is running before continuing.
+### 2. Download InfoMancer Server
 
-### Step 2: Download and extract InfoMancer Server
-
-Download:
+Download and extract:
 
 `InfoMancer-Server-0.8.1-beta.2.zip`
 
-Extract it somewhere permanent. The extracted folder will also hold your InfoMancer configuration and `data/` directory, so do not use a temporary folder if you plan to keep the server.
+Keep the extracted folder somewhere permanent. It will also hold InfoMancer's local configuration and catalog data.
 
-Open `START-HERE.txt` inside the extracted folder if you want the shortest possible instructions.
+### 3. Run the setup helper
 
-### Step 3: Run the setup helper
-
-#### Windows
+**Windows**
 
 Double-click:
 
 `Setup-InfoMancer.cmd`
 
-A PowerShell window will open and keep itself visible when setup finishes.
-
-#### macOS
+**macOS**
 
 Double-click:
 
 `Setup-InfoMancer.command`
 
-If macOS blocks it, right-click it and choose **Open**. You can also open Terminal in the extracted Server folder and run:
+If macOS blocks it, right-click the file and choose **Open**.
 
-```bash
-sh setup-infomancer.sh
-```
+**Linux**
 
-#### Linux
-
-Open a terminal in the extracted Server folder and run:
+Open Terminal in the extracted folder and run:
 
 ```bash
 ./setup-infomancer.sh
 ```
 
-If the executable bit was lost while copying the files, run:
+If that reports a permission problem, run:
 
 ```bash
 sh setup-infomancer.sh
 ```
 
-### Step 4: Answer two simple media questions
+### 4. Tell InfoMancer where your media lives
 
-The helper asks where your Movies and TV Shows live. You can leave one blank if you only have the other.
+The helper asks for your Movies folder and TV Shows folder. You can leave one blank if you do not have it.
 
-For example:
+Examples:
 
 ```text
-Movies folder: /media/storage/Movies
-TV Shows folder: /media/storage/TV
+Windows: D:\Movies
+macOS:   /Volumes/Media/Movies
+Linux:   /media/storage/Movies
 ```
 
-On Windows, a normal path such as `D:\Movies` is fine. The helper converts it to Docker-friendly form automatically.
+The helper creates the needed config files for you. It also sets the Linux user/group values automatically when needed.
 
-The helper then:
+It does **not** move, copy, rename, or delete media during setup.
 
-1. creates `.env` if it does not already exist
-2. creates `compose.media.yaml` from your answers
-3. creates `data/`
-4. sets the correct Linux UID/GID automatically when needed
-5. checks that Docker and Docker Compose are available and running
-6. builds and starts InfoMancer Server
-7. waits for the Server to become healthy
-8. creates and reads the one-time first-run setup code
-9. prints the address to open from this computer and, when it can detect one, the LAN address for other computers
+### 5. Open InfoMancer
 
-It does not move, copy, rename, or delete your media during setup.
+The helper starts the Server, waits for it to become ready, then prints an address and a one-time setup code.
 
-### Step 5: Open InfoMancer
-
-When setup finishes, it prints something similar to:
+It will look similar to:
 
 ```text
 InfoMancer Server is ready.
-
-On this computer:
-  http://127.0.0.1:8787
 
 From another computer on this network:
   http://192.168.1.50:8787
@@ -120,165 +97,34 @@ One-time setup code:
   example-code-here
 ```
 
-From another computer, the general address format is:
+Create the first **Librarian** account and paste in that one-time code.
+
+From another computer, the general address is:
 
 `http://SERVER-IP:8787`
 
-Create the first **Librarian** account and paste in the one-time setup code when asked.
+After that, install InfoMancer Desktop on other computers and choose **Connect to a server**.
 
-> **Do not port-forward port 8787 on your router and do not expose it directly to the public Internet.** Local-network access is built in. For access away from home, use a VPN or the documented authenticated reverse-proxy/Cloudflare setup in [Remote Access](REMOTE_ACCESS.md).
+> **Do not port-forward port 8787 to the public Internet.** Local-network access is built in. For access away from home, use a VPN or the documented authenticated setup in [Remote Access](REMOTE_ACCESS.md).
 
-## What happens if I run the helper again?
+## If setup fails
 
-The helper is designed not to casually destroy an existing setup:
-
-- existing `.env` is kept
-- existing `data/` is kept
-- if `compose.media.yaml` already exists, the helper asks whether to keep it
-- you can choose not to start Docker after creating/updating the config
-
-That makes the helper useful for the first install without turning it into an upgrade or reset tool.
-
-## Connect InfoMancer Desktop to the Server
-
-Install InfoMancer Desktop on a Windows, Mac, or Linux computer, launch it, and choose **Connect to a server**.
-
-Enter the same address you used in the browser, for example:
-
-`http://192.168.1.50:8787`
-
-The Server owns the catalog, accounts, settings, and media access. Desktop is only the client in this mode. The media folders therefore need to be accessible to the **Server**, not to every client computer.
-
-## Manual / advanced Server setup
-
-Most users should use the setup helper above. The manual steps remain available for unusual Docker setups or troubleshooting.
-
-### Create the config files yourself
-
-Choose the matching media template:
-
-#### Windows PowerShell
-
-```powershell
-Copy-Item .env.example .env
-Copy-Item deploy\windows.compose.yaml.example compose.media.yaml
-notepad compose.media.yaml
-```
-
-#### macOS
-
-```bash
-cp .env.example .env
-cp deploy/macos.compose.yaml.example compose.media.yaml
-open -e compose.media.yaml
-```
-
-#### Linux
-
-```bash
-cp .env.example .env
-cp deploy/linux.compose.yaml.example compose.media.yaml
-nano compose.media.yaml
-```
-
-Open `compose.media.yaml` and change the `source:` paths to the real folders on the **server**.
-
-**Only change `source:` for a basic manual install. Leave the `/media/...` `target:` paths alone.**
-
-Linux example:
-
-```yaml
-- type: bind
-  source: /mnt/media/movies
-  target: /media/movies
-- type: bind
-  source: /mnt/media/tv
-  target: /media/tv
-```
-
-Windows example:
-
-```yaml
-source: D:/Movies
-```
-
-macOS example:
-
-```yaml
-source: /Volumes/Media/Movies
-```
-
-On Linux, set the container user to the current account and create `data/`:
-
-```bash
-sed -i "s/^INFOMANCER_UID=.*/INFOMANCER_UID=$(id -u)/" .env
-sed -i "s/^INFOMANCER_GID=.*/INFOMANCER_GID=$(id -g)/" .env
-mkdir -p data
-```
-
-The server user needs read access to media for scanning. Rename, organize, and Managed Trash features also require write access to the affected media folders.
-
-### Start manually
-
-```bash
-docker compose -f compose.yaml -f compose.media.yaml up -d --build
-```
-
-Check status:
-
-```bash
-docker compose -f compose.yaml -f compose.media.yaml ps
-```
-
-Look for the `infomancer` service to become healthy.
-
-### Get the first-run setup code manually
-
-Open `http://127.0.0.1:8787/setup` once, then run:
-
-```bash
-docker compose -f compose.yaml -f compose.media.yaml logs --tail=100 infomancer
-```
-
-Find:
-
-```text
-InfoMancer first-run bootstrap token: ...
-```
-
-That token is the one-time setup code used to claim the first Librarian account. It stops being valid after that first Librarian account is created.
-
-## Server troubleshooting
-
-### Is the container running?
-
-```bash
-docker compose -f compose.yaml -f compose.media.yaml ps
-```
-
-### What went wrong during startup?
+The helper should normally tell you what went wrong. For more detail, run this from the Server folder:
 
 ```bash
 docker compose -f compose.yaml -f compose.media.yaml logs --tail=200 infomancer
 ```
 
-### Restart the server
+For manual Docker setup, unusual storage layouts, permissions, and detailed troubleshooting, see **[Manual Server Setup](SERVER_MANUAL.md)**.
 
-```bash
-docker compose -f compose.yaml -f compose.media.yaml restart infomancer
-```
+If you are doing the manual setup yourself, **Only change `source:`** for the host media path and leave the `/media/...` target alone. The first-run log line is `InfoMancer first-run bootstrap token:`.
 
-### Stop the server
+# InfoMancer Desktop
 
-```bash
-docker compose -f compose.yaml -f compose.media.yaml down
-```
+Desktop is for either:
 
-If another computer cannot connect but the server itself can, check the server operating system's firewall and allow TCP port `8787` on your trusted/private network.
-
-Before posting logs publicly, remove private filenames, paths, addresses, API keys, bootstrap tokens, and session information.
-
-# Install InfoMancer Desktop
+- **Run on this computer**: one private catalog on that computer
+- **Connect to a server**: use an existing InfoMancer Server
 
 Download the package that matches the computer:
 
@@ -290,29 +136,22 @@ Download the package that matches the computer:
 | Debian / Ubuntu / Linux Mint x86-64 | `InfoMancer-0.8.1-beta.2-Linux-x86_64.deb` |
 | Other Linux x86-64 desktops | `InfoMancer-0.8.1-beta.2-Linux-x86_64.AppImage` |
 
-If you are unsure which Mac you have, open **Apple menu > About This Mac**. An Apple M-series chip uses the Apple Silicon package. An Intel processor uses the Intel package.
-
-Native packages include the FFprobe component used for technical media inspection. You do not need to install FFprobe separately.
-
 ## Windows Desktop
 
-1. Download `InfoMancer-0.8.1-beta.2-Windows-x64-Setup.exe`.
-2. Run the installer.
-3. Launch **InfoMancer** from the Start menu.
-4. Choose **Run on this computer** for a standalone local catalog or **Connect to a server** for an existing InfoMancer Server.
-5. Follow Guided Setup if this is a new local installation.
+1. Run `InfoMancer-0.8.1-beta.2-Windows-x64-Setup.exe`.
+2. Launch **InfoMancer**.
+3. Choose **Run on this computer** or **Connect to a server**.
 
-The Beta 2 installer is not yet Authenticode-signed, so Windows SmartScreen may show an unknown-publisher warning. Only continue with a package downloaded from the official InfoMancer GitHub Release.
+Beta 2 is not yet Authenticode-signed, so Windows SmartScreen may show an unknown-publisher warning.
 
 ## macOS Desktop
 
-1. Download the DMG that matches the Mac.
-2. Open the DMG and move **InfoMancer** into Applications.
-3. Try to launch InfoMancer.
-4. If macOS blocks it, open **System Settings > Privacy & Security**, scroll to Security, and choose **Open Anyway** for InfoMancer. You may need to attempt the launch once before that option appears.
-5. Choose **Run on this computer** or **Connect to a server**.
+1. Open the DMG that matches your Mac.
+2. Move **InfoMancer** into Applications.
+3. Launch InfoMancer.
+4. Choose **Run on this computer** or **Connect to a server**.
 
-Beta 2 is not yet Apple-notarized, so the Privacy & Security approval step is expected on many Macs.
+If macOS blocks the first launch, open **System Settings > Privacy & Security** and choose **Open Anyway** for InfoMancer. Beta 2 is not yet Apple-notarized.
 
 ## Linux Desktop
 
@@ -329,62 +168,22 @@ chmod +x InfoMancer-0.8.1-beta.2-Linux-x86_64.AppImage
 ./InfoMancer-0.8.1-beta.2-Linux-x86_64.AppImage
 ```
 
-Then launch InfoMancer and choose **Run on this computer** or **Connect to a server**.
+Then choose **Run on this computer** or **Connect to a server**.
 
-# Updates
+# Updating and backups
 
-## InfoMancer Desktop
+Before a beta update, make a backup if the catalog matters to you.
 
-Install a newer package over the existing application. The local catalog remains in the operating system's InfoMancer application-data folder.
+- **Desktop:** use InfoMancer's Recovery tools to create a `.infomancer-backup`.
+- **Server:** protect `data/`, `.env`, and `compose.media.yaml` together.
 
-For beta testing, create a fresh `.infomancer-backup` before an upgrade when the catalog matters to you.
-
-## InfoMancer Server
-
-Keep these three things when updating:
-
-- `.env`
-- `compose.media.yaml`
-- `data/`
-
-Back them up, replace the application files with the newer InfoMancer Server package, then run:
-
-```bash
-docker compose -f compose.yaml -f compose.media.yaml down
-docker compose -f compose.yaml -f compose.media.yaml up -d --build
-```
-
-Database migrations run automatically at startup.
-
-# Backups
-
-**Desktop standalone:** use InfoMancer's Recovery tools to create a portable `.infomancer-backup`.
-
-**Server:** protect these together:
-
-- `data/`
-- `.env`
-- `compose.media.yaml`
-
-Recovery packages and deployment backups contain InfoMancer state, not the Movie or TV files themselves.
-
-# Uninstall
-
-Removing InfoMancer does not delete your media files.
-
-For Server, stop the containers with:
-
-```bash
-docker compose -f compose.yaml -f compose.media.yaml down
-```
-
-Delete the extracted Server folder only if you also intend to delete that server's InfoMancer catalog and configuration.
+See **[Updating InfoMancer](UPDATES.md)** for the update steps.
 
 # More help
 
+- **[Manual Server Setup](SERVER_MANUAL.md)**
 - **[Remote Access](REMOTE_ACCESS.md)**
 - **[Updating InfoMancer](UPDATES.md)**
-- **[Packaging](PACKAGING.md)**
-- **[CLI](CLI.md)**
+- **[Feature Catalog](reference/FEATURE_CATALOG.md)**
 
-Direct Python execution is intended for development and troubleshooting, not normal installation.
+Direct Python execution and detailed Docker configuration are development/advanced paths, not the normal installation method.

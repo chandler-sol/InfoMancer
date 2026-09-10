@@ -3,12 +3,11 @@
 </p>
 
 <p align="center"><strong>Your media library, understood.</strong></p>
-<p align="center">A local-first media catalog, intelligence, review, and organization workspace for Movie and TV libraries.</p>
+<p align="center">InfoMancer helps you catalog, inspect, review, and safely organize Movie and TV libraries you already own.</p>
 
 <p align="center">
   <img alt="Release 0.8.1 beta.2" src="https://img.shields.io/badge/release-0.8.1--beta.2-B7FF2A?style=flat-square&labelColor=11161d">
   <img alt="Windows, macOS, Linux, Server" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Server-26313d?style=flat-square&labelColor=11161d">
-  <img alt="Local first" src="https://img.shields.io/badge/design-local--first-26313d?style=flat-square&labelColor=11161d">
 </p>
 
 <p align="center">
@@ -18,93 +17,23 @@
   <a href="docs/REMOTE_ACCESS.md"><strong>Remote access</strong></a>
 </p>
 
-InfoMancer is built for media libraries that have outgrown a folder browser. It catalogs media across local disks, mounted storage, and network shares, enriches titles with metadata, inspects technical characteristics, surfaces problems through the Media Intelligence Engine, and keeps potentially destructive work behind explicit review and safety checks.
+InfoMancer works with the media files you already have. It does not require you to move your library into a special folder, and scanning does not change your files.
 
-> **0.8.1 is beta software.** Back up a catalog you care about before upgrades, and expect packaging and compatibility to keep improving on the way to 1.0.
+> **0.8.1 is beta software.** Keep a backup of any catalog you care about while testing.
 
-<!-- README SCREENSHOT SLOT 1: docs/assets/readme/dashboard-hero.png
-     Wide 16:9 capture of the populated Dashboard. No open menus or personal paths.
--->
+## Start here
 
-## Four jobs, one workspace
+Pick the setup that matches what you want:
 
-| | |
+| I want to... | Use |
 | --- | --- |
-| **Catalog** | Scan multiple Movie and TV sources into one searchable SQLite-backed library without moving media. |
-| **Understand** | Use metadata, FFprobe inspection, episode data, and MIE findings to see what is healthy, missing, unusual, or unresolved. |
-| **Review** | Work through matching, missing episodes, duplicates, quality issues, and proposed changes with context instead of disconnected scripts. |
-| **Act safely** | Preview supported filesystem changes, block collisions, constrain operations to configured sources, and retain history for guarded recovery. |
+| Use InfoMancer on one computer only | **InfoMancer Desktop** and choose **Run on this computer** |
+| Share one catalog between several computers | **InfoMancer Server**, then connect Desktop clients to it |
+| Use an existing InfoMancer Server | **InfoMancer Desktop** and choose **Connect to a server** |
 
-## Built for real libraries
-
-InfoMancer 0.8 includes:
-
-- Movie and TV cataloging across multiple sources
-- Covers and dense List views with search, filters, Saved Views, and sorting
-- a persistent Library Inspector plus deeper title-detail pages
-- TVDB matching, metadata, artwork, credits, and expected episode data
-- episode-aware TV handling, including multi-episode files and missing aired episodes
-- bundled FFprobe inspection for runtime, resolution, codecs, audio, bitrate, container, and dynamic range
-- Media Intelligence Engine findings with severity, evidence, explanation, and recommendations
-- Review workflows for unresolved media and proposed work
-- Collections, Smart Collections, Custom Libraries, Favorites, ratings, and tags
-- duplicate review, Managed Trash, guarded restore, Operation History, and Safe Undo where supported
-- recovery packages, database backups, and portable exports
-- Librarian and Member accounts with role-aware permissions
-
-The complete inventory lives in the **[Feature Catalog](docs/reference/FEATURE_CATALOG.md)**.
-
-<!-- README SCREENSHOT SLOT 2: docs/assets/readme/library-covers.png
-     Wide Library Covers view with real posters, toolbar/filter controls visible, inspector closed.
--->
-
-## Understand the library without losing your place
-
-Library is the main workspace. Switch between Movies and TV, Covers and List layouts, then combine filters, Saved Views, Collections, tags, ratings, favorites, and custom sorting.
-
-Select a title to open the Inspector beside the library. When something needs deeper work, open the full title page for metadata, files, media inspection, matching, episode coverage, organization, editions, and other title-specific tools.
-
-<!-- README SCREENSHOT SLOT 3: docs/assets/readme/library-inspector.png
-     Library with one title selected and the Inspector open. Avoid exposing private filesystem paths.
--->
-
-## Media Intelligence that explains itself
-
-MIE analyzes facts already stored in the catalog. It can surface identity problems, unreadable inspection results, stale or incomplete metadata, missing aired episodes, unusual episode coverage, technical consistency concerns, and storage opportunities.
-
-A finding includes the evidence and recommendation behind it. InfoMancer should tell you **why** something deserves attention before asking you to change anything.
-
-## Filesystem safety is part of the product
-
-Scanning is read-only. Supported mutation workflows add additional layers:
-
-- preview before apply
-- collision blocking instead of overwrite
-- source-boundary validation
-- revalidation immediately before a change
-- Read-Only, Standard, and Lockdown protection modes
-- durable Operation History
-- guarded undo and restore when the current state can still be verified
-
-InfoMancer is designed to understand a library first, then let you decide what should change.
-
-<!-- README SCREENSHOT SLOT 4: docs/assets/readme/review-workspace.png
-     Review Workspace with several realistic categories/items visible and no private paths.
--->
-
-## Choose Desktop or Server
-
-| Product | Best for | What it does |
-| --- | --- | --- |
-| **InfoMancer Desktop: Run on this computer** | One Windows, Mac, or Linux computer | Runs a bundled local InfoMancer core and catalog on that computer. |
-| **InfoMancer Desktop: Connect to a server** | A desktop using an existing InfoMancer Server | Uses the native shell while the Server owns the shared catalog and media access. |
-| **InfoMancer Server** | Shared, always-on, headless, or remotely accessed installations | Runs independently of a desktop login and can serve several clients. |
-
-> **Desktop is not Server.** In 0.8, **Run on this computer** is local-only. Install InfoMancer Server when several computers need to share one catalog.
+**Desktop is not Server.** A Desktop install using **Run on this computer** stays local to that computer. Use InfoMancer Server when several devices need the same catalog.
 
 ## Download 0.8.1-beta.2
-
-Choose the package whose name matches what you are installing:
 
 | Platform / product | Download |
 | --- | --- |
@@ -115,21 +44,55 @@ Choose the package whose name matches what you are installing:
 | Other Linux Desktop x86-64 | `InfoMancer-0.8.1-beta.2-Linux-x86_64.AppImage` |
 | **InfoMancer Server** | `InfoMancer-Server-0.8.1-beta.2.zip` |
 
-Then follow **[Install InfoMancer](docs/INSTALLATION.md)**. The Server ZIP includes guided setup helpers for Windows, macOS, and Linux, plus `START-HERE.txt`. For a normal home install, you only need Docker and the paths to your media folders.
+## Installing InfoMancer Server is meant to be simple
 
-Beta 2 native packages are not yet fully platform-signed/notarized, so Windows SmartScreen or macOS Gatekeeper may show a warning. Download only from the official GitHub release and verify `SHA256SUMS.txt` when desired.
+For a normal home Server install:
+
+1. Install Docker.
+2. Download and extract `InfoMancer-Server-0.8.1-beta.2.zip`.
+3. Run the setup helper for your operating system.
+4. Tell it where your Movies and TV Shows live.
+5. Open the address it prints and paste in the one-time setup code.
+
+The Server ZIP includes:
+
+- `Setup-InfoMancer.cmd` for Windows
+- `Setup-InfoMancer.command` for macOS
+- `setup-infomancer.sh` for Linux
+- `START-HERE.txt` for the shortest instructions
+
+You do not need Python, Node, Rust, a separate database server, or Cloudflare for a normal local-network install.
+
+See **[Installation](docs/INSTALLATION.md)** for the full first-time walkthrough.
+
+## What InfoMancer does
+
+InfoMancer can:
+
+- catalog Movies and TV Shows across several folders or drives
+- add metadata, artwork, credits, episode information, and technical media details
+- help match titles that were not identified correctly
+- find missing episodes, duplicates, unusual files, and other library problems
+- organize the library with Collections, tags, ratings, Favorites, Saved Views, and custom sorting
+- preview supported file changes before anything is applied
+- keep operation history, recovery tools, backups, and guarded restore options
+- support Librarian and Member accounts on shared Server installs
+
+For the detailed feature list, see the **[Feature Catalog](docs/reference/FEATURE_CATALOG.md)**.
+
+## File safety
+
+Scanning is read-only. InfoMancer does not rename, move, or delete media simply because it found something wrong.
+
+When you choose a supported file-changing action, InfoMancer is designed to show the proposed change first, block obvious collisions, and keep recovery information where possible.
 
 ## Remote access
 
-InfoMancer Server can be used entirely on a trusted local network without Cloudflare or another remote-access service. The initial Docker installation/build and online metadata providers require Internet access unless their dependencies are already available locally. Do not expose port 8787 directly to the public Internet or port-forward it on your router. For access away from home, use a VPN, authenticated reverse proxy, or the documented Cloudflare Access/Tunnel path.
+A normal InfoMancer Server works on your trusted local network without Cloudflare.
 
-See **[Remote access](docs/REMOTE_ACCESS.md)**.
+**Do not port-forward port 8787 directly to the public Internet.** If you want access away from home, use a VPN or the documented authenticated remote-access setup.
 
-## Recovery and ownership
-
-InfoMancer is local-first. The catalog is SQLite, and your Movie and TV files stay where they already live.
-
-Portable `.infomancer-backup` packages can include the catalog and InfoMancer-managed artwork with integrity verification. They do **not** include your media files, deployment secrets, provider-secret keys, application binaries, or caches.
+See **[Remote Access](docs/REMOTE_ACCESS.md)**.
 
 ## Documentation
 
@@ -137,15 +100,16 @@ Portable `.infomancer-backup` packages can include the catalog and InfoMancer-ma
 - **[Feature Catalog](docs/reference/FEATURE_CATALOG.md)**
 - **[Remote Access](docs/REMOTE_ACCESS.md)**
 - **[Updates](docs/UPDATES.md)**
+- **[Server manual setup](docs/SERVER_MANUAL.md)**
 - **[CLI](docs/CLI.md)**
 - **[Packaging](docs/PACKAGING.md)**
 
 ## Development
 
-InfoMancer uses Python 3.13, FastAPI, SQLite, Jinja, JavaScript/CSS, and Tauri. The repository runs cross-platform regression tests plus browser acceptance and dependency/security audits.
+Developer and packaging details are intentionally kept out of the normal installation path. If you are working on InfoMancer itself, the repository uses Python 3.13, FastAPI, SQLite, JavaScript/CSS, and Tauri.
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-InfoMancer remains a beta project and a final open-source license has not yet been selected. Current release work focuses on platform qualification, signing/notarization, performance, accessibility, data durability, and the remaining path to a stable 1.0.
+InfoMancer remains a beta project and a final open-source license has not yet been selected.
