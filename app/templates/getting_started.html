@@ -1,34 +1,29 @@
 {% extends "base.html" %}
-{% block title %}Setup Assistant · InfoMancer{% endblock %}
+{% block title %}Build your library · InfoMancer{% endblock %}
 {% block content %}
-<div class="setup-assistant-page">
+<div class="setup-assistant" data-setup-step="{{ step }}">
 <header class="settings-heading setup-assistant-heading">
-  <p class="eyebrow">GUIDED SETUP</p><h1>Build your library</h1>
+  <p class="eyebrow">GETTING STARTED</p>
+  <h1>Build your library</h1>
   <p>Complete four short steps. You can leave at any time and resume from Help, Settings, or your Profile menu.</p>
 </header>
 <nav class="setup-progress" aria-label="Setup progress">
-  {% for item, label in [('general','Region'),('metadata','Metadata'),('sources','Sources'),('finish','Finish')] %}
-  <a href="/getting-started/{{ item }}" class="{% if item == step %}active{% elif steps.index(item) < steps.index(step) %}complete{% endif %}"><span>{{ loop.index }}</span><b>{{ label }}</b></a>
+  {% set steps = [('general', 'Region'), ('metadata', 'Metadata'), ('sources', 'Sources'), ('finish', 'Finish')] %}
+  {% for key, label in steps %}
+  {% set done = progress[key] %}
+  <a href="/getting-started/{{ key }}" class="{{ 'active' if key == step else '' }} {{ 'complete' if done else '' }}"><span>{{ loop.index if not done else '✓' }}</span><b>{{ label }}</b></a>
   {% endfor %}
 </nav>
-{% if error %}<div class="form-error page-error" role="alert">{{ error }}</div>{% endif %}
 
 {% if step == 'general' %}
 <form class="setup-step panel" method="post" action="/getting-started/general">
-  <div class="setup-step-copy"><p class="eyebrow">STEP 1 OF 4</p><h2>Set your time zone</h2><p>InfoMancer stores timestamps in UTC and uses this location for scan times, sessions, and announcements.</p></div>
-  <div class="setup-fields compact-fields">
-    <label>Time zone<select id="setup-timezone" name="timezone_name" required>{% for group_name, zones in timezone_groups %}<optgroup label="{{ group_name }}">{% for zone, label in zones %}<option value="{{ zone }}" {% if zone == preferences.timezone %}selected{% endif %}>{{ label }}</option>{% endfor %}</optgroup>{% endfor %}</select><small>Choose your location. Used for scan times, sessions, and announcements.</small></label>
+  <div class="setup-step-copy"><p class="eyebrow">STEP 1 OF 4</p><h2>Set your region</h2><p>This controls dates, times, and scheduling throughout InfoMancer. You can change it later in Settings.</p></div>
+  <div class="setup-fields two-column">
+    <label>Time zone<select name="timezone">{% for value, label in timezone_choices %}<option value="{{ value }}" {% if preferences.timezone == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label>Language<select name="language"><option value="en" {% if preferences.language == 'en' %}selected{% endif %}>English</option></select></label>
   </div>
-  <div class="setup-step-actions"><a class="button" href="/">Exit for now</a><button class="button primary">Save and continue</button></div>
+  <div class="setup-step-actions"><span></span><button class="button primary">Save and continue</button></div>
 </form>
-<script>
-(() => {
-  const select = document.getElementById("setup-timezone");
-  if (!select || select.value !== "UTC") return;
-  const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  if (detected && [...select.options].some(option => option.value === detected)) select.value = detected;
-})();
-</script>
 
 {% elif step == 'metadata' %}
 <form class="setup-step panel" method="post" action="/getting-started/metadata">
@@ -75,7 +70,7 @@
 
 {% elif step == 'sources' %}
 <section class="setup-step panel">
-  <div class="setup-step-copy"><p class="eyebrow">STEP 3 OF 4</p><h2>Add your media folders</h2><p>Choose each folder that contains Movies or TV Shows. InfoMancer previews the folder, lets you confirm its type, and begins the first scan after you add it. You can also skip this step and add sources later.</p></div>
+  <div class="setup-step-copy"><p class="eyebrow">STEP 3 OF 4</p><h2>Add your media folders</h2><p>Choose each folder that contains Movies or TV Shows. InfoMancer previews the folder, lets you confirm its type, and begins the first scan after you add it. Not ready to add folders? Skip this step and add them later from Settings.</p></div>
   {% if roots %}<div class="setup-source-summary">{% for root in roots %}<article><span class="kind {{ root.kind }}">{{ root.kind }}</span><div><strong>{{ root.label or root.path }}</strong><small>{{ root.path }} · {{ root.title_count }} titles · {{ root.file_count }} video files</small></div></article>{% endfor %}</div>{% else %}<div class="setup-empty-source"><strong>No media folders added yet</strong><span>Add a folder now, or skip for now and add your sources later from Settings.</span></div>{% endif %}
   <button class="button primary setup-browse-source" type="button" data-open-source-browser>{{ 'Add another folder' if roots else 'Browse folders' }}</button>
   <div class="source-type-hints" aria-label="Supported library types"><span><b class="kind movie">Movie</b> Movie files, title folders, and A–Z or number buckets</span><span><b class="kind tv">TV</b> Series folders, season folders, and episode files</span></div>
