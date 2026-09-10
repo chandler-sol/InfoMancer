@@ -76,14 +76,15 @@ class ServerSetupHelperContracts(unittest.TestCase):
 
     def test_install_guide_makes_helper_the_default_path(self):
         guide = (ROOT / "docs/INSTALLATION.md").read_text(encoding="utf-8")
-        self.assertIn("## The easy Server install", guide)
+        self.assertIn("## Quick install", guide)
         self.assertIn("Double-click:\n\n`Setup-InfoMancer.cmd`", guide)
         self.assertIn("`Setup-InfoMancer.command`", guide)
         self.assertIn("./setup-infomancer.sh", guide)
-        self.assertIn("## Manual / advanced Server setup", guide)
+        self.assertIn("[Manual Server Setup](SERVER_MANUAL.md)", guide)
         self.assertIn("Only change `source:`", guide)
         self.assertIn("InfoMancer first-run bootstrap token:", guide)
         self.assertIn("http://SERVER-IP:8787", guide)
+        self.assertNotIn("## Manual / advanced Server setup", guide)
 
 
 if __name__ == "__main__":
