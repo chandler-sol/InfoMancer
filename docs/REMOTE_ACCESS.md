@@ -1,6 +1,18 @@
-# Remote access
+# Remote Access
 
-InfoMancer Server works on a normal local network without Cloudflare or any other Internet service. A standard Server install from `.env.example` listens on the host's local-network interfaces, so devices on the same trusted network can use:
+You do not need remote-access software to use InfoMancer around your home.
+
+| Where you are using InfoMancer | Recommended setup |
+| --- | --- |
+| On the same trusted network as the Server | Nothing extra. Use the Server's normal LAN address. |
+| Away from home and you already use a private VPN | Connect the VPN, then use InfoMancer as if you were at home. |
+| Away from home and you want a public HTTPS hostname | Use an authenticated reverse proxy. The Cloudflare option is documented below. |
+
+**Never port-forward port 8787 directly to the public Internet.**
+
+# On your home network
+
+A normal InfoMancer Server installation listens on the trusted local network. Other devices on that network can use:
 
 `http://SERVER-IP:8787`
 
@@ -8,11 +20,19 @@ For example:
 
 `http://192.168.1.50:8787`
 
-**Do not port-forward port 8787 on your router and do not expose the InfoMancer origin directly to the public Internet.**
+The guided Server setup helper prints the address when it can detect the Server's LAN address.
 
-If you need InfoMancer while away from home, use a VPN or an authenticated reverse proxy. The rest of this guide documents the Cloudflare Access and Tunnel option.
+If InfoMancer works on the Server computer but another computer cannot connect, check the Server operating system's firewall and allow TCP port `8787` on the trusted/private network.
 
-# Remote access with Cloudflare
+# Away from home
+
+A private VPN is usually the simplest option. Connect to the home network through the VPN, then use the same InfoMancer Server address or private hostname you normally use at home.
+
+If you prefer a public HTTPS hostname, put an authenticated reverse proxy in front of InfoMancer and keep the InfoMancer origin private. Do not expose the application directly just because the proxy provides HTTPS.
+
+The rest of this guide covers the supported Cloudflare Access and Tunnel approach.
+
+# Advanced: Cloudflare Access and Tunnel
 
 A Cloudflare Tunnel makes an outbound connection from the InfoMancer host, so the router does not need a port-forward or public inbound firewall rule.
 
@@ -69,7 +89,7 @@ CF_ACCESS_AUD=the-application-audience-tag-from-cloudflare
 
 Local accounts remain the normal choice when you do not need Cloudflare to be the application sign-in authority.
 
-The first verified visitor must also enter the one-time bootstrap token shown in the InfoMancer server logs to complete Librarian setup. Afterward, a Librarian must create each later account with the exact email address Cloudflare asserts.
+The first verified visitor must also enter the one-time setup code to complete Librarian setup. Afterward, a Librarian must create each later account with the exact email address Cloudflare asserts.
 
 Restart InfoMancer after changing authentication environment values.
 
@@ -115,7 +135,7 @@ docker compose -f compose.yaml -f compose.media.yaml -f compose.cloudflare.yaml 
   logs --tail=100 cloudflared
 ```
 
-## Verification and rollback
+## Verify it before relying on it
 
 1. Confirm `http://127.0.0.1:8787` responds on the Server host.
 2. Open the public hostname in a private browser window.
@@ -123,11 +143,13 @@ docker compose -f compose.yaml -f compose.media.yaml -f compose.cloudflare.yaml 
 4. Confirm HTTPS and the expected InfoMancer login.
 5. Preview, but do not apply, a rename as a final functional check.
 
-To remove remote access immediately, delete or disable the published route. If using the dedicated connector, also run:
+## Remove Cloudflare remote access
+
+Delete or disable the published route. If you use the dedicated connector, also run:
 
 ```bash
 docker compose -f compose.yaml -f compose.media.yaml -f compose.cloudflare.yaml \
   stop cloudflared
 ```
 
-Never commit `.env.cloudflare`, the tunnel token, `.env`, TVDB credentials, bootstrap tokens, or the SQLite database.
+Never commit `.env.cloudflare`, the tunnel token, `.env`, TVDB credentials, setup codes, or the SQLite database.
