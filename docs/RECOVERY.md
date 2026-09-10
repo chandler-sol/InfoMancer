@@ -1,90 +1,109 @@
-# Portable recovery and clean reinstall
+# Backup and Restore
 
-InfoMancer 0.8 uses `.infomancer-backup` as its portable recovery format. The same package is
-created from Settings and by the native Windows uninstall recovery flow. It is intended to carry
-InfoMancer-owned catalog state across a clean reinstall without copying movie or TV media into the
-archive.
+InfoMancer uses `.infomancer-backup` files for portable catalog backups.
 
-## What a recovery package contains
+A recovery package is meant to preserve InfoMancer's catalog and application state. It does **not** copy your Movie or TV files into the backup.
 
-A portable package contains:
+# When to make a backup
 
-- a consistent SQLite snapshot of the InfoMancer catalog and account state;
-- collection artwork stored by InfoMancer;
-- a versioned manifest identifying the InfoMancer version that created the package;
-- the size and SHA-256 checksum of every restorable payload.
+Create a fresh backup before:
 
-It deliberately does **not** contain movie or TV media, provider credentials, provider-secret
-encryption keys, deployment `.env` files, application binaries, or caches. Provider credentials
-must be entered again after recovery.
+- installing a beta update you care about
+- doing a clean reinstall
+- moving an installation to another computer
+- making major storage or source changes
+- testing filesystem-changing features on an important catalog
 
-Treat a recovery package as sensitive even though provider credentials are excluded. The database
-can contain user accounts, library organization, source paths, filenames, ratings, tags, and other
-installation state.
+# What a recovery package contains
 
-## Create and verify a package before reinstalling
+A portable recovery package can contain:
 
-From **Settings > System**, create and download a portable recovery package. InfoMancer verifies the
-package before presenting it as complete. Keep the file somewhere outside the InfoMancer application
-data directory and, for an uninstall/reinstall, outside any directory the uninstaller will remove.
+- the InfoMancer catalog and account state
+- library organization such as Collections, ratings, tags, and other saved state
+- InfoMancer-managed collection artwork
+- a manifest identifying the InfoMancer version that created the package
+- size and SHA-256 integrity information for the restorable files
 
-For the native Windows application, accept the optional final recovery backup before uninstalling
-when you want to preserve the installation. That package uses the same format as the in-app
-recovery workflow.
+It does **not** contain:
 
-## Clean reinstall and restore
+- Movie or TV media files
+- TVDB or other provider credentials
+- provider-secret encryption keys
+- Server `.env` files
+- application binaries
+- caches
 
-1. Install the new InfoMancer build normally and start it with a new/empty application-data
-   directory.
-2. Recreate the storage mappings required to reach the existing media. For Docker, mount the same
-   media roots at paths compatible with the recovered source definitions. For native Windows,
-   reconnect the same drives or UNC shares where practical.
-3. Complete temporary first-run setup so you can enter Librarian Settings. This temporary account
-   is replaced when the recovered database is committed.
-4. Open **Settings > Recovery** and select the `.infomancer-backup` file.
-5. Choose **Verify package & preview restore**. InfoMancer verifies archive paths, the manifest,
-   every declared size/checksum, and the staged SQLite database before it changes the live
-   installation.
-6. Review the source InfoMancer version, creation time, database size, artwork count, and exclusions.
-7. Type `RESTORE` and submit the final confirmation.
-8. Before commit, InfoMancer creates and verifies a fresh portable safety package of the current
-   installation. It then restores the database and collection artwork as one rollback-protected
-   operation. If commit fails, both are rolled back rather than leaving a mixed installation.
-9. InfoMancer restarts. Sign in using an account from the recovered database.
-10. Re-enter TVDB/provider credentials and verify provider status. Provider-secret storage is never
-    taken from the recovery archive.
-11. Open Sources and confirm every recovered source resolves to the intended local disk/share.
-    Reconnect or correct deployment mounts before running destructive filesystem operations.
-12. Run a scan and inspect Review/Activity before resuming normal filesystem automation.
+Treat the backup as private. The catalog can still contain account information, source paths, filenames, ratings, tags, and other library details.
 
-## Path validation and moved libraries
+# Create a backup
 
-Recovery validates source/media paths stored in the incoming database against the installation's
-configured browse roots before replacing the live database. This prevents a package from silently
-introducing arbitrary filesystem locations.
+1. Open **Settings > System**.
+2. Create and download a portable recovery package.
+3. Keep the `.infomancer-backup` file somewhere outside InfoMancer's application-data directory.
 
-If a clean reinstall intentionally changes mount points, first configure the new installation so the
-corresponding trusted browse roots are available. Do not weaken browse-root restrictions merely to
-make an old package pass validation. If source paths themselves must change, recover in a controlled
-environment, update the source mapping through supported InfoMancer workflows, then create a fresh
-portable package.
+If you are making the backup before uninstalling or reinstalling, keep it somewhere the uninstall process will not remove.
 
-## Failure behavior
+InfoMancer verifies the package before presenting it as complete.
 
-A failed verification never starts a restore. A failure while staging also leaves the live database
-and artwork untouched. Once commit begins, InfoMancer keeps a rollback database snapshot and the old
-collection-art directory until the incoming database validates in its live location. A successful
-restore keeps the separately created pre-restore safety package in `recovery-packages` so there is a
-known-good return point.
+# Restore a backup
 
-If InfoMancer reports that automatic rollback itself was incomplete, stop using the installation and
-preserve the application-data directory. The error identifies the pre-restore safety package when it
-was successfully created; use that package for controlled recovery rather than attempting more
-filesystem operations.
+For a clean reinstall or move:
 
-## 0.8 release qualification
+1. Install InfoMancer normally.
+2. Make sure the computer or Server can reach the same media storage. Reconnect drives, network shares, or Server media mappings before restoring when possible.
+3. Complete the temporary first-run setup if InfoMancer requires it so you can reach Librarian Settings.
+4. Open **Settings > Recovery**.
+5. Select the `.infomancer-backup` file.
+6. Choose **Verify package & preview restore**.
+7. Review the backup version, creation time, database size, artwork count, and exclusions.
+8. Type `RESTORE` when you are ready to commit the restore.
+9. Let InfoMancer restart.
+10. Sign in with an account from the restored catalog.
+11. Re-enter TVDB or other provider credentials.
+12. Open Sources and confirm every source points to the intended storage.
+13. Run a scan and review the results before resuming filesystem-changing work.
 
-The restore implementation is present in 0.8 alpha, but public-release qualification still requires
-the clean reinstall matrix in `docs/QA_0_8.md`: supported Windows/Docker platforms, real network
-shares, interrupted restore fault injection, old supported database versions, and provider
-re-authentication after restore. Those are release gates, not implied guarantees of an alpha build.
+The temporary first-run account is replaced when the restored database is committed.
+
+# If your media paths changed
+
+A backup remembers the source paths from the original installation.
+
+If the new computer or Server uses different drive letters, mount points, or network-share paths, make the corresponding storage available before running file-changing actions.
+
+For Docker Server installs, restoring the same host media folders to compatible `/media/...` mappings is the simplest path.
+
+Do not weaken InfoMancer's trusted browse-root restrictions just to make an old backup pass validation. If source paths need to change, update them through supported InfoMancer source-management workflows after the restore environment is safe.
+
+# What happens during restore
+
+Before InfoMancer replaces the live catalog, it verifies the recovery package and staged database.
+
+Immediately before commit, InfoMancer creates a fresh safety package of the current installation. The database and InfoMancer-managed collection artwork are then restored as one rollback-protected operation.
+
+If verification fails, the live installation is not changed.
+
+If commit fails, InfoMancer attempts to roll back rather than leave the database and artwork in a mixed state.
+
+# If a restore reports a serious failure
+
+If InfoMancer says automatic rollback was incomplete:
+
+1. Stop using that installation.
+2. Do not run filesystem-changing operations.
+3. Preserve the entire InfoMancer application-data directory.
+4. Preserve the pre-restore safety package identified by the error, if one was created.
+
+Use that preserved state for controlled recovery instead of repeatedly retrying changes against a partially restored installation.
+
+# Server deployment backup
+
+A portable `.infomancer-backup` protects the InfoMancer catalog, but a Server deployment also has local configuration outside that package.
+
+For a complete Server deployment backup, protect these together:
+
+- `data/`
+- `.env`
+- `compose.media.yaml`
+
+Your actual Movie and TV files remain separate from InfoMancer backups.
