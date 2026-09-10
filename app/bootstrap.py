@@ -15,6 +15,8 @@ class BootstrapTokenManager:
     does not have to hunt through Docker logs during first-time setup. The helper
     does not bypass token validation or account creation; it only presents the
     same one-time secret the Server would otherwise print to its local logs.
+    ``START-HERE.txt`` and the guided installer are the supported first-run path;
+    manual Docker setup remains available for advanced deployments.
     """
 
     def __init__(self, path: Path, configured_token: str = ""):
