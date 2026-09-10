@@ -1,105 +1,78 @@
 # Updating InfoMancer
 
-InfoMancer can check GitHub releases without additional setup. Installing a
-release from the web interface is optional and uses a separate, restricted
-host helper. The web application never receives Docker or Git control.
+Updating InfoMancer should not require you to understand Git, signing keys, or Docker internals.
 
-## Release signature requirement
+Because 0.8.1 is still beta software, make a backup before updating a catalog you care about.
 
-The host updater refuses to install an unsigned or invalidly signed Git tag.
-After fetching release tags, it runs `git verify-tag --raw` before resolving or
-checking out the requested commit. The host account therefore needs the public
-GPG key used to sign InfoMancer release tags in its Git/GPG keyring.
+# InfoMancer Desktop
 
-The host updater also requires the full expected signing-key fingerprint.
-A valid signature from some other key in the service account's GPG keyring is
-not sufficient:
+## Normal update
 
-```text
---trusted-signing-key FULL_GPG_FINGERPRINT
+If InfoMancer tells you a Desktop update is available, you can use the Desktop update screen.
+
+If the in-app installer is not available for your build:
+
+1. Download the newer InfoMancer Desktop package for your operating system.
+2. Close InfoMancer.
+3. Install the newer package over the existing application.
+4. Start InfoMancer normally.
+
+Do not uninstall the old Desktop application first unless you intentionally want a clean reinstall.
+
+A standalone Desktop catalog is stored in InfoMancer's application-data folder, not inside the installed program files.
+
+## Before a beta update
+
+From **Settings > System**, create a fresh `.infomancer-backup` when the catalog matters to you.
+
+See **[Backup and Restore](RECOVERY.md)** for details.
+
+# InfoMancer Server
+
+For beta releases, the safest update method is to keep the old Server folder until the new version is working.
+
+## Before the update
+
+Back up these three items from the current Server folder:
+
+- `data/`
+- `.env`
+- `compose.media.yaml`
+
+They contain the Server's InfoMancer state and local deployment settings. Your Movie and TV files are not stored in the Server package.
+
+## Update the Server
+
+1. Stop the current Server:
+
+```bash
+docker compose -f compose.yaml -f compose.media.yaml down
 ```
 
-The option may be supplied more than once during a signing-key rotation. The
-helper refuses to start without at least one valid fingerprint, and a
-cryptographically valid tag is accepted only when its `VALIDSIG` fingerprint
-matches that allowlist.
+2. Download the newer `InfoMancer-Server-<version>.zip`.
+3. Extract it into a new folder.
+4. Copy your existing `data/`, `.env`, and `compose.media.yaml` into the new folder.
+5. Run the normal InfoMancer Server setup helper in the new folder.
+6. If it asks whether to keep the existing media configuration, choose **Yes**.
+7. Start InfoMancer and confirm the library, accounts, Sources, and Settings look correct.
 
-Release maintainers should create annotated signed tags, for example:
+Keep the old Server folder until you are satisfied that the updated Server is working.
 
-```sh
-git tag -s v0.7.0-alpha.1 -m "InfoMancer 0.7.0 alpha 1"
-git push origin v0.7.0-alpha.1
-```
+Database migrations run automatically when the newer Server starts.
 
-Older unsigned tags remain usable for manual rollback or inspection, but the
-restricted host updater intentionally will not install them.
+## Roll back a Server beta
 
-## Manual updates
+If the new Server does not work:
 
-From the InfoMancer checkout:
+1. Stop it.
+2. Keep its folder for troubleshooting.
+3. Return to the previous Server folder and the pre-update copy of `data/`, `.env`, and `compose.media.yaml`.
+4. Start the previous Server again.
 
-```sh
-git fetch --tags
-git verify-tag v0.7.0-alpha.1
-git checkout --detach v0.7.0-alpha.1
-docker compose -p infomancer -f compose.yaml -f compose.media.yaml up -d --build --remove-orphans
-```
+Do not point an older Server at a database that was already migrated by a newer build. Keeping a separate pre-update copy is what makes the rollback safe.
 
-Replace the tag and Compose files with the release and deployment files you
-use. Create or download a database backup from **Settings > System** first.
+# Advanced update administration
 
-## Enable updates from the interface on Linux
+Most users do not need Git tag verification, systemd updater services, signing-key fingerprints, or `host_updater.py`.
 
-1. Copy `deploy/infomancer-updater.service.example` to
-   `/etc/systemd/system/infomancer-updater.service`.
-2. Edit `User`, `WorkingDirectory`, `ExecStart`, and the repeated
-   `--compose-file` values to match the installation. Replace the example
-   `--trusted-signing-key FULL_GPG_FINGERPRINT` value with the verified full
-   fingerprint of the InfoMancer release key.
-3. Import the release-signing public key into the GPG keyring of the service
-   account and verify its fingerprint out of band.
-4. The service user must be able to run Docker and read/write the InfoMancer
-   checkout.
-5. Start the helper:
-
-```sh
-sudo systemctl daemon-reload
-sudo systemctl enable --now infomancer-updater
-```
-
-The helper refuses to update a checkout with local source edits. It fetches
-only a release tag selected by InfoMancer, verifies the tag signature before
-checkout, rebuilds the existing Compose project, checks `/health`, and returns
-to the previous commit if the new release does not start successfully.
-
-## Windows and macOS
-
-The same Python helper is cross-platform and can be run by Task Scheduler,
-launchd, or manually:
-
-```text
-python scripts/host_updater.py --watch --compose-file compose.yaml --compose-file compose.media.yaml --trusted-signing-key FULL_GPG_FINGERPRINT
-```
-
-Keep it running under a dedicated operating-system account with access only to
-the InfoMancer checkout, Docker, and the release-signing public key needed for
-verification.
-
-## Native Windows updater
-
-The native Windows shell uses Tauri's signed updater rather than the host-update
-request mechanism used by the self-hosted deployment. No InfoMancer-operated file
-server is required. GitHub Releases stores the NSIS updater bundle, signature, and
-`latest.json` manifest. Alpha clients read a rolling `desktop-alpha/latest.json`
-asset whose download URLs point at immutable versioned releases.
-
-Tauri updater signatures are mandatory. The public verification key is compiled
-into release builds through `TAURI_UPDATER_PUBLIC_KEY`; the private key is supplied
-only to GitHub Actions through `TAURI_SIGNING_PRIVATE_KEY` (and optional password).
-Preview builds made without the public key remain buildable but report the updater
-as not configured rather than accepting unsigned updates.
-
-Before the Windows updater launches the replacement installer, the desktop shell
-stops its bundled local core. The NSIS uninstaller hooks detect updater mode and
-preserve application data, so ordinary updates replace binaries without invoking
-the zero-residue uninstall policy.
+Those operator and maintainer details live in **[Advanced Update Administration](UPDATES_ADVANCED.md)**.
