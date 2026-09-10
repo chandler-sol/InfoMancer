@@ -8,7 +8,10 @@
     <p>InfoMancer catalogs, matches, inspects, and organizes movie and TV libraries from a native desktop workspace or an existing self-hosted InfoMancer server.</p>
   </description>
   <launchable type="desktop-id">InfoMancer.desktop</launchable>
+  <icon type="stock">infomancer-desktop</icon>
+  <developer_name>Chandler Solomon</developer_name>
   <url type="homepage">https://infomancer.media/</url>
+  <url type="bugtracker">https://github.com/chandler-sol/InfoMancer/issues</url>
   <screenshots>
     <screenshot type="default">
       <image>https://raw.githubusercontent.com/chandler-sol/InfoMancer/d9982b00937393f23087686a4cbd0fe63985a153/docs/Infomancer1.png</image>
@@ -23,9 +26,14 @@
     <category>Utility</category>
   </categories>
   <releases>
-    <release version="0.8.1-beta.2" date="2026-09-09">
+    <release version="0.8.1-beta.2" date="2026-09-10">
       <description>
-        <p>Current cross-platform beta testing build.</p>
+        <p>Beta 2 improves desktop stability, first-run setup, update handling, and Linux integration.</p>
+        <ul>
+          <li>Fixed desktop core cleanup when the application closes.</li>
+          <li>Improved guided setup and metadata credential management.</li>
+          <li>Improved Linux desktop identity, icons, and package metadata.</li>
+        </ul>
       </description>
     </release>
   </releases>
