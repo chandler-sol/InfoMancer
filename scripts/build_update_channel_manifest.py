@@ -10,17 +10,21 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from app.update_channels import normalize_channel, version_key
+UPDATE_CHANNELS_PATH = ROOT / "app" / "update_channels.py"
+_spec = importlib.util.spec_from_file_location("infomancer_update_channels", UPDATE_CHANNELS_PATH)
+if _spec is None or _spec.loader is None:
+    raise RuntimeError(f"Could not load {UPDATE_CHANNELS_PATH}")
+_update_channels = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_update_channels)
+normalize_channel = _update_channels.normalize_channel
+version_key = _update_channels.version_key
 
 
 GATES_DEFAULT = (
