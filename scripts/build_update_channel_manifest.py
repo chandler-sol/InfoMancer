@@ -12,19 +12,33 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
-UPDATE_CHANNELS_PATH = ROOT / "app" / "update_channels.py"
-_spec = importlib.util.spec_from_file_location("infomancer_update_channels", UPDATE_CHANNELS_PATH)
-if _spec is None or _spec.loader is None:
-    raise RuntimeError(f"Could not load {UPDATE_CHANNELS_PATH}")
-_update_channels = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_update_channels)
+
+
+def load_module(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not load {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_update_channels = load_module(
+    "infomancer_update_channels", ROOT / "app" / "update_channels.py"
+)
+_migrations = load_module(
+    "infomancer_migrations", ROOT / "app" / "migrations.py"
+)
 normalize_channel = _update_channels.normalize_channel
 version_key = _update_channels.version_key
+schema_contract = _migrations.schema_contract
 
 
 GATES_DEFAULT = (
@@ -101,6 +115,7 @@ def build_manifest(arguments: argparse.Namespace) -> dict:
             "run_id": arguments.run_id,
             "gates": list(gates),
         },
+        "database_schema": schema_contract(),
         "artifacts": artifacts,
     }
     if arguments.run_url:
