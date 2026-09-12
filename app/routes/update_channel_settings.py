@@ -18,6 +18,11 @@ from ..maintenance import (
     write_update_request,
     write_update_status,
 )
+from ..migrations import (
+    assess_schema_downgrade,
+    schema_compatibility_history,
+    schema_contract,
+)
 from ..update_channels import (
     CHANNEL_DESCRIPTIONS,
     CHANNEL_LABELS,
@@ -67,6 +72,8 @@ def build_router(ctx: RouteContext):
     def page_context(request: Request, error: str = "") -> dict:
         channel = read_update_channel(db.path)
         status = read_update_status(db.path)
+        with db.connect() as conn:
+            compatibility_history = schema_compatibility_history(conn)
         return {
             "section": "updates",
             "error": error,
@@ -80,6 +87,8 @@ def build_router(ctx: RouteContext):
             "update_status": status,
             "update_repository": repository_name(),
             "update_manifest_base_url": manifest_base_url(),
+            "schema_contract": schema_contract(),
+            "schema_compatibility_history": compatibility_history,
         }
 
     def fetch_json(url: str) -> object:
@@ -106,6 +115,11 @@ def build_router(ctx: RouteContext):
         version = manifest["version"]
         state = update_state(APP_VERSION, version)
         qualification = manifest["qualification"]
+        database_schema = manifest["database_schema"]
+        with db.connect() as conn:
+            schema_assessment = assess_schema_downgrade(
+                conn, int(database_schema["current"])
+            )
         artifacts = manifest["artifacts"]
         server_artifact = artifacts.get("server") if isinstance(artifacts, dict) else None
         server_tag = ""
@@ -127,6 +141,8 @@ def build_router(ctx: RouteContext):
             "qualification_run_id": qualification["run_id"],
             "qualification_run_url": qualification.get("run_url") or "",
             "qualification_gates": qualification["gates"],
+            "database_schema": database_schema,
+            "schema_assessment": schema_assessment,
             "release_notes_url": manifest.get("release_notes_url") or "",
             "manifest_url": manifest_url,
             "metadata_source": "qualified_manifest",
@@ -135,11 +151,26 @@ def build_router(ctx: RouteContext):
             "artifacts": sorted(artifacts),
         }
         if state == "waiting_for_channel":
-            status["message"] = (
-                f"This installation is already newer than the latest qualified "
-                f"{channel_label(channel)} build ({version}). InfoMancer will not "
-                "downgrade it; it will wait for the selected channel to catch up."
-            )
+            assessment = schema_assessment["status"]
+            if assessment == "safe_downgrade":
+                status["message"] = (
+                    f"The latest qualified {channel_label(channel)} build ({version}) "
+                    "is older than this installation, but the recorded database schema "
+                    "history says it can read and write this database safely. Automatic "
+                    "downgrade remains disabled until the updater path is qualified for rollback."
+                )
+            elif assessment == "read_only":
+                status["message"] = (
+                    f"The latest qualified {channel_label(channel)} build ({version}) is older. "
+                    "Its schema generation could read this database, but writing would be unsafe, "
+                    "so InfoMancer will not downgrade to it."
+                )
+            else:
+                status["message"] = (
+                    f"The latest qualified {channel_label(channel)} build ({version}) is older and "
+                    "cannot safely use the current database schema. Returning to it would require "
+                    "restoring a compatible pre-update database backup."
+                )
         elif state == "current":
             status["message"] = (
                 f"InfoMancer {APP_VERSION} is current on the "
@@ -202,8 +233,8 @@ def build_router(ctx: RouteContext):
         if state == "waiting_for_channel":
             status["message"] = (
                 f"This installation is already newer than the latest "
-                f"{channel_label(channel)} release ({tag}). InfoMancer will not "
-                "downgrade it; it will wait for the selected channel to catch up."
+                f"{channel_label(channel)} release ({tag}). This legacy release metadata "
+                "does not contain a schema compatibility contract, so InfoMancer will not downgrade it."
             )
         elif state == "current":
             status["message"] = (
@@ -282,8 +313,8 @@ def build_router(ctx: RouteContext):
         message = f"Update channel changed to {channel_label(selected)}."
         if transition == "more_stable":
             message += (
-                " InfoMancer will not downgrade the installed build. It will wait "
-                "for that channel to catch up."
+                " InfoMancer will evaluate the recorded schema compatibility before any "
+                "older build is considered. It will not perform an unproven downgrade."
             )
         record_event(
             "update",
@@ -356,6 +387,7 @@ def build_router(ctx: RouteContext):
                 "channel": channel,
                 "latest_version": status.get("latest_version", ""),
                 "metadata_source": status.get("metadata_source", ""),
+                "schema_assessment": (status.get("schema_assessment") or {}).get("status", ""),
             },
             user_id=request.state.user.id,
         )
@@ -402,6 +434,8 @@ def build_router(ctx: RouteContext):
                 "build_id": status.get("build_id", ""),
                 "commit_sha": status.get("commit_sha", ""),
                 "qualification_status": status.get("qualification_status", "published"),
+                "database_schema": status.get("database_schema", {}),
+                "schema_assessment": status.get("schema_assessment", {}),
                 "message": (
                     f"{channel_label(channel)} update {tag} is queued. The restricted "
                     "host updater will begin it when that helper is running."
@@ -418,6 +452,7 @@ def build_router(ctx: RouteContext):
                 "channel": channel,
                 "trusted_tag": trusted_tag,
                 "build_id": status.get("build_id", ""),
+                "schema_assessment": (status.get("schema_assessment") or {}).get("status", ""),
             },
             user_id=request.state.user.id,
         )
