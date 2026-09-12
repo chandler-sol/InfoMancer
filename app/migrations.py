@@ -6,11 +6,37 @@ from dataclasses import dataclass
 from typing import Callable
 
 
+COMPATIBILITY_LEVELS = {"additive", "behavioral", "breaking"}
+DOWNGRADE_POLICIES = {"compatible", "read_only", "restore_required"}
+
+
 @dataclass(frozen=True)
 class Migration:
     version: int
     name: str
     apply: Callable[[sqlite3.Connection], None]
+    compatibility: str
+    minimum_reader_schema: int
+    minimum_writer_schema: int | None
+    downgrade_policy: str
+
+
+def additive_migration(
+    version: int,
+    name: str,
+    apply: Callable[[sqlite3.Connection], None],
+    compatible_from_schema: int = 1,
+) -> Migration:
+    """Declare an additive migration that older schema generations may ignore safely."""
+    return Migration(
+        version=version,
+        name=name,
+        apply=apply,
+        compatibility="additive",
+        minimum_reader_schema=compatible_from_schema,
+        minimum_writer_schema=compatible_from_schema,
+        downgrade_policy="compatible",
+    )
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -269,27 +295,205 @@ def _announcement_onboarding_receipts(conn: sqlite3.Connection) -> None:
 
 
 MIGRATIONS = (
-    Migration(1, "title metadata columns", _titles),
-    Migration(2, "source health columns", _roots),
-    Migration(3, "collection filters", _collections),
-    Migration(4, "media technical and edition columns", _files),
-    Migration(5, "episode IMDb identity", _episodes),
-    Migration(6, "user presentation preferences", _users),
-    Migration(7, "user title sort keys", _title_state),
-    Migration(8, "duplicate review ownership", _duplicate_reviews),
-    Migration(9, "duplicate trash size accounting", _duplicate_trash),
-    Migration(10, "single-runtime lease", _runtime_lease),
-    Migration(11, "persistent aggregate login lockouts", _login_lockouts),
-    Migration(12, "user saved library views", _user_saved_views),
-    Migration(13, "operation history and safe undo", _operation_history),
-    Migration(14, "persisted global rename proposals", _rename_proposals),
-    Migration(15, "library read-path indexes", _library_read_indexes),
-    Migration(16, "shared chrome read indexes", _shared_chrome_indexes),
-    Migration(17, "historical announcement onboarding receipts", _announcement_onboarding_receipts),
+    additive_migration(1, "title metadata columns", _titles),
+    additive_migration(2, "source health columns", _roots),
+    additive_migration(3, "collection filters", _collections),
+    additive_migration(4, "media technical and edition columns", _files),
+    additive_migration(5, "episode IMDb identity", _episodes),
+    additive_migration(6, "user presentation preferences", _users),
+    additive_migration(7, "user title sort keys", _title_state),
+    additive_migration(8, "duplicate review ownership", _duplicate_reviews),
+    additive_migration(9, "duplicate trash size accounting", _duplicate_trash),
+    additive_migration(10, "single-runtime lease", _runtime_lease),
+    additive_migration(11, "persistent aggregate login lockouts", _login_lockouts),
+    additive_migration(12, "user saved library views", _user_saved_views),
+    additive_migration(13, "operation history and safe undo", _operation_history),
+    additive_migration(14, "persisted global rename proposals", _rename_proposals),
+    additive_migration(15, "library read-path indexes", _library_read_indexes),
+    additive_migration(16, "shared chrome read indexes", _shared_chrome_indexes),
+    additive_migration(17, "historical announcement onboarding receipts", _announcement_onboarding_receipts),
 )
+
+CURRENT_SCHEMA_VERSION = max(migration.version for migration in MIGRATIONS)
+
+
+def validate_migration_contracts() -> None:
+    seen: set[int] = set()
+    for migration in MIGRATIONS:
+        if migration.version in seen:
+            raise RuntimeError(f"Duplicate migration version {migration.version}.")
+        seen.add(migration.version)
+        if migration.compatibility not in COMPATIBILITY_LEVELS:
+            raise RuntimeError(f"Migration {migration.version} has an invalid compatibility class.")
+        if migration.downgrade_policy not in DOWNGRADE_POLICIES:
+            raise RuntimeError(f"Migration {migration.version} has an invalid downgrade policy.")
+        if migration.minimum_reader_schema < 1 or migration.minimum_reader_schema > migration.version:
+            raise RuntimeError(f"Migration {migration.version} has an invalid minimum reader schema.")
+        if (
+            migration.minimum_writer_schema is not None
+            and (
+                migration.minimum_writer_schema < migration.minimum_reader_schema
+                or migration.minimum_writer_schema > migration.version
+            )
+        ):
+            raise RuntimeError(f"Migration {migration.version} has an invalid minimum writer schema.")
+        if migration.downgrade_policy == "compatible" and migration.minimum_writer_schema is None:
+            raise RuntimeError(f"Migration {migration.version} cannot be write-compatible without a writer schema.")
+        if migration.downgrade_policy == "read_only" and migration.minimum_writer_schema is not None:
+            raise RuntimeError(f"Migration {migration.version} read-only policy must omit a writer schema.")
+
+
+def _ensure_compatibility_ledger(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS schema_compatibility (
+             migration_version INTEGER PRIMARY KEY,
+             migration_name TEXT NOT NULL,
+             compatibility TEXT NOT NULL
+               CHECK(compatibility IN ('additive','behavioral','breaking')),
+             minimum_reader_schema INTEGER NOT NULL,
+             minimum_writer_schema INTEGER,
+             downgrade_policy TEXT NOT NULL
+               CHECK(downgrade_policy IN ('compatible','read_only','restore_required')),
+             recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+           )"""
+    )
+
+
+def _record_compatibility(conn: sqlite3.Connection, migration: Migration) -> None:
+    conn.execute(
+        """INSERT OR IGNORE INTO schema_compatibility(
+             migration_version,migration_name,compatibility,
+             minimum_reader_schema,minimum_writer_schema,downgrade_policy
+           ) VALUES (?,?,?,?,?,?)""",
+        (
+            migration.version,
+            migration.name,
+            migration.compatibility,
+            migration.minimum_reader_schema,
+            migration.minimum_writer_schema,
+            migration.downgrade_policy,
+        ),
+    )
+
+
+def sync_schema_compatibility_ledger(conn: sqlite3.Connection) -> None:
+    """Backfill compatibility snapshots for already-applied known migrations.
+
+    INSERT OR IGNORE is intentional. Once a migration has been applied, the installed
+    database keeps the compatibility declaration that accompanied that migration.
+    Later code changes do not silently rewrite its downgrade history.
+    """
+    validate_migration_contracts()
+    _ensure_compatibility_ledger(conn)
+    applied = {int(row[0]) for row in conn.execute("SELECT version FROM schema_migrations")}
+    for migration in MIGRATIONS:
+        if migration.version in applied:
+            _record_compatibility(conn, migration)
+
+
+def schema_contract() -> dict:
+    """Return the compatibility contract for a database at this build's schema."""
+    validate_migration_contracts()
+    minimum_reader = max(migration.minimum_reader_schema for migration in MIGRATIONS)
+    writer_values = [migration.minimum_writer_schema for migration in MIGRATIONS]
+    minimum_writer = None if any(value is None for value in writer_values) else max(writer_values)
+    policy = "compatible"
+    if any(migration.downgrade_policy == "restore_required" for migration in MIGRATIONS):
+        policy = "restore_required"
+    elif any(migration.downgrade_policy == "read_only" for migration in MIGRATIONS):
+        policy = "read_only"
+    return {
+        "current": CURRENT_SCHEMA_VERSION,
+        "minimum_reader_schema": minimum_reader,
+        "minimum_writer_schema": minimum_writer,
+        "downgrade_policy": policy,
+    }
+
+
+def assess_schema_downgrade(conn: sqlite3.Connection, target_schema: int) -> dict:
+    """Assess whether an application built for target_schema may use this database."""
+    if target_schema < 1:
+        raise ValueError("Target schema must be positive.")
+    sync_schema_compatibility_ledger(conn)
+    applied_versions = sorted(
+        int(row[0]) for row in conn.execute("SELECT version FROM schema_migrations")
+    )
+    current_schema = applied_versions[-1] if applied_versions else 0
+    if target_schema >= current_schema:
+        return {
+            "status": "current" if target_schema == current_schema else "upgrade",
+            "current_schema": current_schema,
+            "target_schema": target_schema,
+            "blocking_migrations": [],
+        }
+
+    rows = conn.execute(
+        """SELECT migration_version,migration_name,compatibility,
+                  minimum_reader_schema,minimum_writer_schema,downgrade_policy
+           FROM schema_compatibility
+           WHERE migration_version>? AND migration_version<=?
+           ORDER BY migration_version""",
+        (target_schema, current_schema),
+    ).fetchall()
+    by_version = {int(row["migration_version"]): row for row in rows}
+    unknown = [version for version in applied_versions if target_schema < version <= current_schema and version not in by_version]
+    if unknown:
+        return {
+            "status": "restore_required",
+            "current_schema": current_schema,
+            "target_schema": target_schema,
+            "blocking_migrations": unknown,
+            "reason": "compatibility_unknown",
+        }
+
+    read_blockers = [
+        row for row in rows
+        if target_schema < int(row["minimum_reader_schema"])
+        or row["downgrade_policy"] == "restore_required"
+    ]
+    if read_blockers:
+        return {
+            "status": "restore_required",
+            "current_schema": current_schema,
+            "target_schema": target_schema,
+            "blocking_migrations": [int(row["migration_version"]) for row in read_blockers],
+            "reason": "reader_incompatible",
+        }
+
+    write_blockers = [
+        row for row in rows
+        if row["minimum_writer_schema"] is None
+        or target_schema < int(row["minimum_writer_schema"])
+        or row["downgrade_policy"] == "read_only"
+    ]
+    if write_blockers:
+        return {
+            "status": "read_only",
+            "current_schema": current_schema,
+            "target_schema": target_schema,
+            "blocking_migrations": [int(row["migration_version"]) for row in write_blockers],
+            "reason": "writer_incompatible",
+        }
+
+    return {
+        "status": "safe_downgrade",
+        "current_schema": current_schema,
+        "target_schema": target_schema,
+        "blocking_migrations": [],
+    }
+
+
+def schema_compatibility_history(conn: sqlite3.Connection) -> list[dict]:
+    sync_schema_compatibility_ledger(conn)
+    return [dict(row) for row in conn.execute(
+        """SELECT migration_version,migration_name,compatibility,
+                  minimum_reader_schema,minimum_writer_schema,downgrade_policy,recorded_at
+           FROM schema_compatibility ORDER BY migration_version"""
+    )]
 
 
 def apply_migrations(conn: sqlite3.Connection) -> None:
+    validate_migration_contracts()
     conn.execute(
         """CREATE TABLE IF NOT EXISTS schema_migrations (
              version INTEGER PRIMARY KEY,
@@ -297,6 +501,7 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
              applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
            )"""
     )
+    sync_schema_compatibility_ledger(conn)
     applied = {int(row[0]) for row in conn.execute("SELECT version FROM schema_migrations")}
     for migration in MIGRATIONS:
         if migration.version in applied:
@@ -309,6 +514,7 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
                 "INSERT INTO schema_migrations(version,name) VALUES (?,?)",
                 (migration.version, migration.name),
             )
+            _record_compatibility(conn, migration)
         except Exception:
             conn.execute(f"ROLLBACK TO {savepoint}")
             conn.execute(f"RELEASE {savepoint}")
