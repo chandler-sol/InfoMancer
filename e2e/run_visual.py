@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 import time
@@ -113,6 +112,8 @@ def run(mode: str, passthrough: list[str]) -> int:
         (8787, state / "token.db", {"INFOMANCER_BOOTSTRAP_TOKEN": BOOTSTRAP_TOKEN}, "token-server.log"),
         (8788, state / "sandbox.db", {"INFOMANCER_SANDBOX": "1"}, "sandbox-server.log"),
         (8789, state / "tour.db", {"INFOMANCER_SANDBOX": "1"}, "tour-server.log"),
+        (8790, state / "smoke.db", {"INFOMANCER_SANDBOX": "1"}, "smoke-server.log"),
+        (8791, state / "deep.db", {"INFOMANCER_SANDBOX": "1"}, "deep-server.log"),
     )
 
     try:
@@ -133,6 +134,8 @@ def run(mode: str, passthrough: list[str]) -> int:
             "INFOMANCER_E2E_TOKEN_URL": "http://127.0.0.1:8787",
             "INFOMANCER_E2E_SANDBOX_URL": "http://127.0.0.1:8788",
             "INFOMANCER_E2E_TOUR_URL": "http://127.0.0.1:8789",
+            "INFOMANCER_E2E_SMOKE_URL": "http://127.0.0.1:8790",
+            "INFOMANCER_E2E_DEEP_URL": "http://127.0.0.1:8791",
             "INFOMANCER_E2E_DATABASE": str(state / "sandbox.db"),
             "INFOMANCER_E2E_BOOTSTRAP_TOKEN": BOOTSTRAP_TOKEN,
         })
