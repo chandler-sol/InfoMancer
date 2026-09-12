@@ -40,7 +40,7 @@
       </article>
       {% endfor %}
     </div>
-    <p class="muted"><small>Switching from Dev or Beta toward a more-stable channel never silently downgrades the installed build or database. InfoMancer waits until the selected channel catches up.</small></p>
+    <p class="muted"><small>Switching from Dev or Beta toward a more-stable channel never silently downgrades the installed build or database. InfoMancer evaluates the recorded schema compatibility first, and an unproven downgrade remains blocked.</small></p>
   </section>
 
   <section class="panel settings-card full-width" id="available-update">
@@ -56,8 +56,11 @@
 
     <dl class="settings-facts">
       <div><dt>Installed</dt><dd>{{ update_status.current_version or app_version }}</dd></div>
+      <div><dt>Installed schema</dt><dd>{{ schema_contract.current }}</dd></div>
       <div><dt>Selected channel</dt><dd>{{ update_channel_label }}</dd></div>
       {% if update_status.latest_version %}<div><dt>Latest eligible build</dt><dd>{{ update_status.latest_version }}</dd></div>{% endif %}
+      {% if update_status.database_schema %}<div><dt>Target schema</dt><dd>{{ update_status.database_schema.current }}</dd></div>{% endif %}
+      {% if update_status.schema_assessment %}<div><dt>Schema compatibility</dt><dd>{{ update_status.schema_assessment.status|replace('_',' ')|title }}</dd></div>{% endif %}
       {% if update_status.build_id %}<div><dt>Build ID</dt><dd><code>{{ update_status.build_id }}</code></dd></div>{% endif %}
       {% if update_status.commit_sha %}<div><dt>Source commit</dt><dd><code>{{ update_status.commit_sha[:12] }}</code></dd></div>{% endif %}
       {% if update_status.latest_channel %}<div><dt>Build class</dt><dd>{{ update_channel_labels[update_status.latest_channel] }}</dd></div>{% endif %}
@@ -104,6 +107,41 @@
       <p class="muted"><small>This qualified build is visible for the selected channel, but there is not yet a trusted server artifact to install on this host.</small></p>
     {% endif %}
     <p class="muted"><small>Server updates still require the restricted host updater, which verifies trusted release signatures before checkout. A channel manifest cannot bypass that trust check.</small></p>
+  </section>
+
+  <section class="panel settings-card full-width" id="schema-compatibility">
+    <div class="settings-card-head">
+      <div><p class="eyebrow">DATABASE SAFETY</p><h2>Schema compatibility ledger</h2></div>
+      <span class="settings-state good">Schema {{ schema_contract.current }}</span>
+    </div>
+    <p class="muted">Each applied migration keeps a compatibility snapshot so InfoMancer can distinguish a truly unsafe downgrade from an older build that can still read and write the current database safely.</p>
+    <dl class="settings-facts">
+      <div><dt>Current schema</dt><dd>{{ schema_contract.current }}</dd></div>
+      <div><dt>Oldest compatible reader</dt><dd>Schema {{ schema_contract.minimum_reader_schema }}</dd></div>
+      <div><dt>Oldest compatible writer</dt><dd>{% if schema_contract.minimum_writer_schema %}Schema {{ schema_contract.minimum_writer_schema }}{% else %}Read-only only{% endif %}</dd></div>
+      <div><dt>Current downgrade policy</dt><dd>{{ schema_contract.downgrade_policy|replace('_',' ')|title }}</dd></div>
+    </dl>
+    <details>
+      <summary>Migration compatibility history</summary>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Schema</th><th>Migration</th><th>Class</th><th>Oldest reader</th><th>Oldest writer</th><th>Downgrade</th></tr></thead>
+          <tbody>
+          {% for migration in schema_compatibility_history %}
+            <tr>
+              <td>{{ migration.migration_version }}</td>
+              <td>{{ migration.migration_name }}</td>
+              <td>{{ migration.compatibility|title }}</td>
+              <td>{{ migration.minimum_reader_schema }}</td>
+              <td>{{ migration.minimum_writer_schema if migration.minimum_writer_schema is not none else 'Read-only' }}</td>
+              <td>{{ migration.downgrade_policy|replace('_',' ')|title }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="muted"><small>Compatibility rows use snapshot semantics. Once recorded for an applied migration, later code does not silently rewrite that migration's historical downgrade declaration.</small></p>
+    </details>
   </section>
 </div>
 {% endblock %}
