@@ -19,6 +19,109 @@
   margin-bottom: 0;
 }
 
+.recovery-card-head {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.recovery-card-head > div {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.recovery-card-head .eyebrow,
+.recovery-card-head h2,
+.recovery-card-head p {
+  margin: 0;
+}
+
+.recovery-scan-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  border-radius: 10px;
+}
+
+.recovery-backup-list {
+  display: grid;
+  gap: 12px;
+}
+
+.recovery-backup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.95fr);
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  border-radius: 12px;
+}
+
+.recovery-backup-invalid {
+  grid-template-columns: 1fr;
+}
+
+.recovery-backup-main,
+.recovery-recommendation {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+
+.recovery-recommendation {
+  padding-left: 16px;
+  border-left: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+}
+
+.recovery-recommendation p,
+.recovery-recommendation .eyebrow,
+.recovery-location {
+  margin: 0;
+}
+
+.recovery-backup-title-line,
+.recovery-build-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.recovery-backup-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 0.92rem;
+}
+
+.recovery-location code,
+.recovery-locations code {
+  overflow-wrap: anywhere;
+}
+
+.recovery-downloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recovery-locations {
+  margin-top: 2px;
+}
+
+.recovery-locations ul {
+  margin-bottom: 0;
+}
+
+.subtle-notice {
+  margin: 0;
+}
+
 #recovery-upload-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -58,7 +161,28 @@
   margin-top: 10px;
 }
 
+@media (max-width: 900px) {
+  .recovery-backup-row {
+    grid-template-columns: 1fr;
+  }
+
+  .recovery-recommendation {
+    padding-top: 12px;
+    padding-left: 0;
+    border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+    border-left: 0;
+  }
+}
+
 @media (max-width: 760px) {
+  .recovery-card-head {
+    display: grid;
+  }
+
+  .recovery-card-head .button {
+    width: 100%;
+  }
+
   #recovery-upload-form {
     grid-template-columns: 1fr;
   }
