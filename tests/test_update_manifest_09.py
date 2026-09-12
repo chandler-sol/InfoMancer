@@ -11,7 +11,7 @@ SCRIPT = ROOT / "scripts" / "build_update_channel_manifest.py"
 
 
 class UpdateManifest09Tests(unittest.TestCase):
-    def test_builder_records_qualification_and_artifact_digest(self):
+    def test_builder_records_qualification_artifact_digest_and_schema_contract(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             artifact = root / "candidate.bin"
@@ -42,6 +42,12 @@ class UpdateManifest09Tests(unittest.TestCase):
             self.assertEqual(manifest["qualification"]["status"], "passed")
             self.assertEqual(manifest["qualification"]["run_id"], 184)
             self.assertEqual(len(manifest["artifacts"]["windows"]["sha256"]), 64)
+            self.assertGreaterEqual(manifest["database_schema"]["current"], 17)
+            self.assertEqual(manifest["database_schema"]["downgrade_policy"], "compatible")
+            self.assertLessEqual(
+                manifest["database_schema"]["minimum_reader_schema"],
+                manifest["database_schema"]["current"],
+            )
 
     def test_builder_refuses_failed_qualification(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -66,13 +72,19 @@ class UpdateManifest09Tests(unittest.TestCase):
             self.assertNotEqual(completed.returncode, 0)
             self.assertFalse(output.exists())
 
-    def test_manifest_schema_requires_passed_qualification(self):
+    def test_manifest_schema_requires_passed_qualification_and_database_contract(self):
         schema = json.loads(
             (ROOT / "docs" / "update-channel-manifest.schema.json").read_text(encoding="utf-8")
         )
         qualification = schema["properties"]["qualification"]
         self.assertEqual(qualification["properties"]["status"]["const"], "passed")
         self.assertIn("artifacts", schema["required"])
+        self.assertIn("database_schema", schema["required"])
+        database_schema = schema["properties"]["database_schema"]
+        self.assertIn("current", database_schema["required"])
+        self.assertIn("minimum_reader_schema", database_schema["required"])
+        self.assertIn("minimum_writer_schema", database_schema["required"])
+        self.assertIn("downgrade_policy", database_schema["required"])
 
     def test_dev_candidate_waits_for_every_qualification_gate(self):
         workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
