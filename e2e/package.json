@@ -4,7 +4,12 @@
   "version": "0.1.0",
   "scripts": {
     "test": "playwright test",
-    "test:headed": "playwright test --headed"
+    "test:local": "python run_visual.py headless",
+    "test:watch": "python run_visual.py watch",
+    "test:headed": "python run_visual.py watch",
+    "test:ui": "python run_visual.py ui",
+    "test:debug": "python run_visual.py debug",
+    "test:report": "playwright show-report"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1"
