@@ -76,7 +76,15 @@ test('smoke: startup, login, navigation, and primary UI chrome stay usable', asy
   await expectHealthyPage(page, '/settings/system');
   await expect(page.locator('.settings-nav, [aria-label="Settings"]').first()).toBeVisible();
 
-  await testInfo.attach('smoke-system-settings', {
+  await expectHealthyPage(page, '/settings/updates');
+  await expect(page.getByRole('heading', { name: 'Updates' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Standard', exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Dev', exact: true })).toBeVisible();
+  await expect(page.getByText('Dev only advances after qualification succeeds.')).toBeVisible();
+  await expect(page.getByText(/never silently downgrades/)).toBeVisible();
+
+  await testInfo.attach('smoke-update-channels', {
     body: await page.screenshot({ fullPage: true }),
     contentType: 'image/png',
   });
