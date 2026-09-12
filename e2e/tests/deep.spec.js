@@ -3,6 +3,8 @@ const { test, expect } = require('@playwright/test');
 const baseUrl = process.env.INFOMANCER_E2E_DEEP_URL || 'http://127.0.0.1:8791';
 const password = 'acceptance-password-123';
 
+test.describe.configure({ retries: 0 });
+
 async function createLibrarian(page) {
   await page.goto(`${baseUrl}/setup`);
   await expect(page.getByRole('heading', { name: 'Create your Librarian' })).toBeVisible();
@@ -66,11 +68,12 @@ test('deep: source workflow, library interaction, inspector, and modal UI stay c
   await expect(sourceRow).toContainText('12 video files');
 
   await page.goto(`${baseUrl}/movies`);
-  const cards = page.locator('[data-workspace-title-id]');
-  await expect(cards.first()).toBeVisible();
+  await expect(page.locator('#library-list')).toBeVisible();
+  await expect(page.locator('#library-list [data-workspace-title-id]').first()).toBeVisible();
 
   await page.locator('#library-cover-view').click();
   await expect(page.locator('#cover-library')).toBeVisible();
+  await expect(page.locator('#cover-library [data-workspace-title-id]').first()).toBeVisible();
   await page.locator('#library-list-view').click();
   await expect(page.locator('#library-list')).toBeVisible();
   await page.locator('#library-cover-view').click();
