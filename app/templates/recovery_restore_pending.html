@@ -6,6 +6,7 @@
   <h1>Recovery completed</h1>
   <div class="success-banner"><strong>The verified package was restored and InfoMancer is restarting.</strong></div>
   <p>Restored data from InfoMancer {{ source_version }} with {{ artwork_files }} collection artwork file{% if artwork_files != 1 %}s{% endif %}.</p>
+  {% if mapped_roots %}<p>Storage reconciliation mapped {{ mapped_roots }} media root{% if mapped_roots != 1 %}s{% endif %} and updated {{ rewritten_paths }} stored path value{% if rewritten_paths != 1 %}s{% endif %} before the restored database was accepted.</p>{% endif %}
   <p>A pre-restore safety package named <code>{{ safety_package }}</code> was created and verified before the live installation was changed.</p>
   <p>Provider credentials were not restored. After InfoMancer returns, sign in using an account from the restored database and re-enter provider credentials if needed.</p>
   <p><a class="button primary" href="/login">Return to InfoMancer</a></p>
