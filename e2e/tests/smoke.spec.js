@@ -3,6 +3,8 @@ const { test, expect } = require('@playwright/test');
 const baseUrl = process.env.INFOMANCER_E2E_SMOKE_URL || 'http://127.0.0.1:8790';
 const password = 'acceptance-password-123';
 
+test.describe.configure({ retries: 0 });
+
 async function createLibrarian(page) {
   await page.goto(`${baseUrl}/setup`);
   await expect(page.getByRole('heading', { name: 'Create your Librarian' })).toBeVisible();
@@ -62,6 +64,9 @@ test('smoke: startup, login, navigation, and primary UI chrome stay usable', asy
 
   await expectHealthyPage(page, '/library');
   await expect(page.locator('.catalog-tabs')).toBeVisible();
+  const searchToggle = page.locator('#library-filter-search-toggle');
+  await expect(searchToggle).toBeVisible();
+  await searchToggle.click();
   await expect(page.locator('#live-library-search')).toBeVisible();
   await expect(page.locator('#library-list-view')).toBeVisible();
   await expect(page.locator('#library-cover-view')).toBeVisible();
