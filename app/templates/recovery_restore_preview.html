@@ -2,6 +2,7 @@
 {% block title %}Preview Recovery · InfoMancer{% endblock %}
 {% block content %}
 {% set section = 'recovery' %}
+<link rel="stylesheet" href="{{ url_for('static', path='recovery-restore.css') }}?v={{ static_version }}">
 <section class="settings-shell">
   <header class="page-head compact-page-head">
     <div><p class="eyebrow">PORTABLE RECOVERY</p><h1>Verified restore preview</h1><p>The selected package passed archive, checksum, and database validation.</p></div>
@@ -20,6 +21,55 @@
     </dl>
   </section>
 
+  <section class="panel settings-card recovery-path-card">
+    <p class="eyebrow">STORAGE RECONCILIATION</p>
+    <h2>Confirm where the media lives on this computer</h2>
+    <p>The backup remembers the original source paths. If a drive letter, mount point, share, or container mapping changed, map the old root to the directory that contains the same media now. InfoMancer rewrites catalog paths inside the staged database before restore and verifies that every mapped destination is inside trusted storage.</p>
+
+    {% if recovery_roots %}
+      <div class="recovery-root-list">
+        {% for root in recovery_roots %}
+          <div class="recovery-root-row">
+            <div class="recovery-root-source">
+              <span class="status-chip{% if root.trusted_here %} success{% elif root.accessible %} warning{% else %} danger{% endif %}">
+                {% if root.trusted_here %}Ready{% elif root.accessible %}Needs trust or mapping{% else %}Not reachable here{% endif %}
+              </span>
+              <strong>{{ root.kind|capitalize }} source</strong>
+              <code>{{ root.path }}</code>
+            </div>
+            <label>Restore this source at
+              <input
+                type="text"
+                name="root_path_{{ root.id }}"
+                form="recovery-apply-form"
+                value="{% if root.suggestion_is_match %}{{ root.suggested_path }}{% endif %}"
+                placeholder="{% if root.trusted_here %}Leave blank to keep the original path{% else %}Enter the current media directory{% endif %}"
+                autocomplete="off">
+            </label>
+            {% if root.suggestion_is_match %}
+              <p class="muted">Suggested because a directory with the same source name exists under trusted storage. Review it before restoring.</p>
+            {% elif root.trusted_here %}
+              <p class="muted">The original path is already within trusted storage. Leave this blank unless you intentionally moved it.</p>
+            {% else %}
+              <p class="muted">If the original path is no longer valid on this platform, enter its replacement. The destination must already exist.</p>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">This recovery package does not contain any media sources.</p>
+    {% endif %}
+
+    {% if trusted_media_roots %}
+      <details>
+        <summary>Trusted storage locations on this installation</summary>
+        <ul>{% for root in trusted_media_roots %}<li><code>{{ root }}</code></li>{% endfor %}</ul>
+      </details>
+    {% else %}
+      <div class="notice subtle-notice">This installation has no trusted media browse roots configured. Add trusted storage before mapping a backup to new paths.</div>
+    {% endif %}
+  </section>
+
   <section class="panel settings-card">
     <p class="eyebrow">EXCLUDED BY DESIGN</p>
     <h2>Secrets stay local to this installation</h2>
@@ -30,8 +80,8 @@
   <section class="panel settings-card danger-zone">
     <p class="eyebrow">FINAL CONFIRMATION</p>
     <h2>Restore this package</h2>
-    <p>InfoMancer will first create and verify a new portable safety backup of the current installation. It will then stage and replace the database plus collection artwork. If commit fails, InfoMancer will roll both back before returning an error.</p>
-    <form method="post" action="/settings/recovery/apply" class="stacked-form">
+    <p>InfoMancer will first create and verify a new portable safety backup of the current installation. It will then reconcile any storage mappings above, validate the staged paths, and replace the database plus collection artwork. If commit fails, InfoMancer will roll both back before returning an error.</p>
+    <form id="recovery-apply-form" method="post" action="/settings/recovery/apply" class="stacked-form">
       <input type="hidden" name="staged_token" value="{{ staged_token }}">
       <label>Type <strong>RESTORE</strong> to continue
         <input type="text" name="confirm" autocomplete="off" required>
