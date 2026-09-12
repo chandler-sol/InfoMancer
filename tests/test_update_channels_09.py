@@ -38,6 +38,12 @@ def qualified_manifest(channel: str = "dev") -> dict:
                 "browser-acceptance",
             ],
         },
+        "database_schema": {
+            "current": 17,
+            "minimum_reader_schema": 1,
+            "minimum_writer_schema": 1,
+            "downgrade_policy": "compatible",
+        },
         "artifacts": {
             "windows": {
                 "kind": "tauri-updater",
@@ -93,6 +99,8 @@ class UpdateChannel09Tests(unittest.TestCase):
         self.assertEqual(manifest["channel"], "dev")
         self.assertEqual(manifest["version"], "0.9.0-dev.2384")
         self.assertEqual(manifest["qualification"]["status"], "passed")
+        self.assertEqual(manifest["database_schema"]["current"], 17)
+        self.assertEqual(manifest["database_schema"]["downgrade_policy"], "compatible")
 
     def test_manifest_for_wrong_channel_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "selected channel"):
@@ -108,6 +116,18 @@ class UpdateChannel09Tests(unittest.TestCase):
         manifest = qualified_manifest()
         manifest["artifacts"]["windows"]["sha256"] = "not-a-digest"
         with self.assertRaisesRegex(ValueError, "artifact metadata"):
+            validate_channel_manifest(manifest, "dev")
+
+    def test_manifest_without_schema_contract_is_rejected(self):
+        manifest = qualified_manifest()
+        del manifest["database_schema"]
+        with self.assertRaisesRegex(ValueError, "database schema contract"):
+            validate_channel_manifest(manifest, "dev")
+
+    def test_manifest_with_impossible_schema_contract_is_rejected(self):
+        manifest = qualified_manifest()
+        manifest["database_schema"]["minimum_writer_schema"] = 18
+        with self.assertRaisesRegex(ValueError, "minimum writer schema"):
             validate_channel_manifest(manifest, "dev")
 
     def test_updates_page_and_routes_are_registered(self):
