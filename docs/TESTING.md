@@ -5,17 +5,7 @@ InfoMancer uses two complementary test layers during development:
 - Python regression tests for application logic and platform behavior.
 - Playwright browser acceptance tests for real user workflows in disposable InfoMancer installations.
 
-The 0.9 development line adds a local visual runner so browser tests can be watched without manually preparing fixture databases or starting acceptance servers.
-
-## Python regression suite
-
-From the repository root:
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-GitHub Actions runs this suite on Windows, macOS, and Linux for the canonical 0.9 alpha branch.
+The 0.9 development line adds local visual runners so the browser tests can be watched without manually preparing fixture databases or starting acceptance servers.
 
 ## One-time Playwright setup
 
@@ -28,84 +18,144 @@ npx playwright install chromium
 
 The browser runtime only needs to be installed again when Playwright requires a different browser revision.
 
-## Watch InfoMancer test itself
+## Three local test tiers
 
-From the `e2e` directory:
+### Smoke
+
+Use this constantly while developing:
+
+```bash
+npm run test:smoke
+```
+
+Smoke verifies the basics that should almost never be broken:
+
+- InfoMancer starts and reports healthy before Playwright begins.
+- A fresh Librarian account can be created.
+- Local sign-in works after clearing the browser session.
+- Dashboard, Library, Review, Sources, and System Settings load successfully.
+- Primary Library UI controls render.
+- No uncaught browser page errors occur during the pass.
+
+The goal is a short confidence check rather than exhaustive coverage.
+
+### Deep
+
+Use this after meaningful UI, library, source, scanner, modal, or Inspector work:
+
+```bash
+npm run test:deep
+```
+
+Deep runs the Smoke pass and then exercises a more realistic workflow:
+
+- guided setup
+- source browser modal
+- deterministic source preview
+- source add and scan
+- Library population
+- list and cover view switching
+- workspace Inspector opening from a Library title
+- Inspector health, media, metadata, and organization sections
+- favorite state mutation
+- organization modal opening and closing
+
+This tier is intended to catch interaction regressions that unit tests and simple page-load checks cannot see.
+
+### Full
+
+Use this before promoting a Dev build, before a Beta candidate, after broad architectural changes, or whenever the machine can be left working unattended:
+
+```bash
+npm run test:full
+```
+
+Full runs:
+
+1. the complete Python regression suite
+2. application bytecode compilation
+3. the complete Playwright browser acceptance suite, including Smoke, Deep, guided onboarding, source workflows, activity behavior, bulk matching, collections, modal behavior, and every additional acceptance spec added later
+
+There is intentionally no short runtime target for Full. As the 0.9 suite grows, this is the tier where expensive checks belong. It is acceptable for a local Full qualification to take hours or eventually run overnight. Do not make Full artificially slow by repeating identical tests without a reason. Add expensive coverage when it validates a real failure mode, migration path, large-library condition, media-analysis case, or platform behavior.
+
+## Visible and headless variants
+
+The default Smoke, Deep, and Full commands use visible Chromium so the run can be watched.
+
+Headless equivalents are available for unattended work:
+
+```bash
+npm run test:smoke:headless
+npm run test:deep:headless
+npm run test:full:headless
+```
+
+Interactive Playwright UI variants are also available:
+
+```bash
+npm run test:smoke:ui
+npm run test:deep:ui
+npm run test:full:ui
+```
+
+Playwright UI Mode lets you select tests, run or re-run them, inspect individual actions, and review browser state.
+
+## General browser test tools
+
+To run the complete browser suite without first running Python tests:
 
 ```bash
 npm run test:watch
 ```
 
-This command:
-
-1. Rebuilds deterministic disposable media fixtures.
-2. Starts three isolated local InfoMancer acceptance installations.
-3. Waits until every installation reports healthy.
-4. Runs the Playwright acceptance suite in a visible Chromium window.
-5. Stops the temporary InfoMancer servers when the test run ends.
-
-`test:headed` is kept as an alias for the same workflow.
-
-## Interactive Playwright UI
-
-For the most useful visual development experience:
+For Playwright UI Mode:
 
 ```bash
 npm run test:ui
 ```
 
-Playwright UI Mode lets you select tests, run or re-run them, inspect each step, and review browser state while the disposable InfoMancer installations stay available behind the runner.
-
-## Step-through debugging
+For step-through debugging with Playwright Inspector:
 
 ```bash
 npm run test:debug
 ```
 
-This opens Playwright Inspector and pauses execution so individual browser actions can be stepped through.
-
-## Local headless acceptance run
-
-To reproduce the browser suite locally without opening a browser window:
+For a local headless browser-only run:
 
 ```bash
 npm run test:local
 ```
 
-CI continues to use `npm test` because GitHub Actions prepares its own isolated acceptance servers before invoking Playwright.
+## Disposable installations
 
-## Additional Playwright arguments
+The local runner builds deterministic media fixtures and starts isolated InfoMancer installations on loopback ports for different scenarios. Smoke and Deep each have their own database so their state cannot interfere with the longer acceptance scenarios.
 
-Arguments after `--` are forwarded to Playwright. For example:
+The runner waits for every instance to report healthy before starting Playwright and shuts every temporary server down when the run ends.
 
-```bash
-npm run test:watch -- acceptance.spec.js
-npm run test:ui -- --grep "guided setup"
+The disposable runtime lives at:
+
+```text
+e2e/.e2e-runtime/
 ```
+
+It is rebuilt at the beginning of the next visual run and must never be treated as user data.
 
 ## Test evidence
 
-Playwright is configured to retain the following evidence when a test fails:
+Playwright retains failure evidence including:
 
 - screenshots
 - trace files
 - video
-- HTML report
+- HTML reports
 
 Local output is written beneath:
 
 ```text
 e2e/test-results/
 e2e/playwright-report/
-```
-
-The visual runner also leaves its disposable server logs in:
-
-```text
 e2e/.e2e-runtime/logs/
 ```
-
-The `.e2e-runtime` fixture area is rebuilt at the start of the next visual run, so it must never be treated as user data.
 
 To reopen the most recent HTML report:
 
@@ -115,14 +165,16 @@ npm run test:report
 
 ## CI behavior
 
-The canonical `testing/0.9-alpha` branch runs the full GitHub Actions test workflow on every push. The workflow includes:
+The canonical `testing/0.9-alpha` branch runs the full GitHub Actions qualification workflow on every push. CI remains optimized for qualification rather than visual watching. It includes:
 
 - Python tests on Windows, macOS, and Linux
 - Python dependency audit
 - Bandit security scan
 - Rust dependency audit
-- Playwright browser acceptance
-- compilation check
-- retained test output and browser evidence
+- the complete isolated Playwright browser suite
+- compilation checks
+- retained Python output and browser evidence
+
+The CI browser job uses the same `run_visual.py` orchestration as local testing so the local and hosted acceptance environments do not drift apart.
 
 The workflow can also be started manually through GitHub Actions when a clean qualification run is useful without creating another code commit.
