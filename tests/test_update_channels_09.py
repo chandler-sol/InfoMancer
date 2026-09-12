@@ -67,10 +67,9 @@ class UpdateChannel09Tests(unittest.TestCase):
         self.assertIn('"/settings/updates/check"', handler)
         self.assertIn('"/settings/updates/apply"', handler)
         self.assertIn('href="/settings/updates"', nav)
-        self.assertIn("Standard", template)
-        self.assertIn("Beta", template)
-        self.assertIn("Dev", template)
-        self.assertIn("will not downgrade", template)
+        self.assertIn("update_channel_labels", template)
+        self.assertIn("Dev only advances after qualification succeeds", template)
+        self.assertIn("never silently downgrades", template)
 
 
 if __name__ == "__main__":
