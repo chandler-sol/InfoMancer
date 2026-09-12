@@ -74,7 +74,8 @@ test('smoke: startup, login, navigation, and primary UI chrome stay usable', asy
   await expectHealthyPage(page, '/review');
   await expectHealthyPage(page, '/sources');
   await expectHealthyPage(page, '/settings/system');
-  await expect(page.locator('.settings-nav, [aria-label="Settings"]').first()).toBeVisible();
+  await expect(page.locator('.settings-section-nav')).toBeVisible();
+  await expect(page.locator('.settings-section-nav a[href="/settings/updates"]')).toBeVisible();
 
   await expectHealthyPage(page, '/settings/updates');
   await expect(page.getByRole('heading', { name: 'Updates' })).toBeVisible();
