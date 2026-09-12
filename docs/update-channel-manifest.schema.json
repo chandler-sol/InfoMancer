@@ -12,6 +12,7 @@
     "commit_sha",
     "qualified_at",
     "qualification",
+    "database_schema",
     "artifacts"
   ],
   "properties": {
@@ -39,6 +40,29 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "database_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "current",
+        "minimum_reader_schema",
+        "minimum_writer_schema",
+        "downgrade_policy"
+      ],
+      "properties": {
+        "current": {"type": "integer", "minimum": 1},
+        "minimum_reader_schema": {"type": "integer", "minimum": 1},
+        "minimum_writer_schema": {
+          "anyOf": [
+            {"type": "integer", "minimum": 1},
+            {"type": "null"}
+          ]
+        },
+        "downgrade_policy": {
+          "enum": ["compatible", "read_only", "restore_required"]
         }
       }
     },
