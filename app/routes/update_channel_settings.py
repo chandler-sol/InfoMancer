@@ -37,6 +37,9 @@ from .context import RouteContext
 
 REPOSITORY_PATTERN = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 MAX_UPDATE_RESPONSE = 2 * 1024 * 1024
+DEFAULT_MANIFEST_BASE_URL = (
+    "https://github.com/chandler-sol/InfoMancer/releases/download/update-channels"
+)
 
 
 def build_router(ctx: RouteContext):
@@ -53,7 +56,13 @@ def build_router(ctx: RouteContext):
         ).strip()
 
     def manifest_base_url() -> str:
-        return os.getenv("INFOMANCER_UPDATE_MANIFEST_BASE_URL", "").strip().rstrip("/")
+        configured = os.getenv("INFOMANCER_UPDATE_MANIFEST_BASE_URL")
+        if configured is None:
+            return DEFAULT_MANIFEST_BASE_URL
+        configured = configured.strip()
+        if configured.casefold() in {"off", "disabled", "none"}:
+            return ""
+        return configured.rstrip("/")
 
     def page_context(request: Request, error: str = "") -> dict:
         channel = read_update_channel(db.path)
@@ -297,7 +306,16 @@ def build_router(ctx: RouteContext):
         checked_at = datetime.now(timezone.utc).isoformat()
         try:
             if manifest_base_url():
-                status = status_from_manifest(channel, checked_at)
+                try:
+                    status = status_from_manifest(channel, checked_at)
+                except urllib.error.HTTPError as exc:
+                    if exc.code != 404:
+                        raise
+                    # During 0C rollout, Standard/Beta may not have a manifest yet.
+                    # A missing manifest falls back to the existing published-release
+                    # path; an invalid manifest never does.
+                    status = status_from_github_releases(channel, checked_at)
+                    status["manifest_fallback"] = True
             else:
                 status = status_from_github_releases(channel, checked_at)
             write_update_status(db.path, status)
