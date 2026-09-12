@@ -84,6 +84,9 @@ test('smoke: startup, login, navigation, and primary UI chrome stay usable', asy
   await expect(page.getByRole('heading', { name: 'Dev', exact: true })).toBeVisible();
   await expect(page.getByText('Dev only advances after qualification succeeds.')).toBeVisible();
   await expect(page.getByText(/never silently downgrades/)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Schema compatibility ledger' })).toBeVisible();
+  await expect(page.getByText('Oldest compatible reader')).toBeVisible();
+  await expect(page.getByText('Oldest compatible writer')).toBeVisible();
 
   await testInfo.attach('smoke-update-channels', {
     body: await page.screenshot({ fullPage: true }),
