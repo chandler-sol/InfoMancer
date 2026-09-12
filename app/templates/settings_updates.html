@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Updates · InfoMancer{% endblock %}
+{% block content %}
+<header class="settings-heading app-settings-heading">
+  <p class="eyebrow">LIBRARIAN</p>
+  <h1>Updates</h1>
+  <p>Choose how quickly this installation receives qualified InfoMancer builds.</p>
+</header>
+{% include "_settings_nav.html" %}
+
+{% if error %}<div class="form-error page-error" role="alert">{{ error }}</div>{% endif %}
+{% if message %}<div class="success-banner">{{ message }}</div>{% endif %}
+
+<div class="settings-page-grid">
+  <section class="panel settings-card full-width" id="update-channel">
+    <div class="settings-card-head">
+      <div><p class="eyebrow">UPDATE CHANNEL</p><h2>{{ update_channel_label }}</h2></div>
+      <span class="settings-state good">Selected</span>
+    </div>
+    <p class="muted">The channel is installation-wide. Changing it only changes which future builds InfoMancer considers. It never installs or downgrades code by itself.</p>
+    <div class="system-overview-grid">
+      {% for channel in update_channels %}
+      <article class="panel settings-card{% if channel == update_channel %} selected{% endif %}">
+        <div class="settings-card-head">
+          <div><p class="eyebrow">{{ update_channel_labels[channel]|upper }}</p><h3>{{ update_channel_labels[channel] }}</h3></div>
+          {% if channel == update_channel %}<span class="settings-state good">Current</span>{% endif %}
+        </div>
+        <p class="muted">{{ update_channel_descriptions[channel] }}</p>
+        {% if channel == 'dev' %}<p><strong>Dev only advances after qualification succeeds.</strong> A red or cancelled development build is not eligible for the Dev channel.</p>{% endif %}
+        {% if channel != update_channel %}
+        <form method="post" action="/settings/updates/channel">
+          <input type="hidden" name="update_channel" value="{{ channel }}">
+          {% if update_channel_ranks[channel] > update_channel_ranks[update_channel] %}
+          <input type="hidden" name="confirm_preview" value="PREVIEW">
+          <p class="muted"><small>Choosing this button confirms that you want less-stable preview builds.</small></p>
+          {% endif %}
+          <button class="button{% if channel == 'dev' %} primary{% endif %}" type="submit">Switch to {{ update_channel_labels[channel] }}</button>
+        </form>
+        {% endif %}
+      </article>
+      {% endfor %}
+    </div>
+    <p class="muted"><small>Switching from Dev or Beta toward a more-stable channel never silently downgrades the installed build or database. InfoMancer waits until the selected channel catches up.</small></p>
+  </section>
+
+  <section class="panel settings-card full-width" id="available-update">
+    <div class="settings-card-head">
+      <div><p class="eyebrow">APPLICATION UPDATE</p><h2>{{ update_channel_label }} channel</h2></div>
+      <span class="settings-state {{ 'warn' if update_status.status == 'available' else 'good' if update_status.status in ['current','waiting_for_channel'] else '' }}">{{ update_status.status|default('idle')|replace('_',' ')|title }}</span>
+    </div>
+    <p class="muted">Release discovery currently uses published releases from <code>{{ update_repository }}</code>. Qualified channel manifests will become the canonical source as 0C is completed.</p>
+
+    <dl class="settings-facts">
+      <div><dt>Installed</dt><dd>{{ update_status.current_version or app_version }}</dd></div>
+      <div><dt>Selected channel</dt><dd>{{ update_channel_label }}</dd></div>
+      {% if update_status.latest_version %}<div><dt>Latest eligible build</dt><dd>{{ update_status.latest_version }}</dd></div>{% endif %}
+      {% if update_status.latest_channel %}<div><dt>Build class</dt><dd>{{ update_channel_labels[update_status.latest_channel] }}</dd></div>{% endif %}
+      {% if update_status.qualification_status %}<div><dt>Qualification</dt><dd>{{ update_status.qualification_status|replace('_',' ')|title }}</dd></div>{% endif %}
+      {% if update_status.published_at %}<div><dt>Published</dt><dd>{{ local_time(update_status.published_at) }}</dd></div>{% endif %}
+      {% if update_status.checked_at %}<div><dt>Last checked</dt><dd>{{ local_time(update_status.checked_at) }}</dd></div>{% endif %}
+    </dl>
+
+    {% if update_status.message %}
+      <div class="{{ 'form-error' if update_status.status in ['error','rolled_back'] else 'success-banner' }}">{{ update_status.message }}</div>
+    {% endif %}
+
+    {% if update_status.release_notes %}
+    <details>
+      <summary>Release notes</summary>
+      <pre class="settings-release-notes">{{ update_status.release_notes }}</pre>
+    </details>
+    {% endif %}
+
+    <div class="actions">
+      <form method="post" action="/settings/updates/check"><button class="button">Check {{ update_channel_label }}</button></form>
+      {% if update_status.status == 'available' and update_status.channel == update_channel %}
+      <form method="post" action="/settings/updates/apply">
+        <input type="hidden" name="tag" value="{{ update_status.latest_version }}">
+        <input type="hidden" name="confirm" value="UPDATE">
+        <button class="button primary">Back up and update to {{ update_status.latest_version }}</button>
+      </form>
+      {% endif %}
+    </div>
+    <p class="muted"><small>Server updates still require the restricted host updater, which verifies trusted release signatures before checkout. A queued update cannot bypass that trust check.</small></p>
+  </section>
+</div>
+{% endblock %}
