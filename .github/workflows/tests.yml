@@ -190,3 +190,173 @@ jobs:
           path: build/update-channel/dev-candidate.json
           if-no-files-found: error
           retention-days: 30
+
+  windows-dev-package:
+    name: Signed Windows Dev package
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/testing/0.9-alpha'
+    needs:
+      - audit
+      - test
+      - acceptance
+    permissions:
+      contents: write
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - name: Check out the exact qualified commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Check signing configuration
+        id: signing
+        shell: pwsh
+        env:
+          INFOMANCER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+          INFOMANCER_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:INFOMANCER_PUBLIC_KEY) -or [string]::IsNullOrWhiteSpace($env:INFOMANCER_PRIVATE_KEY)) {
+            'configured=false' >> $env:GITHUB_OUTPUT
+            Write-Host 'Signed Dev packaging is not configured. Qualification remains valid, but the Dev install channel will not advance.'
+          } else {
+            'configured=true' >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Set up qualified build identity
+        if: steps.signing.outputs.configured == 'true'
+        id: identity
+        shell: pwsh
+        run: |
+          $shortSha = $env:GITHUB_SHA.Substring(0, 8)
+          $version = "0.9.0-dev.${{ github.run_number }}"
+          $buildId = "dev-${{ github.run_number }}-$shortSha"
+          $tag = "desktop-dev-${{ github.run_number }}-$shortSha"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "build_id=$buildId" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "short_sha=$shortSha" >> $env:GITHUB_OUTPUT
+
+      - name: Set up Python
+        if: steps.signing.outputs.configured == 'true'
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install build dependencies
+        if: steps.signing.outputs.configured == 'true'
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller==6.21.0
+
+      - name: Stamp immutable Dev version into build workspace
+        if: steps.signing.outputs.configured == 'true'
+        run: python scripts/stamp_build_version.py "${{ steps.identity.outputs.version }}"
+
+      - name: Build bundled InfoMancer core
+        if: steps.signing.outputs.configured == 'true'
+        shell: pwsh
+        run: |
+          python scripts/stage_ffprobe.py
+          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
+          & .\dist\infomancer-core.exe --check-ffprobe
+          if ($LASTEXITCODE -ne 0) { throw "Bundled FFprobe self-check failed: $LASTEXITCODE" }
+          $triple = (rustc --print host-tuple).Trim()
+          New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
+          Copy-Item dist/infomancer-core.exe "desktop/src-tauri/binaries/infomancer-core-$triple.exe"
+
+      - name: Install and audit desktop dependencies
+        if: steps.signing.outputs.configured == 'true'
+        working-directory: desktop
+        run: |
+          npm ci
+          npm audit --audit-level=high
+
+      - name: Generate native icons
+        if: steps.signing.outputs.configured == 'true'
+        working-directory: desktop
+        run: npm run icon
+
+      - name: Verify stamped packaging versions
+        if: steps.signing.outputs.configured == 'true'
+        run: python -m unittest tests.test_windows_desktop -v
+
+      - name: Build, sign, and publish immutable Windows Dev updater
+        if: steps.signing.outputs.configured == 'true'
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          INFOMANCER_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+        with:
+          projectPath: desktop
+          tagName: ${{ steps.identity.outputs.tag }}
+          releaseName: InfoMancer ${{ steps.identity.outputs.version }}
+          releaseBody: Qualified InfoMancer Dev build from Tests run ${{ github.run_number }} at commit ${{ github.sha }}.
+          releaseDraft: false
+          prerelease: true
+          args: --bundles nsis --config src-tauri/tauri.release.conf.json
+          updaterJsonPreferNsis: true
+          includeUpdaterJson: true
+
+      - name: Resolve published updater assets
+        if: steps.signing.outputs.configured == 'true'
+        id: assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEV_TAG: ${{ steps.identity.outputs.tag }}
+        run: |
+          $published = Join-Path $env:RUNNER_TEMP 'published-dev'
+          New-Item -ItemType Directory -Force $published | Out-Null
+          gh release download $env:DEV_TAG --pattern 'latest.json' --dir $published
+          $release = gh release view $env:DEV_TAG --json assets | ConvertFrom-Json
+          $installer = $release.assets | Where-Object { $_.name -like '*.exe' } | Select-Object -First 1
+          if ($null -eq $installer) { throw 'The signed Dev release did not contain a Windows installer asset.' }
+          gh release download $env:DEV_TAG --pattern $installer.name --dir $published
+          $installerPath = Join-Path $published $installer.name
+          "published_dir=$published" >> $env:GITHUB_OUTPUT
+          "installer_path=$installerPath" >> $env:GITHUB_OUTPUT
+          "installer_url=$($installer.url)" >> $env:GITHUB_OUTPUT
+
+      - name: Build installable Dev channel manifest
+        if: steps.signing.outputs.configured == 'true'
+        shell: pwsh
+        env:
+          QUALIFICATION_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          New-Item -ItemType Directory -Force build/update-channel | Out-Null
+          python scripts/build_update_channel_manifest.py `
+            --channel dev `
+            --version "${{ steps.identity.outputs.version }}" `
+            --build-id "${{ steps.identity.outputs.build_id }}" `
+            --commit-sha "$env:GITHUB_SHA" `
+            --workflow Tests `
+            --run-id "${{ github.run_id }}" `
+            --run-url "$env:QUALIFICATION_RUN_URL" `
+            --artifact "windows=tauri-updater,${{ steps.assets.outputs.installer_url }},${{ steps.assets.outputs.installer_path }}" `
+            --output build/update-channel/dev.json
+          Get-Content build/update-channel/dev.json
+
+      - name: Advance rolling Desktop Dev and qualified channel manifests
+        if: steps.signing.outputs.configured == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLISHED_DIR: ${{ steps.assets.outputs.published_dir }}
+        run: |
+          gh release view desktop-dev 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create desktop-dev --target $env:GITHUB_SHA --title 'InfoMancer Desktop Dev Update Channel' --notes 'Rolling signed Tauri updater manifest. Only qualified 0.9 development builds advance this pointer.' --prerelease
+          }
+          gh release upload desktop-dev (Join-Path $env:PUBLISHED_DIR 'latest.json') --clobber
+
+          gh release view update-channels 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create update-channels --target $env:GITHUB_SHA --title 'InfoMancer Qualified Update Channels' --notes 'Rolling channel manifests for qualified InfoMancer builds.' --prerelease
+          }
+          gh release upload update-channels build/update-channel/dev.json --clobber
