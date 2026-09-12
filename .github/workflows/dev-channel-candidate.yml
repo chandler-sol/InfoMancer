@@ -1,0 +1,64 @@
+name: Dev Channel Candidate
+
+on:
+  workflow_run:
+    workflows:
+      - Tests
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+  qualified-dev-candidate:
+    name: Qualified Dev candidate manifest
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'testing/0.9-alpha'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact qualified commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+
+      - name: Build qualified Dev candidate manifest
+        shell: bash
+        env:
+          QUALIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
+          QUALIFICATION_RUN_ID: ${{ github.event.workflow_run.id }}
+          QUALIFICATION_RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+          QUALIFICATION_RUN_URL: ${{ github.event.workflow_run.html_url }}
+          QUALIFIED_AT: ${{ github.event.workflow_run.updated_at }}
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${QUALIFIED_SHA:0:8}"
+          VERSION="0.9.0-dev.${QUALIFICATION_RUN_NUMBER}"
+          BUILD_ID="dev-${QUALIFICATION_RUN_NUMBER}-${SHORT_SHA}"
+          python scripts/build_update_channel_manifest.py \
+            --channel dev \
+            --version "$VERSION" \
+            --build-id "$BUILD_ID" \
+            --commit-sha "$QUALIFIED_SHA" \
+            --workflow Tests \
+            --run-id "$QUALIFICATION_RUN_ID" \
+            --run-url "$QUALIFICATION_RUN_URL" \
+            --qualified-at "$QUALIFIED_AT" \
+            --output build/update-channel/dev-candidate.json
+          cat build/update-channel/dev-candidate.json
+
+      - name: Preserve qualified candidate manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dev-channel-candidate-${{ github.event.workflow_run.run_number }}-${{ github.event.workflow_run.head_sha }}
+          path: build/update-channel/dev-candidate.json
+          if-no-files-found: error
+          retention-days: 30
