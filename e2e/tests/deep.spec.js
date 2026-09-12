@@ -68,14 +68,15 @@ test('deep: source workflow, library interaction, inspector, and modal UI stay c
   await expect(sourceRow).toContainText('12 video files');
 
   await page.goto(`${baseUrl}/movies`);
-  await expect(page.locator('#library-list')).toBeVisible();
-  await expect(page.locator('#library-list [data-workspace-title-id]').first()).toBeVisible();
+  const list = page.locator('.library-table');
+  await expect(list).toBeVisible();
+  await expect(list.locator('[data-workspace-title-id]').first()).toBeVisible();
 
   await page.locator('#library-cover-view').click();
   await expect(page.locator('#cover-library')).toBeVisible();
   await expect(page.locator('#cover-library [data-workspace-title-id]').first()).toBeVisible();
   await page.locator('#library-list-view').click();
-  await expect(page.locator('#library-list')).toBeVisible();
+  await expect(list).toBeVisible();
   await page.locator('#library-cover-view').click();
 
   const firstCard = page.locator('#cover-library [data-workspace-title-id]').first();
