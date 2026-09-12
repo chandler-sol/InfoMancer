@@ -28,6 +28,7 @@ SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 DEV_MARKERS = {"dev", "alpha", "nightly", "canary", "preview"}
 BETA_MARKERS = {"beta", "rc"}
+SCHEMA_DOWNGRADE_POLICIES = {"compatible", "read_only", "restore_required"}
 
 
 def normalize_channel(value: str) -> str:
@@ -154,6 +155,36 @@ def select_release(releases: Iterable[dict], selected_channel: str) -> dict | No
     return max(candidates, key=lambda item: version_key(str(item.get("tag_name") or "")))
 
 
+def validate_database_schema_contract(value: object) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError("Update channel manifest is missing its database schema contract.")
+    current = value.get("current")
+    minimum_reader = value.get("minimum_reader_schema")
+    minimum_writer = value.get("minimum_writer_schema")
+    policy = str(value.get("downgrade_policy") or "").strip()
+    if not isinstance(current, int) or current < 1:
+        raise ValueError("Update channel manifest contains an invalid current database schema.")
+    if not isinstance(minimum_reader, int) or not 1 <= minimum_reader <= current:
+        raise ValueError("Update channel manifest contains an invalid minimum reader schema.")
+    if minimum_writer is not None and (
+        not isinstance(minimum_writer, int)
+        or not minimum_reader <= minimum_writer <= current
+    ):
+        raise ValueError("Update channel manifest contains an invalid minimum writer schema.")
+    if policy not in SCHEMA_DOWNGRADE_POLICIES:
+        raise ValueError("Update channel manifest contains an invalid schema downgrade policy.")
+    if policy == "compatible" and minimum_writer is None:
+        raise ValueError("Compatible schema contracts must identify a minimum writer schema.")
+    if policy == "read_only" and minimum_writer is not None:
+        raise ValueError("Read-only schema contracts must omit a minimum writer schema.")
+    return {
+        "current": current,
+        "minimum_reader_schema": minimum_reader,
+        "minimum_writer_schema": minimum_writer,
+        "downgrade_policy": policy,
+    }
+
+
 def validate_channel_manifest(value: object, expected_channel: str) -> dict:
     channel = normalize_channel(expected_channel)
     if not isinstance(value, dict):
@@ -191,6 +222,8 @@ def validate_channel_manifest(value: object, expected_channel: str) -> dict:
     ):
         raise ValueError("Update channel manifest must record its passed qualification gates.")
 
+    database_schema = validate_database_schema_contract(value.get("database_schema"))
+
     artifacts = value.get("artifacts")
     if not isinstance(artifacts, dict):
         raise ValueError("Update channel manifest artifacts must be an object.")
@@ -207,6 +240,7 @@ def validate_channel_manifest(value: object, expected_channel: str) -> dict:
     normalized["channel"] = manifest_channel
     normalized["version"] = version
     normalized["commit_sha"] = commit_sha
+    normalized["database_schema"] = database_schema
     return normalized
 
 
