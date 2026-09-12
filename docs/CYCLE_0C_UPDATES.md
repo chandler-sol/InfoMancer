@@ -94,3 +94,21 @@ and the production release:
 ```
 
 The immutable build identity and source commit remain separately recorded so promotion history is auditable even when the user-facing release version changes.
+
+## Recovery-aware downgrade guidance
+
+Cycle 0C also connects the schema compatibility ledger to portable recovery packages.
+
+`Settings > Recovery` can explicitly scan InfoMancer's own `recovery-packages` directory plus additional directories listed in `INFOMANCER_RECOVERY_SEARCH_PATHS`. The scan is non-recursive and never performs an unrestricted filesystem crawl.
+
+Each discovered `.infomancer-backup` is fully verified. InfoMancer then reads the packaged SQLite database's `schema_migrations` and `schema_compatibility` tables to derive the recovery point's actual compatibility contract. This works for existing portable backups without requiring a new archive-format version.
+
+The derived contract is compared with currently published qualified Standard, Beta, and Dev manifests. Recommendation order is:
+
+1. an exact creator-version match inside the selected channel when one is currently published
+2. otherwise the newest qualified read/write-compatible build allowed by the selected channel
+3. if no build in the selected channel is compatible, the most stable compatible cross-channel build may be shown as a fallback, but it is explicitly marked as requiring a channel change
+
+Unknown or incomplete compatibility history fails closed for downgrades. InfoMancer may still recommend an equal or newer schema target because that path migrates the backup forward rather than asking older code to write a newer database.
+
+Portable `.infomancer-backup` files remain cross-platform. The package data is platform-neutral, while source paths remain environment-specific and may require reconciliation when moving between Windows drive letters, macOS volumes, Linux mounts, network shares, or container mappings.
