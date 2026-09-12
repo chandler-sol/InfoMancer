@@ -3,12 +3,21 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "test": "playwright test",
+    "test": "python run_visual.py headless",
     "test:local": "python run_visual.py headless",
     "test:watch": "python run_visual.py watch",
     "test:headed": "python run_visual.py watch",
     "test:ui": "python run_visual.py ui",
     "test:debug": "python run_visual.py debug",
+    "test:smoke": "python run_visual.py watch tests/smoke.spec.js",
+    "test:smoke:headless": "python run_visual.py headless tests/smoke.spec.js",
+    "test:smoke:ui": "python run_visual.py ui tests/smoke.spec.js",
+    "test:deep": "python run_visual.py watch tests/smoke.spec.js tests/deep.spec.js",
+    "test:deep:headless": "python run_visual.py headless tests/smoke.spec.js tests/deep.spec.js",
+    "test:deep:ui": "python run_visual.py ui tests/smoke.spec.js tests/deep.spec.js",
+    "test:full": "python run_full.py watch",
+    "test:full:headless": "python run_full.py headless",
+    "test:full:ui": "python run_full.py ui",
     "test:report": "playwright show-report"
   },
   "devDependencies": {
