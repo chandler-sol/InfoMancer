@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
 import re
+from pathlib import Path
 from typing import Iterable
 
 
@@ -42,6 +45,40 @@ def channel_transition(current: str, requested: str) -> str:
     if old == new:
         return "same"
     return "less_stable" if CHANNEL_RANK[new] > CHANNEL_RANK[old] else "more_stable"
+
+
+def channel_preferences_path(database_path: Path) -> Path:
+    return database_path.parent / "update-channel.json"
+
+
+def read_update_channel(database_path: Path) -> str:
+    path = channel_preferences_path(database_path)
+    if not path.exists():
+        return "standard"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            return "standard"
+        return normalize_channel(str(value.get("channel") or "standard"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        # A damaged preference file must never make Settings or startup fail.
+        # Standard is the conservative fallback and does not install anything.
+        return "standard"
+
+
+def write_update_channel(database_path: Path, channel: str) -> Path:
+    selected = normalize_channel(channel)
+    path = channel_preferences_path(database_path)
+    temporary = path.with_suffix(".tmp")
+    payload = {"format": "infomancer-update-channel", "version": 1, "channel": selected}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError:
+        temporary.unlink(missing_ok=True)
+        raise
+    return path
 
 
 def _prerelease_tokens(value: str) -> tuple[str, ...]:
