@@ -8,12 +8,44 @@ from app.update_channels import (
     release_channel,
     select_release,
     update_state,
+    validate_channel_manifest,
     version_key,
     write_update_channel,
 )
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def qualified_manifest(channel: str = "dev") -> dict:
+    return {
+        "schema_version": 1,
+        "channel": channel,
+        "version": "0.9.0-dev.2384" if channel == "dev" else "0.9.0-beta.1",
+        "build_id": "qualified-build-2384",
+        "commit_sha": "0123456789abcdef0123456789abcdef01234567",
+        "qualified_at": "2026-09-12T17:45:00+00:00",
+        "qualification": {
+            "status": "passed",
+            "workflow": "Tests",
+            "run_id": 2384,
+            "run_url": "https://github.com/chandler-sol/InfoMancer/actions/runs/2384",
+            "gates": [
+                "python-windows",
+                "python-macos",
+                "python-linux",
+                "security-audit",
+                "browser-acceptance",
+            ],
+        },
+        "artifacts": {
+            "windows": {
+                "kind": "tauri-updater",
+                "url": "https://example.invalid/InfoMancer.exe",
+                "sha256": "a" * 64,
+            }
+        },
+    }
 
 
 class UpdateChannel09Tests(unittest.TestCase):
@@ -56,6 +88,28 @@ class UpdateChannel09Tests(unittest.TestCase):
             (Path(directory) / "update-channel.json").write_text("not-json", encoding="utf-8")
             self.assertEqual(read_update_channel(database), "standard")
 
+    def test_valid_qualified_manifest_is_normalized(self):
+        manifest = validate_channel_manifest(qualified_manifest(), "dev")
+        self.assertEqual(manifest["channel"], "dev")
+        self.assertEqual(manifest["version"], "0.9.0-dev.2384")
+        self.assertEqual(manifest["qualification"]["status"], "passed")
+
+    def test_manifest_for_wrong_channel_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "selected channel"):
+            validate_channel_manifest(qualified_manifest("beta"), "dev")
+
+    def test_manifest_without_passed_qualification_is_rejected(self):
+        manifest = qualified_manifest()
+        manifest["qualification"]["status"] = "failed"
+        with self.assertRaisesRegex(ValueError, "passed qualification"):
+            validate_channel_manifest(manifest, "dev")
+
+    def test_manifest_with_invalid_artifact_digest_is_rejected(self):
+        manifest = qualified_manifest()
+        manifest["artifacts"]["windows"]["sha256"] = "not-a-digest"
+        with self.assertRaisesRegex(ValueError, "artifact metadata"):
+            validate_channel_manifest(manifest, "dev")
+
     def test_updates_page_and_routes_are_registered(self):
         routes = (ROOT / "app" / "routes" / "__init__.py").read_text(encoding="utf-8")
         handler = (ROOT / "app" / "routes" / "update_channel_settings.py").read_text(encoding="utf-8")
@@ -66,10 +120,15 @@ class UpdateChannel09Tests(unittest.TestCase):
         self.assertIn('"/settings/updates/channel"', handler)
         self.assertIn('"/settings/updates/check"', handler)
         self.assertIn('"/settings/updates/apply"', handler)
+        self.assertIn("INFOMANCER_UPDATE_MANIFEST_BASE_URL", handler)
+        self.assertIn("validate_channel_manifest", handler)
         self.assertIn('href="/settings/updates"', nav)
         self.assertIn("update_channel_labels", template)
         self.assertIn("Dev only advances after qualification succeeds", template)
         self.assertIn("never silently downgrades", template)
+        self.assertIn("Source commit", template)
+        self.assertIn("Qualification gates", template)
+        self.assertIn("update_status.installable", template)
 
 
 if __name__ == "__main__":
