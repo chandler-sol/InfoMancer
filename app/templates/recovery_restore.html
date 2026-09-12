@@ -10,6 +10,104 @@
   {% include "_settings_nav.html" %}
   {% if message %}<div class="notice">{{ message }}</div>{% endif %}
 
+  <section class="panel settings-card recovery-inventory-card">
+    <div class="recovery-card-head">
+      <div>
+        <p class="eyebrow">AVAILABLE BACKUPS</p>
+        <h2>Find a recovery point</h2>
+        <p>InfoMancer can inspect its own recovery folder plus locations explicitly configured with <code>INFOMANCER_RECOVERY_SEARCH_PATHS</code>. It never crawls the rest of the filesystem.</p>
+      </div>
+      <a class="button{% if not scan_requested %} primary{% endif %}" href="/settings/recovery?scan=1">{% if scan_requested %}Scan again{% else %}Scan for backups{% endif %}</a>
+    </div>
+
+    {% if not scan_requested %}
+      <p class="muted">A scan fully verifies each discovered portable package, reads the database schema ledger inside it, and compares that recovery point with currently published qualified Standard, Beta, and Dev builds. Up to {{ recovery_scan_limit }} newest packages are inspected.</p>
+    {% else %}
+      <div class="recovery-scan-summary">
+        <span><strong>{{ recovery_inventory|length }}</strong> package{% if recovery_inventory|length != 1 %}s{% endif %} inspected</span>
+        <span><strong>{{ recovery_manifest_count }}</strong> qualified channel manifest{% if recovery_manifest_count != 1 %}s{% endif %} available</span>
+        <span>Preferred channel: <strong>{{ update_channel_label }}</strong></span>
+      </div>
+
+      {% if recovery_manifest_errors %}
+        <div class="notice subtle-notice">
+          Some qualified-build metadata was unavailable, so recommendations may be limited: {{ recovery_manifest_errors|join(' ') }}
+        </div>
+      {% endif %}
+
+      {% if recovery_inventory %}
+        <div class="recovery-backup-list">
+          {% for backup in recovery_inventory %}
+            <article class="recovery-backup-row{% if not backup.valid %} recovery-backup-invalid{% endif %}">
+              <div class="recovery-backup-main">
+                <div class="recovery-backup-title-line">
+                  <strong>{{ backup.name }}</strong>
+                  {% if backup.valid %}<span class="status-chip success">Verified</span>{% else %}<span class="status-chip danger">Invalid</span>{% endif %}
+                </div>
+                {% if backup.valid %}
+                  <div class="recovery-backup-meta">
+                    <span>Created by InfoMancer {{ backup.app_version }}</span>
+                    <span>Schema {{ backup.database_schema.current if backup.database_schema.current else 'unknown' }}</span>
+                    <span>{{ '%.1f'|format(backup.database_size / (1024 * 1024)) }} MB database</span>
+                    <span>{{ backup.artwork_files }} artwork file{% if backup.artwork_files != 1 %}s{% endif %}</span>
+                  </div>
+                  <p class="muted recovery-location">Location: <code>{{ backup.location }}</code></p>
+                {% else %}
+                  <p class="form-error">{{ backup.error }}</p>
+                {% endif %}
+              </div>
+
+              {% if backup.valid %}
+                <div class="recovery-recommendation">
+                  {% if backup.recommendation %}
+                    {% set recommendation = backup.recommendation %}
+                    <p class="eyebrow">RECOMMENDED BUILD</p>
+                    <div class="recovery-build-line">
+                      <strong>InfoMancer {{ recommendation.version }}</strong>
+                      <span class="status-chip">{{ recommendation.channel|capitalize }}</span>
+                    </div>
+                    {% if recommendation.reason == 'exact_creator' %}
+                      <p>Exact creator-version match with a qualified build.</p>
+                    {% elif recommendation.reason == 'newest_compatible' %}
+                      <p>Newest qualified build allowed by your {{ update_channel_label }} preference that is proven read/write compatible with this backup.</p>
+                    {% else %}
+                      <p>A compatible qualified build exists, but it is outside your current {{ update_channel_label }} channel preference.</p>
+                    {% endif %}
+                    <p class="muted">Backup schema {{ recommendation.compatibility.backup_schema }} → target schema {{ recommendation.compatibility.target_schema }}{% if recommendation.compatibility.reason == 'ledger_safe_downgrade' %} using the recorded safe-downgrade ledger{% endif %}.</p>
+                    {% if recommendation.requires_channel_change %}
+                      <p class="form-error">Using this recommendation would require an explicit update-channel change. InfoMancer will not change channels automatically.</p>
+                    {% endif %}
+                    {% if recommendation.artifacts %}
+                      <div class="recovery-downloads" aria-label="Available downloads for recommended build">
+                        {% for artifact in recommendation.artifacts %}
+                          <a class="button small" href="{{ artifact.url }}" target="_blank" rel="noopener noreferrer">{{ artifact.platform|capitalize }} {{ artifact.kind }}</a>
+                        {% endfor %}
+                      </div>
+                    {% else %}
+                      <p class="muted">This qualified manifest does not currently expose a downloadable artifact.</p>
+                    {% endif %}
+                  {% else %}
+                    <p class="eyebrow">DOWNLOAD GUIDANCE</p>
+                    <p>No currently published qualified channel build was proven read/write compatible with this recovery point. InfoMancer will not guess at a downgrade target.</p>
+                  {% endif %}
+                </div>
+              {% endif %}
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">No <code>.infomancer-backup</code> files were found in the configured recovery locations.</p>
+      {% endif %}
+
+      <details class="recovery-locations">
+        <summary>Scanned locations</summary>
+        <ul>
+          {% for location in recovery_locations %}<li><code>{{ location }}</code></li>{% endfor %}
+        </ul>
+      </details>
+    {% endif %}
+  </section>
+
   <section class="panel settings-card">
     <p class="eyebrow">PORTABLE RECOVERY</p>
     <h2>Restore an InfoMancer installation</h2>
@@ -32,7 +130,7 @@
       <li>Restores the catalog database and collection artwork together with automatic rollback if commit fails.</li>
       <li>Never restores provider credentials, provider-secret encryption keys, deployment environment files, media files, or application binaries.</li>
     </ul>
-    <p class="muted">After a reinstall, restore the portable package first, then re-enter provider credentials and confirm that the same media paths or shares are available.</p>
+    <p class="muted">Portable backups are cross-platform. Source paths still describe the original storage layout, so Windows drive letters, macOS volumes, Linux mount points, network shares, and container mappings may need reconciliation after a move.</p>
   </section>
 </section>
 <script>
