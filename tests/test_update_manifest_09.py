@@ -74,6 +74,16 @@ class UpdateManifest09Tests(unittest.TestCase):
         self.assertEqual(qualification["properties"]["status"]["const"], "passed")
         self.assertIn("artifacts", schema["required"])
 
+    def test_dev_candidate_waits_for_every_qualification_gate(self):
+        workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+        self.assertIn("qualified-dev-candidate:", workflow)
+        self.assertIn("- audit", workflow)
+        self.assertIn("- test", workflow)
+        self.assertIn("- acceptance", workflow)
+        self.assertIn("github.ref == 'refs/heads/testing/0.9-alpha'", workflow)
+        self.assertIn("dev-channel-candidate-${{ github.run_number }}-${{ github.sha }}", workflow)
+        self.assertNotIn("workflow_run:", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
