@@ -45,6 +45,40 @@ If you are making the backup before uninstalling or reinstalling, keep it somewh
 
 InfoMancer verifies the package before presenting it as complete.
 
+# Find available backups and a compatible build
+
+Open **Settings > Recovery** and choose **Scan for backups**.
+
+InfoMancer scans only:
+
+- its own `recovery-packages` directory
+- additional directories explicitly listed in `INFOMANCER_RECOVERY_SEARCH_PATHS`
+
+The additional directory list uses the host operating system path separator. The scan is intentionally non-recursive and never crawls the rest of the filesystem.
+
+For each discovered `.infomancer-backup`, InfoMancer:
+
+1. fully verifies the portable package
+2. validates the packaged SQLite database
+3. reads the database's `schema_migrations` and `schema_compatibility` history
+4. derives the backup's actual schema compatibility contract from the database rather than trusting a filename
+5. compares that contract with currently published qualified Standard, Beta, and Dev channel manifests
+6. recommends an exact creator-version match when available inside the selected channel, otherwise the newest compatible qualified build allowed by that channel
+
+If the selected channel has no compatible build but another channel does, InfoMancer may show that build as a fallback. It marks the recommendation as requiring an explicit channel change and never changes the update channel automatically.
+
+Recommendations fail closed. If schema history is missing or incomplete, InfoMancer will not guess that an older build is safe. Equal or newer schema targets can still be recommended because they can migrate the older database forward.
+
+The scan currently inspects up to the 50 newest portable packages across the configured locations. Scanning is explicit because full package verification can take time for large backups.
+
+# Cross-platform compatibility
+
+Portable `.infomancer-backup` files are designed to move between supported operating systems. The archive uses platform-neutral data such as SQLite, JSON metadata, and collection artwork, and package validation rejects archive paths that would be unsafe or collide on another supported platform.
+
+That means a backup created on Windows can be restored on Linux or macOS, and the reverse is also supported, as long as the receiving InfoMancer version can use the packaged database schema.
+
+Media source paths are the important exception. A portable backup remembers the source paths from the original installation. For example, `D:\Movies` on Windows does not automatically become `/media/movies` on Linux. Reconnect equivalent storage and reconcile paths before running filesystem-changing operations.
+
 # Restore a backup
 
 For a clean reinstall or move:
