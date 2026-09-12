@@ -142,6 +142,8 @@ class UpdateChannel09Tests(unittest.TestCase):
         self.assertIn('"/settings/updates/apply"', handler)
         self.assertIn("INFOMANCER_UPDATE_MANIFEST_BASE_URL", handler)
         self.assertIn("validate_channel_manifest", handler)
+        self.assertIn("assess_schema_downgrade", handler)
+        self.assertIn("schema_compatibility_history", handler)
         self.assertIn('href="/settings/updates"', nav)
         self.assertIn("update_channel_labels", template)
         self.assertIn("Dev only advances after qualification succeeds", template)
@@ -149,6 +151,9 @@ class UpdateChannel09Tests(unittest.TestCase):
         self.assertIn("Source commit", template)
         self.assertIn("Qualification gates", template)
         self.assertIn("update_status.installable", template)
+        self.assertIn("Schema compatibility ledger", template)
+        self.assertIn("Migration compatibility history", template)
+        self.assertIn("Oldest compatible writer", template)
 
 
 if __name__ == "__main__":
