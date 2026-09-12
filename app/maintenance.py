@@ -17,6 +17,25 @@ SAFE_BACKUP_NAME = re.compile(
     r"^infomancer-backup-\d{8}-\d{6}(?:-[a-z-]+)?(?:-\d+)?\.db$"
 )
 SAFE_ARTWORK_NAME = re.compile(r"^[0-9a-f]{40}\.(?:jpg|png|webp)$")
+UPDATE_RELEASE_FIELDS = (
+    "channel",
+    "latest_version",
+    "server_tag",
+    "build_id",
+    "commit_sha",
+    "qualified_at",
+    "qualification_status",
+    "qualification_workflow",
+    "qualification_run_id",
+    "qualification_run_url",
+    "qualification_gates",
+    "database_schema",
+    "schema_assessment",
+    "metadata_source",
+    "manifest_url",
+    "release_notes_url",
+)
+MAX_UPDATE_RELEASE_METADATA_BYTES = 64 * 1024
 
 
 def backup_directory(database_path: Path) -> Path:
@@ -365,6 +384,21 @@ def write_update_status(database_path: Path, value: dict) -> Path:
     )
 
 
+def _release_identity_from_status(status: dict) -> dict:
+    identity = {
+        key: status[key]
+        for key in UPDATE_RELEASE_FIELDS
+        if key in status and status[key] not in (None, "", [], {})
+    }
+    try:
+        encoded = json.dumps(identity, separators=(",", ":"), sort_keys=True)
+    except (TypeError, ValueError) as exc:
+        raise MaintenanceError("The selected update metadata is not serializable.") from exc
+    if len(encoded.encode("utf-8")) > MAX_UPDATE_RELEASE_METADATA_BYTES:
+        raise MaintenanceError("The selected update metadata is unexpectedly large.")
+    return identity
+
+
 def write_update_request(database_path: Path, tag: str, requested_by: str) -> Path:
     candidate = tag[1:] if tag.startswith("v") else tag
     core = candidate
@@ -386,12 +420,15 @@ def write_update_request(database_path: Path, tag: str, requested_by: str) -> Pa
         or not valid_suffix
     ):
         raise MaintenanceError("The selected release tag is not valid.")
+    status = read_update_status(database_path)
+    release_identity = _release_identity_from_status(status)
     return _write_json_atomically(
         update_request_path(database_path),
         {
             "tag": tag,
             "requested_by": requested_by,
             "requested_at": datetime.now(timezone.utc).isoformat(),
+            "release": release_identity,
         },
         "InfoMancer could not write the updater request. Check application-data permissions and free disk space.",
     )
