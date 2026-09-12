@@ -21,6 +21,7 @@ from .recovery import build_router as build_recovery_router
 from .scheduled_tasks import build_router as build_scheduled_tasks_router
 from .source_commit import build_router as build_source_commit_router
 from .source_health import build_router as build_source_health_router
+from .update_channel_settings import build_router as build_update_channel_settings_router
 from .settings import build_router as build_settings_router
 from .settings_quick_actions import build_router as build_settings_quick_actions_router
 from .account_avatar import build_router as build_account_avatar_router
@@ -80,6 +81,9 @@ ROUTER_BUILDERS = (
     # POST /roots uses the same Windows/NFS-safe path validation as the browser.
     build_source_commit_router,
     build_source_health_router,
+    # 0.9 update-channel settings use dedicated URLs while the Beta 2 System page
+    # keeps its legacy release controls during the transition.
+    build_update_channel_settings_router,
     build_settings_router,
     build_settings_quick_actions_router,
     build_account_avatar_router,
