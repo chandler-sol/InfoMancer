@@ -10,7 +10,7 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Request, UploadFile
 from fastapi.responses import HTMLResponse
 
 from ..access import require_librarian
@@ -21,6 +21,10 @@ from ..recovery_inventory import (
     scan_recovery_packages,
 )
 from ..recovery_package import RecoveryPackageError, RecoveryPackageService
+from ..recovery_path_mapping import (
+    MappedRecoveryPackageService,
+    inspect_recovery_roots,
+)
 from ..update_channels import (
     UPDATE_CHANNELS,
     channel_label,
@@ -31,6 +35,7 @@ from .context import RouteContext
 
 
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{20,96}$")
+_ROOT_MAPPING_KEY_RE = re.compile(r"^root_path_(\d+)$")
 _STAGED_MAX_AGE = 24 * 60 * 60
 _ACTIVE_STATES = {"starting", "running"}
 _MAX_UPDATE_RESPONSE = 2 * 1024 * 1024
@@ -106,7 +111,9 @@ def build_router(ctx: RouteContext):
 
     def staged_path(token: str) -> Path:
         if not _TOKEN_RE.fullmatch(token):
-            raise RecoveryPackageError("That recovery preview is no longer valid. Upload the package again.")
+            raise RecoveryPackageError(
+                "That recovery preview is no longer valid. Upload the package again."
+            )
         return staging_dir() / f"{token}.infomancer-backup"
 
     def manifest_base_url() -> str:
@@ -122,14 +129,14 @@ def build_router(ctx: RouteContext):
         parsed = urlparse(url)
         if parsed.scheme not in {"https", "http"} or not parsed.netloc:
             raise ValueError("Update metadata URL must use HTTP or HTTPS.")
-        request = urllib.request.Request(
+        update_request = urllib.request.Request(
             url,
             headers={
                 "Accept": "application/json, application/vnd.github+json",
                 "User-Agent": f"InfoMancer/{APP_VERSION}",
             },
         )
-        with urllib.request.urlopen(request, timeout=5) as response:
+        with urllib.request.urlopen(update_request, timeout=5) as response:
             payload = response.read(_MAX_UPDATE_RESPONSE + 1)
         if len(payload) > _MAX_UPDATE_RESPONSE:
             raise ValueError("Update metadata response is unexpectedly large.")
@@ -138,16 +145,22 @@ def build_router(ctx: RouteContext):
     def qualified_recovery_manifests() -> tuple[list[dict], list[str]]:
         base = manifest_base_url()
         if not base:
-            return [], ["Qualified update-channel metadata is disabled for this installation."]
+            return [], [
+                "Qualified update-channel metadata is disabled for this installation."
+            ]
         manifests: list[dict] = []
         errors: list[str] = []
         for channel in UPDATE_CHANNELS:
             url = f"{base}/{channel}.json"
             try:
-                manifests.append(validate_channel_manifest(fetch_json(url), channel))
+                manifests.append(
+                    validate_channel_manifest(fetch_json(url), channel)
+                )
             except urllib.error.HTTPError as exc:
                 if exc.code != 404:
-                    errors.append(f"{channel_label(channel)} metadata could not be loaded.")
+                    errors.append(
+                        f"{channel_label(channel)} metadata could not be loaded."
+                    )
             except (
                 urllib.error.URLError,
                 TimeoutError,
@@ -155,7 +168,9 @@ def build_router(ctx: RouteContext):
                 json.JSONDecodeError,
                 OSError,
             ):
-                errors.append(f"{channel_label(channel)} metadata could not be validated.")
+                errors.append(
+                    f"{channel_label(channel)} metadata could not be validated."
+                )
         return manifests, errors
 
     def recovery_page_context(request: Request) -> dict:
@@ -219,45 +234,76 @@ def build_router(ctx: RouteContext):
             except OSError:
                 pass
             summary = package_service.verify(candidate)
+            recovery_roots = inspect_recovery_roots(
+                package_service,
+                candidate,
+                settings.media_browse_roots,
+            )
         except (RecoveryPackageError, OSError) as exc:
             candidate.unlink(missing_ok=True)
             record_event(
-                "restore", "Portable recovery preview was rejected.",
-                level="error", detail=str(exc), user_id=request.state.user.id,
+                "restore",
+                "Portable recovery preview was rejected.",
+                level="error",
+                detail=str(exc),
+                user_id=request.state.user.id,
             )
             message = (
-                str(exc) if isinstance(exc, RecoveryPackageError)
+                str(exc)
+                if isinstance(exc, RecoveryPackageError)
                 else "InfoMancer could not stage that recovery package. Check free disk space and application-data permissions."
             )
             return redirect("/settings/recovery", message)
 
         record_event(
-            "restore", "Portable recovery package verified for preview.",
+            "restore",
+            "Portable recovery package verified for preview.",
             context={
                 "source_version": summary["app_version"],
                 "artwork_files": summary["artwork_files"],
                 "database_size": summary["database_size"],
+                "media_roots": len(recovery_roots),
+                "path_reconciliation_needed": sum(
+                    1 for root in recovery_roots if not root["trusted_here"]
+                ),
             },
             user_id=request.state.user.id,
         )
-        return templates.TemplateResponse(request, "recovery_restore_preview.html", {
-            "summary": summary,
-            "staged_token": token,
-            "source_name": recovery_file.filename or "recovery package",
-            "message": "",
-        })
+        return templates.TemplateResponse(
+            request,
+            "recovery_restore_preview.html",
+            {
+                "summary": summary,
+                "staged_token": token,
+                "source_name": recovery_file.filename or "recovery package",
+                "recovery_roots": recovery_roots,
+                "trusted_media_roots": [
+                    str(Path(root)) for root in settings.media_browse_roots
+                ],
+                "message": "",
+            },
+        )
 
     @librarian_post("/settings/recovery/apply", response_class=HTMLResponse)
-    def apply_recovery_package(
-        request: Request,
-        staged_token: str = Form(...),
-        confirm: str = Form(""),
-    ):
+    async def apply_recovery_package(request: Request):
+        form = await request.form()
+        staged_token = str(form.get("staged_token") or "")
+        confirm = str(form.get("confirm") or "")
         if confirm != "RESTORE":
             return redirect(
                 "/settings/recovery",
                 "Portable recovery cancelled; the live installation was not changed.",
             )
+
+        path_mappings: dict[int, str] = {}
+        for key, value in form.multi_items():
+            match = _ROOT_MAPPING_KEY_RE.fullmatch(str(key))
+            if not match:
+                continue
+            destination = str(value or "").strip()
+            if destination:
+                path_mappings[int(match.group(1))] = destination
+
         if not restore_lock.acquire(blocking=False):
             return redirect(
                 "/settings/recovery",
@@ -274,7 +320,9 @@ def build_router(ctx: RouteContext):
                     "Wait for active scans, metadata, fingerprint, duplicate, trash-cleanup, or maintenance work to finish before restoring."
                 )
             record_event(
-                "restore", "Portable recovery restore started.",
+                "restore",
+                "Portable recovery restore started.",
+                context={"path_mappings": len(path_mappings)},
                 user_id=request.state.user.id,
             )
             # Check once more after the event write so a task that was already
@@ -283,11 +331,20 @@ def build_router(ctx: RouteContext):
                 raise RecoveryPackageError(
                     "Background work started while recovery was preparing. Wait for it to finish and try again."
                 )
-            result = recovery_service().restore(candidate, settings.media_browse_roots)
+            package_service = MappedRecoveryPackageService(
+                Path(db.path),
+                APP_VERSION,
+                path_mappings,
+                settings.media_browse_roots,
+            )
+            result = package_service.restore(candidate, settings.media_browse_roots)
         except RecoveryPackageError as exc:
             record_event(
-                "restore", "Portable recovery restore failed.",
-                level="error", detail=str(exc), user_id=request.state.user.id,
+                "restore",
+                "Portable recovery restore failed.",
+                level="error",
+                detail=str(exc),
+                user_id=request.state.user.id,
             )
             return redirect("/settings/recovery", str(exc))
         finally:
@@ -297,20 +354,30 @@ def build_router(ctx: RouteContext):
             except (RecoveryPackageError, OSError):
                 pass
 
+        reconciliation = result.get("path_reconciliation") or {}
         record_event(
-            "restore", "Portable recovery restore completed.",
+            "restore",
+            "Portable recovery restore completed.",
             context={
                 "source_version": result["app_version"],
                 "artwork_files": result["restored_artwork_files"],
                 "safety_package": result["safety_package"],
+                "mapped_roots": reconciliation.get("mapped_roots", 0),
+                "rewritten_paths": reconciliation.get("rewritten_paths", 0),
             },
         )
         threading.Thread(target=restart_after_restore, daemon=True).start()
-        return templates.TemplateResponse(request, "recovery_restore_pending.html", {
-            "source_version": result["app_version"],
-            "artwork_files": result["restored_artwork_files"],
-            "safety_package": result["safety_package"],
-            "message": "",
-        })
+        return templates.TemplateResponse(
+            request,
+            "recovery_restore_pending.html",
+            {
+                "source_version": result["app_version"],
+                "artwork_files": result["restored_artwork_files"],
+                "safety_package": result["safety_package"],
+                "mapped_roots": reconciliation.get("mapped_roots", 0),
+                "rewritten_paths": reconciliation.get("rewritten_paths", 0),
+                "message": "",
+            },
+        )
 
     return router, {}
