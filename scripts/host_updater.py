@@ -24,6 +24,27 @@ from pathlib import Path
 
 TAG_PATTERN = re.compile(r"v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?")
 FINGERPRINT_PATTERN = re.compile(r"^[0-9A-Fa-f]{40,64}$")
+COMMIT_SHA_PATTERN = re.compile(r"^[0-9A-Fa-f]{40}$")
+MAX_RELEASE_METADATA_BYTES = 64 * 1024
+MAX_HISTORY_ENTRIES = 100
+RELEASE_METADATA_FIELDS = {
+    "channel",
+    "latest_version",
+    "server_tag",
+    "build_id",
+    "commit_sha",
+    "qualified_at",
+    "qualification_status",
+    "qualification_workflow",
+    "qualification_run_id",
+    "qualification_run_url",
+    "qualification_gates",
+    "database_schema",
+    "schema_assessment",
+    "metadata_source",
+    "manifest_url",
+    "release_notes_url",
+}
 
 
 class UpdateError(RuntimeError):
@@ -34,7 +55,7 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def write_json(path: Path, value: dict) -> None:
+def write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, indent=2), encoding="utf-8")
@@ -133,6 +154,51 @@ def wait_for_health(url: str, seconds: int) -> None:
     )
 
 
+def release_metadata(request: dict) -> dict:
+    value = request.get("release") or {}
+    if not isinstance(value, dict):
+        raise UpdateError("The queued release identity is invalid.")
+    release = {
+        key: value[key]
+        for key in RELEASE_METADATA_FIELDS
+        if key in value and value[key] not in (None, "", [], {})
+    }
+    try:
+        encoded = json.dumps(release, separators=(",", ":"), sort_keys=True)
+    except (TypeError, ValueError) as exc:
+        raise UpdateError("The queued release identity is not valid JSON metadata.") from exc
+    if len(encoded.encode("utf-8")) > MAX_RELEASE_METADATA_BYTES:
+        raise UpdateError("The queued release identity is unexpectedly large.")
+    commit_sha = str(release.get("commit_sha") or "").strip()
+    if commit_sha and not COMMIT_SHA_PATTERN.fullmatch(commit_sha):
+        raise UpdateError("The queued release identity contains an invalid commit SHA.")
+    return release
+
+
+def append_history(data_directory: Path, entry: dict) -> None:
+    """Retain bounded updater outcomes for audit and recovery guidance."""
+    path = data_directory / "update-history.json"
+    history: list[dict] = []
+    if path.exists():
+        try:
+            candidate = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(candidate, list):
+                history = [item for item in candidate if isinstance(item, dict)]
+        except (OSError, json.JSONDecodeError):
+            history = []
+    history.append(entry)
+    write_json(path, history[-MAX_HISTORY_ENTRIES:])
+
+
+def _status_with_release(status: dict, release: dict, requested_by: str) -> dict:
+    value = dict(status)
+    if release:
+        value["release"] = release
+    if requested_by:
+        value["requested_by"] = requested_by
+    return value
+
+
 def process_request(
     repository: Path, data_directory: Path, files: list[str],
     health_url: str, health_timeout: int, trusted_signing_keys: set[str] | None = None,
@@ -141,9 +207,20 @@ def process_request(
     status_path = data_directory / "update-status.json"
     if not request_path.exists():
         return False
+
+    tag = ""
+    requested_by = ""
+    release: dict = {}
+    previous_commit = ""
+    target_commit = ""
+    started_at = utc_now()
     try:
         request = json.loads(request_path.read_text(encoding="utf-8"))
+        if not isinstance(request, dict):
+            raise UpdateError("The queued updater request is invalid.")
         tag = str(request.get("tag", "")).strip()
+        requested_by = str(request.get("requested_by") or "").strip()
+        release = release_metadata(request)
         if not TAG_PATTERN.fullmatch(tag):
             raise UpdateError("The queued release tag is not valid.")
         if not (repository / ".git").exists() or not (repository / "compose.yaml").exists():
@@ -156,11 +233,11 @@ def process_request(
                     f"The configured Compose file does not exist: {compose_file}"
                 )
 
-        write_json(status_path, {
+        write_json(status_path, _status_with_release({
             "status": "running", "latest_version": tag,
             "message": f"Updating InfoMancer to {tag}.",
-            "started_at": utc_now(),
-        })
+            "started_at": started_at,
+        }, release, requested_by))
         if run(["git", "status", "--porcelain", "--untracked-files=no"], repository):
             raise UpdateError(
                 "The InfoMancer source has local edits. The updater stopped "
@@ -173,6 +250,11 @@ def process_request(
             ["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"],
             repository,
         )
+        qualified_commit = str(release.get("commit_sha") or "").strip().casefold()
+        if qualified_commit and target_commit.casefold() != qualified_commit:
+            raise UpdateError(
+                "The signed release tag does not point to the commit recorded by the qualified update manifest. The update was stopped before checkout."
+            )
         run(["git", "checkout", "--detach", target_commit], repository)
         compose = compose_command(files)
         try:
@@ -189,34 +271,56 @@ def process_request(
                     f"started automatically. Update error: {update_exc}. "
                     f"Rollback error: {rollback_exc}"
                 ) from rollback_exc
-            write_json(status_path, {
+            finished_at = utc_now()
+            status = _status_with_release({
                 "status": "rolled_back", "latest_version": tag,
+                "previous_commit": previous_commit,
+                "target_commit": target_commit,
                 "message": (
                     "The update did not start correctly, so InfoMancer "
                     "returned to the previous release."
                 ),
-                "finished_at": utc_now(),
-            })
+                "started_at": started_at,
+                "finished_at": finished_at,
+            }, release, requested_by)
+            write_json(status_path, status)
+            append_history(data_directory, status)
             request_path.unlink(missing_ok=True)
             return True
 
-        write_json(status_path, {
+        finished_at = utc_now()
+        status = _status_with_release({
             "status": "success", "current_version": tag,
             "latest_version": tag,
+            "previous_commit": previous_commit,
+            "target_commit": target_commit,
             "message": f"InfoMancer was updated successfully to {tag}.",
-            "finished_at": utc_now(),
-        })
+            "started_at": started_at,
+            "finished_at": finished_at,
+        }, release, requested_by)
+        write_json(status_path, status)
+        append_history(data_directory, status)
         request_path.unlink(missing_ok=True)
         return True
     except (OSError, json.JSONDecodeError, UpdateError) as exc:
-        write_json(status_path, {
+        finished_at = utc_now()
+        status = _status_with_release({
             "status": "error",
+            "latest_version": tag,
+            "previous_commit": previous_commit,
+            "target_commit": target_commit,
             "message": (
                 "The update could not be completed. The installed version "
                 f"was left in place. Reason: {exc}"
             ),
-            "finished_at": utc_now(),
-        })
+            "started_at": started_at,
+            "finished_at": finished_at,
+        }, release, requested_by)
+        write_json(status_path, status)
+        try:
+            append_history(data_directory, status)
+        except OSError:
+            pass
         request_path.unlink(missing_ok=True)
         return True
 
