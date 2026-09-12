@@ -24,6 +24,8 @@ SEMVER_PATTERN = re.compile(
     r"(?:-(?P<prerelease>[0-9A-Za-z.-]+))?"
     r"(?:\+(?P<build>[0-9A-Za-z.-]+))?$"
 )
+SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
+SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 DEV_MARKERS = {"dev", "alpha", "nightly", "canary", "preview"}
 BETA_MARKERS = {"beta", "rc"}
 
@@ -150,6 +152,62 @@ def select_release(releases: Iterable[dict], selected_channel: str) -> dict | No
     if not candidates:
         return None
     return max(candidates, key=lambda item: version_key(str(item.get("tag_name") or "")))
+
+
+def validate_channel_manifest(value: object, expected_channel: str) -> dict:
+    channel = normalize_channel(expected_channel)
+    if not isinstance(value, dict):
+        raise ValueError("Update channel manifest must be a JSON object.")
+    if value.get("schema_version") != 1:
+        raise ValueError("Update channel manifest schema version is not supported.")
+    manifest_channel = normalize_channel(str(value.get("channel") or ""))
+    if manifest_channel != channel:
+        raise ValueError("Update channel manifest does not match the selected channel.")
+
+    version = str(value.get("version") or "").strip().lstrip("v")
+    if version_key(version)[0] < 0:
+        raise ValueError("Update channel manifest contains an invalid version.")
+    build_id = str(value.get("build_id") or "").strip()
+    if not build_id:
+        raise ValueError("Update channel manifest is missing its immutable build id.")
+    commit_sha = str(value.get("commit_sha") or "").strip().casefold()
+    if not SHA_PATTERN.fullmatch(commit_sha):
+        raise ValueError("Update channel manifest contains an invalid commit SHA.")
+    qualified_at = str(value.get("qualified_at") or "").strip()
+    if not qualified_at:
+        raise ValueError("Update channel manifest is missing its qualification timestamp.")
+
+    qualification = value.get("qualification")
+    if not isinstance(qualification, dict) or qualification.get("status") != "passed":
+        raise ValueError("Update channel manifest is not backed by a passed qualification.")
+    if not str(qualification.get("workflow") or "").strip():
+        raise ValueError("Update channel manifest is missing its qualification workflow.")
+    run_id = qualification.get("run_id")
+    if not isinstance(run_id, int) or run_id < 1:
+        raise ValueError("Update channel manifest contains an invalid qualification run id.")
+    gates = qualification.get("gates")
+    if not isinstance(gates, list) or not gates or not all(
+        isinstance(gate, str) and gate.strip() for gate in gates
+    ):
+        raise ValueError("Update channel manifest must record its passed qualification gates.")
+
+    artifacts = value.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise ValueError("Update channel manifest artifacts must be an object.")
+    for platform, artifact in artifacts.items():
+        if not isinstance(platform, str) or not platform.strip() or not isinstance(artifact, dict):
+            raise ValueError("Update channel manifest contains an invalid platform artifact.")
+        kind = str(artifact.get("kind") or "").strip()
+        url = str(artifact.get("url") or "").strip()
+        digest = str(artifact.get("sha256") or "").strip()
+        if not kind or not url.startswith(("https://", "http://")) or not SHA256_PATTERN.fullmatch(digest):
+            raise ValueError("Update channel manifest contains invalid artifact metadata.")
+
+    normalized = dict(value)
+    normalized["channel"] = manifest_channel
+    normalized["version"] = version
+    normalized["commit_sha"] = commit_sha
+    return normalized
 
 
 def update_state(installed_version: str, latest_version: str) -> str:
