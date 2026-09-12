@@ -155,7 +155,7 @@ class RecoveryPackageTests(unittest.TestCase):
 
 
 class RecoveryPackageUiContractTests(unittest.TestCase):
-    def test_recovery_ui_has_preview_confirmation_and_secret_boundary(self):
+    def test_recovery_ui_has_preview_confirmation_secret_boundary_and_path_mapping(self):
         root = Path(__file__).resolve().parents[1]
         settings = (root / "app/templates/settings.html").read_text(encoding="utf-8")
         routes = (root / "app/routes/settings.py").read_text(encoding="utf-8")
@@ -169,7 +169,10 @@ class RecoveryPackageUiContractTests(unittest.TestCase):
         self.assertIn('/settings/recovery/preview', page)
         self.assertIn('/settings/recovery/apply', preview)
         self.assertIn('name="confirm"', preview)
-        self.assertIn('recovery_service().restore(candidate, settings.media_browse_roots)', recovery_routes)
+        self.assertIn('name="root_path_{{ root.id }}"', preview)
+        self.assertIn("STORAGE RECONCILIATION", preview)
+        self.assertIn("MappedRecoveryPackageService", recovery_routes)
+        self.assertIn("package_service.restore(candidate, settings.media_browse_roots)", recovery_routes)
         self.assertIn("Provider credentials were not restored", (root / "app/templates/recovery_restore_pending.html").read_text(encoding="utf-8"))
 
 
