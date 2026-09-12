@@ -115,7 +115,7 @@ def inspect_recovery_roots(
     package_path: Path,
     trusted_roots: Iterable[Path],
 ) -> list[dict]:
-    """Return packaged media roots with conservative same-host suggestions."""
+    """Return packaged media roots with conservative same-name suggestions."""
     temporary = _extract_packaged_database(service, Path(package_path))
     trusted = [Path(root).expanduser() for root in trusted_roots]
     rows: list[dict] = []
@@ -219,7 +219,7 @@ def apply_recovery_root_mappings(
             for root_id, destination in destinations.items():
                 old_root = roots[root_id]
                 connection.execute(
-                    "UPDATE roots SET path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    "UPDATE roots SET path=? WHERE id=?",
                     (str(destination), root_id),
                 )
                 rewritten += 1
@@ -228,7 +228,7 @@ def apply_recovery_root_mappings(
                     "SELECT id,folder_path FROM titles WHERE root_id=?", (root_id,)
                 ).fetchall()
                 for row in title_rows:
-                    new_value = _rewritten_path(str(row["folder_path"] or ""), old_root, destination)
+                    new_value = _rewritten_path(str(row["folder_path"]), old_root, destination)
                     connection.execute(
                         "UPDATE titles SET folder_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                         (new_value, row["id"]),
@@ -241,7 +241,7 @@ def apply_recovery_root_mappings(
                     (root_id,),
                 ).fetchall()
                 for row in file_rows:
-                    new_value = _rewritten_path(str(row["path"] or ""), old_root, destination)
+                    new_value = _rewritten_path(str(row["path"]), old_root, destination)
                     connection.execute(
                         "UPDATE files SET path=? WHERE id=?", (new_value, row["id"])
                     )
@@ -254,10 +254,10 @@ def apply_recovery_root_mappings(
                     ).fetchall()
                     for row in trash_rows:
                         original = _rewritten_path(
-                            str(row["original_path"] or ""), old_root, destination
+                            str(row["original_path"]), old_root, destination
                         )
                         trash = _rewritten_path(
-                            str(row["trash_path"] or ""), old_root, destination
+                            str(row["trash_path"]), old_root, destination
                         )
                         connection.execute(
                             "UPDATE duplicate_trash SET original_path=?,trash_path=? WHERE id=?",
@@ -272,10 +272,10 @@ def apply_recovery_root_mappings(
                     ).fetchall()
                     for row in proposals:
                         source = _rewritten_path(
-                            str(row["source_path"] or ""), old_root, destination
+                            str(row["source_path"]), old_root, destination
                         )
                         target = _rewritten_path(
-                            str(row["destination_path"] or ""), old_root, destination
+                            str(row["destination_path"]), old_root, destination
                         )
                         connection.execute(
                             "UPDATE rename_proposals SET source_path=?,destination_path=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
