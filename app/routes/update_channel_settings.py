@@ -6,6 +6,7 @@ import re
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Form, Request
 
@@ -28,12 +29,14 @@ from ..update_channels import (
     read_update_channel,
     select_release,
     update_state,
+    validate_channel_manifest,
     write_update_channel,
 )
 from .context import RouteContext
 
 
 REPOSITORY_PATTERN = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+MAX_UPDATE_RESPONSE = 2 * 1024 * 1024
 
 
 def build_router(ctx: RouteContext):
@@ -48,6 +51,9 @@ def build_router(ctx: RouteContext):
         return os.getenv(
             "INFOMANCER_UPDATE_REPOSITORY", "chandler-sol/InfoMancer"
         ).strip()
+
+    def manifest_base_url() -> str:
+        return os.getenv("INFOMANCER_UPDATE_MANIFEST_BASE_URL", "").strip().rstrip("/")
 
     def page_context(request: Request, error: str = "") -> dict:
         channel = read_update_channel(db.path)
@@ -64,7 +70,143 @@ def build_router(ctx: RouteContext):
             "update_channel_ranks": CHANNEL_RANK,
             "update_status": status,
             "update_repository": repository_name(),
+            "update_manifest_base_url": manifest_base_url(),
         }
+
+    def fetch_json(url: str) -> object:
+        parsed = urlparse(url)
+        if parsed.scheme not in {"https", "http"} or not parsed.netloc:
+            raise ValueError("Update metadata URL must use HTTP or HTTPS.")
+        update_request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/json, application/vnd.github+json",
+                "User-Agent": f"InfoMancer/{APP_VERSION}",
+            },
+        )
+        with urllib.request.urlopen(update_request, timeout=10) as response:
+            payload = response.read(MAX_UPDATE_RESPONSE + 1)
+        if len(payload) > MAX_UPDATE_RESPONSE:
+            raise ValueError("Update metadata response is unexpectedly large.")
+        return json.loads(payload)
+
+    def status_from_manifest(channel: str, checked_at: str) -> dict:
+        base_url = manifest_base_url()
+        manifest_url = f"{base_url}/{channel}.json"
+        manifest = validate_channel_manifest(fetch_json(manifest_url), channel)
+        version = manifest["version"]
+        state = update_state(APP_VERSION, version)
+        qualification = manifest["qualification"]
+        artifacts = manifest["artifacts"]
+        server_artifact = artifacts.get("server") if isinstance(artifacts, dict) else None
+        server_tag = ""
+        if isinstance(server_artifact, dict):
+            server_tag = str(server_artifact.get("tag") or "").strip()
+        installable = bool(server_tag)
+        status = {
+            "status": state,
+            "channel": channel,
+            "latest_channel": channel,
+            "checked_at": checked_at,
+            "current_version": APP_VERSION,
+            "latest_version": version,
+            "build_id": manifest["build_id"],
+            "commit_sha": manifest["commit_sha"],
+            "qualified_at": manifest["qualified_at"],
+            "qualification_status": "passed",
+            "qualification_workflow": qualification["workflow"],
+            "qualification_run_id": qualification["run_id"],
+            "qualification_run_url": qualification.get("run_url") or "",
+            "qualification_gates": qualification["gates"],
+            "release_notes_url": manifest.get("release_notes_url") or "",
+            "manifest_url": manifest_url,
+            "metadata_source": "qualified_manifest",
+            "server_tag": server_tag,
+            "installable": installable,
+            "artifacts": sorted(artifacts),
+        }
+        if state == "waiting_for_channel":
+            status["message"] = (
+                f"This installation is already newer than the latest qualified "
+                f"{channel_label(channel)} build ({version}). InfoMancer will not "
+                "downgrade it; it will wait for the selected channel to catch up."
+            )
+        elif state == "current":
+            status["message"] = (
+                f"InfoMancer {APP_VERSION} is current on the "
+                f"{channel_label(channel)} channel."
+            )
+        elif installable:
+            status["message"] = (
+                f"Qualified {channel_label(channel)} build {version} is available "
+                "and has a trusted server release target."
+            )
+        else:
+            status["message"] = (
+                f"Qualified {channel_label(channel)} build {version} is available, "
+                "but this installation does not have a server update artifact for it yet."
+            )
+        return status
+
+    def status_from_github_releases(channel: str, checked_at: str) -> dict:
+        repository = repository_name()
+        if not REPOSITORY_PATTERN.fullmatch(repository):
+            raise ValueError("The configured GitHub repository name is invalid.")
+        url = f"https://api.github.com/repos/{repository}/releases?per_page=100"
+        releases = fetch_json(url)
+        if not isinstance(releases, list):
+            raise ValueError("GitHub returned an unexpected releases response.")
+        release = select_release(releases, channel)
+        if release is None:
+            return {
+                "status": "no_releases",
+                "channel": channel,
+                "checked_at": checked_at,
+                "current_version": APP_VERSION,
+                "metadata_source": "github_releases",
+                "installable": False,
+                "message": (
+                    f"GitHub is reachable, but the {channel_label(channel)} channel "
+                    "does not contain a published InfoMancer release yet."
+                ),
+            }
+
+        tag = str(release.get("tag_name") or "").strip()
+        state = update_state(APP_VERSION, tag)
+        latest_channel = str(release.get("infomancer_channel") or channel)
+        status = {
+            "status": state,
+            "channel": channel,
+            "latest_channel": latest_channel,
+            "checked_at": checked_at,
+            "current_version": APP_VERSION,
+            "latest_version": tag,
+            "release_name": release.get("name") or tag,
+            "release_url": release.get("html_url") or "",
+            "release_notes": str(release.get("body") or "")[:4000],
+            "published_at": release.get("published_at") or "",
+            "qualification_status": "published",
+            "metadata_source": "github_releases",
+            "server_tag": tag,
+            "installable": state == "available",
+        }
+        if state == "waiting_for_channel":
+            status["message"] = (
+                f"This installation is already newer than the latest "
+                f"{channel_label(channel)} release ({tag}). InfoMancer will not "
+                "downgrade it; it will wait for the selected channel to catch up."
+            )
+        elif state == "current":
+            status["message"] = (
+                f"InfoMancer {APP_VERSION} is current on the "
+                f"{channel_label(channel)} channel."
+            )
+        else:
+            status["message"] = (
+                f"InfoMancer {tag} is available on the "
+                f"{channel_label(channel)} channel."
+            )
+        return status
 
     @router.get(
         "/settings/updates",
@@ -151,74 +293,13 @@ def build_router(ctx: RouteContext):
         dependencies=[Depends(require_librarian)],
     )
     def check_channel_for_updates(request: Request):
-        repository = repository_name()
         channel = read_update_channel(db.path)
-        if not REPOSITORY_PATTERN.fullmatch(repository):
-            return redirect(
-                "/settings/updates",
-                "Update checking is unavailable because the configured GitHub repository name is invalid.",
-            )
-        url = f"https://api.github.com/repos/{repository}/releases?per_page=100"
+        checked_at = datetime.now(timezone.utc).isoformat()
         try:
-            github_request = urllib.request.Request(
-                url,
-                headers={
-                    "Accept": "application/vnd.github+json",
-                    "User-Agent": f"InfoMancer/{APP_VERSION}",
-                },
-            )
-            with urllib.request.urlopen(github_request, timeout=10) as response:
-                releases = json.loads(response.read(2 * 1024 * 1024))
-            if not isinstance(releases, list):
-                raise ValueError("GitHub returned an unexpected releases response.")
-            release = select_release(releases, channel)
-            checked_at = datetime.now(timezone.utc).isoformat()
-            if release is None:
-                status = {
-                    "status": "no_releases",
-                    "channel": channel,
-                    "checked_at": checked_at,
-                    "current_version": APP_VERSION,
-                    "message": (
-                        f"GitHub is reachable, but the {channel_label(channel)} channel "
-                        "does not contain a published InfoMancer release yet."
-                    ),
-                }
-                write_update_status(db.path, status)
-                return redirect("/settings/updates", status["message"])
-
-            tag = str(release.get("tag_name") or "").strip()
-            state = update_state(APP_VERSION, tag)
-            latest_channel = str(release.get("infomancer_channel") or channel)
-            status = {
-                "status": state,
-                "channel": channel,
-                "latest_channel": latest_channel,
-                "checked_at": checked_at,
-                "current_version": APP_VERSION,
-                "latest_version": tag,
-                "release_name": release.get("name") or tag,
-                "release_url": release.get("html_url") or "",
-                "release_notes": str(release.get("body") or "")[:4000],
-                "published_at": release.get("published_at") or "",
-                "qualification_status": "published",
-            }
-            if state == "waiting_for_channel":
-                status["message"] = (
-                    f"This installation is already newer than the latest "
-                    f"{channel_label(channel)} release ({tag}). InfoMancer will not "
-                    "downgrade it; it will wait for the selected channel to catch up."
-                )
-            elif state == "current":
-                status["message"] = (
-                    f"InfoMancer {APP_VERSION} is current on the "
-                    f"{channel_label(channel)} channel."
-                )
+            if manifest_base_url():
+                status = status_from_manifest(channel, checked_at)
             else:
-                status["message"] = (
-                    f"InfoMancer {tag} is available on the "
-                    f"{channel_label(channel)} channel."
-                )
+                status = status_from_github_releases(channel, checked_at)
             write_update_status(db.path, status)
         except (
             urllib.error.HTTPError,
@@ -229,14 +310,14 @@ def build_router(ctx: RouteContext):
             OSError,
         ) as exc:
             if isinstance(exc, urllib.error.HTTPError) and exc.code == 404:
-                explanation = "GitHub could not find the configured InfoMancer repository."
+                explanation = "The selected update channel metadata has not been published yet."
             elif isinstance(exc, urllib.error.HTTPError) and exc.code == 403:
                 explanation = (
-                    "GitHub temporarily refused the update check, usually because its anonymous API limit was reached."
+                    "The update metadata provider temporarily refused the check, usually because an API limit was reached."
                 )
             else:
                 explanation = (
-                    "GitHub could not be reached or returned an unreadable release list."
+                    "Update metadata could not be reached or did not pass validation."
                 )
             record_event(
                 "update",
@@ -253,7 +334,11 @@ def build_router(ctx: RouteContext):
         record_event(
             "update",
             status["message"],
-            context={"channel": channel, "latest_version": tag},
+            context={
+                "channel": channel,
+                "latest_version": status.get("latest_version", ""),
+                "metadata_source": status.get("metadata_source", ""),
+            },
             user_id=request.state.user.id,
         )
         return redirect("/settings/updates", status["message"])
@@ -273,23 +358,31 @@ def build_router(ctx: RouteContext):
             )
         channel = read_update_channel(db.path)
         status = read_update_status(db.path)
+        trusted_tag = str(status.get("server_tag") or "").strip()
         if (
             status.get("status") != "available"
             or status.get("latest_version") != tag
             or status.get("channel") != channel
+            or not status.get("installable")
+            or not trusted_tag
         ):
             return redirect(
                 "/settings/updates",
-                "That build is no longer the verified available release for the selected channel. Check for updates again before applying it.",
+                "That build is not currently a verified installable server release for the selected channel. Check for updates again before applying it.",
             )
         try:
             safety = create_database_backup(db.path, "before-update")
-            write_update_request(db.path, tag, request.state.user.username)
+            # The host updater receives only the trusted release tag. It still owns
+            # GPG signature verification and refuses tags outside its trust policy.
+            write_update_request(db.path, trusted_tag, request.state.user.username)
             write_update_status(db.path, {
                 "status": "requested",
                 "channel": channel,
                 "current_version": APP_VERSION,
                 "latest_version": tag,
+                "server_tag": trusted_tag,
+                "build_id": status.get("build_id", ""),
+                "commit_sha": status.get("commit_sha", ""),
                 "qualification_status": status.get("qualification_status", "published"),
                 "message": (
                     f"{channel_label(channel)} update {tag} is queued. The restricted "
@@ -302,7 +395,12 @@ def build_router(ctx: RouteContext):
         record_event(
             "update",
             f"Application update {tag} requested from the {channel_label(channel)} channel.",
-            context={"backup": safety.name, "channel": channel},
+            context={
+                "backup": safety.name,
+                "channel": channel,
+                "trusted_tag": trusted_tag,
+                "build_id": status.get("build_id", ""),
+            },
             user_id=request.state.user.id,
         )
         return redirect(
