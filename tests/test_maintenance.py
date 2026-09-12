@@ -158,9 +158,32 @@ class MaintenanceTests(unittest.TestCase):
         with self.assertRaisesRegex(MaintenanceError, "not an InfoMancer backup"):
             validate_database_backup(invalid)
 
-    def test_update_request_is_validated_and_status_failure_is_plain(self):
-        request = write_update_request(self.path, "v1.2.3", "Librarian")
-        self.assertEqual(json.loads(request.read_text())["tag"], "v1.2.3")
+    def test_update_request_preserves_qualified_identity_and_validates_tag(self):
+        write_update_status(self.path, {
+            "status": "available",
+            "channel": "dev",
+            "latest_version": "0.9.0-dev.2410",
+            "server_tag": "v0.9.0-dev.2410",
+            "build_id": "qualified-2410",
+            "commit_sha": "a" * 40,
+            "qualification_status": "passed",
+            "qualification_workflow": "Tests",
+            "qualification_run_id": 2410,
+            "qualification_gates": ["python-linux", "browser-acceptance"],
+            "database_schema": {"current": 17},
+            "message": "ignored in request identity",
+        })
+        request = write_update_request(
+            self.path, "v0.9.0-dev.2410", "Librarian"
+        )
+        payload = json.loads(request.read_text())
+        self.assertEqual(payload["tag"], "v0.9.0-dev.2410")
+        self.assertEqual(payload["release"]["channel"], "dev")
+        self.assertEqual(payload["release"]["build_id"], "qualified-2410")
+        self.assertEqual(payload["release"]["commit_sha"], "a" * 40)
+        self.assertEqual(payload["release"]["qualification_run_id"], 2410)
+        self.assertNotIn("message", payload["release"])
+
         with self.assertRaisesRegex(MaintenanceError, "not valid"):
             write_update_request(self.path, "main; rm -rf", "Librarian")
         for invalid in ("v1.2.3-", "v1.2", "v1.2.3/../../main", "v１.2.3"):
