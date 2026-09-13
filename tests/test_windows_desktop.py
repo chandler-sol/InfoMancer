@@ -99,12 +99,17 @@ class WindowsDesktopContractTests(unittest.TestCase):
         self.assertNotIn("dangerousRemoteDomainIpcAccess", config["app"]["security"])
         self.assertNotIn("dangerousRemoteUrlIpcAccess", config["app"]["security"])
 
-    def test_updater_uses_signed_github_release_channel(self):
+    def test_updater_uses_selected_signed_standard_beta_dev_channel(self):
         rust = (ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
-        sidecar = (ROOT / "desktop/sidecar.py").read_text(encoding="utf-8")
         self.assertIn("tauri_plugin_updater", rust)
-        self.assertIn("desktop-alpha/latest.json", rust)
+        self.assertIn('data_dir.join("update-channel.json")', rust)
+        self.assertIn('"standard" => "standard".to_string()', rust)
+        self.assertIn('"beta" => "beta".to_string()', rust)
+        self.assertIn('"dev" => "dev".to_string()', rust)
+        self.assertIn('"{UPDATE_RELEASE_BASE}/desktop-{channel}/latest.json"', rust)
+        self.assertNotIn("desktop-alpha/latest.json", rust)
         self.assertIn("INFOMANCER_UPDATER_PUBLIC_KEY", rust)
+        self.assertIn(".pubkey(public_key)", rust)
         self.assertIn("download_and_install", rust)
         capability = json.loads((ROOT / "desktop/src-tauri/capabilities/launcher.json").read_text(encoding="utf-8"))
         self.assertEqual(capability["permissions"], ["core:default"])
@@ -115,7 +120,8 @@ class WindowsDesktopContractTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/windows-desktop-release.yml").read_text(encoding="utf-8")
         self.assertIn("secrets.TAURI_SIGNING_PRIVATE_KEY", workflow)
         self.assertIn("vars.TAURI_UPDATER_PUBLIC_KEY", workflow)
-        self.assertIn("desktop-alpha", workflow)
+        self.assertIn("desktop-standard", workflow)
+        self.assertNotIn("desktop-alpha", workflow)
         self.assertNotIn("BEGIN PRIVATE KEY", workflow)
 
     def test_release_workflow_is_owner_gated_and_version_bound(self):
