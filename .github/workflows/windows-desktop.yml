@@ -89,8 +89,8 @@ jobs:
         shell: pwsh
         run: |
           python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILDINFO.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILD_SCRIPT.sh;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_CONFIGURE_ARGS.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_DLL_DEPENDENCIES.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_SOURCE_COMMIT.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILD_MARKER.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
-          & .\dist\infomancer-core.exe --check-ffprobe
-          if ($LASTEXITCODE -ne 0) { throw "Bundled FFprobe self-check failed: $LASTEXITCODE" }
+          $selfCheck = Start-Process -FilePath '.\dist\infomancer-core.exe' -ArgumentList '--check-ffprobe' -Wait -PassThru
+          if ($selfCheck.ExitCode -ne 0) { throw "Bundled FFprobe self-check failed: $($selfCheck.ExitCode)" }
           $triple = (rustc --print host-tuple).Trim()
           New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
           Copy-Item dist/infomancer-core.exe "desktop/src-tauri/binaries/infomancer-core-$triple.exe"
@@ -115,8 +115,8 @@ jobs:
           New-Item -ItemType Directory -Force $data | Out-Null
           $env:SMOKE_DB = Join-Path $data 'infomancer.db'
           python -c "import os; from pathlib import Path; from app.db import Database; Database(Path(os.environ['SMOKE_DB'])).initialize()"
-          & .\dist\infomancer-core.exe --data-dir $data --recovery-output $backup
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $backup)) { throw 'Recovery helper smoke test failed.' }
+          $recovery = Start-Process -FilePath '.\dist\infomancer-core.exe' -ArgumentList @('--data-dir', $data, '--recovery-output', $backup) -Wait -PassThru
+          if ($recovery.ExitCode -ne 0 -or -not (Test-Path $backup)) { throw "Recovery helper smoke test failed: $($recovery.ExitCode)" }
 
       - name: Install desktop dependencies
         working-directory: desktop
