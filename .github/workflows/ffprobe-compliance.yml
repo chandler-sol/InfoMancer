@@ -3,6 +3,7 @@ name: FFprobe Compliance
 on:
   pull_request:
     paths:
+      - scripts/build_minimal_ffprobe.sh
       - scripts/stage_ffprobe.py
       - tests/test_ffprobe_packaging.py
       - docs/FFPROBE_DISTRIBUTION.md
@@ -14,6 +15,7 @@ on:
     branches:
       - testing/0.9-alpha-reseed
     paths:
+      - scripts/build_minimal_ffprobe.sh
       - scripts/stage_ffprobe.py
       - tests/test_ffprobe_packaging.py
       - docs/FFPROBE_DISTRIBUTION.md
@@ -30,15 +32,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify-bundled-ffprobe:
-    name: Verify pinned FFprobe on ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - windows-latest
-          - ubuntu-latest
-    runs-on: ${{ matrix.os }}
+  build-minimal-windows-ffprobe:
+    name: Build minimal Windows FFprobe
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install MinGW cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y gcc-mingw-w64-x86-64
+
+      - name: Build minimal FFprobe from pinned FFmpeg source
+        run: bash scripts/build_minimal_ffprobe.sh build/minimal-ffprobe
+
+      - name: Reject optional third-party runtime dependencies
+        run: |
+          cat build/minimal-ffprobe/FFPROBE_DLL_DEPENDENCIES.txt
+          if grep -Eiq 'libgcc|libstdc\+\+|libwinpthread|libiconv|libz|avcodec|avformat|avutil|swresample|swscale' build/minimal-ffprobe/FFPROBE_DLL_DEPENDENCIES.txt; then
+            echo 'Unexpected non-system DLL dependency in minimal FFprobe build.' >&2
+            exit 1
+          fi
+
+      - name: Upload minimal FFprobe compliance bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: minimal-ffprobe-win64
+          path: build/minimal-ffprobe/
+          if-no-files-found: error
+          retention-days: 7
+
+  verify-minimal-windows-ffprobe:
+    name: Execute and verify minimal Windows FFprobe
+    needs: build-minimal-windows-ffprobe
+    runs-on: windows-latest
     timeout-minutes: 15
     steps:
       - name: Check out candidate
@@ -51,33 +82,26 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Download, verify, and execute pinned FFprobe
-        run: python scripts/stage_ffprobe.py --output build/ffprobe
+      - name: Download minimal FFprobe compliance bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: minimal-ffprobe-win64
+          path: build/minimal-ffprobe
 
-      - name: Verify staged compliance evidence
+      - name: Execute compliance verifier and stage native payload
+        run: python scripts/stage_ffprobe.py --input build/minimal-ffprobe --output build/ffprobe
+
+      - name: Verify staged redistribution evidence
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import os
-
-          root = Path('build/ffprobe')
-          binary = root / ('ffprobe.exe' if os.name == 'nt' else 'ffprobe')
-          required = [
-              binary,
-              root / 'FFPROBE_LICENSE.txt',
-              root / 'FFPROBE_NOTICE.txt',
-              root / 'FFPROBE_BUILDINFO.txt',
-          ]
-          missing = [str(path) for path in required if not path.is_file()]
-          if missing:
-              raise SystemExit(f'Missing staged FFprobe compliance files: {missing}')
-
-          build_info = (root / 'FFPROBE_BUILDINFO.txt').read_text(encoding='utf-8').casefold()
-          if '--enable-version3' not in build_info:
-              raise SystemExit('Pinned FFprobe did not preserve the expected LGPLv3 build profile')
-          for forbidden in ('--enable-gpl', '--enable-nonfree'):
-              if forbidden in build_info:
-                  raise SystemExit(f'Forbidden FFprobe configure flag present: {forbidden}')
-          print((root / 'FFPROBE_BUILDINFO.txt').read_text(encoding='utf-8'))
-          PY
+          test -f build/ffprobe/ffprobe.exe
+          test -f build/ffprobe/FFPROBE_LICENSE.txt
+          test -f build/ffprobe/FFPROBE_NOTICE.txt
+          test -f build/ffprobe/FFPROBE_BUILDINFO.txt
+          test -f build/ffprobe/FFPROBE_BUILD_SCRIPT.sh
+          grep -F -- '--disable-autodetect' build/ffprobe/FFPROBE_BUILDINFO.txt
+          if grep -Eiq -- '--enable-(gpl|nonfree|version3|lib[^ ]*)' build/ffprobe/FFPROBE_BUILDINFO.txt; then
+            echo 'Disallowed FFprobe configuration survived staging.' >&2
+            exit 1
+          fi
+          cat build/ffprobe/FFPROBE_BUILDINFO.txt
