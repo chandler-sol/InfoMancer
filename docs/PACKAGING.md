@@ -166,10 +166,10 @@ Only FFprobe is bundled for this feature. The full FFmpeg executable is not
 included.
 
 InfoMancer builds its own minimal Windows x86_64 FFprobe directly from the exact
-pinned FFmpeg source commit `ad500d59cb6e0126add4fcb95afb4e2557c4292c`
-(`n9.0.1-29-gad500d59cb`). We deliberately do not redistribute a general-purpose
-third-party FFmpeg binary bundle because those builds can pull in many optional
-libraries with additional redistribution obligations.
+pinned FFmpeg source commit `ad500d59cb6e0126add4fcb95afb4e2557c4292c`.
+We deliberately do not redistribute a general-purpose third-party FFmpeg binary
+bundle because those builds can pull in many optional libraries with additional
+redistribution obligations.
 
 `scripts/build_minimal_ffprobe.sh` cross-compiles the binary with MinGW-w64 and
 uses `--disable-autodetect`. It does not permit optional `--enable-lib*`
@@ -178,17 +178,27 @@ muxers, filters, devices, hardware acceleration, iconv, shared libraries, and
 POSIX pthreads. The result stays on FFmpeg's default GNU LGPL v2.1-or-later
 profile. `--enable-gpl`, `--enable-nonfree`, and `--enable-version3` are forbidden.
 
+The build verifies the full source commit before compilation and stamps the
+binary with `--extra-version=infomancer-ad500d59cb`. The Windows staging step
+executes the actual candidate with `ffprobe -version` and requires that exact
+marker plus the full approved configure profile. This avoids depending on
+FFmpeg's checkout-sensitive tag description as the binary identity.
+
 The build records imported DLLs and rejects unexpected MinGW runtime or optional
-media-library dependencies. The Windows staging step then executes the actual
-candidate binary with `ffprobe -version` and independently verifies its version
-and configure line before it can be packaged.
+media-library dependencies. It also carries FFmpeg's LGPL text and the required
+Independent JPEG Group acknowledgement for the IJG-derived JPEG source present
+upstream.
 
 The executable plus `FFPROBE_LICENSE.txt`, `FFPROBE_NOTICE.txt`,
 `FFPROBE_BUILDINFO.txt`, `FFPROBE_BUILD_SCRIPT.sh`,
-`FFPROBE_CONFIGURE_ARGS.txt`, and `FFPROBE_DLL_DEPENDENCIES.txt` are added to the
-PyInstaller core. Before Tauri creates a native installer, CI also executes the
-finished core with `--check-ffprobe` and requires the bundled executable to run
-successfully.
+`FFPROBE_CONFIGURE_ARGS.txt`, `FFPROBE_DLL_DEPENDENCIES.txt`,
+`FFPROBE_SOURCE_COMMIT.txt`, and `FFPROBE_BUILD_MARKER.txt` are added to the
+PyInstaller core. The same readable compliance files are installed as ordinary
+Tauri resources under `third-party/ffprobe`. The Windows installer smoke test
+fails if the license, notice, or build provenance is missing after installation.
+
+Before Tauri creates a native installer, CI also executes the finished core with
+`--check-ffprobe` and requires the bundled executable to run successfully.
 
 At runtime, media inspection resolves FFprobe in this order:
 
@@ -199,9 +209,9 @@ At runtime, media inspection resolves FFprobe in this order:
 
 For every tagged Windows release containing bundled FFprobe, the release job
 uploads the exact corresponding FFmpeg source archive generated from the verified
-source checkout, plus the license, notice, build-info, build script, configure
-arguments, and DLL dependency inventory to the same GitHub Release as the
-installer.
+source checkout, plus the license, IJG-bearing notice, build-info, build script,
+configure arguments, source identity, build marker, and DLL dependency inventory
+to the same GitHub Release as the installer.
 
 Native Linux, macOS, and Windows ARM64 FFprobe bundling are not approved by this
 implementation. Those platforms should continue to use a configured/system
