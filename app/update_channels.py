@@ -185,6 +185,40 @@ def validate_database_schema_contract(value: object) -> dict:
     }
 
 
+def _validate_promotion(value: object, target_channel: str, version: str, build_id: str, commit_sha: str) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError("Update channel manifest contains invalid promotion provenance.")
+    source_channel = normalize_channel(str(value.get("source_channel") or ""))
+    if target_channel not in {"beta", "standard"} or CHANNEL_RANK[source_channel] <= CHANNEL_RANK[target_channel]:
+        raise ValueError("Update channel promotion must move from a less stable channel to a more stable channel.")
+
+    source_version = str(value.get("source_version") or "").strip().lstrip("v")
+    if version_key(source_version)[0] < 0:
+        raise ValueError("Update channel promotion contains an invalid source version.")
+    if release_channel(source_version, bool(_prerelease_tokens(source_version))) != source_channel:
+        raise ValueError("Update channel promotion source version does not match its source channel.")
+    if release_channel(version, bool(_prerelease_tokens(version))) != target_channel:
+        raise ValueError("Promoted version does not match the target update channel.")
+
+    source_build_id = str(value.get("source_build_id") or "").strip()
+    if source_build_id != build_id:
+        raise ValueError("Promoted manifests must preserve the immutable source build id.")
+    source_commit_sha = str(value.get("source_commit_sha") or "").strip().casefold()
+    if source_commit_sha != commit_sha:
+        raise ValueError("Promoted manifests must preserve the qualified source commit SHA.")
+    promoted_at = str(value.get("promoted_at") or "").strip()
+    if not promoted_at:
+        raise ValueError("Update channel promotion is missing its promotion timestamp.")
+
+    return {
+        "source_channel": source_channel,
+        "source_version": source_version,
+        "source_build_id": source_build_id,
+        "source_commit_sha": source_commit_sha,
+        "promoted_at": promoted_at,
+    }
+
+
 def validate_channel_manifest(value: object, expected_channel: str) -> dict:
     channel = normalize_channel(expected_channel)
     if not isinstance(value, dict):
@@ -241,6 +275,10 @@ def validate_channel_manifest(value: object, expected_channel: str) -> dict:
     normalized["version"] = version
     normalized["commit_sha"] = commit_sha
     normalized["database_schema"] = database_schema
+    if "promotion" in value:
+        normalized["promotion"] = _validate_promotion(
+            value.get("promotion"), manifest_channel, version, build_id, commit_sha,
+        )
     return normalized
 
 
