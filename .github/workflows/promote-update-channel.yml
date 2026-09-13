@@ -105,6 +105,21 @@ jobs:
           "version=$targetVersion" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
 
+      - name: Require unused immutable promotion tag
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROMOTED_TAG: ${{ steps.identity.outputs.tag }}
+        run: |
+          gh release view $env:PROMOTED_TAG --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            throw "Release $env:PROMOTED_TAG already exists. Promotion is fail-closed so an immutable release is never overwritten; choose a new target version."
+          }
+          $tagLine = git ls-remote "https://github.com/$env:GITHUB_REPOSITORY.git" "refs/tags/$env:PROMOTED_TAG"
+          if (-not [string]::IsNullOrWhiteSpace($tagLine)) {
+            throw "Tag $env:PROMOTED_TAG already exists. Promotion will not reuse or move an existing tag."
+          }
+
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -143,30 +158,6 @@ jobs:
       - name: Verify promoted packaging versions
         run: python -m unittest tests.test_windows_desktop -v
 
-      - name: Reserve promoted release at qualified source commit
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PROMOTED_TAG: ${{ steps.identity.outputs.tag }}
-          SOURCE_SHA: ${{ steps.source.outputs.commit_sha }}
-        run: |
-          gh release view $env:PROMOTED_TAG --repo $env:GITHUB_REPOSITORY 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            throw "Release $env:PROMOTED_TAG already exists. Promotion is fail-closed so an existing immutable release is never overwritten; choose a new target version."
-          }
-          $title = 'InfoMancer ${{ steps.identity.outputs.version }}'
-          $notes = 'Promoted from qualified ${{ inputs.source_channel }} build ${{ steps.source.outputs.build_id }} at commit ${{ steps.source.outputs.commit_sha }}. No source commit was substituted during promotion.'
-          if ('${{ inputs.target_channel }}' -eq 'standard') {
-            gh release create $env:PROMOTED_TAG --repo $env:GITHUB_REPOSITORY --target $env:SOURCE_SHA --title $title --notes $notes
-          } else {
-            gh release create $env:PROMOTED_TAG --repo $env:GITHUB_REPOSITORY --target $env:SOURCE_SHA --title $title --notes $notes --prerelease
-          }
-          if ($LASTEXITCODE -ne 0) { throw 'Could not reserve the promoted release.' }
-          $tagLine = git ls-remote "https://github.com/$env:GITHUB_REPOSITORY.git" "refs/tags/$env:PROMOTED_TAG"
-          if ([string]::IsNullOrWhiteSpace($tagLine) -or -not $tagLine.StartsWith($env:SOURCE_SHA)) {
-            throw 'The promoted release tag does not resolve to the exact qualified source commit.'
-          }
-
       - name: Build, sign, and publish immutable promoted Windows updater
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
         env:
@@ -177,6 +168,7 @@ jobs:
         with:
           projectPath: desktop
           tagName: ${{ steps.identity.outputs.tag }}
+          releaseCommitish: ${{ steps.source.outputs.commit_sha }}
           releaseName: InfoMancer ${{ steps.identity.outputs.version }}
           releaseBody: Promoted from qualified ${{ inputs.source_channel }} build ${{ steps.source.outputs.build_id }} at commit ${{ steps.source.outputs.commit_sha }}. No source commit was substituted during promotion.
           releaseDraft: false
@@ -191,7 +183,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PROMOTED_TAG: ${{ steps.identity.outputs.tag }}
+          SOURCE_SHA: ${{ steps.source.outputs.commit_sha }}
         run: |
+          $tagLine = git ls-remote "https://github.com/$env:GITHUB_REPOSITORY.git" "refs/tags/$env:PROMOTED_TAG"
+          if ([string]::IsNullOrWhiteSpace($tagLine) -or -not $tagLine.StartsWith($env:SOURCE_SHA)) {
+            throw 'The promoted release tag does not resolve to the exact qualified source commit.'
+          }
           $published = Join-Path $env:RUNNER_TEMP 'published-promotion'
           New-Item -ItemType Directory -Force $published | Out-Null
           gh release download $env:PROMOTED_TAG --repo $env:GITHUB_REPOSITORY --pattern latest.json --dir $published
