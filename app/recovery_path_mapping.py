@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import sqlite3
@@ -176,6 +177,53 @@ def inspect_recovery_roots(
         temporary.unlink(missing_ok=True)
 
 
+def _rewrite_operation_history(
+    connection: sqlite3.Connection,
+    root_id: int,
+    old_root: str,
+    destination: Path,
+) -> int:
+    """Keep rename undo records valid after a root mapping.
+
+    Managed-trash undo stores a trash row id rather than literal paths, so the
+    duplicate_trash rewrite already keeps that undo safe. Rename undo embeds the
+    old source/destination paths and must be translated with the same root mapping.
+    Invalid path-bearing undo metadata fails the restore instead of becoming a
+    dangerous stale undo action.
+    """
+    rewritten = 0
+    rows = connection.execute(
+        """SELECT id,undo_kind,undo_payload FROM operation_history
+           WHERE root_id=? AND undo_kind IN ('rename_file','rename_folder')""",
+        (root_id,),
+    ).fetchall()
+    for row in rows:
+        try:
+            payload = json.loads(row["undo_payload"] or "{}")
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise RecoveryPackageError(
+                "A path-bearing undo record in this backup is invalid, so storage reconciliation stopped safely."
+            ) from exc
+        if not isinstance(payload, dict):
+            raise RecoveryPackageError(
+                "A path-bearing undo record in this backup is invalid, so storage reconciliation stopped safely."
+            )
+        source = _rewritten_path(str(payload.get("source") or ""), old_root, destination)
+        target = _rewritten_path(str(payload.get("destination") or ""), old_root, destination)
+        payload["source"] = source
+        payload["destination"] = target
+        connection.execute(
+            "UPDATE operation_history SET undo_payload=?,detail=? WHERE id=?",
+            (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                f"{source} → {target}",
+                row["id"],
+            ),
+        )
+        rewritten += 2
+    return rewritten
+
+
 def apply_recovery_root_mappings(
     database_path: Path,
     mappings: dict[int, str],
@@ -282,6 +330,11 @@ def apply_recovery_root_mappings(
                             (source, target, row["id"]),
                         )
                         rewritten += 2
+
+                if "operation_history" in tables:
+                    rewritten += _rewrite_operation_history(
+                        connection, root_id, old_root, destination
+                    )
     except sqlite3.Error as exc:
         raise RecoveryPackageError(
             "InfoMancer could not reconcile media paths in the staged recovery database."
