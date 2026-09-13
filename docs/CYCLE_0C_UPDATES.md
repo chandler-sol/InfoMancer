@@ -36,7 +36,7 @@ The canonical channel classifier lives in `app/update_channels.py`. It owns:
 - filtering a GitHub release list for the selected channel
 - the no-blind-downgrade `waiting_for_channel` state
 - conservative persistence of the installation-wide channel preference
-- qualified manifest and database-schema contract validation
+- qualified manifest, promotion provenance, and database-schema contract validation
 
 The dedicated settings surface is `/settings/updates`.
 
@@ -52,7 +52,7 @@ Beta     -> desktop-beta/latest.json
 Dev      -> desktop-dev/latest.json
 ```
 
-A damaged or unknown desktop channel setting fails conservatively to Standard. The updater public key and Tauri artifact signature remain mandatory. Standard release publication now advances `desktop-standard`; Dev publication remains qualification-gated by the canonical Tests workflow. Beta publication is completed by the promotion work rather than by treating arbitrary prerelease tags as Standard.
+A damaged or unknown desktop channel setting fails conservatively to Standard. The updater public key and Tauri artifact signature remain mandatory. Standard release publication advances `desktop-standard`; Dev publication remains qualification-gated by the canonical Tests workflow.
 
 ## Qualification and publishing
 
@@ -82,11 +82,26 @@ push to 0.9
 
 A failed, cancelled, or incomplete qualification run never advances the Dev manifest.
 
+Actual signed Dev publication requires the repository signing configuration documented in `docs/UPDATER_SIGNING.md`. Qualification may remain green when those credentials are absent, but the install channel does not advance.
+
 ## Promotion
 
-Beta and Standard should promote an already-qualified immutable build wherever packaging/signing permits. The channel is a pointer to a build, not a request to rebuild source. Where a platform requires channel-specific metadata, that metadata may be regenerated, but the application payload should remain tied to the same immutable build identity.
+Beta and Standard promote an already-qualified immutable build rather than choosing a fresh source commit.
 
-The dedicated Beta promotion path will own `desktop-beta` and the Beta channel manifest. The production release path owns `desktop-standard` and refuses prerelease version strings.
+`scripts/promote_update_channel_manifest.py` and `.github/workflows/promote-update-channel.yml` enforce these rules:
+
+- allowed directions are Dev to Beta, Dev to Standard, and Beta to Standard
+- the promoted manifest keeps the source immutable build id
+- the promoted manifest keeps the exact qualified source commit SHA
+- the original qualification timestamp, workflow, run id, passed gates, and database schema contract are preserved
+- promotion provenance records the source channel/version/build/commit and promotion timestamp
+- target versions must match the target channel
+- version-bearing signed artifacts are never silently reused under a different release version
+- packaging may be regenerated where the platform embeds the release version, but it is built from the exact previously qualified source commit
+
+The manual promotion workflow downloads the qualified source channel manifest before checkout, then checks out the exact commit named by that manifest. It refuses to run without the updater signing configuration. Only after the promoted signed artifact and target manifest validate does it advance `desktop-beta` or `desktop-standard` and the matching qualified channel manifest.
+
+The workflow becomes dispatchable once it is present on the repository's default branch. Until then, the promotion builder and its invariants are still covered by the canonical test suite on the 0.9 branch.
 
 ## Version identity
 
@@ -109,6 +124,16 @@ and the production release:
 ```
 
 The immutable build identity and source commit remain separately recorded so promotion history is auditable even when the user-facing release version changes.
+
+## Downgrade qualification
+
+Schema compatibility and updater rollback are separate safety requirements.
+
+The automated 0C suite now exercises both successful and failed schema-safe version downgrade requests through the restricted host-updater path. It verifies that a qualified target commit must match the signed tag target, that successful downgrade requests preserve release/schema identity, and that an unhealthy target checks the previous commit back out and records a `rolled_back` history entry.
+
+Automatic downgrade remains disabled in the Settings route. A `safe_downgrade` schema result is necessary but not sufficient to make the button appear. The final gate is an operational proof using real signed published artifacts, as described in `docs/UPDATER_SIGNING.md`.
+
+Read-only, breaking, or unknown migration compatibility continues to fail closed and cannot use the automatic downgrade path.
 
 ## Recovery-aware downgrade guidance
 
