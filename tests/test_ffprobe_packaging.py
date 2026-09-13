@@ -151,6 +151,20 @@ class FFprobePackagingTests(unittest.TestCase):
         self.assertIn("Independent JPEG Group", workflow)
         self.assertIn(BUILD_MARKER, workflow)
 
+    def test_windows_gui_core_checks_wait_for_process_completion(self):
+        preview = (ROOT / ".github/workflows/windows-desktop.yml").read_text(
+            encoding="utf-8"
+        )
+        release = (ROOT / ".github/workflows/windows-desktop-release.yml").read_text(
+            encoding="utf-8"
+        )
+        for workflow in (preview, release):
+            self.assertIn("Start-Process -FilePath '.\\dist\\infomancer-core.exe'", workflow)
+            self.assertIn("-Wait -PassThru", workflow)
+            self.assertNotIn("& .\\dist\\infomancer-core.exe --check-ffprobe", workflow)
+        self.assertIn("$recovery = Start-Process", preview)
+        self.assertIn("$recovery.ExitCode", preview)
+
     def test_compliance_workflow_builds_source_then_executes_binary_on_windows(self):
         workflow = (ROOT / ".github/workflows/ffprobe-compliance.yml").read_text(
             encoding="utf-8"
