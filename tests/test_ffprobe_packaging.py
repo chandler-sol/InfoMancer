@@ -13,6 +13,7 @@ from scripts.stage_ffprobe import (
     BTBN_RELEASE,
     FFMPEG_COMMIT,
     LICENSE_GIT_BLOB_SHA1,
+    LICENSE_URL,
 )
 
 
@@ -65,6 +66,7 @@ class FFprobePackagingTests(unittest.TestCase):
             BTBN_COMMIT, "cc8f0958be119db774cdaf6c50065651a4901e72"
         )
         self.assertEqual(BTBN_RELEASE, "autobuild-2026-09-11-13-20")
+        self.assertTrue(LICENSE_URL.endswith("/COPYING.LGPLv3"))
         self.assertRegex(LICENSE_GIT_BLOB_SHA1, r"^[0-9a-f]{40}$")
 
     def test_native_packaging_enforces_lgpl_configuration(self):
@@ -75,6 +77,8 @@ class FFprobePackagingTests(unittest.TestCase):
             "FFPROBE_BUILDINFO.txt",
             "--enable-gpl",
             "--enable-nonfree",
+            "--enable-version3",
+            "COPYING.LGPLv3",
             '_require_hash("FFprobe archive"',
             "LICENSE_GIT_BLOB_SHA1",
         ):
