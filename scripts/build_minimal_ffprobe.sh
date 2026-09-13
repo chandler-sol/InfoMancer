@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 FFMPEG_COMMIT="ad500d59cb6e0126add4fcb95afb4e2557c4292c"
 FFMPEG_SHORT="ad500d59cb"
+BUILD_MARKER="infomancer-$FFMPEG_SHORT"
 OUTPUT_DIR="${1:-build/minimal-ffprobe}"
 WORK_DIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/infomancer-ffprobe-build"
 JOBS="${JOBS:-2}"
@@ -33,6 +34,7 @@ CONFIGURE_ARGS=(
   --target-os=mingw32
   --arch=x86_64
   --cross-prefix=x86_64-w64-mingw32-
+  --extra-version="$BUILD_MARKER"
   --disable-autodetect
   --disable-debug
   --disable-doc
@@ -73,6 +75,8 @@ cp ffprobe.exe "$OUTPUT_DIR/ffprobe.exe"
 cp "$SOURCE_DIR/COPYING.LGPLv2.1" "$OUTPUT_DIR/FFPROBE_LICENSE.txt"
 cp "$SCRIPT_PATH" "$OUTPUT_DIR/FFPROBE_BUILD_SCRIPT.sh"
 printf '%s\n' "${CONFIGURE_ARGS[@]}" > "$OUTPUT_DIR/FFPROBE_CONFIGURE_ARGS.txt"
+printf '%s\n' "$FFMPEG_COMMIT" > "$OUTPUT_DIR/FFPROBE_SOURCE_COMMIT.txt"
+printf '%s\n' "$BUILD_MARKER" > "$OUTPUT_DIR/FFPROBE_BUILD_MARKER.txt"
 
 # Publish the exact corresponding source used for the binary. This archive is
 # created from the verified Git commit rather than from a moving branch/tag.
@@ -86,6 +90,6 @@ sha256sum "$OUTPUT_DIR/ffprobe.exe" > "$OUTPUT_DIR/FFPROBE_BINARY_SHA256.txt"
 sha256sum "$OUTPUT_DIR/ffmpeg-source-$FFMPEG_COMMIT.tar.gz" \
   > "$OUTPUT_DIR/FFPROBE_SOURCE_SHA256.txt"
 
-printf 'Built minimal FFprobe from FFmpeg %s (%s)\n' "$FFMPEG_SHORT" "$FFMPEG_COMMIT"
+printf 'Built minimal FFprobe from FFmpeg commit %s with marker %s\n' "$FFMPEG_COMMIT" "$BUILD_MARKER"
 printf 'DLL dependencies:\n'
 cat "$OUTPUT_DIR/FFPROBE_DLL_DEPENDENCIES.txt"
