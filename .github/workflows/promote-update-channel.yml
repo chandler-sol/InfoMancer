@@ -143,6 +143,30 @@ jobs:
       - name: Verify promoted packaging versions
         run: python -m unittest tests.test_windows_desktop -v
 
+      - name: Reserve promoted release at qualified source commit
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROMOTED_TAG: ${{ steps.identity.outputs.tag }}
+          SOURCE_SHA: ${{ steps.source.outputs.commit_sha }}
+        run: |
+          gh release view $env:PROMOTED_TAG --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            throw "Release $env:PROMOTED_TAG already exists. Promotion is fail-closed so an existing immutable release is never overwritten; choose a new target version."
+          }
+          $title = 'InfoMancer ${{ steps.identity.outputs.version }}'
+          $notes = 'Promoted from qualified ${{ inputs.source_channel }} build ${{ steps.source.outputs.build_id }} at commit ${{ steps.source.outputs.commit_sha }}. No source commit was substituted during promotion.'
+          if ('${{ inputs.target_channel }}' -eq 'standard') {
+            gh release create $env:PROMOTED_TAG --repo $env:GITHUB_REPOSITORY --target $env:SOURCE_SHA --title $title --notes $notes
+          } else {
+            gh release create $env:PROMOTED_TAG --repo $env:GITHUB_REPOSITORY --target $env:SOURCE_SHA --title $title --notes $notes --prerelease
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Could not reserve the promoted release.' }
+          $tagLine = git ls-remote "https://github.com/$env:GITHUB_REPOSITORY.git" "refs/tags/$env:PROMOTED_TAG"
+          if ([string]::IsNullOrWhiteSpace($tagLine) -or -not $tagLine.StartsWith($env:SOURCE_SHA)) {
+            throw 'The promoted release tag does not resolve to the exact qualified source commit.'
+          }
+
       - name: Build, sign, and publish immutable promoted Windows updater
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
         env:
@@ -172,12 +196,19 @@ jobs:
           New-Item -ItemType Directory -Force $published | Out-Null
           gh release download $env:PROMOTED_TAG --repo $env:GITHUB_REPOSITORY --pattern latest.json --dir $published
           $release = gh release view $env:PROMOTED_TAG --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json
-          $installer = $release.assets | Where-Object { $_.name -like '*.exe' } | Select-Object -First 1
+          $installer = $release.assets | Where-Object { $_.name -like '*.exe' -and $_.name -notlike '*.sig' } | Select-Object -First 1
           if ($null -eq $installer) { throw 'The promoted release did not contain a Windows installer asset.' }
+          $signatureName = "$($installer.name).sig"
+          $signature = $release.assets | Where-Object { $_.name -eq $signatureName } | Select-Object -First 1
+          if ($null -eq $signature) { throw 'The promoted release did not contain the updater signature for the Windows installer.' }
           gh release download $env:PROMOTED_TAG --repo $env:GITHUB_REPOSITORY --pattern $installer.name --dir $published
+          gh release download $env:PROMOTED_TAG --repo $env:GITHUB_REPOSITORY --pattern $signature.name --dir $published
           $installerPath = Join-Path $published $installer.name
+          $signaturePath = Join-Path $published $signature.name
+          if ([string]::IsNullOrWhiteSpace((Get-Content $signaturePath -Raw))) { throw 'The published updater signature was empty.' }
           "published_dir=$published" >> $env:GITHUB_OUTPUT
           "installer_path=$installerPath" >> $env:GITHUB_OUTPUT
+          "signature_path=$signaturePath" >> $env:GITHUB_OUTPUT
           "installer_url=$($installer.url)" >> $env:GITHUB_OUTPUT
 
       - name: Build promoted qualified channel manifest
@@ -185,12 +216,15 @@ jobs:
         run: |
           $output = "build/update-channel/${{ inputs.target_channel }}.json"
           New-Item -ItemType Directory -Force build/update-channel | Out-Null
+          $signature = (Get-Content '${{ steps.assets.outputs.signature_path }}' -Raw).Trim()
+          if ([string]::IsNullOrWhiteSpace($signature)) { throw 'The published updater signature was empty.' }
+          $artifactSpec = "windows=tauri-updater,${{ steps.assets.outputs.installer_url }},${{ steps.assets.outputs.installer_path }},$signature"
           $arguments = @(
             'scripts/promote_update_channel_manifest.py',
             '--source', '${{ steps.source.outputs.manifest_path }}',
             '--target-channel', '${{ inputs.target_channel }}',
             '--target-version', '${{ steps.identity.outputs.version }}',
-            '--artifact', 'windows=tauri-updater,${{ steps.assets.outputs.installer_url }},${{ steps.assets.outputs.installer_path }}',
+            '--artifact', $artifactSpec,
             '--output', $output
           )
           if (-not [string]::IsNullOrWhiteSpace('${{ inputs.release_notes_url }}')) {
