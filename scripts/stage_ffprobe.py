@@ -60,8 +60,9 @@ def _sha256(data: bytes) -> str:
 
 
 def _git_blob_sha1(data: bytes) -> str:
+    """Return Git's blob object ID; SHA-1 here is an object identity, not a security check."""
     header = f"blob {len(data)}\0".encode("ascii")
-    return hashlib.sha1(header + data).hexdigest()
+    return hashlib.sha1(header + data, usedforsecurity=False).hexdigest()
 
 
 def _platform_key() -> tuple[str, str]:
