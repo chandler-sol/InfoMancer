@@ -98,12 +98,24 @@ jobs:
       - name: Build bundled InfoMancer core
         shell: pwsh
         run: |
-          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILDINFO.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILD_SCRIPT.sh;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_CONFIGURE_ARGS.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_DLL_DEPENDENCIES.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
+          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILDINFO.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILD_SCRIPT.sh;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_CONFIGURE_ARGS.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_DLL_DEPENDENCIES.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_SOURCE_COMMIT.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILD_MARKER.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
           & .\dist\infomancer-core.exe --check-ffprobe
           if ($LASTEXITCODE -ne 0) { throw "Bundled FFprobe self-check failed: $LASTEXITCODE" }
           $triple = (rustc --print host-tuple).Trim()
           New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
           Copy-Item dist/infomancer-core.exe "desktop/src-tauri/binaries/infomancer-core-$triple.exe"
+
+          $ffprobeResources = 'desktop/src-tauri/resources/ffprobe'
+          Remove-Item $ffprobeResources -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $ffprobeResources | Out-Null
+          Copy-Item build/ffprobe/FFPROBE_LICENSE.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_NOTICE.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_BUILDINFO.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_BUILD_SCRIPT.sh $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_CONFIGURE_ARGS.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_DLL_DEPENDENCIES.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_SOURCE_COMMIT.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_BUILD_MARKER.txt $ffprobeResources
 
       - name: Install desktop dependencies
         working-directory: desktop
@@ -156,6 +168,8 @@ jobs:
             build/ffprobe/FFPROBE_BUILD_SCRIPT.sh `
             build/ffprobe/FFPROBE_CONFIGURE_ARGS.txt `
             build/ffprobe/FFPROBE_DLL_DEPENDENCIES.txt `
+            build/ffprobe/FFPROBE_SOURCE_COMMIT.txt `
+            build/ffprobe/FFPROBE_BUILD_MARKER.txt `
             "build/minimal-ffprobe/ffmpeg-source-$ffmpegCommit.tar.gz" `
             --clobber
 
