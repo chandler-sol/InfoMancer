@@ -10,14 +10,16 @@ import subprocess
 from pathlib import Path
 
 
-VERSION = "n9.0.1-29-gad500d59cb"
 FFMPEG_COMMIT = "ad500d59cb6e0126add4fcb95afb4e2557c4292c"
+FFMPEG_SHORT = FFMPEG_COMMIT[:10]
+BUILD_MARKER = f"infomancer-{FFMPEG_SHORT}"
 SOURCE_ARCHIVE = f"ffmpeg-source-{FFMPEG_COMMIT}.tar.gz"
 LICENSE_GIT_BLOB_SHA1 = "40924c2a6da76a2b0c639f6fe7ef0b2d095a6adb"
 
 REQUIRED_CONFIGURE_FLAGS = {
     "--target-os=mingw32",
     "--arch=x86_64",
+    f"--extra-version={BUILD_MARKER}",
     "--disable-autodetect",
     "--disable-debug",
     "--disable-doc",
@@ -74,6 +76,8 @@ def _verify_input_bundle(input_dir: Path) -> dict[str, Path]:
         "build_script": input_dir / "FFPROBE_BUILD_SCRIPT.sh",
         "configure_args": input_dir / "FFPROBE_CONFIGURE_ARGS.txt",
         "dll_dependencies": input_dir / "FFPROBE_DLL_DEPENDENCIES.txt",
+        "source_commit": input_dir / "FFPROBE_SOURCE_COMMIT.txt",
+        "build_marker": input_dir / "FFPROBE_BUILD_MARKER.txt",
         "source": input_dir / SOURCE_ARCHIVE,
     }
     missing = [str(path) for path in files.values() if not path.is_file()]
@@ -85,6 +89,17 @@ def _verify_input_bundle(input_dir: Path) -> dict[str, Path]:
         raise FFprobeComplianceError("Candidate ffprobe.exe is unexpectedly small")
     if files["source"].stat().st_size < 1_000_000:
         raise FFprobeComplianceError("Corresponding FFmpeg source archive is unexpectedly small")
+
+    source_commit = files["source_commit"].read_text(encoding="utf-8").strip()
+    if source_commit != FFMPEG_COMMIT:
+        raise FFprobeComplianceError(
+            f"FFmpeg source commit mismatch: expected {FFMPEG_COMMIT}, received {source_commit}"
+        )
+    build_marker = files["build_marker"].read_text(encoding="utf-8").strip()
+    if build_marker != BUILD_MARKER:
+        raise FFprobeComplianceError(
+            f"FFprobe build marker mismatch: expected {BUILD_MARKER}, received {build_marker}"
+        )
     return files
 
 
@@ -139,7 +154,8 @@ def _verify_dll_dependencies(path: Path) -> list[str]:
         "swscale",
     )
     bad = [
-        dep for dep in dependencies
+        dep
+        for dep in dependencies
         if any(pattern in dep.casefold() for pattern in forbidden_patterns)
     ]
     if bad:
@@ -168,9 +184,11 @@ def _verify_ffprobe(binary_path: Path) -> str:
 
     report = result.stdout
     lower = report.casefold()
-    if VERSION.casefold() not in lower:
+    if not lower.startswith("ffprobe version "):
+        raise FFprobeComplianceError("Candidate did not identify itself as FFprobe")
+    if BUILD_MARKER.casefold() not in lower:
         raise FFprobeComplianceError(
-            f"Candidate FFprobe did not report expected version {VERSION}"
+            f"Candidate FFprobe did not report required build marker {BUILD_MARKER}"
         )
     if "configuration:" not in lower:
         raise FFprobeComplianceError("Candidate FFprobe did not report its build configuration")
@@ -199,7 +217,7 @@ def _write_notice(output: Path) -> None:
         "InfoMancer native Windows packages include FFprobe from the FFmpeg "
         "project as a separate executable used only for local media inspection.\n\n"
         f"Bundled FFmpeg source commit: {FFMPEG_COMMIT}\n"
-        f"Bundled FFprobe version: {VERSION}\n"
+        f"InfoMancer FFprobe build marker: {BUILD_MARKER}\n"
         "Effective FFmpeg license profile: GNU LGPL v2.1 or later\n"
         "Upstream project: https://ffmpeg.org/\n\n"
         "InfoMancer builds this FFprobe executable from the exact FFmpeg source "
@@ -214,6 +232,10 @@ def _write_notice(output: Path) -> None:
         "ffprobe -version output. FFPROBE_BUILD_SCRIPT.sh is the exact build "
         "recipe. The corresponding FFmpeg source archive is published beside "
         "each native release that contains this binary.\n\n"
+        "This software is based in part on the work of the Independent JPEG Group.\n"
+        "InfoMancer does not modify the IJG-derived FFmpeg source files; the "
+        "exact upstream source and their original notices are included in the "
+        "corresponding-source archive.\n\n"
         "FFmpeg/FFprobe is third-party software and is not owned by InfoMancer. "
         "InfoMancer and FFmpeg are separate projects.\n",
         encoding="utf-8",
@@ -227,11 +249,13 @@ def _write_build_info(
     dependencies: list[str],
     report: str,
 ) -> None:
+    runtime_version = report.splitlines()[0].strip() if report.splitlines() else "unknown"
     (output / "FFPROBE_BUILDINFO.txt").write_text(
         "InfoMancer FFprobe distribution provenance\n"
         "==========================================\n\n"
-        f"FFmpeg version: {VERSION}\n"
         f"FFmpeg source commit: {FFMPEG_COMMIT}\n"
+        f"InfoMancer build marker: {BUILD_MARKER}\n"
+        f"Runtime version line: {runtime_version}\n"
         "Effective FFmpeg license profile: GNU LGPL v2.1 or later\n"
         f"ffprobe.exe SHA-256: {_sha256_file(files['binary'])}\n"
         f"Corresponding source archive: {SOURCE_ARCHIVE}\n"
@@ -281,9 +305,11 @@ def stage(input_dir: Path, output: Path) -> Path:
     shutil.copy2(files["build_script"], output / "FFPROBE_BUILD_SCRIPT.sh")
     shutil.copy2(files["configure_args"], output / "FFPROBE_CONFIGURE_ARGS.txt")
     shutil.copy2(files["dll_dependencies"], output / "FFPROBE_DLL_DEPENDENCIES.txt")
+    shutil.copy2(files["source_commit"], output / "FFPROBE_SOURCE_COMMIT.txt")
+    shutil.copy2(files["build_marker"], output / "FFPROBE_BUILD_MARKER.txt")
     _write_notice(output)
     _write_build_info(output, files, configure_args, dependencies, report)
-    print(f"Staged minimal LGPL FFprobe {VERSION} at {binary_path}")
+    print(f"Staged minimal LGPL FFprobe from {FFMPEG_COMMIT} at {binary_path}")
     return binary_path
 
 
