@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,7 +35,7 @@ class RecoveryPathMappingTests(unittest.TestCase):
                 ),
             )
             self.title_id = int(cursor.lastrowid)
-            conn.execute(
+            cursor = conn.execute(
                 """INSERT INTO files(title_id,path,filename,extension,seen_scan)
                    VALUES (?,?,?,?,?)""",
                 (
@@ -45,6 +46,24 @@ class RecoveryPathMappingTests(unittest.TestCase):
                     "test-scan",
                 ),
             )
+            self.file_id = int(cursor.lastrowid)
+            conn.execute(
+                """INSERT INTO operation_history(
+                     operation_type,status,summary,title_id,file_id,root_id,undo_kind,undo_payload,detail
+                   ) VALUES ('rename_file','completed','rename',?,?,?,?,?,?)""",
+                (
+                    self.title_id,
+                    self.file_id,
+                    self.root_id,
+                    "rename_file",
+                    json.dumps({
+                        "file_id": self.file_id,
+                        "source": r"D:\Movies\Alien (1979)\Alien-old.mkv",
+                        "destination": r"D:\Movies\Alien (1979)\Alien.mkv",
+                    }),
+                    r"D:\Movies\Alien (1979)\Alien-old.mkv → D:\Movies\Alien (1979)\Alien.mkv",
+                ),
+            )
         self.trusted = self.data / "media"
         self.destination = self.trusted / "Movies"
         self.destination.mkdir(parents=True)
@@ -52,14 +71,14 @@ class RecoveryPathMappingTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def test_windows_backup_paths_map_to_native_destination(self):
+    def test_windows_backup_paths_map_to_native_destination_and_undo_history(self):
         result = apply_recovery_root_mappings(
             self.database.path,
             {self.root_id: str(self.destination)},
             (self.trusted,),
         )
         self.assertEqual(result["mapped_roots"], 1)
-        self.assertEqual(result["rewritten_paths"], 3)
+        self.assertEqual(result["rewritten_paths"], 5)
         with self.database.connect() as conn:
             root = conn.execute(
                 "SELECT path FROM roots WHERE id=?", (self.root_id,)
@@ -70,12 +89,26 @@ class RecoveryPathMappingTests(unittest.TestCase):
             media_file = conn.execute(
                 "SELECT path FROM files WHERE title_id=?", (self.title_id,)
             ).fetchone()[0]
+            history = conn.execute(
+                "SELECT undo_payload,detail FROM operation_history WHERE root_id=?",
+                (self.root_id,),
+            ).fetchone()
         self.assertEqual(root, str(self.destination.resolve()))
         self.assertEqual(folder, str(self.destination.resolve() / "Alien (1979)"))
         self.assertEqual(
             media_file,
             str(self.destination.resolve() / "Alien (1979)" / "Alien.mkv"),
         )
+        payload = json.loads(history["undo_payload"])
+        self.assertEqual(
+            payload["source"],
+            str(self.destination.resolve() / "Alien (1979)" / "Alien-old.mkv"),
+        )
+        self.assertEqual(
+            payload["destination"],
+            str(self.destination.resolve() / "Alien (1979)" / "Alien.mkv"),
+        )
+        self.assertIn(str(self.destination.resolve()), history["detail"])
 
     def test_mapping_destination_must_be_inside_trusted_storage(self):
         outside = self.data / "outside" / "Movies"
