@@ -25,9 +25,9 @@ FFMPEG_SOURCE_URL = f"https://github.com/FFmpeg/FFmpeg/archive/{FFMPEG_COMMIT}.t
 BTBN_SOURCE_URL = f"https://github.com/BtbN/FFmpeg-Builds/archive/{BTBN_COMMIT}.tar.gz"
 LICENSE_URL = (
     "https://raw.githubusercontent.com/FFmpeg/FFmpeg/"
-    f"{FFMPEG_COMMIT}/COPYING.LGPLv2.1"
+    f"{FFMPEG_COMMIT}/COPYING.LGPLv3"
 )
-LICENSE_GIT_BLOB_SHA1 = "40924c2a6da76a2b0c639f6fe7ef0b2d095a6adb"
+LICENSE_GIT_BLOB_SHA1 = "65c5ca88a67c30becee01c5a8816d964b03862f9"
 
 # Only explicitly reviewed LGPL builds are allowed here. macOS is intentionally
 # absent until an equally reviewable LGPL build/source path is added.
@@ -158,6 +158,10 @@ def _verify_ffprobe(binary_path: Path) -> str:
         )
     if "configuration:" not in lower:
         raise RuntimeError("FFprobe did not report its build configuration")
+    if "--enable-version3" not in lower:
+        raise RuntimeError(
+            "Pinned BtbN LGPL build did not report the expected --enable-version3 license profile"
+        )
     return report
 
 
@@ -166,18 +170,21 @@ def _write_notice(output: Path, asset: dict) -> None:
         "InfoMancer native desktop packages include FFprobe from the FFmpeg "
         "project as a separate executable used only for local media inspection.\n\n"
         f"Bundled build: FFmpeg/FFprobe {VERSION}\n"
+        "Effective FFmpeg license profile: GNU LGPL v3\n"
         f"Binary builder: BtbN/FFmpeg-Builds @ {BTBN_COMMIT}\n"
         f"Binary release: {RELEASE_BASE}/{asset['filename']}\n"
         f"Exact FFmpeg source commit: {FFMPEG_COMMIT}\n"
         f"Corresponding source: {FFMPEG_SOURCE_URL}\n"
         f"Build scripts source: {BTBN_SOURCE_URL}\n"
         "Upstream project: https://ffmpeg.org/\n\n"
-        "The selected BtbN artifact is the LGPL build variant. InfoMancer's "
+        "The selected BtbN artifact is the LGPL build variant. Its pinned build "
+        "profile enables FFmpeg's version-3 licensing option. InfoMancer's "
         "packaging step executes the staged binary and refuses it if FFprobe's "
-        "reported configuration contains --enable-gpl or --enable-nonfree. "
-        "FFPROBE_LICENSE.txt contains the GNU LGPL v2.1 text from the exact "
-        "FFmpeg source commit. FFPROBE_BUILDINFO.txt records the binary's own "
-        "version/configuration output and archive checksum.\n\n"
+        "reported configuration contains --enable-gpl or --enable-nonfree, or "
+        "does not contain --enable-version3. FFPROBE_LICENSE.txt contains the "
+        "GNU LGPL v3 text from the exact FFmpeg source commit. "
+        "FFPROBE_BUILDINFO.txt records the binary's own version/configuration "
+        "output and archive checksum.\n\n"
         "FFmpeg/FFprobe is third-party software and is not owned by InfoMancer. "
         "InfoMancer and FFmpeg are separate projects.\n",
         encoding="utf-8",
@@ -189,6 +196,7 @@ def _write_build_info(output: Path, asset: dict, report: str) -> None:
         "InfoMancer FFprobe distribution provenance\n"
         "==========================================\n\n"
         f"FFmpeg version: {VERSION}\n"
+        "Effective FFmpeg license profile: GNU LGPL v3\n"
         f"FFmpeg source commit: {FFMPEG_COMMIT}\n"
         f"BtbN build-scripts commit: {BTBN_COMMIT}\n"
         f"BtbN release: {BTBN_RELEASE}\n"
@@ -261,7 +269,7 @@ def stage(output: Path) -> Path:
     report = _verify_ffprobe(binary_path)
     _write_notice(output, asset)
     _write_build_info(output, asset, report)
-    print(f"Staged verified LGPL FFprobe {VERSION} at {binary_path}")
+    print(f"Staged verified LGPLv3 FFprobe {VERSION} at {binary_path}")
     return binary_path
 
 
