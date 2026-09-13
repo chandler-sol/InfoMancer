@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from app.media_info import ffprobe_executable
 from scripts.stage_ffprobe import (
+    BUILD_MARKER,
     FFMPEG_COMMIT,
     FORBIDDEN_CONFIGURE_FLAGS,
     LICENSE_GIT_BLOB_SHA1,
@@ -42,6 +43,7 @@ class FFprobePackagingTests(unittest.TestCase):
         self.assertEqual(
             FFMPEG_COMMIT, "ad500d59cb6e0126add4fcb95afb4e2557c4292c"
         )
+        self.assertEqual(BUILD_MARKER, "infomancer-ad500d59cb")
         self.assertEqual(SOURCE_ARCHIVE, f"ffmpeg-source-{FFMPEG_COMMIT}.tar.gz")
         self.assertEqual(
             LICENSE_GIT_BLOB_SHA1, "40924c2a6da76a2b0c639f6fe7ef0b2d095a6adb"
@@ -62,6 +64,7 @@ class FFprobePackagingTests(unittest.TestCase):
             "--enable-w32threads",
             "--enable-static",
             "--disable-shared",
+            f"--extra-version={BUILD_MARKER}",
         }
         self.assertTrue(required.issubset(REQUIRED_CONFIGURE_FLAGS))
         self.assertEqual(
@@ -73,11 +76,15 @@ class FFprobePackagingTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn(FFMPEG_COMMIT, build_script)
+        self.assertIn('BUILD_MARKER="infomancer-$FFMPEG_SHORT"', build_script)
         self.assertIn("git -C \"$SOURCE_DIR\" archive", build_script)
         self.assertIn("COPYING.LGPLv2.1", build_script)
+        self.assertIn("FFPROBE_SOURCE_COMMIT.txt", build_script)
+        self.assertIn("FFPROBE_BUILD_MARKER.txt", build_script)
         self.assertNotIn("BtbN", build_script)
-        for flag in required:
+        for flag in required - {f"--extra-version={BUILD_MARKER}"}:
             self.assertIn(flag, build_script)
+        self.assertIn('--extra-version="$BUILD_MARKER"', build_script)
 
     def test_configure_verifier_rejects_optional_external_library(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -109,11 +116,15 @@ class FFprobePackagingTests(unittest.TestCase):
             "FFPROBE_BUILDINFO.txt",
             "FFPROBE_BUILD_SCRIPT.sh",
             "FFPROBE_DLL_DEPENDENCIES.txt",
+            "FFPROBE_SOURCE_COMMIT.txt",
+            "FFPROBE_BUILD_MARKER.txt",
+            "Independent JPEG Group",
             "--enable-gpl",
             "--enable-nonfree",
             "--enable-version3",
             "--enable-lib",
             "--disable-autodetect",
+            "--extra-version=",
             "LICENSE_GIT_BLOB_SHA1",
         ):
             self.assertIn(required, stage)
@@ -123,6 +134,22 @@ class FFprobePackagingTests(unittest.TestCase):
         sidecar = (ROOT / "desktop" / "sidecar.py").read_text(encoding="utf-8")
         self.assertIn('parser.add_argument("--check-ffprobe"', sidecar)
         self.assertIn('[ffprobe_executable(), "-version"]', sidecar)
+
+    def test_windows_installer_exposes_ffprobe_notices_as_resources(self):
+        config = (ROOT / "desktop" / "src-tauri" / "tauri.windows.conf.json").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"resources/ffprobe/": "third-party/ffprobe/"', config)
+
+        workflow = (ROOT / ".github/workflows/windows-desktop.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("desktop/src-tauri/resources/ffprobe", workflow)
+        self.assertIn("FFPROBE_NOTICE.txt", workflow)
+        self.assertIn("FFPROBE_LICENSE.txt", workflow)
+        self.assertIn("Installed FFprobe compliance resource is missing", workflow)
+        self.assertIn("Independent JPEG Group", workflow)
+        self.assertIn(BUILD_MARKER, workflow)
 
     def test_compliance_workflow_builds_source_then_executes_binary_on_windows(self):
         workflow = (ROOT / ".github/workflows/ffprobe-compliance.yml").read_text(
@@ -134,6 +161,8 @@ class FFprobePackagingTests(unittest.TestCase):
         self.assertIn("scripts/stage_ffprobe.py", workflow)
         self.assertIn("windows-latest", workflow)
         self.assertIn("ubuntu-latest", workflow)
+        self.assertIn(BUILD_MARKER, workflow)
+        self.assertIn("Independent JPEG Group", workflow)
 
     def test_windows_release_uses_minimal_build_and_publishes_source(self):
         workflow = (
@@ -145,6 +174,9 @@ class FFprobePackagingTests(unittest.TestCase):
             "scripts/stage_ffprobe.py",
             "FFPROBE_BUILDINFO.txt",
             "FFPROBE_BUILD_SCRIPT.sh",
+            "FFPROBE_SOURCE_COMMIT.txt",
+            "FFPROBE_BUILD_MARKER.txt",
+            "desktop/src-tauri/resources/ffprobe",
             "ffmpeg-source-",
             "gh release upload",
             "--check-ffprobe",
