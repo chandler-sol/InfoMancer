@@ -160,29 +160,35 @@ installer registration survives.
 
 ### Bundled FFprobe contract
 
-Native desktop packages include FFprobe because media inspection must work on a
+Native Windows packages include FFprobe because media inspection must work on a
 clean machine without requiring the user to install FFmpeg or modify `PATH`.
 Only FFprobe is bundled for this feature. The full FFmpeg executable is not
 included.
 
-The approved Windows and Linux binaries are pinned BtbN/FFmpeg-Builds **LGPL**
-static variants for FFmpeg `n9.0.1-29-gad500d59cb`. The exact FFmpeg source
-commit and BtbN build-scripts commit are pinned alongside each archive SHA-256 in
-`scripts/stage_ffprobe.py`; moving `latest` aliases are not used. The pinned
-BtbN LGPL profile enables `--enable-version3`, so this approved build's effective
-FFmpeg license profile is GNU LGPL v3.
+InfoMancer builds its own minimal Windows x86_64 FFprobe directly from the exact
+pinned FFmpeg source commit `ad500d59cb6e0126add4fcb95afb4e2557c4292c`
+(`n9.0.1-29-gad500d59cb`). We deliberately do not redistribute a general-purpose
+third-party FFmpeg binary bundle because those builds can pull in many optional
+libraries with additional redistribution obligations.
 
-The staging script verifies the downloaded archive, extracts only FFprobe, then
-executes the staged binary with `ffprobe -version`. Packaging fails if the binary
-does not report the expected version, if its configure output contains
-`--enable-gpl` or `--enable-nonfree`, or if the expected `--enable-version3`
-profile is absent. The LGPL v3 license is fetched from the exact FFmpeg source
-commit and its Git blob identity is verified before it is included.
+`scripts/build_minimal_ffprobe.sh` cross-compiles the binary with MinGW-w64 and
+uses `--disable-autodetect`. It does not permit optional `--enable-lib*`
+integrations and disables the `ffmpeg`/`ffplay` programs, networking, encoders,
+muxers, filters, devices, hardware acceleration, iconv, shared libraries, and
+POSIX pthreads. The result stays on FFmpeg's default GNU LGPL v2.1-or-later
+profile. `--enable-gpl`, `--enable-nonfree`, and `--enable-version3` are forbidden.
 
-The executable plus `FFPROBE_LICENSE.txt`, `FFPROBE_NOTICE.txt`, and
-`FFPROBE_BUILDINFO.txt` are added to the PyInstaller core. Before Tauri creates a
-native installer, CI also executes the finished core with `--check-ffprobe` and
-requires the bundled executable to run successfully.
+The build records imported DLLs and rejects unexpected MinGW runtime or optional
+media-library dependencies. The Windows staging step then executes the actual
+candidate binary with `ffprobe -version` and independently verifies its version
+and configure line before it can be packaged.
+
+The executable plus `FFPROBE_LICENSE.txt`, `FFPROBE_NOTICE.txt`,
+`FFPROBE_BUILDINFO.txt`, `FFPROBE_BUILD_SCRIPT.sh`,
+`FFPROBE_CONFIGURE_ARGS.txt`, and `FFPROBE_DLL_DEPENDENCIES.txt` are added to the
+PyInstaller core. Before Tauri creates a native installer, CI also executes the
+finished core with `--check-ffprobe` and requires the bundled executable to run
+successfully.
 
 At runtime, media inspection resolves FFprobe in this order:
 
@@ -191,16 +197,16 @@ At runtime, media inspection resolves FFprobe in this order:
 3. A system `ffprobe` available on `PATH`, which remains useful for source and
    server installations.
 
-For tagged Windows releases, the exact FFmpeg corresponding-source archive, the
-exact BtbN build-scripts archive, and the FFprobe license/notice/build-info files
-are uploaded to the same GitHub Release as the installer. The source archives
-are staged before installer publication so a missing source download blocks the
-release path.
+For every tagged Windows release containing bundled FFprobe, the release job
+uploads the exact corresponding FFmpeg source archive generated from the verified
+source checkout, plus the license, notice, build-info, build script, configure
+arguments, and DLL dependency inventory to the same GitHub Release as the
+installer.
 
-macOS bundling is currently fail-closed because no macOS binary source has yet
-been approved under the same provenance/licensing standard. Do not substitute an
-unreviewed binary to make a macOS packaging job pass.
+Native Linux, macOS, and Windows ARM64 FFprobe bundling are not approved by this
+implementation. Those platforms should continue to use a configured/system
+FFprobe until their native packaging receives the same source, build, runtime,
+and redistribution review.
 
-See `docs/FFPROBE_DISTRIBUTION.md` for the pinned versions, redistribution
-controls, source-publication requirements, future-review triggers, and patent
-note.
+See `docs/FFPROBE_DISTRIBUTION.md` for the complete redistribution controls,
+source-publication requirements, future-review triggers, and patent note.
