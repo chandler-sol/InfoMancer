@@ -1,5 +1,4 @@
 import os
-import re
 import sys
 import tempfile
 import unittest
@@ -8,12 +7,13 @@ from unittest.mock import patch
 
 from app.media_info import ffprobe_executable
 from scripts.stage_ffprobe import (
-    ASSETS,
-    BTBN_COMMIT,
-    BTBN_RELEASE,
     FFMPEG_COMMIT,
+    FORBIDDEN_CONFIGURE_FLAGS,
     LICENSE_GIT_BLOB_SHA1,
-    LICENSE_URL,
+    REQUIRED_CONFIGURE_FLAGS,
+    SOURCE_ARCHIVE,
+    FFprobeComplianceError,
+    _verify_configure_args,
 )
 
 
@@ -38,76 +38,119 @@ class FFprobePackagingTests(unittest.TestCase):
             ):
                 self.assertEqual(ffprobe_executable(), str(candidate))
 
-    def test_pinned_assets_are_reviewed_lgpl_builds(self):
-        expected = {
-            ("windows", "x86_64"),
-            ("windows", "arm64"),
-            ("linux", "x86_64"),
-            ("linux", "arm64"),
-        }
-        self.assertEqual(set(ASSETS), expected)
-        sha256 = re.compile(r"^[0-9a-f]{64}$")
-        for target, asset in ASSETS.items():
-            with self.subTest(target=target):
-                self.assertIn("-lgpl-", asset["filename"])
-                self.assertNotIn("-gpl-", asset["filename"])
-                self.assertRegex(asset["archive_sha256"], sha256)
-                self.assertIn(asset["format"], {"zip", "tar.xz"})
-
-    def test_unreviewed_macos_binary_is_not_silently_bundled(self):
-        self.assertNotIn(("darwin", "x86_64"), ASSETS)
-        self.assertNotIn(("darwin", "arm64"), ASSETS)
-
-    def test_ffprobe_provenance_is_immutable(self):
+    def test_ffprobe_source_identity_is_pinned(self):
         self.assertEqual(
             FFMPEG_COMMIT, "ad500d59cb6e0126add4fcb95afb4e2557c4292c"
         )
+        self.assertEqual(SOURCE_ARCHIVE, f"ffmpeg-source-{FFMPEG_COMMIT}.tar.gz")
         self.assertEqual(
-            BTBN_COMMIT, "cc8f0958be119db774cdaf6c50065651a4901e72"
+            LICENSE_GIT_BLOB_SHA1, "40924c2a6da76a2b0c639f6fe7ef0b2d095a6adb"
         )
-        self.assertEqual(BTBN_RELEASE, "autobuild-2026-09-11-13-20")
-        self.assertTrue(LICENSE_URL.endswith("/COPYING.LGPLv3"))
-        self.assertRegex(LICENSE_GIT_BLOB_SHA1, r"^[0-9a-f]{40}$")
 
-    def test_native_packaging_enforces_lgpl_configuration(self):
+    def test_minimal_build_has_required_license_safety_flags(self):
+        required = {
+            "--disable-autodetect",
+            "--disable-network",
+            "--disable-ffmpeg",
+            "--disable-ffplay",
+            "--disable-encoders",
+            "--disable-muxers",
+            "--disable-filters",
+            "--disable-devices",
+            "--disable-hwaccels",
+            "--disable-pthreads",
+            "--enable-w32threads",
+            "--enable-static",
+            "--disable-shared",
+        }
+        self.assertTrue(required.issubset(REQUIRED_CONFIGURE_FLAGS))
+        self.assertEqual(
+            FORBIDDEN_CONFIGURE_FLAGS,
+            {"--enable-gpl", "--enable-nonfree", "--enable-version3"},
+        )
+
+        build_script = (ROOT / "scripts" / "build_minimal_ffprobe.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(FFMPEG_COMMIT, build_script)
+        self.assertIn("git -C \"$SOURCE_DIR\" archive", build_script)
+        self.assertIn("COPYING.LGPLv2.1", build_script)
+        self.assertNotIn("BtbN", build_script)
+        for flag in required:
+            self.assertIn(flag, build_script)
+
+    def test_configure_verifier_rejects_optional_external_library(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "args.txt"
+            path.write_text(
+                "\n".join(sorted(REQUIRED_CONFIGURE_FLAGS | {"--enable-libopus"}))
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(FFprobeComplianceError):
+                _verify_configure_args(path)
+
+    def test_configure_verifier_rejects_gpl_nonfree_and_version3(self):
+        for flag in FORBIDDEN_CONFIGURE_FLAGS:
+            with self.subTest(flag=flag), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "args.txt"
+                path.write_text(
+                    "\n".join(sorted(REQUIRED_CONFIGURE_FLAGS | {flag})) + "\n",
+                    encoding="utf-8",
+                )
+                with self.assertRaises(FFprobeComplianceError):
+                    _verify_configure_args(path)
+
+    def test_native_stager_is_offline_and_records_compliance_evidence(self):
         stage = (ROOT / "scripts" / "stage_ffprobe.py").read_text(encoding="utf-8")
         for required in (
             "FFPROBE_LICENSE.txt",
             "FFPROBE_NOTICE.txt",
             "FFPROBE_BUILDINFO.txt",
+            "FFPROBE_BUILD_SCRIPT.sh",
+            "FFPROBE_DLL_DEPENDENCIES.txt",
             "--enable-gpl",
             "--enable-nonfree",
             "--enable-version3",
-            "COPYING.LGPLv3",
-            '_require_hash("FFprobe archive"',
+            "--enable-lib",
+            "--disable-autodetect",
             "LICENSE_GIT_BLOB_SHA1",
         ):
             self.assertIn(required, stage)
+        self.assertNotIn("urllib.request", stage)
+        self.assertNotIn("BtbN", stage)
 
         sidecar = (ROOT / "desktop" / "sidecar.py").read_text(encoding="utf-8")
         self.assertIn('parser.add_argument("--check-ffprobe"', sidecar)
         self.assertIn('[ffprobe_executable(), "-version"]', sidecar)
 
-        for relative in (
-            ".github/workflows/windows-desktop.yml",
-            ".github/workflows/windows-desktop-release.yml",
-        ):
-            workflow = (ROOT / relative).read_text(encoding="utf-8")
-            with self.subTest(workflow=relative):
-                self.assertIn("scripts/stage_ffprobe.py", workflow)
-                self.assertIn("FFPROBE_BUILDINFO.txt", workflow)
-                self.assertIn("--add-binary", workflow)
-                self.assertIn("--check-ffprobe", workflow)
+    def test_compliance_workflow_builds_source_then_executes_binary_on_windows(self):
+        workflow = (ROOT / ".github/workflows/ffprobe-compliance.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("scripts/build_minimal_ffprobe.sh", workflow)
+        self.assertIn("gcc-mingw-w64-x86-64", workflow)
+        self.assertIn("minimal-ffprobe-win64", workflow)
+        self.assertIn("scripts/stage_ffprobe.py", workflow)
+        self.assertIn("windows-latest", workflow)
+        self.assertIn("ubuntu-latest", workflow)
 
-    def test_release_publishes_corresponding_ffmpeg_source_and_build_provenance(self):
+    def test_windows_release_uses_minimal_build_and_publishes_source(self):
         workflow = (
             ROOT / ".github/workflows/windows-desktop-release.yml"
         ).read_text(encoding="utf-8")
-        self.assertIn(FFMPEG_COMMIT, workflow)
-        self.assertIn(BTBN_COMMIT, workflow)
-        self.assertIn("ffmpeg-source-", workflow)
-        self.assertIn("ffmpeg-build-scripts-", workflow)
-        self.assertIn("gh release upload", workflow)
+        for required in (
+            "scripts/build_minimal_ffprobe.sh",
+            "minimal-ffprobe-win64",
+            "scripts/stage_ffprobe.py",
+            "FFPROBE_BUILDINFO.txt",
+            "FFPROBE_BUILD_SCRIPT.sh",
+            "ffmpeg-source-",
+            "gh release upload",
+            "--check-ffprobe",
+        ):
+            self.assertIn(required, workflow)
+        self.assertNotIn("BtbN/FFmpeg-Builds", workflow)
 
 
 if __name__ == "__main__":
