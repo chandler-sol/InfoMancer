@@ -78,12 +78,24 @@ jobs:
       - name: Build bundled InfoMancer core
         shell: pwsh
         run: |
-          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILDINFO.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILD_SCRIPT.sh;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_CONFIGURE_ARGS.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_DLL_DEPENDENCIES.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
+          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILDINFO.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILD_SCRIPT.sh;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_CONFIGURE_ARGS.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_DLL_DEPENDENCIES.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_SOURCE_COMMIT.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILD_MARKER.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
           & .\dist\infomancer-core.exe --check-ffprobe
           if ($LASTEXITCODE -ne 0) { throw "Bundled FFprobe self-check failed: $LASTEXITCODE" }
           $triple = (rustc --print host-tuple).Trim()
           New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
           Copy-Item dist/infomancer-core.exe "desktop/src-tauri/binaries/infomancer-core-$triple.exe"
+
+          $ffprobeResources = 'desktop/src-tauri/resources/ffprobe'
+          Remove-Item $ffprobeResources -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $ffprobeResources | Out-Null
+          Copy-Item build/ffprobe/FFPROBE_LICENSE.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_NOTICE.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_BUILDINFO.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_BUILD_SCRIPT.sh $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_CONFIGURE_ARGS.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_DLL_DEPENDENCIES.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_SOURCE_COMMIT.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_BUILD_MARKER.txt $ffprobeResources
 
       - name: Smoke-test recovery helper
         shell: pwsh
@@ -135,6 +147,19 @@ jobs:
             Where-Object { $_.Name -ne 'uninstall.exe' -and $_.Name -ne 'infomancer-core.exe' } |
             Select-Object -First 1
           if (-not $launcher) { throw "Installed InfoMancer launcher was not found under $installDir" }
+
+          $ffprobeNotice = Join-Path $installDir 'third-party\ffprobe\FFPROBE_NOTICE.txt'
+          $ffprobeLicense = Join-Path $installDir 'third-party\ffprobe\FFPROBE_LICENSE.txt'
+          $ffprobeBuildInfo = Join-Path $installDir 'third-party\ffprobe\FFPROBE_BUILDINFO.txt'
+          foreach ($path in @($ffprobeNotice, $ffprobeLicense, $ffprobeBuildInfo)) {
+            if (-not (Test-Path $path)) { throw "Installed FFprobe compliance resource is missing: $path" }
+          }
+          if (-not (Select-String -Path $ffprobeNotice -SimpleMatch 'Independent JPEG Group' -Quiet)) {
+            throw 'Installed FFprobe notice is missing the IJG attribution.'
+          }
+          if (-not (Select-String -Path $ffprobeBuildInfo -SimpleMatch 'infomancer-ad500d59cb' -Quiet)) {
+            throw 'Installed FFprobe build provenance is missing the exact-source build marker.'
+          }
 
           $log = Join-Path $env:APPDATA 'cloud.arsenik.infomancer\logs\desktop-launcher.log'
           Remove-Item $log -Force -ErrorAction SilentlyContinue
