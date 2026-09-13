@@ -13,6 +13,16 @@ on:
       - scripts/stage_ffprobe.py
       - requirements.txt
       - .github/workflows/windows-desktop.yml
+  pull_request:
+    branches:
+      - testing/0.9-alpha-reseed
+    paths:
+      - desktop/**
+      - app/**
+      - scripts/build_minimal_ffprobe.sh
+      - scripts/stage_ffprobe.py
+      - requirements.txt
+      - .github/workflows/windows-desktop.yml
 
 permissions:
   contents: read
