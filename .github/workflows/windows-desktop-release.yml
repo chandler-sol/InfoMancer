@@ -93,23 +93,23 @@ jobs:
           projectPath: desktop
           tagName: ${{ github.ref_name }}
           releaseName: InfoMancer ${{ github.ref_name }}
-          releaseBody: Windows desktop alpha with signed in-app updater artifacts.
+          releaseBody: Windows desktop release with signed in-app updater artifacts.
           releaseDraft: false
-          prerelease: true
+          prerelease: false
           args: --bundles nsis --config src-tauri/tauri.release.conf.json
           updaterJsonPreferNsis: true
           includeUpdaterJson: true
 
-      - name: Update rolling desktop-alpha manifest
+      - name: Update rolling desktop-standard manifest
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $channelDir = Join-Path $env:RUNNER_TEMP 'desktop-alpha-channel'
+          $channelDir = Join-Path $env:RUNNER_TEMP 'desktop-standard-channel'
           New-Item -ItemType Directory -Force $channelDir | Out-Null
           gh release download $env:GITHUB_REF_NAME --pattern latest.json --dir $channelDir
-          gh release view desktop-alpha 2>$null
+          gh release view desktop-standard 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create desktop-alpha --target $env:GITHUB_SHA --title 'InfoMancer Desktop Alpha Update Channel' --notes 'Rolling signed updater manifest for InfoMancer Windows alpha builds.' --prerelease
+            gh release create desktop-standard --target $env:GITHUB_SHA --title 'InfoMancer Desktop Standard Update Channel' --notes 'Rolling signed updater manifest for InfoMancer Windows Standard releases.' --prerelease
           }
-          gh release upload desktop-alpha (Join-Path $channelDir 'latest.json') --clobber
+          gh release upload desktop-standard (Join-Path $channelDir 'latest.json') --clobber
