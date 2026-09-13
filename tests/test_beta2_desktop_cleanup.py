@@ -50,15 +50,11 @@ class Beta2DesktopCleanupContracts(unittest.TestCase):
         self.assertIn("<screenshots>", metainfo)
         self.assertIn("https://infomancer.media/", metainfo)
 
-    def test_release_matrix_keeps_linux_on_glibc_235_floor(self):
-        workflow = (ROOT / ".github/workflows/draft-08-release.yml").read_text(encoding="utf-8")
-        self.assertIn("- os: ubuntu-22.04", workflow)
-        self.assertIn("compat_key: glibc235", workflow)
-        self.assertIn("Confirm Linux compatibility baseline", workflow)
-        self.assertIn("Verify Linux GLIBC compatibility floor", workflow)
-        self.assertIn("binutils", workflow)
-        self.assertIn("GLIBC_2.35", workflow)
-        self.assertNotIn("- os: ubuntu-latest\n            label: Linux", workflow)
+    def test_09_does_not_claim_a_qualified_native_linux_release(self):
+        self.assertFalse((ROOT / ".github/workflows/draft-08-release.yml").exists())
+        distribution = (ROOT / "docs/FFPROBE_DISTRIBUTION.md").read_text(encoding="utf-8")
+        self.assertIn("Linux and macOS native FFprobe bundling are not approved", distribution)
+        self.assertIn("adding native Linux, macOS, or Windows ARM64 FFprobe bundling", distribution)
 
     def test_local_core_conflicts_fail_fast_instead_of_waiting_for_timeout(self):
         sidecar = (ROOT / "desktop/sidecar.py").read_text(encoding="utf-8")
