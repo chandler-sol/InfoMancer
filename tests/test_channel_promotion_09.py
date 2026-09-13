@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -135,6 +136,33 @@ class ChannelPromotion09Tests(unittest.TestCase):
                 promoted_at="2026-09-13T01:00:00+00:00",
             )
 
+    def test_artifact_spec_accepts_unsigned_platform_url_and_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = Path(tmp) / "InfoMancer.exe"
+            artifact_path.write_bytes(b"signed-package-bytes")
+            platform, artifact = promotion.parse_artifact_spec(
+                f"windows=tauri-updater,https://example.invalid/InfoMancer.exe,{artifact_path}"
+            )
+        self.assertEqual(platform, "windows")
+        self.assertEqual(artifact["kind"], "tauri-updater")
+        self.assertEqual(artifact["url"], "https://example.invalid/InfoMancer.exe")
+        self.assertEqual(len(artifact["sha256"]), 64)
+        self.assertNotIn("signature", artifact)
+
+    def test_artifact_spec_accepts_optional_signature_as_fourth_field(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = Path(tmp) / "InfoMancer.exe"
+            artifact_path.write_bytes(b"signed-package-bytes")
+            platform, artifact = promotion.parse_artifact_spec(
+                f"windows=tauri-updater,https://example.invalid/InfoMancer.exe,{artifact_path},minisign-value"
+            )
+        self.assertEqual(platform, "windows")
+        self.assertEqual(artifact["signature"], "minisign-value")
+
+    def test_artifact_spec_rejects_wrong_field_count(self):
+        with self.assertRaisesRegex(ValueError, "platform=kind,url,path"):
+            promotion.parse_artifact_spec("windows=tauri-updater,https://example.invalid/InfoMancer.exe")
+
     def test_workflow_checks_out_exact_qualified_commit_and_requires_signing(self):
         workflow = (ROOT / ".github/workflows/promote-update-channel.yml").read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", workflow)
@@ -142,6 +170,9 @@ class ChannelPromotion09Tests(unittest.TestCase):
         self.assertIn("TAURI_UPDATER_PUBLIC_KEY", workflow)
         self.assertIn("TAURI_SIGNING_PRIVATE_KEY", workflow)
         self.assertIn("scripts/promote_update_channel_manifest.py", workflow)
+        self.assertIn("path: .promotion-control", workflow)
+        self.assertIn("ref: ${{ github.sha }}", workflow)
+        self.assertIn(".promotion-control/scripts/promote_update_channel_manifest.py", workflow)
         self.assertIn("source_build_id", (ROOT / "docs/update-channel-manifest.schema.json").read_text(encoding="utf-8"))
         self.assertNotIn("git checkout testing/0.9-alpha", workflow)
 
