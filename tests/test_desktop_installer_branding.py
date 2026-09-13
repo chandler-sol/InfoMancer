@@ -8,7 +8,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 TAURI_CONFIG = ROOT / "desktop" / "src-tauri" / "tauri.conf.json"
 INSTALLER_HOOKS = ROOT / "desktop" / "src-tauri" / "windows" / "hooks.nsh"
-WINDOWS_PREVIEW = ROOT / ".github" / "workflows" / "windows-preview.yml"
+WINDOWS_WORKFLOW = ROOT / ".github" / "workflows" / "windows-desktop.yml"
 
 
 class DesktopInstallerBrandingTests(unittest.TestCase):
@@ -35,14 +35,14 @@ class DesktopInstallerBrandingTests(unittest.TestCase):
             hooks,
         )
 
-    def test_windows_preview_stamps_and_names_commit_build(self) -> None:
-        workflow = WINDOWS_PREVIEW.read_text(encoding="utf-8")
-        self.assertIn("name: Stamp installer build identity", workflow)
-        self.assertIn("PREVIEW_SHORT_SHA=$shortSha", workflow)
-        self.assertIn("INFOMANCER_BUILD_COMMIT", workflow)
-        self.assertIn("INFOMANCER_BUILD_COMMIT_FULL", workflow)
-        self.assertIn("-commit-$($env:PREVIEW_SHORT_SHA)-setup.exe", workflow)
-        self.assertIn("gh release delete-asset", workflow)
+    def test_active_windows_build_is_commit_identifiable(self) -> None:
+        workflow = WINDOWS_WORKFLOW.read_text(encoding="utf-8")
+        stager = (ROOT / "scripts/stage_ffprobe.py").read_text(encoding="utf-8")
+        self.assertIn("InfoMancer-Windows-${{ github.sha }}", workflow)
+        self.assertIn("scripts/stage_ffprobe.py", workflow)
+        self.assertIn("app/static/build-info.json", stager)
+        self.assertIn('os.environ.get("GITHUB_SHA")', stager)
+        self.assertFalse((ROOT / ".github/workflows/windows-preview.yml").exists())
 
 
 if __name__ == "__main__":
