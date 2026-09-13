@@ -77,45 +77,76 @@ Portable `.infomancer-backup` files are designed to move between supported opera
 
 That means a backup created on Windows can be restored on Linux or macOS, and the reverse is also supported, as long as the receiving InfoMancer version can use the packaged database schema.
 
-Media source paths are the important exception. A portable backup remembers the source paths from the original installation. For example, `D:\Movies` on Windows does not automatically become `/media/movies` on Linux. Reconnect equivalent storage and reconcile paths before running filesystem-changing operations.
+Media source paths are the important exception, and InfoMancer now reconciles them during the verified restore preview. For example:
+
+```text
+D:\Movies       -> /media/Movies
+D:\TV           -> /media/TV
+\\NAS\Movies    -> /Volumes/Movies
+```
+
+The destination must already exist and must be inside a storage location trusted by the receiving InfoMancer installation. InfoMancer never performs an unrestricted filesystem crawl to guess where media moved.
+
+When exactly one directory with the old source's name exists directly under trusted storage, Recovery can suggest it. Suggestions are advisory and remain visible for review before restore.
 
 # Restore a backup
 
 For a clean reinstall or move:
 
 1. Install InfoMancer normally.
-2. Make sure the computer or Server can reach the same media storage. Reconnect drives, network shares, or Server media mappings before restoring when possible.
+2. Connect the media storage and configure the receiving installation's trusted media browse roots.
 3. Complete the temporary first-run setup if InfoMancer requires it so you can reach Librarian Settings.
 4. Open **Settings > Recovery**.
 5. Select the `.infomancer-backup` file.
 6. Choose **Verify package & preview restore**.
-7. Review the backup version, creation time, database size, artwork count, and exclusions.
-8. Type `RESTORE` when you are ready to commit the restore.
-9. Let InfoMancer restart.
-10. Sign in with an account from the restored catalog.
-11. Re-enter TVDB or other provider credentials.
-12. Open Sources and confirm every source points to the intended storage.
-13. Run a scan and review the results before resuming filesystem-changing work.
+7. Review the backup version, creation time, database size, artwork count, exclusions, and original media roots.
+8. For any source that moved, map the original root to the directory containing the same media on this computer or Server.
+9. Review any suggested mappings. Leaving a mapping blank keeps the original root.
+10. Type `RESTORE` when you are ready to commit the restore.
+11. Let InfoMancer restart.
+12. Sign in with an account from the restored catalog.
+13. Re-enter TVDB or other provider credentials.
+14. Open Sources and confirm every source points to the intended storage.
+15. Run a scan and review the results before resuming filesystem-changing work.
 
 The temporary first-run account is replaced when the restored database is committed.
 
+# How path reconciliation works
+
+Path reconciliation happens only against the **staged** recovery database. The live catalog is not edited while mappings are being validated.
+
+For every mapped media root, InfoMancer preserves the relative path underneath that root and updates persisted path-bearing state, including:
+
+- the media root itself
+- title folder paths
+- cataloged media-file paths
+- managed Trash paths
+- pending rename proposal paths
+- path-bearing rename Undo history
+
+Managed-Trash Undo records store a Trash record identifier rather than literal paths, so their referenced Trash rows are reconciled instead. Windows roots are interpreted using Windows path semantics even when the restore is running on Linux or macOS, including case-insensitive Windows path comparisons.
+
+After rewriting, InfoMancer validates the staged database again. Every media path must remain under its mapped root, and every mapped root must remain inside trusted storage. If a path cannot be proven safe, reconciliation fails closed and the live installation is not replaced.
+
+A fresh portable safety package of the current installation is still a hard precondition immediately before the live restore is committed.
+
 # If your media paths changed
 
-A backup remembers the source paths from the original installation.
+Use the Storage Reconciliation section of the verified restore preview rather than weakening trusted browse-root restrictions.
 
-If the new computer or Server uses different drive letters, mount points, or network-share paths, make the corresponding storage available before running file-changing actions.
+For Docker Server installs, map old paths to the directories visible inside the InfoMancer container, such as `/media/Movies`, rather than to host-only paths the container cannot access.
 
-For Docker Server installs, restoring the same host media folders to compatible `/media/...` mappings is the simplest path.
-
-Do not weaken InfoMancer's trusted browse-root restrictions just to make an old backup pass validation. If source paths need to change, update them through supported InfoMancer source-management workflows after the restore environment is safe.
+If a destination is not yet available, reconnect or mount it first. Recovery deliberately requires the destination to exist so a typo cannot silently redirect future filesystem operations to an unintended location.
 
 # What happens during restore
 
 Before InfoMancer replaces the live catalog, it verifies the recovery package and staged database.
 
+If storage mappings are supplied, InfoMancer reconciles those paths inside the staged database and validates the rewritten database against the receiving installation's trusted storage.
+
 Immediately before commit, InfoMancer creates a fresh safety package of the current installation. The database and InfoMancer-managed collection artwork are then restored as one rollback-protected operation.
 
-If verification fails, the live installation is not changed.
+If verification or path reconciliation fails, the live installation is not changed.
 
 If commit fails, InfoMancer attempts to roll back rather than leave the database and artwork in a mixed state.
 
