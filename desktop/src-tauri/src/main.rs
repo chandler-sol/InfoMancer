@@ -17,8 +17,9 @@ use tauri_plugin_updater::UpdaterExt;
 use url::Url;
 use uuid::Uuid;
 
-const UPDATE_ENDPOINT: &str =
-    "https://github.com/chandler-sol/InfoMancer/releases/download/desktop-alpha/latest.json";
+const UPDATE_RELEASE_BASE: &str =
+    "https://github.com/chandler-sol/InfoMancer/releases/download";
+const DEFAULT_UPDATE_CHANNEL: &str = "standard";
 const LOCAL_CORE_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 const LOCAL_CORE_POLL_INTERVAL: Duration = Duration::from_millis(150);
 const LOCAL_CORE_STDERR_HISTORY: usize = 12;
@@ -298,12 +299,46 @@ fn updater_public_key() -> Option<&'static str> {
     })
 }
 
+fn desktop_update_channel(app: &tauri::AppHandle) -> String {
+    let Ok(data_dir) = app_data_dir(app) else {
+        return DEFAULT_UPDATE_CHANNEL.to_string();
+    };
+    let path = data_dir.join("update-channel.json");
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return DEFAULT_UPDATE_CHANNEL.to_string();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return DEFAULT_UPDATE_CHANNEL.to_string();
+    };
+    match value
+        .get("channel")
+        .and_then(|channel| channel.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "standard" => "standard".to_string(),
+        "beta" => "beta".to_string(),
+        "dev" => "dev".to_string(),
+        _ => DEFAULT_UPDATE_CHANNEL.to_string(),
+    }
+}
+
+fn desktop_update_endpoint(channel: &str) -> Result<Url, String> {
+    Url::parse(&format!(
+        "{UPDATE_RELEASE_BASE}/desktop-{channel}/latest.json"
+    ))
+    .map_err(|error| format!("The InfoMancer update endpoint is invalid: {error}"))
+}
+
 fn desktop_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
     let public_key = updater_public_key().ok_or_else(|| {
         "Updater signing key is not configured for this build.".to_string()
     })?;
-    let endpoint = Url::parse(UPDATE_ENDPOINT)
-        .map_err(|error| format!("The InfoMancer update endpoint is invalid: {error}"))?;
+    let channel = desktop_update_channel(app);
+    let endpoint = desktop_update_endpoint(&channel)?;
+    log_launcher(&format!("Desktop updater using {channel} channel: {endpoint}"));
     let exit_handle = app.clone();
     app.updater_builder()
         .pubkey(public_key)
@@ -470,7 +505,7 @@ async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateStatus, String>
     let update = updater
         .check()
         .await
-        .map_err(|error| format!("Could not check GitHub Releases for updates: {error}"))?;
+        .map_err(|error| format!("Could not check the selected InfoMancer channel for updates: {error}"))?;
     match update {
         Some(update) => Ok(UpdateStatus {
             configured: true,
@@ -486,7 +521,7 @@ async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateStatus, String>
             current_version,
             version: None,
             notes: None,
-            message: "InfoMancer is up to date.".into(),
+            message: "InfoMancer is up to date on the selected channel.".into(),
         }),
     }
 }
