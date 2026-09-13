@@ -57,7 +57,7 @@ jobs:
           $dir = Join-Path $env:RUNNER_TEMP 'source-channel'
           New-Item -ItemType Directory -Force $dir | Out-Null
           $name = '${{ inputs.source_channel }}.json'
-          gh release download update-channels --pattern $name --dir $dir
+          gh release download update-channels --repo $env:GITHUB_REPOSITORY --pattern $name --dir $dir
           $path = Join-Path $dir $name
           if (-not (Test-Path $path)) { throw "Qualified source manifest $name was not found." }
           $manifest = Get-Content $path -Raw | ConvertFrom-Json
@@ -170,11 +170,11 @@ jobs:
         run: |
           $published = Join-Path $env:RUNNER_TEMP 'published-promotion'
           New-Item -ItemType Directory -Force $published | Out-Null
-          gh release download $env:PROMOTED_TAG --pattern latest.json --dir $published
-          $release = gh release view $env:PROMOTED_TAG --json assets | ConvertFrom-Json
+          gh release download $env:PROMOTED_TAG --repo $env:GITHUB_REPOSITORY --pattern latest.json --dir $published
+          $release = gh release view $env:PROMOTED_TAG --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json
           $installer = $release.assets | Where-Object { $_.name -like '*.exe' } | Select-Object -First 1
           if ($null -eq $installer) { throw 'The promoted release did not contain a Windows installer asset.' }
-          gh release download $env:PROMOTED_TAG --pattern $installer.name --dir $published
+          gh release download $env:PROMOTED_TAG --repo $env:GITHUB_REPOSITORY --pattern $installer.name --dir $published
           $installerPath = Join-Path $published $installer.name
           "published_dir=$published" >> $env:GITHUB_OUTPUT
           "installer_path=$installerPath" >> $env:GITHUB_OUTPUT
@@ -207,14 +207,14 @@ jobs:
         run: |
           $target = '${{ inputs.target_channel }}'
           $desktopTag = "desktop-$target"
-          gh release view $desktopTag 2>$null
+          gh release view $desktopTag --repo $env:GITHUB_REPOSITORY 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $desktopTag --target '${{ steps.source.outputs.commit_sha }}' --title "InfoMancer Desktop $target Update Channel" --notes "Rolling signed Tauri updater manifest for qualified InfoMancer $target builds." --prerelease
+            gh release create $desktopTag --repo $env:GITHUB_REPOSITORY --target '${{ steps.source.outputs.commit_sha }}' --title "InfoMancer Desktop $target Update Channel" --notes "Rolling signed Tauri updater manifest for qualified InfoMancer $target builds." --prerelease
           }
-          gh release upload $desktopTag (Join-Path $env:PUBLISHED_DIR 'latest.json') --clobber
+          gh release upload $desktopTag --repo $env:GITHUB_REPOSITORY (Join-Path $env:PUBLISHED_DIR 'latest.json') --clobber
 
-          gh release view update-channels 2>$null
+          gh release view update-channels --repo $env:GITHUB_REPOSITORY 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create update-channels --target '${{ steps.source.outputs.commit_sha }}' --title 'InfoMancer Qualified Update Channels' --notes 'Rolling channel manifests for qualified InfoMancer builds.' --prerelease
+            gh release create update-channels --repo $env:GITHUB_REPOSITORY --target '${{ steps.source.outputs.commit_sha }}' --title 'InfoMancer Qualified Update Channels' --notes 'Rolling channel manifests for qualified InfoMancer builds.' --prerelease
           }
-          gh release upload update-channels "build/update-channel/$target.json" --clobber
+          gh release upload update-channels --repo $env:GITHUB_REPOSITORY "build/update-channel/$target.json" --clobber
