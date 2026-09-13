@@ -66,6 +66,27 @@
         }
       }
     },
+    "promotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_channel",
+        "source_version",
+        "source_build_id",
+        "source_commit_sha",
+        "promoted_at"
+      ],
+      "properties": {
+        "source_channel": {"enum": ["beta", "dev"]},
+        "source_version": {
+          "type": "string",
+          "pattern": "^v?[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+        },
+        "source_build_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "source_commit_sha": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+        "promoted_at": {"type": "string", "format": "date-time"}
+      }
+    },
     "artifacts": {
       "type": "object",
       "additionalProperties": {
