@@ -116,6 +116,13 @@ class WindowsDesktopContractTests(unittest.TestCase):
         release_config = json.loads((ROOT / "desktop/src-tauri/tauri.release.conf.json").read_text(encoding="utf-8"))
         self.assertTrue(release_config["bundle"]["createUpdaterArtifacts"])
 
+    def test_tauri_wrapper_preserves_native_updater_artifacts_for_action_discovery(self):
+        wrapper = (ROOT / "desktop/scripts/tauri-wrapper.mjs").read_text(encoding="utf-8")
+        self.assertIn("copyFileSync(source, destination)", wrapper)
+        self.assertIn("copyFileSync(sourceSignature, destinationSignature)", wrapper)
+        self.assertNotIn("renameSync(source, destination)", wrapper)
+        self.assertNotIn("renameSync(sourceSignature, destinationSignature)", wrapper)
+
     def test_release_workflow_keeps_private_key_out_of_source(self):
         workflow = (ROOT / ".github/workflows/windows-desktop-release.yml").read_text(encoding="utf-8")
         self.assertIn("secrets.TAURI_SIGNING_PRIVATE_KEY", workflow)
