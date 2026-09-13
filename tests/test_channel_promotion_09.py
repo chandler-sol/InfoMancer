@@ -135,6 +135,16 @@ class ChannelPromotion09Tests(unittest.TestCase):
                 promoted_at="2026-09-13T01:00:00+00:00",
             )
 
+    def test_workflow_checks_out_exact_qualified_commit_and_requires_signing(self):
+        workflow = (ROOT / ".github/workflows/promote-update-channel.yml").read_text(encoding="utf-8")
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("ref: ${{ steps.source.outputs.commit_sha }}", workflow)
+        self.assertIn("TAURI_UPDATER_PUBLIC_KEY", workflow)
+        self.assertIn("TAURI_SIGNING_PRIVATE_KEY", workflow)
+        self.assertIn("scripts/promote_update_channel_manifest.py", workflow)
+        self.assertIn("source_build_id", (ROOT / "docs/update-channel-manifest.schema.json").read_text(encoding="utf-8"))
+        self.assertNotIn("git checkout testing/0.9-alpha", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
