@@ -55,12 +55,26 @@ jobs:
         shell: pwsh
         run: |
           python scripts/stage_ffprobe.py
-          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
+          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILDINFO.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
           & .\dist\infomancer-core.exe --check-ffprobe
           if ($LASTEXITCODE -ne 0) { throw "Bundled FFprobe self-check failed: $LASTEXITCODE" }
           $triple = (rustc --print host-tuple).Trim()
           New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
           Copy-Item dist/infomancer-core.exe "desktop/src-tauri/binaries/infomancer-core-$triple.exe"
+
+      - name: Stage FFmpeg corresponding source and build scripts
+        shell: pwsh
+        run: |
+          $ffmpegCommit = 'ad500d59cb6e0126add4fcb95afb4e2557c4292c'
+          $btbnCommit = 'cc8f0958be119db774cdaf6c50065651a4901e72'
+          $complianceDir = 'build/ffprobe/compliance'
+          New-Item -ItemType Directory -Force $complianceDir | Out-Null
+          $ffmpegSource = Join-Path $complianceDir "ffmpeg-source-$ffmpegCommit.tar.gz"
+          $btbnSource = Join-Path $complianceDir "ffmpeg-build-scripts-$btbnCommit.tar.gz"
+          Invoke-WebRequest -Uri "https://github.com/FFmpeg/FFmpeg/archive/$ffmpegCommit.tar.gz" -OutFile $ffmpegSource
+          Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/archive/$btbnCommit.tar.gz" -OutFile $btbnSource
+          if ((Get-Item $ffmpegSource).Length -lt 1MB) { throw 'FFmpeg corresponding-source archive is unexpectedly small.' }
+          if ((Get-Item $btbnSource).Length -lt 1KB) { throw 'BtbN build-scripts archive is unexpectedly small.' }
 
       - name: Install desktop dependencies
         working-directory: desktop
@@ -99,6 +113,21 @@ jobs:
           args: --bundles nsis --config src-tauri/tauri.release.conf.json
           updaterJsonPreferNsis: true
           includeUpdaterJson: true
+
+      - name: Publish FFprobe license, provenance, and corresponding source
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ffmpegCommit = 'ad500d59cb6e0126add4fcb95afb4e2557c4292c'
+          $btbnCommit = 'cc8f0958be119db774cdaf6c50065651a4901e72'
+          gh release upload $env:GITHUB_REF_NAME `
+            build/ffprobe/FFPROBE_LICENSE.txt `
+            build/ffprobe/FFPROBE_NOTICE.txt `
+            build/ffprobe/FFPROBE_BUILDINFO.txt `
+            "build/ffprobe/compliance/ffmpeg-source-$ffmpegCommit.tar.gz" `
+            "build/ffprobe/compliance/ffmpeg-build-scripts-$btbnCommit.tar.gz" `
+            --clobber
 
       - name: Update rolling desktop-alpha manifest
         shell: pwsh
