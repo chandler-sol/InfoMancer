@@ -137,7 +137,7 @@ jobs:
             throw 'Windows release launcher is not configured for the GUI subsystem.'
           }
 
-      - name: Build, sign, and publish Windows updater
+      - name: Build, sign, and stage Windows updater release
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -149,13 +149,13 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: InfoMancer ${{ github.ref_name }}
           releaseBody: Windows desktop alpha with signed in-app updater artifacts.
-          releaseDraft: false
+          releaseDraft: true
           prerelease: true
           args: --bundles nsis --config src-tauri/tauri.release.conf.json
           updaterJsonPreferNsis: true
           includeUpdaterJson: true
 
-      - name: Publish FFprobe license, build recipe, provenance, and corresponding source
+      - name: Upload FFprobe compliance assets to draft release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -172,6 +172,13 @@ jobs:
             build/ffprobe/FFPROBE_BUILD_MARKER.txt `
             "build/minimal-ffprobe/ffmpeg-source-$ffmpegCommit.tar.gz" `
             --clobber
+
+      - name: Publish verified Windows release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit $env:GITHUB_REF_NAME --draft=false --prerelease
 
       - name: Update rolling desktop-alpha manifest
         shell: pwsh
