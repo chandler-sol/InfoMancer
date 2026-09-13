@@ -26,14 +26,17 @@ The approved build is pinned to:
 - BtbN release: `autobuild-2026-09-11-13-20`
 - BtbN build-scripts commit: `cc8f0958be119db774cdaf6c50065651a4901e72`
 - Variant: `lgpl`, static executable
+- Effective FFmpeg license profile: GNU LGPL v3
 
 Each platform archive is pinned by SHA-256 in `scripts/stage_ffprobe.py`. The staging script does not use BtbN's moving `latest` aliases.
+
+The exact BtbN `defaults-lgpl.sh` at the pinned build-scripts commit explicitly enables `--enable-version3` and selects `COPYING.LGPLv3`. That means the effective license for this approved binary profile is LGPL v3, not FFmpeg's default LGPL v2.1-or-later profile.
 
 macOS is intentionally not in the approved binary table. Native macOS packaging must fail closed until an LGPL build and corresponding-source path are reviewed and pinned. Do not restore the previous unreviewed `eugeneware/ffmpeg-static` macOS binaries as a workaround.
 
 ## License guardrails
 
-FFmpeg is LGPL v2.1-or-later by default, but optional components can change the effective license. In particular, a build configured with `--enable-gpl` becomes GPL, and a build configured with `--enable-nonfree` is not redistributable under FFmpeg's normal terms.
+FFmpeg is LGPL v2.1-or-later by default, but optional configure choices can change the effective license. A build configured with `--enable-gpl` becomes GPL. A build configured with `--enable-nonfree` is not redistributable under FFmpeg's normal terms. The approved BtbN LGPL profile also uses `--enable-version3`, which moves this build to LGPL v3.
 
 InfoMancer therefore applies all of these checks before a bundled FFprobe reaches PyInstaller:
 
@@ -42,8 +45,9 @@ InfoMancer therefore applies all of these checks before a bundled FFprobe reache
 3. Only the `ffprobe` executable is extracted from that verified archive.
 4. The staged executable is run with `ffprobe -version` on the native build runner.
 5. Packaging aborts if the reported build configuration contains `--enable-gpl` or `--enable-nonfree`.
-6. Packaging aborts if the binary does not report the exact pinned FFmpeg version.
-7. The LGPL v2.1 text is fetched from the exact FFmpeg source commit and verified by its Git blob SHA-1 before being staged.
+6. Packaging aborts unless the reported build configuration contains the expected `--enable-version3` flag.
+7. Packaging aborts if the binary does not report the exact pinned FFmpeg version.
+8. The LGPL v3 text is fetched from the exact FFmpeg source commit and verified by its Git blob SHA-1 before being staged.
 
 A future FFprobe update must repeat this review. Changing only the version string or download URL is not sufficient.
 
@@ -51,8 +55,8 @@ A future FFprobe update must repeat this review. Changing only the version strin
 
 The packaged InfoMancer core carries these files under its third-party FFprobe data:
 
-- `FFPROBE_LICENSE.txt`: GNU LGPL v2.1 license text from the exact FFmpeg source commit.
-- `FFPROBE_NOTICE.txt`: identifies FFmpeg, the binary builder, the exact source/build provenance, and the separation between InfoMancer and FFmpeg.
+- `FFPROBE_LICENSE.txt`: GNU LGPL v3 license text from the exact FFmpeg source commit.
+- `FFPROBE_NOTICE.txt`: identifies FFmpeg, the effective license profile, the binary builder, the exact source/build provenance, and the separation between InfoMancer and FFmpeg.
 - `FFPROBE_BUILDINFO.txt`: records the archive checksum plus the staged binary's own `ffprobe -version` output, including its configure line.
 
 InfoMancer must not claim ownership of FFmpeg/FFprobe or remove upstream copyright/license notices.
@@ -71,7 +75,7 @@ For every tagged Windows desktop release that contains the bundled FFprobe binar
 
 The release job stages the source archives before publishing the installer so a missing source download blocks the release path instead of silently publishing a binary-only release.
 
-If the approved builder begins patching FFmpeg source or introduces dependencies with additional source-distribution obligations, the release process must be expanded to carry the complete corresponding material for those changes/dependencies before that newer build is approved.
+BtbN's LGPL build can contain additional LGPL-compatible third-party dependencies. Their licenses and any dependency-specific notice/source duties belong in InfoMancer's broader third-party dependency review and SBOM. That broader release gate remains separate from this FFmpeg-specific control. If a future approved builder adds a dependency with a corresponding-source obligation, the source publication step must be expanded before that build can ship.
 
 ## Future changes that require a new review
 
@@ -80,6 +84,7 @@ Repeat the FFmpeg distribution review before any of the following:
 - updating the pinned FFmpeg or BtbN build;
 - adding macOS native FFprobe bundling;
 - switching builders;
+- changing the `--enable-version3` license profile;
 - enabling GPL or nonfree components;
 - adding the full `ffmpeg` executable;
 - using FFmpeg libraries through direct/static/dynamic linking instead of spawning FFprobe as a separate process;
@@ -97,6 +102,7 @@ A release containing bundled FFprobe is not ready to publish unless all of these
 - the archive SHA-256 check passes;
 - `ffprobe -version` reports the pinned version;
 - the configure line contains neither `--enable-gpl` nor `--enable-nonfree`;
-- the LGPL license, notice, and build-info files are embedded in the package;
+- the configure line contains the expected `--enable-version3` profile;
+- the LGPL v3 license, notice, and build-info files are embedded in the package;
 - the exact FFmpeg source and BtbN build scripts are uploaded to the same release location as the installer;
 - the packaged `infomancer-core --check-ffprobe` smoke test passes.
