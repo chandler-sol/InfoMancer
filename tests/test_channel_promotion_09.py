@@ -163,16 +163,17 @@ class ChannelPromotion09Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "platform=kind,url,path"):
             promotion.parse_artifact_spec("windows=tauri-updater,https://example.invalid/InfoMancer.exe")
 
-    def test_workflow_checks_out_exact_qualified_commit_and_requires_signing(self):
+    def test_workflow_checks_out_and_publishes_exact_qualified_commit(self):
         workflow = (ROOT / ".github/workflows/promote-update-channel.yml").read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("ref: ${{ steps.source.outputs.commit_sha }}", workflow)
+        self.assertIn("releaseCommitish: ${{ steps.source.outputs.commit_sha }}", workflow)
+        self.assertIn("Require unused immutable promotion tag", workflow)
+        self.assertIn("never overwritten; choose a new target version", workflow)
+        self.assertIn("tag does not resolve to the exact qualified source commit", workflow)
         self.assertIn("TAURI_UPDATER_PUBLIC_KEY", workflow)
         self.assertIn("TAURI_SIGNING_PRIVATE_KEY", workflow)
         self.assertIn("scripts/promote_update_channel_manifest.py", workflow)
-        self.assertIn("Reserve promoted release at qualified source commit", workflow)
-        self.assertIn("--target $env:SOURCE_SHA", workflow)
-        self.assertIn("tag does not resolve to the exact qualified source commit", workflow)
         self.assertIn("signature_path", workflow)
         self.assertIn("$artifactSpec =", workflow)
         self.assertIn("source_build_id", (ROOT / "docs/update-channel-manifest.schema.json").read_text(encoding="utf-8"))
