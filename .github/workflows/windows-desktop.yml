@@ -42,7 +42,7 @@ jobs:
         shell: pwsh
         run: |
           python scripts/stage_ffprobe.py
-          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
+          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILDINFO.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
           & .\dist\infomancer-core.exe --check-ffprobe
           if ($LASTEXITCODE -ne 0) { throw "Bundled FFprobe self-check failed: $LASTEXITCODE" }
           $triple = (rustc --print host-tuple).Trim()
