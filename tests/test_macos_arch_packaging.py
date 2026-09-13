@@ -19,59 +19,19 @@ def _load_macos_auditor():
 
 
 class MacOsArchitecturePackagingContracts(unittest.TestCase):
-    def test_release_builds_native_apple_silicon_and_intel_dmgs(self):
-        workflow = (ROOT / ".github/workflows/draft-08-release.yml").read_text(encoding="utf-8")
+    def test_legacy_multiplatform_release_path_is_not_active_on_09(self):
+        self.assertFalse((ROOT / ".github/workflows/draft-08-release.yml").exists())
+        self.assertFalse((ROOT / ".github/workflows/windows-preview.yml").exists())
 
-        self.assertIn("- os: macos-26\n            label: macOS Apple Silicon", workflow)
-        self.assertIn("slug: macos-arm64", workflow)
-        self.assertIn("- os: macos-26-intel\n            label: macOS Intel", workflow)
-        self.assertIn("slug: macos-intel", workflow)
-        self.assertGreaterEqual(workflow.count("asset_os: macos"), 2)
-        self.assertIn("RELEASE_OS: ${{ matrix.asset_os }}", workflow)
-        self.assertIn("name: infomancer-${{ matrix.slug }}", workflow)
-
-    def test_ffprobe_is_pinned_for_both_mac_architectures(self):
+    def test_macos_ffprobe_bundling_requires_separate_review(self):
         stage = (ROOT / "scripts/stage_ffprobe.py").read_text(encoding="utf-8")
+        distribution = (ROOT / "docs/FFPROBE_DISTRIBUTION.md").read_text(encoding="utf-8")
 
-        self.assertIn('(\"darwin\", \"x86_64\")', stage)
-        self.assertIn('"slug": "darwin-x64"', stage)
-        self.assertIn('(\"darwin\", \"arm64\")', stage)
-        self.assertIn('"slug": "darwin-arm64"', stage)
-
-    def test_intel_macos_cryptography_is_built_with_static_openssl(self):
-        workflow = (ROOT / ".github/workflows/draft-08-release.yml").read_text(encoding="utf-8")
-
-        self.assertIn("Build Intel macOS cryptography with static OpenSSL", workflow)
-        self.assertIn("if: matrix.slug == 'macos-intel'", workflow)
-        self.assertIn("OPENSSL_STATIC=1", workflow)
-        self.assertIn("OPENSSL_DIR=\"$(brew --prefix openssl@3)\"", workflow)
-        self.assertIn("--no-binary cryptography", workflow)
-        self.assertIn("Verify macOS cryptography OpenSSL linkage", workflow)
-        self.assertIn("otool -L", workflow)
-
-    def test_packaged_macos_core_is_started_during_release_smoke_test(self):
-        workflow = (ROOT / ".github/workflows/draft-08-release.yml").read_text(encoding="utf-8")
-
-        self.assertIn("Smoke-test packaged macOS core startup", workflow)
-        self.assertIn("./dist/infomancer-core --port", workflow)
-        self.assertIn("--data-dir \"$smoke_dir\"", workflow)
-        self.assertIn("socket.create_connection(('127.0.0.1', port)", workflow)
-
-
-def test_canonical_intel_build_targets_ventura_and_audits_finished_dmg(self):
-    workflow = (ROOT / ".github/workflows/draft-08-release.yml").read_text(encoding="utf-8")
-    auditor = (ROOT / "scripts/verify_macos_minos.py").read_text(encoding="utf-8")
-
-    self.assertFalse((ROOT / ".github/workflows/macos-intel-priority.yml").exists())
-    self.assertIn("MACOSX_DEPLOYMENT_TARGET=13.0", workflow)
-    self.assertIn("CMAKE_OSX_DEPLOYMENT_TARGET=13.0", workflow)
-    self.assertIn("macos13", workflow)
-    self.assertIn('TMPDIR="$pyi_tmp" ./dist/infomancer-core', workflow)
-    self.assertIn("Verify finished Intel app supports macOS 13", workflow)
-    self.assertIn('hdiutil attach "$dmg"', workflow)
-    self.assertIn("verify_macos_minos.py", workflow)
-    self.assertIn('"xcrun", "vtool", "-show-build"', auditor)
-    self.assertIn("newer than supported", auditor)
+        self.assertIn("Windows FFprobe redistribution check must execute on Windows", stage)
+        self.assertNotIn('(\"darwin\", \"x86_64\")', stage)
+        self.assertNotIn('(\"darwin\", \"arm64\")', stage)
+        self.assertIn("Linux and macOS native FFprobe bundling are not approved", distribution)
+        self.assertIn("adding native Linux, macOS, or Windows ARM64 FFprobe bundling", distribution)
 
     def test_macos_auditor_ignores_linker_tool_version(self):
         auditor = _load_macos_auditor()
@@ -98,20 +58,6 @@ Load command 9
       sdk 13.3
 """
         self.assertEqual(auditor._parse_minimum_versions(output), ["12.0"])
-
-    def test_normal_release_preserves_intel_ventura_contract(self):
-        workflow = (ROOT / ".github/workflows/draft-08-release.yml").read_text(encoding="utf-8")
-
-        self.assertIn("Configure Intel macOS 13 deployment target", workflow)
-        self.assertIn("MACOSX_DEPLOYMENT_TARGET=13.0", workflow)
-        self.assertIn("CMAKE_OSX_DEPLOYMENT_TARGET=13.0", workflow)
-        self.assertIn("compat_key: macos13", workflow)
-        self.assertIn('TMPDIR="$pyi_tmp" ./dist/infomancer-core', workflow)
-        self.assertIn("Verify finished Intel app supports macOS 13", workflow)
-        self.assertIn('hdiutil attach "$dmg"', workflow)
-        self.assertIn("scripts/verify_macos_minos.py", workflow)
-        self.assertIn("testing/0.8-beta", workflow)
-        self.assertNotIn("testing/0.8-alpha", workflow)
 
     def test_macos_launcher_log_uses_persistent_application_support(self):
         launcher = (ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")

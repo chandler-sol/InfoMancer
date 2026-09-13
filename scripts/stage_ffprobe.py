@@ -1,107 +1,275 @@
 from __future__ import annotations
 
 import argparse
-import gzip
 import hashlib
 import json
 import os
-import platform
-import stat
-import urllib.request
+import re
+import shutil
+import subprocess
 from pathlib import Path
 
 
-VERSION = "6.1.1"
-RELEASE_BASE = (
-    "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1"
-)
+FFMPEG_COMMIT = "ad500d59cb6e0126add4fcb95afb4e2557c4292c"
+FFMPEG_SHORT = FFMPEG_COMMIT[:10]
+BUILD_MARKER = f"infomancer-{FFMPEG_SHORT}"
+SOURCE_ARCHIVE = f"ffmpeg-source-{FFMPEG_COMMIT}.tar.gz"
+LICENSE_GIT_BLOB_SHA1 = "40924c2a6da76a2b0c639f6fe7ef0b2d095a6adb"
 
-ASSETS = {
-    ("windows", "x86_64"): {
-        "slug": "win32-x64",
-        "archive_sha256": "f309e6223ad89d2fe54bccd420a7709b66fd27540674e92309578ed491a43c8d",
-        "binary_sha256": "3a7e2dc003dc2cd1472827e4c7c4f056ae1ae0ae7c5bbc580c99b49827351ba4",
-        "license_sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
-    },
-    ("linux", "x86_64"): {
-        "slug": "linux-x64",
-        "archive_sha256": "25d9b6ccb05e3d9de9e04e31e2506d8dd7f9f0418981965ac6df12e8d3afd067",
-        "binary_sha256": "4f231a1960d83e403d08f7971e271707bec278a9ae18e21b8b5b03186668450d",
-        "license_sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
-    },
-    ("linux", "arm64"): {
-        "slug": "linux-arm64",
-        "archive_sha256": "2ab6aba60ee84412dff9188720703376cb4e7aaf7e0b5e43aa8249f2acae5bf8",
-        "binary_sha256": "d17ae9b4c297d48e2521ba14e417bb0537c6ff77c584cdbcd6bb0d8d0307a2e8",
-        "license_sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
-    },
-    ("darwin", "x86_64"): {
-        "slug": "darwin-x64",
-        "archive_sha256": "d4da574d6e2e197bd259b47d69cf262df9e312af24ad960444f6d806d3d4c186",
-        "binary_sha256": "fa3add0ce901f7241abe0dfc0155d958fc834aca3f8ce61f87cc712ae669c1e0",
-        "license_sha256": "2e1d16c72fd74e12063776371da757322f8b77589386532f4fd8634bde7de1af",
-    },
-    ("darwin", "arm64"): {
-        "slug": "darwin-arm64",
-        "archive_sha256": "d986a8ec7b030899fe66a8a288ed809a3543338705a3ce178cfb85869c5d80be",
-        "binary_sha256": "bb2db6f5d8cef919da12fbf592119a987202a8c060a886f3cab091f9cab90b64",
-        "license_sha256": "cb48bf09a11f5fb576cddb0431c8f5ed0a60157a9ec942adffc13907cbe083f2",
-    },
+REQUIRED_CONFIGURE_FLAGS = {
+    "--target-os=mingw32",
+    "--arch=x86_64",
+    f"--extra-version={BUILD_MARKER}",
+    "--disable-autodetect",
+    "--disable-debug",
+    "--disable-doc",
+    "--disable-ffmpeg",
+    "--disable-ffplay",
+    "--disable-network",
+    "--disable-avdevice",
+    "--disable-devices",
+    "--disable-filters",
+    "--disable-encoders",
+    "--disable-muxers",
+    "--disable-hwaccels",
+    "--disable-iconv",
+    "--disable-pthreads",
+    "--enable-w32threads",
+    "--disable-x86asm",
+    "--enable-static",
+    "--disable-shared",
+}
+
+FORBIDDEN_CONFIGURE_FLAGS = {
+    "--enable-gpl",
+    "--enable-nonfree",
+    "--enable-version3",
 }
 
 
-def _sha256(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+class FFprobeComplianceError(RuntimeError):
+    """Raised when a candidate FFprobe artifact is unsafe to redistribute."""
 
 
-def _platform_key() -> tuple[str, str]:
-    system = platform.system().casefold()
-    machine = platform.machine().casefold()
-    if system == "windows":
-        os_name = "windows"
-    elif system == "darwin":
-        os_name = "darwin"
-    elif system == "linux":
-        os_name = "linux"
-    else:
-        raise RuntimeError(f"Unsupported FFprobe build operating system: {system}")
-
-    if machine in {"amd64", "x86_64"}:
-        arch = "x86_64"
-    elif machine in {"arm64", "aarch64"}:
-        arch = "arm64"
-    else:
-        raise RuntimeError(f"Unsupported FFprobe build architecture: {machine}")
-    return os_name, arch
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
-def _download(url: str) -> bytes:
-    request = urllib.request.Request(
-        url,
-        headers={"User-Agent": "InfoMancer-native-packaging/0.8.1"},
-    )
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return response.read()
+def _git_blob_sha1(data: bytes) -> str:
+    """Return Git's blob object ID; SHA-1 here is an object identity, not a security check."""
+    header = f"blob {len(data)}\0".encode("ascii")
+    return hashlib.sha1(header + data, usedforsecurity=False).hexdigest()
 
 
-def _require_hash(label: str, data: bytes, expected: str) -> None:
-    actual = _sha256(data)
-    if actual != expected:
-        raise RuntimeError(
-            f"{label} SHA-256 mismatch: expected {expected}, received {actual}"
+def _read_nonempty_lines(path: Path) -> list[str]:
+    return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _verify_input_bundle(input_dir: Path) -> dict[str, Path]:
+    files = {
+        "binary": input_dir / "ffprobe.exe",
+        "license": input_dir / "FFPROBE_LICENSE.txt",
+        "build_script": input_dir / "FFPROBE_BUILD_SCRIPT.sh",
+        "configure_args": input_dir / "FFPROBE_CONFIGURE_ARGS.txt",
+        "dll_dependencies": input_dir / "FFPROBE_DLL_DEPENDENCIES.txt",
+        "source_commit": input_dir / "FFPROBE_SOURCE_COMMIT.txt",
+        "build_marker": input_dir / "FFPROBE_BUILD_MARKER.txt",
+        "source": input_dir / SOURCE_ARCHIVE,
+    }
+    missing = [str(path) for path in files.values() if not path.is_file()]
+    if missing:
+        raise FFprobeComplianceError(
+            "Minimal FFprobe artifact is incomplete; missing: " + ", ".join(missing)
         )
+    if files["binary"].stat().st_size < 100_000:
+        raise FFprobeComplianceError("Candidate ffprobe.exe is unexpectedly small")
+    if files["source"].stat().st_size < 1_000_000:
+        raise FFprobeComplianceError("Corresponding FFmpeg source archive is unexpectedly small")
+
+    source_commit = files["source_commit"].read_text(encoding="utf-8").strip()
+    if source_commit != FFMPEG_COMMIT:
+        raise FFprobeComplianceError(
+            f"FFmpeg source commit mismatch: expected {FFMPEG_COMMIT}, received {source_commit}"
+        )
+    build_marker = files["build_marker"].read_text(encoding="utf-8").strip()
+    if build_marker != BUILD_MARKER:
+        raise FFprobeComplianceError(
+            f"FFprobe build marker mismatch: expected {BUILD_MARKER}, received {build_marker}"
+        )
+    return files
+
+
+def _verify_license(path: Path) -> None:
+    data = path.read_bytes()
+    actual = _git_blob_sha1(data)
+    if actual != LICENSE_GIT_BLOB_SHA1:
+        raise FFprobeComplianceError(
+            "LGPL v2.1 license identity mismatch: expected Git blob "
+            f"{LICENSE_GIT_BLOB_SHA1}, received {actual}"
+        )
+
+
+def _verify_configure_args(path: Path) -> list[str]:
+    args = _read_nonempty_lines(path)
+    configured = set(args)
+    missing = sorted(REQUIRED_CONFIGURE_FLAGS - configured)
+    if missing:
+        raise FFprobeComplianceError(
+            "Minimal FFprobe build is missing required configure flags: "
+            + ", ".join(missing)
+        )
+
+    forbidden = sorted(FORBIDDEN_CONFIGURE_FLAGS & configured)
+    external = sorted(flag for flag in args if re.match(r"--enable-lib", flag))
+    if forbidden or external:
+        raise FFprobeComplianceError(
+            "Refusing FFprobe build with disallowed license/external-library flags: "
+            + ", ".join(forbidden + external)
+        )
+    return args
+
+
+def _verify_dll_dependencies(path: Path) -> list[str]:
+    dependencies = _read_nonempty_lines(path)
+    if not dependencies:
+        raise FFprobeComplianceError("FFprobe DLL dependency inventory is empty")
+
+    # The minimal build may depend on Windows system DLLs, but not on MinGW
+    # runtime DLLs or third-party media libraries. Keep this intentionally
+    # conservative and expand only after review of a reproducible build.
+    forbidden_patterns = (
+        "libgcc",
+        "libstdc++",
+        "libwinpthread",
+        "libiconv",
+        "libz",
+        "avcodec",
+        "avformat",
+        "avutil",
+        "swresample",
+        "swscale",
+    )
+    bad = [
+        dep
+        for dep in dependencies
+        if any(pattern in dep.casefold() for pattern in forbidden_patterns)
+    ]
+    if bad:
+        raise FFprobeComplianceError(
+            "Minimal FFprobe unexpectedly depends on non-system DLLs: " + ", ".join(bad)
+        )
+    return dependencies
+
+
+def _verify_ffprobe(binary_path: Path) -> str:
+    if os.name != "nt":
+        raise FFprobeComplianceError(
+            "The Windows FFprobe redistribution check must execute on Windows"
+        )
+    try:
+        result = subprocess.run(
+            [str(binary_path), "-version"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise FFprobeComplianceError(f"Could not execute candidate FFprobe: {exc}") from exc
+
+    report = result.stdout
+    lower = report.casefold()
+    if not lower.startswith("ffprobe version "):
+        raise FFprobeComplianceError("Candidate did not identify itself as FFprobe")
+    if BUILD_MARKER.casefold() not in lower:
+        raise FFprobeComplianceError(
+            f"Candidate FFprobe did not report required build marker {BUILD_MARKER}"
+        )
+    if "configuration:" not in lower:
+        raise FFprobeComplianceError("Candidate FFprobe did not report its build configuration")
+
+    forbidden = [
+        flag
+        for flag in ("--enable-gpl", "--enable-nonfree", "--enable-version3")
+        if flag in lower
+    ]
+    external = sorted(set(re.findall(r"--enable-lib[a-z0-9_-]+", lower)))
+    if forbidden or external:
+        raise FFprobeComplianceError(
+            "Refusing FFprobe binary with disallowed license/external-library configuration: "
+            + ", ".join(forbidden + external)
+        )
+    for required in REQUIRED_CONFIGURE_FLAGS:
+        if required.casefold() not in lower:
+            raise FFprobeComplianceError(
+                f"Candidate FFprobe runtime configuration is missing {required}"
+            )
+    return report
 
 
 def _write_notice(output: Path) -> None:
     (output / "FFPROBE_NOTICE.txt").write_text(
-        "InfoMancer native desktop packages include FFprobe from FFmpeg for local "
-        "media inspection.\n\n"
-        f"Bundled build: FFmpeg/FFprobe {VERSION}\n"
-        f"Binary source: {RELEASE_BASE}\n"
+        "InfoMancer native Windows packages include FFprobe from the FFmpeg "
+        "project as a separate executable used only for local media inspection.\n\n"
+        f"Bundled FFmpeg source commit: {FFMPEG_COMMIT}\n"
+        f"InfoMancer FFprobe build marker: {BUILD_MARKER}\n"
+        "Effective FFmpeg license profile: GNU LGPL v2.1 or later\n"
         "Upstream project: https://ffmpeg.org/\n\n"
-        "The accompanying FFPROBE_LICENSE.txt is the license distributed with "
-        "the pinned binary build. Review third-party distribution obligations "
-        "before publishing a production release.\n",
+        "InfoMancer builds this FFprobe executable from the exact FFmpeg source "
+        "commit with --disable-autodetect and without optional external media "
+        "libraries, GPL components, nonfree components, or the version-3-only "
+        "license profile. The build also disables FFmpeg, FFplay, networking, "
+        "encoders, muxers, filters, devices, and hardware acceleration because "
+        "InfoMancer only needs local metadata inspection.\n\n"
+        "FFPROBE_LICENSE.txt contains FFmpeg's GNU LGPL v2.1 license text. "
+        "FFPROBE_BUILDINFO.txt records the binary hash, source hash, exact "
+        "configuration, DLL dependency inventory, and the binary's own "
+        "ffprobe -version output. FFPROBE_BUILD_SCRIPT.sh is the exact build "
+        "recipe. The corresponding FFmpeg source archive is published beside "
+        "each native release that contains this binary.\n\n"
+        "This software is based in part on the work of the Independent JPEG Group.\n"
+        "InfoMancer does not modify the IJG-derived FFmpeg source files; the "
+        "exact upstream source and their original notices are included in the "
+        "corresponding-source archive.\n\n"
+        "FFmpeg/FFprobe is third-party software and is not owned by InfoMancer. "
+        "InfoMancer and FFmpeg are separate projects.\n",
+        encoding="utf-8",
+    )
+
+
+def _write_build_info(
+    output: Path,
+    files: dict[str, Path],
+    configure_args: list[str],
+    dependencies: list[str],
+    report: str,
+) -> None:
+    runtime_version = report.splitlines()[0].strip() if report.splitlines() else "unknown"
+    (output / "FFPROBE_BUILDINFO.txt").write_text(
+        "InfoMancer FFprobe distribution provenance\n"
+        "==========================================\n\n"
+        f"FFmpeg source commit: {FFMPEG_COMMIT}\n"
+        f"InfoMancer build marker: {BUILD_MARKER}\n"
+        f"Runtime version line: {runtime_version}\n"
+        "Effective FFmpeg license profile: GNU LGPL v2.1 or later\n"
+        f"ffprobe.exe SHA-256: {_sha256_file(files['binary'])}\n"
+        f"Corresponding source archive: {SOURCE_ARCHIVE}\n"
+        f"Corresponding source SHA-256: {_sha256_file(files['source'])}\n\n"
+        "Configure arguments\n"
+        "-------------------\n"
+        + "\n".join(configure_args)
+        + "\n\nDLL dependencies\n"
+        "----------------\n"
+        + "\n".join(dependencies)
+        + "\n\nffprobe -version\n"
+        "----------------\n"
+        + report.rstrip()
+        + "\n",
         encoding="utf-8",
     )
 
@@ -116,80 +284,44 @@ def _write_build_identity() -> Path:
     path = Path("app/static/build-info.json")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(
-            {"commit": commit, "short_commit": short_commit},
-            indent=2,
-        )
-        + "\n",
+        json.dumps({"commit": commit, "short_commit": short_commit}, indent=2) + "\n",
         encoding="utf-8",
     )
     print(f"Stamped InfoMancer runtime build identity: {short_commit}")
     return path
 
 
-def _reuse_verified_stage(output: Path, key: tuple[str, str], asset: dict) -> Path | None:
-    """Reuse a cached stage only after re-verifying the pinned binary and license."""
-    binary_name = "ffprobe.exe" if key[0] == "windows" else "ffprobe"
-    binary_path = output / binary_name
-    license_path = output / "FFPROBE_LICENSE.txt"
-    if not binary_path.is_file() or not license_path.is_file():
-        return None
-    try:
-        _require_hash("Cached FFprobe binary", binary_path.read_bytes(), asset["binary_sha256"])
-        _require_hash("Cached FFprobe license", license_path.read_bytes(), asset["license_sha256"])
-    except (OSError, RuntimeError):
-        return None
-    if key[0] != "windows":
-        binary_path.chmod(
-            binary_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-        )
-    _write_notice(output)
-    print(f"Reused verified FFprobe {VERSION} at {binary_path}")
-    return binary_path
-
-
-def stage(output: Path) -> Path:
-    key = _platform_key()
-    asset = ASSETS.get(key)
-    if not asset:
-        raise RuntimeError(f"No pinned FFprobe asset is configured for {key[0]}/{key[1]}")
+def stage(input_dir: Path, output: Path) -> Path:
+    files = _verify_input_bundle(input_dir)
+    _verify_license(files["license"])
+    configure_args = _verify_configure_args(files["configure_args"])
+    dependencies = _verify_dll_dependencies(files["dll_dependencies"])
+    report = _verify_ffprobe(files["binary"])
 
     output.mkdir(parents=True, exist_ok=True)
-    reused = _reuse_verified_stage(output, key, asset)
-    if reused:
-        return reused
-
-    slug = asset["slug"]
-    archive = _download(f"{RELEASE_BASE}/ffprobe-{slug}.gz")
-    _require_hash("FFprobe archive", archive, asset["archive_sha256"])
-    binary = gzip.decompress(archive)
-    _require_hash("FFprobe binary", binary, asset["binary_sha256"])
-
-    license_text = _download(f"{RELEASE_BASE}/{slug}.LICENSE")
-    _require_hash("FFprobe license", license_text, asset["license_sha256"])
-
-    binary_name = "ffprobe.exe" if key[0] == "windows" else "ffprobe"
-    binary_path = output / binary_name
-    binary_path.write_bytes(binary)
-    if key[0] != "windows":
-        binary_path.chmod(
-            binary_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-        )
-
-    (output / "FFPROBE_LICENSE.txt").write_bytes(license_text)
+    binary_path = output / "ffprobe.exe"
+    shutil.copy2(files["binary"], binary_path)
+    shutil.copy2(files["license"], output / "FFPROBE_LICENSE.txt")
+    shutil.copy2(files["build_script"], output / "FFPROBE_BUILD_SCRIPT.sh")
+    shutil.copy2(files["configure_args"], output / "FFPROBE_CONFIGURE_ARGS.txt")
+    shutil.copy2(files["dll_dependencies"], output / "FFPROBE_DLL_DEPENDENCIES.txt")
+    shutil.copy2(files["source_commit"], output / "FFPROBE_SOURCE_COMMIT.txt")
+    shutil.copy2(files["build_marker"], output / "FFPROBE_BUILD_MARKER.txt")
     _write_notice(output)
-    print(f"Staged verified FFprobe {VERSION} at {binary_path}")
+    _write_build_info(output, files, configure_args, dependencies, report)
+    print(f"Staged minimal LGPL FFprobe from {FFMPEG_COMMIT} at {binary_path}")
     return binary_path
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Stage the pinned FFprobe binary used by native InfoMancer packages"
+        description="Verify and stage InfoMancer's minimal FFprobe Windows build"
     )
+    parser.add_argument("--input", default="build/minimal-ffprobe")
     parser.add_argument("--output", default="build/ffprobe")
     args = parser.parse_args()
     _write_build_identity()
-    stage(Path(args.output))
+    stage(Path(args.input), Path(args.output))
     return 0
 
 

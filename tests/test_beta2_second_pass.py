@@ -45,21 +45,22 @@ class Beta2SecondPassContracts(unittest.TestCase):
         self.assertIn("infomancer-root-reveal", stable)
         self.assertIn("from { opacity: .985; }", stable)
 
-    def test_linux_desktop_identity_and_package_validation(self):
+    def test_linux_desktop_identity_is_retained_but_native_release_is_gated(self):
         desktop = (ROOT / "desktop/src-tauri/linux/InfoMancer.desktop.hbs").read_text(encoding="utf-8")
         metainfo = (ROOT / "desktop/src-tauri/linux/cloud.arsenik.infomancer.metainfo.xml").read_text(encoding="utf-8")
-        workflow = (ROOT / ".github/workflows/draft-08-release.yml").read_text(encoding="utf-8")
+        distribution = (ROOT / "docs/FFPROBE_DISTRIBUTION.md").read_text(encoding="utf-8")
         self.assertIn("StartupWMClass=infomancer-desktop", desktop)
         self.assertIn("<id>InfoMancer.desktop</id>", metainfo)
-        self.assertIn("Validate Linux desktop integration", workflow)
-        self.assertIn("appstreamcli validate --no-net", workflow)
-        self.assertIn("desktop-file-validate", workflow)
+        self.assertIn("Linux and macOS native FFprobe bundling are not approved", distribution)
+        self.assertFalse((ROOT / ".github/workflows/draft-08-release.yml").exists())
 
-    def test_canonical_intel_audit_mounts_finished_dmg(self):
-        workflow = (ROOT / ".github/workflows/draft-08-release.yml").read_text(encoding="utf-8")
-        self.assertIn("Verify finished Intel app supports macOS 13", workflow)
-        self.assertIn('hdiutil attach "$dmg"', workflow)
-        self.assertIn('find "$mount_dir" -maxdepth 1 -type d -name \'*.app\'', workflow)
+    def test_macos_auditor_is_retained_while_native_ffprobe_release_is_gated(self):
+        auditor = (ROOT / "scripts/verify_macos_minos.py").read_text(encoding="utf-8")
+        distribution = (ROOT / "docs/FFPROBE_DISTRIBUTION.md").read_text(encoding="utf-8")
+        self.assertIn('"xcrun", "vtool", "-show-build"', auditor)
+        self.assertIn("newer than supported", auditor)
+        self.assertIn("Linux and macOS native FFprobe bundling are not approved", distribution)
+        self.assertFalse((ROOT / ".github/workflows/draft-08-release.yml").exists())
 
     def test_beta2_firefighting_workflows_are_removed(self):
         obsolete = (
@@ -68,6 +69,7 @@ class Beta2SecondPassContracts(unittest.TestCase):
             "publish-beta2-complete-prerelease.yml", "publish-intel-release.yml",
             "validate-beta2-full-tests.yml", "apply-beta2-second-pass.yml",
             "apply-beta2-second-pass-v2.yml", "apply-beta2-second-pass-v3.yml",
+            "draft-08-release.yml", "windows-preview.yml",
         )
         for name in obsolete:
             self.assertFalse((ROOT / ".github/workflows" / name).exists(), name)

@@ -1,5 +1,4 @@
 import os
-import re
 import sys
 import tempfile
 import unittest
@@ -7,7 +6,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.media_info import ffprobe_executable
-from scripts.stage_ffprobe import ASSETS
+from scripts.stage_ffprobe import (
+    BUILD_MARKER,
+    FFMPEG_COMMIT,
+    FORBIDDEN_CONFIGURE_FLAGS,
+    LICENSE_GIT_BLOB_SHA1,
+    REQUIRED_CONFIGURE_FLAGS,
+    SOURCE_ARCHIVE,
+    FFprobeComplianceError,
+    _verify_configure_args,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,45 +39,164 @@ class FFprobePackagingTests(unittest.TestCase):
             ):
                 self.assertEqual(ffprobe_executable(), str(candidate))
 
-    def test_pinned_assets_cover_native_desktop_targets(self):
-        expected = {
-            ("windows", "x86_64"),
-            ("linux", "x86_64"),
-            ("linux", "arm64"),
-            ("darwin", "x86_64"),
-            ("darwin", "arm64"),
-        }
-        self.assertEqual(set(ASSETS), expected)
-        sha256 = re.compile(r"^[0-9a-f]{64}$")
-        for target, asset in ASSETS.items():
-            with self.subTest(target=target):
-                self.assertTrue(asset["slug"])
-                self.assertRegex(asset["archive_sha256"], sha256)
-                self.assertRegex(asset["binary_sha256"], sha256)
-                self.assertRegex(asset["license_sha256"], sha256)
+    def test_ffprobe_source_identity_is_pinned(self):
+        self.assertEqual(
+            FFMPEG_COMMIT, "ad500d59cb6e0126add4fcb95afb4e2557c4292c"
+        )
+        self.assertEqual(BUILD_MARKER, "infomancer-ad500d59cb")
+        self.assertEqual(SOURCE_ARCHIVE, f"ffmpeg-source-{FFMPEG_COMMIT}.tar.gz")
+        self.assertEqual(
+            LICENSE_GIT_BLOB_SHA1, "40924c2a6da76a2b0c639f6fe7ef0b2d095a6adb"
+        )
 
-    def test_native_packaging_runs_packaged_ffprobe_self_check(self):
+    def test_minimal_build_has_required_license_safety_flags(self):
+        required = {
+            "--disable-autodetect",
+            "--disable-network",
+            "--disable-ffmpeg",
+            "--disable-ffplay",
+            "--disable-encoders",
+            "--disable-muxers",
+            "--disable-filters",
+            "--disable-devices",
+            "--disable-hwaccels",
+            "--disable-pthreads",
+            "--enable-w32threads",
+            "--enable-static",
+            "--disable-shared",
+            f"--extra-version={BUILD_MARKER}",
+        }
+        self.assertTrue(required.issubset(REQUIRED_CONFIGURE_FLAGS))
+        self.assertEqual(
+            FORBIDDEN_CONFIGURE_FLAGS,
+            {"--enable-gpl", "--enable-nonfree", "--enable-version3"},
+        )
+
+        build_script = (ROOT / "scripts" / "build_minimal_ffprobe.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(FFMPEG_COMMIT, build_script)
+        self.assertIn('BUILD_MARKER="infomancer-$FFMPEG_SHORT"', build_script)
+        self.assertIn("git -C \"$SOURCE_DIR\" archive", build_script)
+        self.assertIn("COPYING.LGPLv2.1", build_script)
+        self.assertIn("FFPROBE_SOURCE_COMMIT.txt", build_script)
+        self.assertIn("FFPROBE_BUILD_MARKER.txt", build_script)
+        self.assertNotIn("BtbN", build_script)
+        for flag in required - {f"--extra-version={BUILD_MARKER}"}:
+            self.assertIn(flag, build_script)
+        self.assertIn('--extra-version="$BUILD_MARKER"', build_script)
+
+    def test_configure_verifier_rejects_optional_external_library(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "args.txt"
+            path.write_text(
+                "\n".join(sorted(REQUIRED_CONFIGURE_FLAGS | {"--enable-libopus"}))
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(FFprobeComplianceError):
+                _verify_configure_args(path)
+
+    def test_configure_verifier_rejects_gpl_nonfree_and_version3(self):
+        for flag in FORBIDDEN_CONFIGURE_FLAGS:
+            with self.subTest(flag=flag), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "args.txt"
+                path.write_text(
+                    "\n".join(sorted(REQUIRED_CONFIGURE_FLAGS | {flag})) + "\n",
+                    encoding="utf-8",
+                )
+                with self.assertRaises(FFprobeComplianceError):
+                    _verify_configure_args(path)
+
+    def test_native_stager_is_offline_and_records_compliance_evidence(self):
         stage = (ROOT / "scripts" / "stage_ffprobe.py").read_text(encoding="utf-8")
-        self.assertIn("FFPROBE_LICENSE.txt", stage)
-        self.assertIn("FFPROBE_NOTICE.txt", stage)
-        self.assertIn('_require_hash("FFprobe archive"', stage)
-        self.assertIn('_require_hash("FFprobe binary"', stage)
-        self.assertIn('_require_hash("FFprobe license"', stage)
+        for required in (
+            "FFPROBE_LICENSE.txt",
+            "FFPROBE_NOTICE.txt",
+            "FFPROBE_BUILDINFO.txt",
+            "FFPROBE_BUILD_SCRIPT.sh",
+            "FFPROBE_DLL_DEPENDENCIES.txt",
+            "FFPROBE_SOURCE_COMMIT.txt",
+            "FFPROBE_BUILD_MARKER.txt",
+            "Independent JPEG Group",
+            "--enable-gpl",
+            "--enable-nonfree",
+            "--enable-version3",
+            "--enable-lib",
+            "--disable-autodetect",
+            "--extra-version=",
+            "LICENSE_GIT_BLOB_SHA1",
+        ):
+            self.assertIn(required, stage)
+        self.assertNotIn("urllib.request", stage)
+        self.assertNotIn("BtbN", stage)
 
         sidecar = (ROOT / "desktop" / "sidecar.py").read_text(encoding="utf-8")
         self.assertIn('parser.add_argument("--check-ffprobe"', sidecar)
         self.assertIn('[ffprobe_executable(), "-version"]', sidecar)
 
-        for relative in (
-            ".github/workflows/draft-08-release.yml",
-            ".github/workflows/windows-desktop.yml",
-            ".github/workflows/windows-desktop-release.yml",
+    def test_windows_installer_exposes_ffprobe_notices_as_resources(self):
+        config = (ROOT / "desktop" / "src-tauri" / "tauri.windows.conf.json").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"resources/ffprobe/": "third-party/ffprobe/"', config)
+
+        workflow = (ROOT / ".github/workflows/windows-desktop.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("desktop/src-tauri/resources/ffprobe", workflow)
+        self.assertIn("FFPROBE_NOTICE.txt", workflow)
+        self.assertIn("FFPROBE_LICENSE.txt", workflow)
+        self.assertIn("Installed FFprobe compliance resource is missing", workflow)
+        self.assertIn("Independent JPEG Group", workflow)
+        self.assertIn(BUILD_MARKER, workflow)
+
+    def test_windows_gui_core_checks_wait_for_process_completion(self):
+        preview = (ROOT / ".github/workflows/windows-desktop.yml").read_text(
+            encoding="utf-8"
+        )
+        release = (ROOT / ".github/workflows/windows-desktop-release.yml").read_text(
+            encoding="utf-8"
+        )
+        for workflow in (preview, release):
+            self.assertIn("Start-Process -FilePath '.\\dist\\infomancer-core.exe'", workflow)
+            self.assertIn("-Wait -PassThru", workflow)
+            self.assertNotIn("& .\\dist\\infomancer-core.exe --check-ffprobe", workflow)
+        self.assertIn("$recovery = Start-Process", preview)
+        self.assertIn("$recovery.ExitCode", preview)
+
+    def test_compliance_workflow_builds_source_then_executes_binary_on_windows(self):
+        workflow = (ROOT / ".github/workflows/ffprobe-compliance.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("scripts/build_minimal_ffprobe.sh", workflow)
+        self.assertIn("gcc-mingw-w64-x86-64", workflow)
+        self.assertIn("minimal-ffprobe-win64", workflow)
+        self.assertIn("scripts/stage_ffprobe.py", workflow)
+        self.assertIn("windows-latest", workflow)
+        self.assertIn("ubuntu-latest", workflow)
+        self.assertIn(BUILD_MARKER, workflow)
+        self.assertIn("Independent JPEG Group", workflow)
+
+    def test_windows_release_uses_minimal_build_and_publishes_source(self):
+        workflow = (
+            ROOT / ".github/workflows/windows-desktop-release.yml"
+        ).read_text(encoding="utf-8")
+        for required in (
+            "scripts/build_minimal_ffprobe.sh",
+            "minimal-ffprobe-win64",
+            "scripts/stage_ffprobe.py",
+            "FFPROBE_BUILDINFO.txt",
+            "FFPROBE_BUILD_SCRIPT.sh",
+            "FFPROBE_SOURCE_COMMIT.txt",
+            "FFPROBE_BUILD_MARKER.txt",
+            "desktop/src-tauri/resources/ffprobe",
+            "ffmpeg-source-",
+            "gh release upload",
+            "--check-ffprobe",
         ):
-            workflow = (ROOT / relative).read_text(encoding="utf-8")
-            with self.subTest(workflow=relative):
-                self.assertIn("scripts/stage_ffprobe.py", workflow)
-                self.assertIn("--add-binary", workflow)
-                self.assertIn("--check-ffprobe", workflow)
+            self.assertIn(required, workflow)
+        self.assertNotIn("BtbN/FFmpeg-Builds", workflow)
 
 
 if __name__ == "__main__":

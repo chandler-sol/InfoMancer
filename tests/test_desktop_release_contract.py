@@ -43,19 +43,19 @@ class DesktopReleaseContractTests(unittest.TestCase):
         self.assertEqual(updater["pubkey"], "")
         self.assertEqual(updater.get("endpoints"), [])
 
-    def test_draft_windows_sidecar_is_built_without_console(self):
-        workflow = (ROOT / ".github" / "workflows" / "draft-08-release.yml").read_text(
+    def test_active_windows_sidecar_is_built_without_console(self):
+        workflow = (ROOT / ".github" / "workflows" / "windows-desktop.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("PyInstaller --noconfirm --onefile --noconsole", workflow)
-        self.assertNotIn("PyInstaller --noconfirm --clean --onefile --noconsole", workflow)
+        self.assertIn("PyInstaller --noconfirm --clean --onefile --noconsole", workflow)
         self.assertIn("Verify Windows launcher uses GUI subsystem", workflow)
+        self.assertIn("--check-ffprobe", workflow)
 
-    def test_draft_release_launches_installed_windows_app(self):
-        workflow = (ROOT / ".github" / "workflows" / "draft-08-release.yml").read_text(
+    def test_active_windows_build_launches_installed_app(self):
+        workflow = (ROOT / ".github" / "workflows" / "windows-desktop.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("Smoke-test installed Windows desktop launch", workflow)
+        self.assertIn("Smoke-test installed launch and zero-residue silent uninstall", workflow)
         self.assertIn("Start-Process -FilePath $launcher.FullName -PassThru", workflow)
         self.assertIn("desktop-launcher.log", workflow)
         self.assertIn(
@@ -63,17 +63,20 @@ class DesktopReleaseContractTests(unittest.TestCase):
             workflow,
         )
 
-    def test_draft_release_uses_least_privilege_and_retargets_existing_draft_tag(self):
-        workflow = (ROOT / ".github" / "workflows" / "draft-08-release.yml").read_text(
+    def test_tagged_release_stays_draft_until_ffprobe_source_is_uploaded(self):
+        workflow = (ROOT / ".github" / "workflows" / "windows-desktop-release.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("permissions:\n  actions: read\n  contents: read", workflow)
-        self.assertIn("permissions:\n      actions: read\n      contents: write", workflow)
-        self.assertIn("permissions:\n      issues: write", workflow)
-        self.assertNotIn("permissions:\n  actions: read\n  contents: write", workflow)
-        self.assertIn('git/refs/tags/$TAG', workflow)
-        self.assertIn('-f sha="$RELEASE_SHA"', workflow)
-        self.assertIn("-F force=true", workflow)
+        self.assertIn("permissions:\n  contents: write", workflow)
+        self.assertIn("releaseDraft: true", workflow)
+        self.assertIn("Upload FFprobe compliance assets to draft release", workflow)
+        self.assertIn("ffmpeg-source-$ffmpegCommit.tar.gz", workflow)
+        self.assertIn("Publish verified Windows release", workflow)
+        self.assertIn("gh release edit $env:GITHUB_REF_NAME --draft=false --prerelease", workflow)
+        self.assertLess(
+            workflow.index("Upload FFprobe compliance assets to draft release"),
+            workflow.index("Publish verified Windows release"),
+        )
 
     def test_installation_guide_documents_current_native_packages(self):
         guide = (ROOT / "docs" / "INSTALLATION.md").read_text(encoding="utf-8")

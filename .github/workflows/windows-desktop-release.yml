@@ -9,8 +9,43 @@ permissions:
   contents: write
 
 jobs:
+  build-minimal-windows-ffprobe:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Install MinGW cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y gcc-mingw-w64-x86-64
+
+      - name: Build minimal FFprobe from pinned FFmpeg source
+        run: bash scripts/build_minimal_ffprobe.sh build/minimal-ffprobe
+
+      - name: Reject optional third-party runtime dependencies
+        run: |
+          cat build/minimal-ffprobe/FFPROBE_DLL_DEPENDENCIES.txt
+          if grep -Eiq 'libgcc|libstdc\+\+|libwinpthread|libiconv|libz|avcodec|avformat|avutil|swresample|swscale' build/minimal-ffprobe/FFPROBE_DLL_DEPENDENCIES.txt; then
+            echo 'Unexpected non-system DLL dependency in minimal FFprobe build.' >&2
+            exit 1
+          fi
+
+      - name: Upload minimal FFprobe compliance bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: minimal-ffprobe-win64
+          path: build/minimal-ffprobe/
+          if-no-files-found: error
+          retention-days: 7
+
   signed-windows-release:
     if: github.actor == github.repository_owner
+    needs: build-minimal-windows-ffprobe
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -24,6 +59,12 @@ jobs:
         with:
           python-version: '3.13'
           cache: pip
+
+      - name: Download minimal FFprobe compliance bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: minimal-ffprobe-win64
+          path: build/minimal-ffprobe
 
       - name: Verify release tag matches application version
         shell: pwsh
@@ -51,16 +92,30 @@ jobs:
       - name: Run application tests
         run: python -m unittest discover -s tests -v
 
+      - name: Verify and stage minimal FFprobe
+        run: python scripts/stage_ffprobe.py --input build/minimal-ffprobe --output build/ffprobe
+
       - name: Build bundled InfoMancer core
         shell: pwsh
         run: |
-          python scripts/stage_ffprobe.py
-          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
-          & .\dist\infomancer-core.exe --check-ffprobe
-          if ($LASTEXITCODE -ne 0) { throw "Bundled FFprobe self-check failed: $LASTEXITCODE" }
+          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILDINFO.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILD_SCRIPT.sh;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_CONFIGURE_ARGS.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_DLL_DEPENDENCIES.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_SOURCE_COMMIT.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILD_MARKER.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
+          $selfCheck = Start-Process -FilePath '.\dist\infomancer-core.exe' -ArgumentList '--check-ffprobe' -Wait -PassThru
+          if ($selfCheck.ExitCode -ne 0) { throw "Bundled FFprobe self-check failed: $($selfCheck.ExitCode)" }
           $triple = (rustc --print host-tuple).Trim()
           New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
           Copy-Item dist/infomancer-core.exe "desktop/src-tauri/binaries/infomancer-core-$triple.exe"
+
+          $ffprobeResources = 'desktop/src-tauri/resources/ffprobe'
+          Remove-Item $ffprobeResources -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $ffprobeResources | Out-Null
+          Copy-Item build/ffprobe/FFPROBE_LICENSE.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_NOTICE.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_BUILDINFO.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_BUILD_SCRIPT.sh $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_CONFIGURE_ARGS.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_DLL_DEPENDENCIES.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_SOURCE_COMMIT.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_BUILD_MARKER.txt $ffprobeResources
 
       - name: Install desktop dependencies
         working-directory: desktop
@@ -82,7 +137,7 @@ jobs:
             throw 'Windows release launcher is not configured for the GUI subsystem.'
           }
 
-      - name: Build, sign, and publish Windows updater
+      - name: Build, sign, and stage Windows updater release
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -94,11 +149,36 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: InfoMancer ${{ github.ref_name }}
           releaseBody: Windows desktop alpha with signed in-app updater artifacts.
-          releaseDraft: false
+          releaseDraft: true
           prerelease: true
           args: --bundles nsis --config src-tauri/tauri.release.conf.json
           updaterJsonPreferNsis: true
           includeUpdaterJson: true
+
+      - name: Upload FFprobe compliance assets to draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ffmpegCommit = 'ad500d59cb6e0126add4fcb95afb4e2557c4292c'
+          gh release upload $env:GITHUB_REF_NAME `
+            build/ffprobe/FFPROBE_LICENSE.txt `
+            build/ffprobe/FFPROBE_NOTICE.txt `
+            build/ffprobe/FFPROBE_BUILDINFO.txt `
+            build/ffprobe/FFPROBE_BUILD_SCRIPT.sh `
+            build/ffprobe/FFPROBE_CONFIGURE_ARGS.txt `
+            build/ffprobe/FFPROBE_DLL_DEPENDENCIES.txt `
+            build/ffprobe/FFPROBE_SOURCE_COMMIT.txt `
+            build/ffprobe/FFPROBE_BUILD_MARKER.txt `
+            "build/minimal-ffprobe/ffmpeg-source-$ffmpegCommit.tar.gz" `
+            --clobber
+
+      - name: Publish verified Windows release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit $env:GITHUB_REF_NAME --draft=false --prerelease
 
       - name: Update rolling desktop-alpha manifest
         shell: pwsh

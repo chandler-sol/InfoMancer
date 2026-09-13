@@ -99,8 +99,8 @@ explicitly deferred in release notes with an owner and reason.
 
 - [ ] Choose and publish the InfoMancer software license.
 - [ ] Publish third-party notices and dependency-license information.
-- [ ] Review the exact FFmpeg/FFprobe build/distribution configuration and document its licensing
-  obligations before bundling native binaries.
+- [x] Review the exact FFmpeg/FFprobe build/distribution configuration and document its licensing
+  obligations before bundling native binaries. See `docs/FFPROBE_DISTRIBUTION.md`.
 - [ ] Confirm current TheTVDB/IMDb/artwork/search-provider usage and attribution against their
   applicable terms.
 - [ ] Publish the privacy statement and data-flow summary.

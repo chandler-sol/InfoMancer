@@ -5,9 +5,21 @@ on:
   push:
     branches:
       - testing/0.8-alpha
+      - testing/0.9-alpha-reseed
     paths:
       - desktop/**
       - app/**
+      - scripts/build_minimal_ffprobe.sh
+      - scripts/stage_ffprobe.py
+      - requirements.txt
+      - .github/workflows/windows-desktop.yml
+  pull_request:
+    branches:
+      - testing/0.9-alpha-reseed
+    paths:
+      - desktop/**
+      - app/**
+      - scripts/build_minimal_ffprobe.sh
       - scripts/stage_ffprobe.py
       - requirements.txt
       - .github/workflows/windows-desktop.yml
@@ -16,7 +28,33 @@ permissions:
   contents: read
 
 jobs:
+  build-minimal-windows-ffprobe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Install MinGW cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y gcc-mingw-w64-x86-64
+
+      - name: Build minimal FFprobe from pinned FFmpeg source
+        run: bash scripts/build_minimal_ffprobe.sh build/minimal-ffprobe
+
+      - name: Upload minimal FFprobe bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: minimal-ffprobe-win64
+          path: build/minimal-ffprobe/
+          if-no-files-found: error
+          retention-days: 7
+
   build-windows:
+    needs: build-minimal-windows-ffprobe
     runs-on: windows-latest
     steps:
       - name: Check out source
@@ -30,6 +68,12 @@ jobs:
           python-version: '3.13'
           cache: pip
 
+      - name: Download minimal FFprobe bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: minimal-ffprobe-win64
+          path: build/minimal-ffprobe
+
       - name: Install Python dependencies
         run: |
           python -m pip install -r requirements.txt
@@ -38,16 +82,30 @@ jobs:
       - name: Run application tests
         run: python -m unittest discover -s tests -v
 
+      - name: Verify and stage minimal FFprobe
+        run: python scripts/stage_ffprobe.py --input build/minimal-ffprobe --output build/ffprobe
+
       - name: Build bundled InfoMancer core
         shell: pwsh
         run: |
-          python scripts/stage_ffprobe.py
-          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
-          & .\dist\infomancer-core.exe --check-ffprobe
-          if ($LASTEXITCODE -ne 0) { throw "Bundled FFprobe self-check failed: $LASTEXITCODE" }
+          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILDINFO.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILD_SCRIPT.sh;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_CONFIGURE_ARGS.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_DLL_DEPENDENCIES.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_SOURCE_COMMIT.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILD_MARKER.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
+          $selfCheck = Start-Process -FilePath '.\dist\infomancer-core.exe' -ArgumentList '--check-ffprobe' -Wait -PassThru
+          if ($selfCheck.ExitCode -ne 0) { throw "Bundled FFprobe self-check failed: $($selfCheck.ExitCode)" }
           $triple = (rustc --print host-tuple).Trim()
           New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
           Copy-Item dist/infomancer-core.exe "desktop/src-tauri/binaries/infomancer-core-$triple.exe"
+
+          $ffprobeResources = 'desktop/src-tauri/resources/ffprobe'
+          Remove-Item $ffprobeResources -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $ffprobeResources | Out-Null
+          Copy-Item build/ffprobe/FFPROBE_LICENSE.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_NOTICE.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_BUILDINFO.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_BUILD_SCRIPT.sh $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_CONFIGURE_ARGS.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_DLL_DEPENDENCIES.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_SOURCE_COMMIT.txt $ffprobeResources
+          Copy-Item build/ffprobe/FFPROBE_BUILD_MARKER.txt $ffprobeResources
 
       - name: Smoke-test recovery helper
         shell: pwsh
@@ -57,8 +115,8 @@ jobs:
           New-Item -ItemType Directory -Force $data | Out-Null
           $env:SMOKE_DB = Join-Path $data 'infomancer.db'
           python -c "import os; from pathlib import Path; from app.db import Database; Database(Path(os.environ['SMOKE_DB'])).initialize()"
-          & .\dist\infomancer-core.exe --data-dir $data --recovery-output $backup
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $backup)) { throw 'Recovery helper smoke test failed.' }
+          $recovery = Start-Process -FilePath '.\dist\infomancer-core.exe' -ArgumentList @('--data-dir', $data, '--recovery-output', $backup) -Wait -PassThru
+          if ($recovery.ExitCode -ne 0 -or -not (Test-Path $backup)) { throw "Recovery helper smoke test failed: $($recovery.ExitCode)" }
 
       - name: Install desktop dependencies
         working-directory: desktop
@@ -99,6 +157,19 @@ jobs:
             Where-Object { $_.Name -ne 'uninstall.exe' -and $_.Name -ne 'infomancer-core.exe' } |
             Select-Object -First 1
           if (-not $launcher) { throw "Installed InfoMancer launcher was not found under $installDir" }
+
+          $ffprobeNotice = Join-Path $installDir 'third-party\ffprobe\FFPROBE_NOTICE.txt'
+          $ffprobeLicense = Join-Path $installDir 'third-party\ffprobe\FFPROBE_LICENSE.txt'
+          $ffprobeBuildInfo = Join-Path $installDir 'third-party\ffprobe\FFPROBE_BUILDINFO.txt'
+          foreach ($path in @($ffprobeNotice, $ffprobeLicense, $ffprobeBuildInfo)) {
+            if (-not (Test-Path $path)) { throw "Installed FFprobe compliance resource is missing: $path" }
+          }
+          if (-not (Select-String -Path $ffprobeNotice -SimpleMatch 'Independent JPEG Group' -Quiet)) {
+            throw 'Installed FFprobe notice is missing the IJG attribution.'
+          }
+          if (-not (Select-String -Path $ffprobeBuildInfo -SimpleMatch 'infomancer-ad500d59cb' -Quiet)) {
+            throw 'Installed FFprobe build provenance is missing the exact-source build marker.'
+          }
 
           $log = Join-Path $env:APPDATA 'cloud.arsenik.infomancer\logs\desktop-launcher.log'
           Remove-Item $log -Force -ErrorAction SilentlyContinue
