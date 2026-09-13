@@ -29,7 +29,7 @@ def _sha256(path: Path) -> str:
 
 def parse_artifact_spec(value: str, server_tag: str = "") -> tuple[str, dict[str, Any]]:
     parts = [part.strip() for part in value.split(",")]
-    if len(parts) not in {4, 5}:
+    if len(parts) not in {3, 4}:
         raise ValueError(
             "Artifacts must use platform=kind,url,path[,signature]."
         )
