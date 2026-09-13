@@ -25,23 +25,26 @@ class ReleaseAssetNameContracts(unittest.TestCase):
 
         self.assertIn("InfoMancer-${version}-${label}${extension}", wrapper)
 
-    def test_wrapper_preserves_normal_tauri_commands_and_renames_only_completed_builds(self):
+    def test_wrapper_preserves_normal_tauri_commands_and_copies_completed_builds(self):
         wrapper = (ROOT / "desktop/scripts/tauri-wrapper.mjs").read_text(encoding="utf-8")
 
         self.assertIn("if (args[0] !== 'build')", wrapper)
-        self.assertIn("renameSingleBundle('nsis', '.exe')", wrapper)
-        self.assertIn("renameSingleBundle('dmg', '.dmg')", wrapper)
-        self.assertIn("renameSingleBundle('deb', '.deb')", wrapper)
-        self.assertIn("renameSingleBundle('appimage', '.AppImage')", wrapper)
+        self.assertIn("copyFriendlyBundle('nsis', '.exe')", wrapper)
+        self.assertIn("copyFriendlyBundle('dmg', '.dmg')", wrapper)
+        self.assertIn("copyFriendlyBundle('deb', '.deb')", wrapper)
+        self.assertIn("copyFriendlyBundle('appimage', '.AppImage')", wrapper)
+        self.assertIn("copyFileSync(source, destination)", wrapper)
 
-    def test_signed_updater_bundle_keeps_signature_on_matching_friendly_basename(self):
+    def test_signed_updater_bundle_keeps_signature_on_matching_friendly_basename_without_moving_tauri_source(self):
         wrapper = (ROOT / "desktop/scripts/tauri-wrapper.mjs").read_text(encoding="utf-8")
         updater_config = (ROOT / "desktop/src-tauri/tauri.release.conf.json").read_text(encoding="utf-8")
 
         self.assertIn('"createUpdaterArtifacts": true', updater_config)
         self.assertIn("const sourceSignature = `${source}.sig`", wrapper)
         self.assertIn("const destinationSignature = `${destination}.sig`", wrapper)
-        self.assertIn("renameSync(sourceSignature, destinationSignature)", wrapper)
+        self.assertIn("copyFileSync(sourceSignature, destinationSignature)", wrapper)
+        self.assertNotIn("renameSync(sourceSignature, destinationSignature)", wrapper)
+        self.assertIn("Tauri Action still needs Tauri's original filenames in place", wrapper)
 
     def test_shared_package_is_named_infomancer_server(self):
         builder = (ROOT / "scripts/build_release.py").read_text(encoding="utf-8")
