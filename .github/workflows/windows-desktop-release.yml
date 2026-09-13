@@ -9,8 +9,43 @@ permissions:
   contents: write
 
 jobs:
+  build-minimal-windows-ffprobe:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Install MinGW cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y gcc-mingw-w64-x86-64
+
+      - name: Build minimal FFprobe from pinned FFmpeg source
+        run: bash scripts/build_minimal_ffprobe.sh build/minimal-ffprobe
+
+      - name: Reject optional third-party runtime dependencies
+        run: |
+          cat build/minimal-ffprobe/FFPROBE_DLL_DEPENDENCIES.txt
+          if grep -Eiq 'libgcc|libstdc\+\+|libwinpthread|libiconv|libz|avcodec|avformat|avutil|swresample|swscale' build/minimal-ffprobe/FFPROBE_DLL_DEPENDENCIES.txt; then
+            echo 'Unexpected non-system DLL dependency in minimal FFprobe build.' >&2
+            exit 1
+          fi
+
+      - name: Upload minimal FFprobe compliance bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: minimal-ffprobe-win64
+          path: build/minimal-ffprobe/
+          if-no-files-found: error
+          retention-days: 7
+
   signed-windows-release:
     if: github.actor == github.repository_owner
+    needs: build-minimal-windows-ffprobe
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -24,6 +59,12 @@ jobs:
         with:
           python-version: '3.13'
           cache: pip
+
+      - name: Download minimal FFprobe compliance bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: minimal-ffprobe-win64
+          path: build/minimal-ffprobe
 
       - name: Verify release tag matches application version
         shell: pwsh
@@ -51,30 +92,18 @@ jobs:
       - name: Run application tests
         run: python -m unittest discover -s tests -v
 
+      - name: Verify and stage minimal FFprobe
+        run: python scripts/stage_ffprobe.py --input build/minimal-ffprobe --output build/ffprobe
+
       - name: Build bundled InfoMancer core
         shell: pwsh
         run: |
-          python scripts/stage_ffprobe.py
-          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILDINFO.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
+          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILDINFO.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_BUILD_SCRIPT.sh;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_CONFIGURE_ARGS.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_DLL_DEPENDENCIES.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
           & .\dist\infomancer-core.exe --check-ffprobe
           if ($LASTEXITCODE -ne 0) { throw "Bundled FFprobe self-check failed: $LASTEXITCODE" }
           $triple = (rustc --print host-tuple).Trim()
           New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
           Copy-Item dist/infomancer-core.exe "desktop/src-tauri/binaries/infomancer-core-$triple.exe"
-
-      - name: Stage FFmpeg corresponding source and build scripts
-        shell: pwsh
-        run: |
-          $ffmpegCommit = 'ad500d59cb6e0126add4fcb95afb4e2557c4292c'
-          $btbnCommit = 'cc8f0958be119db774cdaf6c50065651a4901e72'
-          $complianceDir = 'build/ffprobe/compliance'
-          New-Item -ItemType Directory -Force $complianceDir | Out-Null
-          $ffmpegSource = Join-Path $complianceDir "ffmpeg-source-$ffmpegCommit.tar.gz"
-          $btbnSource = Join-Path $complianceDir "ffmpeg-build-scripts-$btbnCommit.tar.gz"
-          Invoke-WebRequest -Uri "https://github.com/FFmpeg/FFmpeg/archive/$ffmpegCommit.tar.gz" -OutFile $ffmpegSource
-          Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/archive/$btbnCommit.tar.gz" -OutFile $btbnSource
-          if ((Get-Item $ffmpegSource).Length -lt 1MB) { throw 'FFmpeg corresponding-source archive is unexpectedly small.' }
-          if ((Get-Item $btbnSource).Length -lt 1KB) { throw 'BtbN build-scripts archive is unexpectedly small.' }
 
       - name: Install desktop dependencies
         working-directory: desktop
@@ -114,19 +143,20 @@ jobs:
           updaterJsonPreferNsis: true
           includeUpdaterJson: true
 
-      - name: Publish FFprobe license, provenance, and corresponding source
+      - name: Publish FFprobe license, build recipe, provenance, and corresponding source
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $ffmpegCommit = 'ad500d59cb6e0126add4fcb95afb4e2557c4292c'
-          $btbnCommit = 'cc8f0958be119db774cdaf6c50065651a4901e72'
           gh release upload $env:GITHUB_REF_NAME `
             build/ffprobe/FFPROBE_LICENSE.txt `
             build/ffprobe/FFPROBE_NOTICE.txt `
             build/ffprobe/FFPROBE_BUILDINFO.txt `
-            "build/ffprobe/compliance/ffmpeg-source-$ffmpegCommit.tar.gz" `
-            "build/ffprobe/compliance/ffmpeg-build-scripts-$btbnCommit.tar.gz" `
+            build/ffprobe/FFPROBE_BUILD_SCRIPT.sh `
+            build/ffprobe/FFPROBE_CONFIGURE_ARGS.txt `
+            build/ffprobe/FFPROBE_DLL_DEPENDENCIES.txt `
+            "build/minimal-ffprobe/ffmpeg-source-$ffmpegCommit.tar.gz" `
             --clobber
 
       - name: Update rolling desktop-alpha manifest
