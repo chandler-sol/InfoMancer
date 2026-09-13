@@ -20,10 +20,11 @@ The newest qualified development build. Dev also accepts Beta and Standard relea
 1. Selecting a channel does not install code.
 2. Moving toward a less-stable channel requires explicit confirmation.
 3. Moving toward a more-stable channel never silently downgrades the installed code or database.
-4. If the installed build is newer than the selected channel, InfoMancer reports `waiting_for_channel` and stays on the installed build until the channel catches up.
+4. If the installed build is newer than the selected channel, InfoMancer reports `waiting_for_channel` and stays on the installed build until a qualified downgrade path is explicitly allowed.
 5. Applying an update still creates and validates a database backup first.
 6. Server updates still require the restricted host updater and its trusted release-signature check.
-7. Desktop updater signatures and server release trust remain independent platform-specific verification layers.
+7. Desktop updates still require the Tauri updater signing key and signed updater artifact.
+8. Channel metadata never weakens platform-specific cryptographic verification.
 
 ## Current 0C foundation
 
@@ -33,30 +34,42 @@ The canonical channel classifier lives in `app/update_channels.py`. It owns:
 - semantic version and prerelease ordering
 - release classification
 - filtering a GitHub release list for the selected channel
-- the no-downgrade `waiting_for_channel` state
+- the no-blind-downgrade `waiting_for_channel` state
 - conservative persistence of the installation-wide channel preference
+- qualified manifest and database-schema contract validation
 
 The dedicated settings surface is `/settings/updates`.
 
-The old Beta 2 release controls remain on System Settings temporarily. They are transitional and will be retired or redirected once the channel manifest path owns release discovery for every supported packaging method.
+Every server update request now snapshots the qualified release identity that was displayed to the Librarian. The request can carry the selected channel, version, immutable build id, source commit, qualification run and gates, schema contract, manifest URL, and release-notes reference. The restricted host updater preserves that identity in status and a bounded `update-history.json` audit trail.
 
-## Qualification and publishing plan
+The host updater still verifies the release tag cryptographically. If a qualified manifest commit SHA was supplied, the signed release tag must resolve to that exact commit before checkout is allowed.
 
-The next 0C stage replaces "published GitHub release" as the source of truth with a versioned channel manifest.
+The Tauri desktop updater reads the same installation-wide `update-channel.json` setting as the bundled core and selects the corresponding signed rolling updater endpoint:
 
-A qualified build record will include at minimum:
+```text
+Standard -> desktop-standard/latest.json
+Beta     -> desktop-beta/latest.json
+Dev      -> desktop-dev/latest.json
+```
+
+A damaged or unknown desktop channel setting fails conservatively to Standard. The updater public key and Tauri artifact signature remain mandatory. Standard release publication now advances `desktop-standard`; Dev publication remains qualification-gated by the canonical Tests workflow. Beta publication is completed by the promotion work rather than by treating arbitrary prerelease tags as Standard.
+
+## Qualification and publishing
+
+A qualified build record includes at minimum:
 
 - channel
 - immutable version/build identity
 - source commit SHA
 - build timestamp
 - qualification workflow/run identity
-- qualification result
+- qualification result and passed gates
+- database schema contract
 - release notes reference
 - platform artifacts
 - cryptographic signature or checksum metadata required by that platform
 
-The publishing path is:
+The Dev publishing path is:
 
 ```text
 push to 0.9
@@ -72,6 +85,8 @@ A failed, cancelled, or incomplete qualification run never advances the Dev mani
 ## Promotion
 
 Beta and Standard should promote an already-qualified immutable build wherever packaging/signing permits. The channel is a pointer to a build, not a request to rebuild source. Where a platform requires channel-specific metadata, that metadata may be regenerated, but the application payload should remain tied to the same immutable build identity.
+
+The dedicated Beta promotion path will own `desktop-beta` and the Beta channel manifest. The production release path owns `desktop-standard` and refuses prerelease version strings.
 
 ## Version identity
 
@@ -111,4 +126,20 @@ The derived contract is compared with currently published qualified Standard, Be
 
 Unknown or incomplete compatibility history fails closed for downgrades. InfoMancer may still recommend an equal or newer schema target because that path migrates the backup forward rather than asking older code to write a newer database.
 
-Portable `.infomancer-backup` files remain cross-platform. The package data is platform-neutral, while source paths remain environment-specific and may require reconciliation when moving between Windows drive letters, macOS volumes, Linux mounts, network shares, or container mappings.
+## Cross-platform storage path reconciliation
+
+Portable `.infomancer-backup` files remain cross-platform. During verified restore preview, InfoMancer reads the backup's original media roots and lets the Librarian map them to existing directories under the receiving installation's trusted storage.
+
+Examples:
+
+```text
+D:\Movies       -> /media/Movies
+D:\TV           -> /media/TV
+\\NAS\TV        -> /Volumes/TV
+```
+
+Windows roots are interpreted with Windows path semantics even on Linux or macOS, including case-insensitive path comparisons. Relative media structure below the old root is preserved beneath the new root.
+
+The rewrite happens only in the staged database. It covers roots, title folders, media files, managed Trash, rename proposals, and path-bearing rename Undo history. The rewritten database is then validated again against trusted storage before the normal recovery transaction may replace live state. Unsafe, ambiguous, missing, or untrusted mappings fail closed.
+
+Recovery may suggest a unique same-name directory immediately beneath a trusted browse root, but it never searches the whole filesystem or silently accepts a guessed destination.
