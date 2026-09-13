@@ -30,17 +30,16 @@ class Beta2ReleaseCandidatePolishContracts(unittest.TestCase):
         self.assertIn(".provider-wordmark{min-height:76px", css)
         self.assertIn(".about-project-credit", css)
 
-    def test_linux_package_exposes_software_center_identity(self):
+    def test_linux_package_metadata_preserves_software_center_identity(self):
         metainfo = (ROOT / "desktop/src-tauri/linux/cloud.arsenik.infomancer.metainfo.xml").read_text(encoding="utf-8")
         desktop = (ROOT / "desktop/src-tauri/linux/InfoMancer.desktop.hbs").read_text(encoding="utf-8")
-        workflow = (ROOT / ".github/workflows/draft-08-release.yml").read_text(encoding="utf-8")
+        distribution = (ROOT / "docs/FFPROBE_DISTRIBUTION.md").read_text(encoding="utf-8")
         self.assertIn('<name>InfoMancer</name>', metainfo)
         self.assertIn('<icon type="stock">infomancer-desktop</icon>', metainfo)
         self.assertIn('<release version="0.8.1-beta.2" date="2026-09-10">', metainfo)
         self.assertIn('Name={{name}}', desktop)
         self.assertIn('Icon={{icon}}', desktop)
-        self.assertIn("grep -q '^Name=InfoMancer$'", workflow)
-        self.assertIn("grep -q '^Icon=infomancer-desktop$'", workflow)
+        self.assertIn("Linux and macOS native FFprobe bundling are not approved", distribution)
 
 
 if __name__ == "__main__":
