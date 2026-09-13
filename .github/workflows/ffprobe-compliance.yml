@@ -8,6 +8,8 @@ on:
       - tests/test_ffprobe_packaging.py
       - docs/FFPROBE_DISTRIBUTION.md
       - docs/PACKAGING.md
+      - app/templates/about.html
+      - desktop/src-tauri/tauri.windows.conf.json
       - .github/workflows/ffprobe-compliance.yml
       - .github/workflows/windows-desktop.yml
       - .github/workflows/windows-desktop-release.yml
@@ -20,6 +22,8 @@ on:
       - tests/test_ffprobe_packaging.py
       - docs/FFPROBE_DISTRIBUTION.md
       - docs/PACKAGING.md
+      - app/templates/about.html
+      - desktop/src-tauri/tauri.windows.conf.json
       - .github/workflows/ffprobe-compliance.yml
       - .github/workflows/windows-desktop.yml
       - .github/workflows/windows-desktop-release.yml
@@ -57,6 +61,8 @@ jobs:
             echo 'Unexpected non-system DLL dependency in minimal FFprobe build.' >&2
             exit 1
           fi
+          grep -Fx 'ad500d59cb6e0126add4fcb95afb4e2557c4292c' build/minimal-ffprobe/FFPROBE_SOURCE_COMMIT.txt
+          grep -Fx 'infomancer-ad500d59cb' build/minimal-ffprobe/FFPROBE_BUILD_MARKER.txt
 
       - name: Upload minimal FFprobe compliance bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -99,7 +105,12 @@ jobs:
           test -f build/ffprobe/FFPROBE_NOTICE.txt
           test -f build/ffprobe/FFPROBE_BUILDINFO.txt
           test -f build/ffprobe/FFPROBE_BUILD_SCRIPT.sh
+          test -f build/ffprobe/FFPROBE_SOURCE_COMMIT.txt
+          test -f build/ffprobe/FFPROBE_BUILD_MARKER.txt
           grep -F -- '--disable-autodetect' build/ffprobe/FFPROBE_BUILDINFO.txt
+          grep -F -- '--extra-version=infomancer-ad500d59cb' build/ffprobe/FFPROBE_BUILDINFO.txt
+          grep -F -- 'infomancer-ad500d59cb' build/ffprobe/FFPROBE_BUILDINFO.txt
+          grep -F -- 'Independent JPEG Group' build/ffprobe/FFPROBE_NOTICE.txt
           if grep -Eiq -- '--enable-(gpl|nonfree|version3|lib[^ ]*)' build/ffprobe/FFPROBE_BUILDINFO.txt; then
             echo 'Disallowed FFprobe configuration survived staging.' >&2
             exit 1
