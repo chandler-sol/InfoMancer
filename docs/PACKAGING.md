@@ -168,14 +168,16 @@ included.
 The approved Windows and Linux binaries are pinned BtbN/FFmpeg-Builds **LGPL**
 static variants for FFmpeg `n9.0.1-29-gad500d59cb`. The exact FFmpeg source
 commit and BtbN build-scripts commit are pinned alongside each archive SHA-256 in
-`scripts/stage_ffprobe.py`; moving `latest` aliases are not used.
+`scripts/stage_ffprobe.py`; moving `latest` aliases are not used. The pinned
+BtbN LGPL profile enables `--enable-version3`, so this approved build's effective
+FFmpeg license profile is GNU LGPL v3.
 
 The staging script verifies the downloaded archive, extracts only FFprobe, then
 executes the staged binary with `ffprobe -version`. Packaging fails if the binary
-does not report the expected version or if its configure output contains
-`--enable-gpl` or `--enable-nonfree`. The LGPL v2.1 license is fetched from the
-exact FFmpeg source commit and its Git blob identity is verified before it is
-included.
+does not report the expected version, if its configure output contains
+`--enable-gpl` or `--enable-nonfree`, or if the expected `--enable-version3`
+profile is absent. The LGPL v3 license is fetched from the exact FFmpeg source
+commit and its Git blob identity is verified before it is included.
 
 The executable plus `FFPROBE_LICENSE.txt`, `FFPROBE_NOTICE.txt`, and
 `FFPROBE_BUILDINFO.txt` are added to the PyInstaller core. Before Tauri creates a
