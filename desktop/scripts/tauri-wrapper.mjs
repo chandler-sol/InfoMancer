@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -77,7 +77,9 @@ if (result.status !== 0) {
 }
 
 // Keep ordinary Tauri commands untouched. Friendly filenames matter only for
-// completed native build bundles that may be published or handed to testers.
+// completed native build bundles that may be handed to testers or used by other
+// packaging flows. Tauri Action still needs Tauri's original filenames in place
+// so it can discover, sign-pair, and publish updater artifacts.
 if (args[0] !== 'build') {
   process.exit(0);
 }
@@ -105,7 +107,7 @@ function platformLabel() {
 const label = platformLabel();
 const bundleRoot = join(desktopDir, 'src-tauri', 'target', 'release', 'bundle');
 
-function renameSingleBundle(subdirectory, extension) {
+function copyFriendlyBundle(subdirectory, extension) {
   const directory = join(bundleRoot, subdirectory);
   if (!existsSync(directory)) return;
 
@@ -113,9 +115,8 @@ function renameSingleBundle(subdirectory, extension) {
   const destination = join(directory, destinationName);
   const destinationSignature = `${destination}.sig`;
 
-  // The Rust target directory is cached between CI runs. That cache can contain
-  // a previously renamed release package beside Tauri's newly generated bundle.
-  // Do not count the canonical cached package as another build candidate.
+  // The Rust target directory can contain a friendly copy from a prior cached
+  // build. Ignore that copy when locating the fresh Tauri artifact.
   const matches = readdirSync(directory).filter(
     (name) => name.endsWith(extension) && name !== destinationName,
   );
@@ -138,8 +139,6 @@ function renameSingleBundle(subdirectory, extension) {
   const source = join(directory, matches[0]);
   const sourceSignature = `${source}.sig`;
 
-  // Replace stale canonical output restored from the build cache with the bundle
-  // produced by this run.
   if (existsSync(destination)) {
     unlinkSync(destination);
   }
@@ -147,12 +146,12 @@ function renameSingleBundle(subdirectory, extension) {
     unlinkSync(destinationSignature);
   }
 
-  renameSync(source, destination);
-  // Signed updater builds place a signature beside the bundle. Keep the pair
-  // under the same basename so tauri-action can still match them when it builds
-  // latest.json and uploads updater assets.
+  // Preserve Tauri's original artifact and signature. tauri-action searches for
+  // those canonical filenames after the build command returns. Moving them here
+  // makes a successful signed build look like it produced no artifacts.
+  copyFileSync(source, destination);
   if (existsSync(sourceSignature)) {
-    renameSync(sourceSignature, destinationSignature);
+    copyFileSync(sourceSignature, destinationSignature);
   }
 
   console.log(`Release package: ${destination}`);
@@ -162,10 +161,10 @@ function renameSingleBundle(subdirectory, extension) {
 }
 
 if (process.platform === 'win32') {
-  renameSingleBundle('nsis', '.exe');
+  copyFriendlyBundle('nsis', '.exe');
 } else if (process.platform === 'darwin') {
-  renameSingleBundle('dmg', '.dmg');
+  copyFriendlyBundle('dmg', '.dmg');
 } else if (process.platform === 'linux') {
-  renameSingleBundle('deb', '.deb');
-  renameSingleBundle('appimage', '.AppImage');
+  copyFriendlyBundle('deb', '.deb');
+  copyFriendlyBundle('appimage', '.AppImage');
 }
