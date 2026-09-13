@@ -162,31 +162,43 @@ installer registration survives.
 
 Native desktop packages include FFprobe because media inspection must work on a
 clean machine without requiring the user to install FFmpeg or modify `PATH`.
-InfoMancer currently pins FFprobe 6.1.1 from the `eugeneware/ffmpeg-static`
-`b6.1.1` release and stages the matching binary for Windows x64, Linux x64,
-Linux arm64, macOS x64, or macOS arm64 at package-build time.
+Only FFprobe is bundled for this feature. The full FFmpeg executable is not
+included.
 
-The staging script pins SHA-256 values for the downloaded compressed asset, the
-decompressed executable, and the upstream-provided platform license. Packaging
-fails if any of those hashes differ. The executable and its license/notice are
-then added to the PyInstaller core. Before Tauri is allowed to create the native
-installer or image, CI executes the finished core with `--check-ffprobe`. That
-check must successfully locate and execute the bundled FFprobe binary.
+The approved Windows and Linux binaries are pinned BtbN/FFmpeg-Builds **LGPL**
+static variants for FFmpeg `n9.0.1-29-gad500d59cb`. The exact FFmpeg source
+commit and BtbN build-scripts commit are pinned alongside each archive SHA-256 in
+`scripts/stage_ffprobe.py`; moving `latest` aliases are not used.
+
+The staging script verifies the downloaded archive, extracts only FFprobe, then
+executes the staged binary with `ffprobe -version`. Packaging fails if the binary
+does not report the expected version or if its configure output contains
+`--enable-gpl` or `--enable-nonfree`. The LGPL v2.1 license is fetched from the
+exact FFmpeg source commit and its Git blob identity is verified before it is
+included.
+
+The executable plus `FFPROBE_LICENSE.txt`, `FFPROBE_NOTICE.txt`, and
+`FFPROBE_BUILDINFO.txt` are added to the PyInstaller core. Before Tauri creates a
+native installer, CI also executes the finished core with `--check-ffprobe` and
+requires the bundled executable to run successfully.
 
 At runtime, media inspection resolves FFprobe in this order:
 
 1. `INFOMANCER_FFPROBE`, when an operator explicitly provides an override.
-2. The FFprobe executable embedded in a native PyInstaller build.
+2. The FFprobe executable embedded in an approved native PyInstaller build.
 3. A system `ffprobe` available on `PATH`, which remains useful for source and
    server installations.
 
-Only FFprobe is bundled for this inspection feature. The full FFmpeg executable
-should not be added unless a future feature actually requires media conversion
-or remuxing.
+For tagged Windows releases, the exact FFmpeg corresponding-source archive, the
+exact BtbN build-scripts archive, and the FFprobe license/notice/build-info files
+are uploaded to the same GitHub Release as the installer. The source archives
+are staged before installer publication so a missing source download blocks the
+release path.
 
-The native package carries the license text distributed with the pinned binary
-and an InfoMancer third-party notice. Those files document what is shipped, but
-their presence alone is not a claim that every redistribution obligation has
-been satisfied. Before publishing a production release, confirm the exact
-FFmpeg build configuration and applicable LGPL/GPL obligations, including any
-source or build-correspondence requirements that apply to that binary.
+macOS bundling is currently fail-closed because no macOS binary source has yet
+been approved under the same provenance/licensing standard. Do not substitute an
+unreviewed binary to make a macOS packaging job pass.
+
+See `docs/FFPROBE_DISTRIBUTION.md` for the pinned versions, redistribution
+controls, source-publication requirements, future-review triggers, and patent
+note.
