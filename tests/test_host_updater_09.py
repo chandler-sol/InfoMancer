@@ -99,6 +99,133 @@ class HostUpdater09Tests(unittest.TestCase):
             history = json.loads((data / "update-history.json").read_text())
             self.assertEqual(history[-1]["release"]["commit_sha"], requested_commit)
 
+    def test_schema_safe_version_downgrade_can_complete_through_trusted_host_path(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = root / "repo"
+            data = root / "data"
+            (repository / ".git").mkdir(parents=True)
+            (repository / "compose.yaml").write_text("services: {}\n")
+            data.mkdir()
+            previous_commit = "b" * 40
+            target_commit = "a" * 40
+            (data / "update-request.json").write_text(json.dumps({
+                "tag": "v0.8.1-beta.2",
+                "requested_by": "Librarian",
+                "release": {
+                    "channel": "standard",
+                    "build_id": "qualified-beta2",
+                    "commit_sha": target_commit,
+                    "qualification_status": "passed",
+                    "schema_assessment": {
+                        "status": "safe_downgrade",
+                        "current_schema": 17,
+                        "target_schema": 17,
+                    },
+                },
+            }))
+            commands: list[list[str]] = []
+
+            def fake_run(command, cwd):
+                commands.append(command)
+                if command[:3] == ["git", "status", "--porcelain"]:
+                    return ""
+                if command == ["git", "rev-parse", "HEAD"]:
+                    return previous_commit
+                if command[:2] == ["git", "fetch"]:
+                    return ""
+                if command[:3] == ["git", "rev-parse", "--verify"]:
+                    return target_commit
+                return ""
+
+            with mock.patch.object(host_updater, "run", side_effect=fake_run), mock.patch.object(
+                host_updater, "verify_release_tag"
+            ) as verify, mock.patch.object(host_updater, "wait_for_health") as health:
+                handled = host_updater.process_request(
+                    repository,
+                    data,
+                    ["compose.yaml"],
+                    "http://127.0.0.1:8787/health",
+                    30,
+                    {"D" * 40},
+                )
+
+            self.assertTrue(handled)
+            verify.assert_called_once()
+            health.assert_called_once()
+            self.assertIn(["git", "checkout", "--detach", target_commit], commands)
+            status = json.loads((data / "update-status.json").read_text())
+            self.assertEqual(status["status"], "success")
+            self.assertEqual(status["previous_commit"], previous_commit)
+            self.assertEqual(status["target_commit"], target_commit)
+            self.assertEqual(status["release"]["schema_assessment"]["status"], "safe_downgrade")
+            self.assertFalse((data / "update-request.json").exists())
+
+    def test_failed_schema_safe_downgrade_rolls_back_to_previous_commit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = root / "repo"
+            data = root / "data"
+            (repository / ".git").mkdir(parents=True)
+            (repository / "compose.yaml").write_text("services: {}\n")
+            data.mkdir()
+            previous_commit = "b" * 40
+            target_commit = "a" * 40
+            (data / "update-request.json").write_text(json.dumps({
+                "tag": "v0.8.1-beta.2",
+                "requested_by": "Librarian",
+                "release": {
+                    "channel": "standard",
+                    "build_id": "qualified-beta2",
+                    "commit_sha": target_commit,
+                    "qualification_status": "passed",
+                    "schema_assessment": {"status": "safe_downgrade"},
+                },
+            }))
+            commands: list[list[str]] = []
+
+            def fake_run(command, cwd):
+                commands.append(command)
+                if command[:3] == ["git", "status", "--porcelain"]:
+                    return ""
+                if command == ["git", "rev-parse", "HEAD"]:
+                    return previous_commit
+                if command[:2] == ["git", "fetch"]:
+                    return ""
+                if command[:3] == ["git", "rev-parse", "--verify"]:
+                    return target_commit
+                return ""
+
+            health_results = [host_updater.UpdateError("target unhealthy"), None]
+            with mock.patch.object(host_updater, "run", side_effect=fake_run), mock.patch.object(
+                host_updater, "verify_release_tag"
+            ), mock.patch.object(host_updater, "wait_for_health", side_effect=health_results):
+                handled = host_updater.process_request(
+                    repository,
+                    data,
+                    ["compose.yaml"],
+                    "http://127.0.0.1:8787/health",
+                    30,
+                    {"D" * 40},
+                )
+
+            self.assertTrue(handled)
+            checkout_commands = [command for command in commands if command[:3] == ["git", "checkout", "--detach"]]
+            self.assertEqual(
+                checkout_commands,
+                [
+                    ["git", "checkout", "--detach", target_commit],
+                    ["git", "checkout", "--detach", previous_commit],
+                ],
+            )
+            status = json.loads((data / "update-status.json").read_text())
+            self.assertEqual(status["status"], "rolled_back")
+            self.assertEqual(status["previous_commit"], previous_commit)
+            self.assertEqual(status["target_commit"], target_commit)
+            self.assertEqual(status["release"]["schema_assessment"]["status"], "safe_downgrade")
+            history = json.loads((data / "update-history.json").read_text())
+            self.assertEqual(history[-1]["status"], "rolled_back")
+
 
 if __name__ == "__main__":
     unittest.main()
