@@ -1,0 +1,83 @@
+name: FFprobe Compliance
+
+on:
+  pull_request:
+    paths:
+      - scripts/stage_ffprobe.py
+      - tests/test_ffprobe_packaging.py
+      - docs/FFPROBE_DISTRIBUTION.md
+      - docs/PACKAGING.md
+      - .github/workflows/ffprobe-compliance.yml
+      - .github/workflows/windows-desktop.yml
+      - .github/workflows/windows-desktop-release.yml
+  push:
+    branches:
+      - testing/0.9-alpha-reseed
+    paths:
+      - scripts/stage_ffprobe.py
+      - tests/test_ffprobe_packaging.py
+      - docs/FFPROBE_DISTRIBUTION.md
+      - docs/PACKAGING.md
+      - .github/workflows/ffprobe-compliance.yml
+      - .github/workflows/windows-desktop.yml
+      - .github/workflows/windows-desktop-release.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ffprobe-compliance-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  verify-bundled-ffprobe:
+    name: Verify pinned FFprobe on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+
+      - name: Download, verify, and execute pinned FFprobe
+        run: python scripts/stage_ffprobe.py --output build/ffprobe
+
+      - name: Verify staged compliance evidence
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+
+          root = Path('build/ffprobe')
+          binary = root / ('ffprobe.exe' if os.name == 'nt' else 'ffprobe')
+          required = [
+              binary,
+              root / 'FFPROBE_LICENSE.txt',
+              root / 'FFPROBE_NOTICE.txt',
+              root / 'FFPROBE_BUILDINFO.txt',
+          ]
+          missing = [str(path) for path in required if not path.is_file()]
+          if missing:
+              raise SystemExit(f'Missing staged FFprobe compliance files: {missing}')
+
+          build_info = (root / 'FFPROBE_BUILDINFO.txt').read_text(encoding='utf-8').casefold()
+          if '--enable-version3' not in build_info:
+              raise SystemExit('Pinned FFprobe did not preserve the expected LGPLv3 build profile')
+          for forbidden in ('--enable-gpl', '--enable-nonfree'):
+              if forbidden in build_info:
+                  raise SystemExit(f'Forbidden FFprobe configure flag present: {forbidden}')
+          print((root / 'FFPROBE_BUILDINFO.txt').read_text(encoding='utf-8'))
+          PY
