@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 FFMPEG_COMMIT="ad500d59cb6e0126add4fcb95afb4e2557c4292c"
 FFMPEG_SHORT="ad500d59cb"
 OUTPUT_DIR="${1:-build/minimal-ffprobe}"
@@ -70,7 +71,7 @@ x86_64-w64-mingw32-objdump -p ffprobe.exe \
 
 cp ffprobe.exe "$OUTPUT_DIR/ffprobe.exe"
 cp "$SOURCE_DIR/COPYING.LGPLv2.1" "$OUTPUT_DIR/FFPROBE_LICENSE.txt"
-cp "$0" "$OUTPUT_DIR/FFPROBE_BUILD_SCRIPT.sh"
+cp "$SCRIPT_PATH" "$OUTPUT_DIR/FFPROBE_BUILD_SCRIPT.sh"
 printf '%s\n' "${CONFIGURE_ARGS[@]}" > "$OUTPUT_DIR/FFPROBE_CONFIGURE_ARGS.txt"
 
 # Publish the exact corresponding source used for the binary. This archive is
