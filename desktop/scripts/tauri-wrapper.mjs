@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, renameSync, unlinkSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -13,6 +13,48 @@ if (!existsSync(tauriCli)) {
   process.exit(1);
 }
 
+function configureUpdaterPublicKeyForBuild() {
+  if (args[0] !== 'build') return null;
+
+  const publicKey = (process.env.INFOMANCER_UPDATER_PUBLIC_KEY ?? '').trim();
+  if (!publicKey) return null;
+
+  const decoded = Buffer.from(publicKey, 'base64').toString('utf8');
+  if (!decoded.startsWith('untrusted comment: minisign public key:') || !decoded.includes('\nRW')) {
+    throw new Error(
+      'INFOMANCER_UPDATER_PUBLIC_KEY is not a Tauri-generated updater public key.',
+    );
+  }
+
+  const configIndex = args.indexOf('--config');
+  if (configIndex < 0 || !args[configIndex + 1]) {
+    return null;
+  }
+
+  const sourceConfigPath = resolve(desktopDir, args[configIndex + 1]);
+  const sourceConfig = JSON.parse(readFileSync(sourceConfigPath, 'utf8'));
+  sourceConfig.plugins ??= {};
+  sourceConfig.plugins.updater ??= {};
+  sourceConfig.plugins.updater.pubkey = publicKey;
+
+  const effectiveConfigPath = join(
+    dirname(sourceConfigPath),
+    '.infomancer-tauri-release.effective.json',
+  );
+  writeFileSync(effectiveConfigPath, `${JSON.stringify(sourceConfig, null, 2)}\n`, 'utf8');
+  args[configIndex + 1] = effectiveConfigPath;
+  console.log('Configured updater public key in the effective Tauri release config.');
+  return effectiveConfigPath;
+}
+
+let effectiveConfigPath = null;
+try {
+  effectiveConfigPath = configureUpdaterPublicKeyForBuild();
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
+
 // Invoke the JavaScript entrypoint with the current Node executable rather than
 // relying on platform-specific .cmd/.bin shims. This keeps the wrapper identical
 // on Windows, macOS, and Linux.
@@ -21,6 +63,10 @@ const result = spawnSync(process.execPath, [tauriCli, ...args], {
   stdio: 'inherit',
   shell: false,
 });
+
+if (effectiveConfigPath && existsSync(effectiveConfigPath)) {
+  unlinkSync(effectiveConfigPath);
+}
 
 if (result.error) {
   console.error(result.error.message);
