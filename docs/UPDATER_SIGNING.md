@@ -20,6 +20,8 @@ Keep the private signing key and its password outside the InfoMancer repository.
 
 After signing is configured, push a normal change to `testing/0.9-alpha` or re-run qualification from a new commit.
 
+The repository owner provisioned the signing variable and secrets on 2026-09-13. The next qualifying push is the activation proof: the signed packaging steps must execute rather than skip, and the Dev rolling pointers must advance only after the complete qualification gates pass.
+
 The canonical `Tests` workflow must complete all of these before Dev can advance:
 
 1. Windows Python tests
