@@ -1,57 +1,67 @@
 from __future__ import annotations
 
 import argparse
-import gzip
 import hashlib
+import io
 import json
 import os
 import platform
 import stat
+import subprocess
+import tarfile
 import urllib.request
-from pathlib import Path
+import zipfile
+from pathlib import Path, PurePosixPath
 
 
-VERSION = "6.1.1"
+VERSION = "n9.0.1-29-gad500d59cb"
+FFMPEG_COMMIT = "ad500d59cb6e0126add4fcb95afb4e2557c4292c"
+BTBN_RELEASE = "autobuild-2026-09-11-13-20"
+BTBN_COMMIT = "cc8f0958be119db774cdaf6c50065651a4901e72"
 RELEASE_BASE = (
-    "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1"
+    f"https://github.com/BtbN/FFmpeg-Builds/releases/download/{BTBN_RELEASE}"
 )
+FFMPEG_SOURCE_URL = f"https://github.com/FFmpeg/FFmpeg/archive/{FFMPEG_COMMIT}.tar.gz"
+BTBN_SOURCE_URL = f"https://github.com/BtbN/FFmpeg-Builds/archive/{BTBN_COMMIT}.tar.gz"
+LICENSE_URL = (
+    "https://raw.githubusercontent.com/FFmpeg/FFmpeg/"
+    f"{FFMPEG_COMMIT}/COPYING.LGPLv2.1"
+)
+LICENSE_GIT_BLOB_SHA1 = "40924c2a6da76a2b0c639f6fe7ef0b2d095a6adb"
 
+# Only explicitly reviewed LGPL builds are allowed here. macOS is intentionally
+# absent until an equally reviewable LGPL build/source path is added.
 ASSETS = {
     ("windows", "x86_64"): {
-        "slug": "win32-x64",
-        "archive_sha256": "f309e6223ad89d2fe54bccd420a7709b66fd27540674e92309578ed491a43c8d",
-        "binary_sha256": "3a7e2dc003dc2cd1472827e4c7c4f056ae1ae0ae7c5bbc580c99b49827351ba4",
-        "license_sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+        "filename": "ffmpeg-n9.0.1-29-gad500d59cb-win64-lgpl-9.0.zip",
+        "archive_sha256": "2ed9c183065b944197d771eb6486fe7e4627b28059a9b32e852f3a69495fc9b5",
+        "format": "zip",
+    },
+    ("windows", "arm64"): {
+        "filename": "ffmpeg-n9.0.1-29-gad500d59cb-winarm64-lgpl-9.0.zip",
+        "archive_sha256": "c2b72737f40e0f6206f61c885e011753c5b6307e9d63a2db59a3e949fe24b345",
+        "format": "zip",
     },
     ("linux", "x86_64"): {
-        "slug": "linux-x64",
-        "archive_sha256": "25d9b6ccb05e3d9de9e04e31e2506d8dd7f9f0418981965ac6df12e8d3afd067",
-        "binary_sha256": "4f231a1960d83e403d08f7971e271707bec278a9ae18e21b8b5b03186668450d",
-        "license_sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+        "filename": "ffmpeg-n9.0.1-29-gad500d59cb-linux64-lgpl-9.0.tar.xz",
+        "archive_sha256": "b8f6a666dac99d2ce2010e35f192ab9696bca4c258b13e33fedf1383defff1ea",
+        "format": "tar.xz",
     },
     ("linux", "arm64"): {
-        "slug": "linux-arm64",
-        "archive_sha256": "2ab6aba60ee84412dff9188720703376cb4e7aaf7e0b5e43aa8249f2acae5bf8",
-        "binary_sha256": "d17ae9b4c297d48e2521ba14e417bb0537c6ff77c584cdbcd6bb0d8d0307a2e8",
-        "license_sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
-    },
-    ("darwin", "x86_64"): {
-        "slug": "darwin-x64",
-        "archive_sha256": "d4da574d6e2e197bd259b47d69cf262df9e312af24ad960444f6d806d3d4c186",
-        "binary_sha256": "fa3add0ce901f7241abe0dfc0155d958fc834aca3f8ce61f87cc712ae669c1e0",
-        "license_sha256": "2e1d16c72fd74e12063776371da757322f8b77589386532f4fd8634bde7de1af",
-    },
-    ("darwin", "arm64"): {
-        "slug": "darwin-arm64",
-        "archive_sha256": "d986a8ec7b030899fe66a8a288ed809a3543338705a3ce178cfb85869c5d80be",
-        "binary_sha256": "bb2db6f5d8cef919da12fbf592119a987202a8c060a886f3cab091f9cab90b64",
-        "license_sha256": "cb48bf09a11f5fb576cddb0431c8f5ed0a60157a9ec942adffc13907cbe083f2",
+        "filename": "ffmpeg-n9.0.1-29-gad500d59cb-linuxarm64-lgpl-9.0.tar.xz",
+        "archive_sha256": "ee6b813257af01e125c23740d282fdbc9d656874103ce898f708bdc753b95936",
+        "format": "tar.xz",
     },
 }
 
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _git_blob_sha1(data: bytes) -> str:
+    header = f"blob {len(data)}\0".encode("ascii")
+    return hashlib.sha1(header + data).hexdigest()
 
 
 def _platform_key() -> tuple[str, str]:
@@ -78,9 +88,9 @@ def _platform_key() -> tuple[str, str]:
 def _download(url: str) -> bytes:
     request = urllib.request.Request(
         url,
-        headers={"User-Agent": "InfoMancer-native-packaging/0.8.1"},
+        headers={"User-Agent": "InfoMancer-native-packaging/0.9"},
     )
-    with urllib.request.urlopen(request, timeout=60) as response:
+    with urllib.request.urlopen(request, timeout=120) as response:
         return response.read()
 
 
@@ -92,16 +102,106 @@ def _require_hash(label: str, data: bytes, expected: str) -> None:
         )
 
 
-def _write_notice(output: Path) -> None:
+def _extract_ffprobe(archive: bytes, asset: dict, binary_name: str) -> bytes:
+    candidates: list[tuple[str, bytes]] = []
+    if asset["format"] == "zip":
+        with zipfile.ZipFile(io.BytesIO(archive)) as package:
+            for member in package.namelist():
+                path = PurePosixPath(member)
+                if path.name == binary_name and "bin" in path.parts:
+                    candidates.append((member, package.read(member)))
+    elif asset["format"] == "tar.xz":
+        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:xz") as package:
+            for member in package.getmembers():
+                path = PurePosixPath(member.name)
+                if member.isfile() and path.name == binary_name and "bin" in path.parts:
+                    extracted = package.extractfile(member)
+                    if extracted is not None:
+                        candidates.append((member.name, extracted.read()))
+    else:
+        raise RuntimeError(f"Unsupported FFprobe archive format: {asset['format']}")
+
+    if len(candidates) != 1:
+        found = ", ".join(name for name, _ in candidates) or "none"
+        raise RuntimeError(
+            f"Expected exactly one {binary_name} in pinned FFmpeg archive; found {found}"
+        )
+    return candidates[0][1]
+
+
+def _verify_ffprobe(binary_path: Path) -> str:
+    try:
+        result = subprocess.run(
+            [str(binary_path), "-version"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"Could not execute staged FFprobe: {exc}") from exc
+
+    report = result.stdout
+    lower = report.casefold()
+    if VERSION.casefold() not in lower:
+        raise RuntimeError(
+            f"Staged FFprobe did not report expected version {VERSION}"
+        )
+    forbidden = [
+        flag for flag in ("--enable-gpl", "--enable-nonfree") if flag in lower
+    ]
+    if forbidden:
+        raise RuntimeError(
+            "Refusing to package FFprobe because its configuration enables "
+            + ", ".join(forbidden)
+        )
+    if "configuration:" not in lower:
+        raise RuntimeError("FFprobe did not report its build configuration")
+    return report
+
+
+def _write_notice(output: Path, asset: dict) -> None:
     (output / "FFPROBE_NOTICE.txt").write_text(
-        "InfoMancer native desktop packages include FFprobe from FFmpeg for local "
-        "media inspection.\n\n"
+        "InfoMancer native desktop packages include FFprobe from the FFmpeg "
+        "project as a separate executable used only for local media inspection.\n\n"
         f"Bundled build: FFmpeg/FFprobe {VERSION}\n"
-        f"Binary source: {RELEASE_BASE}\n"
+        f"Binary builder: BtbN/FFmpeg-Builds @ {BTBN_COMMIT}\n"
+        f"Binary release: {RELEASE_BASE}/{asset['filename']}\n"
+        f"Exact FFmpeg source commit: {FFMPEG_COMMIT}\n"
+        f"Corresponding source: {FFMPEG_SOURCE_URL}\n"
+        f"Build scripts source: {BTBN_SOURCE_URL}\n"
         "Upstream project: https://ffmpeg.org/\n\n"
-        "The accompanying FFPROBE_LICENSE.txt is the license distributed with "
-        "the pinned binary build. Review third-party distribution obligations "
-        "before publishing a production release.\n",
+        "The selected BtbN artifact is the LGPL build variant. InfoMancer's "
+        "packaging step executes the staged binary and refuses it if FFprobe's "
+        "reported configuration contains --enable-gpl or --enable-nonfree. "
+        "FFPROBE_LICENSE.txt contains the GNU LGPL v2.1 text from the exact "
+        "FFmpeg source commit. FFPROBE_BUILDINFO.txt records the binary's own "
+        "version/configuration output and archive checksum.\n\n"
+        "FFmpeg/FFprobe is third-party software and is not owned by InfoMancer. "
+        "InfoMancer and FFmpeg are separate projects.\n",
+        encoding="utf-8",
+    )
+
+
+def _write_build_info(output: Path, asset: dict, report: str) -> None:
+    (output / "FFPROBE_BUILDINFO.txt").write_text(
+        "InfoMancer FFprobe distribution provenance\n"
+        "==========================================\n\n"
+        f"FFmpeg version: {VERSION}\n"
+        f"FFmpeg source commit: {FFMPEG_COMMIT}\n"
+        f"BtbN build-scripts commit: {BTBN_COMMIT}\n"
+        f"BtbN release: {BTBN_RELEASE}\n"
+        f"Archive: {asset['filename']}\n"
+        f"Archive SHA-256: {asset['archive_sha256']}\n"
+        f"Corresponding source: {FFMPEG_SOURCE_URL}\n"
+        f"Build scripts source: {BTBN_SOURCE_URL}\n"
+        f"License source: {LICENSE_URL}\n\n"
+        "No InfoMancer modifications are made to the FFmpeg binary after "
+        "extraction from the verified archive.\n\n"
+        "ffprobe -version\n"
+        "----------------\n"
+        f"{report.rstrip()}\n",
         encoding="utf-8",
     )
 
@@ -127,48 +227,21 @@ def _write_build_identity() -> Path:
     return path
 
 
-def _reuse_verified_stage(output: Path, key: tuple[str, str], asset: dict) -> Path | None:
-    """Reuse a cached stage only after re-verifying the pinned binary and license."""
-    binary_name = "ffprobe.exe" if key[0] == "windows" else "ffprobe"
-    binary_path = output / binary_name
-    license_path = output / "FFPROBE_LICENSE.txt"
-    if not binary_path.is_file() or not license_path.is_file():
-        return None
-    try:
-        _require_hash("Cached FFprobe binary", binary_path.read_bytes(), asset["binary_sha256"])
-        _require_hash("Cached FFprobe license", license_path.read_bytes(), asset["license_sha256"])
-    except (OSError, RuntimeError):
-        return None
-    if key[0] != "windows":
-        binary_path.chmod(
-            binary_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-        )
-    _write_notice(output)
-    print(f"Reused verified FFprobe {VERSION} at {binary_path}")
-    return binary_path
-
-
 def stage(output: Path) -> Path:
     key = _platform_key()
     asset = ASSETS.get(key)
     if not asset:
-        raise RuntimeError(f"No pinned FFprobe asset is configured for {key[0]}/{key[1]}")
+        raise RuntimeError(
+            f"No approved LGPL FFprobe asset is configured for {key[0]}/{key[1]}. "
+            "Do not substitute an unreviewed GPL/nonfree binary."
+        )
 
     output.mkdir(parents=True, exist_ok=True)
-    reused = _reuse_verified_stage(output, key, asset)
-    if reused:
-        return reused
-
-    slug = asset["slug"]
-    archive = _download(f"{RELEASE_BASE}/ffprobe-{slug}.gz")
+    archive = _download(f"{RELEASE_BASE}/{asset['filename']}")
     _require_hash("FFprobe archive", archive, asset["archive_sha256"])
-    binary = gzip.decompress(archive)
-    _require_hash("FFprobe binary", binary, asset["binary_sha256"])
-
-    license_text = _download(f"{RELEASE_BASE}/{slug}.LICENSE")
-    _require_hash("FFprobe license", license_text, asset["license_sha256"])
 
     binary_name = "ffprobe.exe" if key[0] == "windows" else "ffprobe"
+    binary = _extract_ffprobe(archive, asset, binary_name)
     binary_path = output / binary_name
     binary_path.write_bytes(binary)
     if key[0] != "windows":
@@ -176,15 +249,25 @@ def stage(output: Path) -> Path:
             binary_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
         )
 
+    license_text = _download(LICENSE_URL)
+    actual_license_sha = _git_blob_sha1(license_text)
+    if actual_license_sha != LICENSE_GIT_BLOB_SHA1:
+        raise RuntimeError(
+            "FFprobe LGPL license Git-blob SHA-1 mismatch: expected "
+            f"{LICENSE_GIT_BLOB_SHA1}, received {actual_license_sha}"
+        )
     (output / "FFPROBE_LICENSE.txt").write_bytes(license_text)
-    _write_notice(output)
-    print(f"Staged verified FFprobe {VERSION} at {binary_path}")
+
+    report = _verify_ffprobe(binary_path)
+    _write_notice(output, asset)
+    _write_build_info(output, asset, report)
+    print(f"Staged verified LGPL FFprobe {VERSION} at {binary_path}")
     return binary_path
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Stage the pinned FFprobe binary used by native InfoMancer packages"
+        description="Stage the pinned LGPL FFprobe binary used by native InfoMancer packages"
     )
     parser.add_argument("--output", default="build/ffprobe")
     args = parser.parse_args()
