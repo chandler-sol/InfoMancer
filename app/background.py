@@ -11,6 +11,7 @@ from .app_settings import AppSettings
 from .db import Database
 from .duplicate_trash import DuplicateTrashService
 from .file_hashes import MediaHashService
+from .maintenance_gate import APPLICATION_MAINTENANCE_GATE
 from .runtime import JobRegistry, RuntimeLease
 
 
@@ -109,24 +110,31 @@ class BackgroundCoordinator:
     def start_media_hashing(
         self, file_ids: list[int], reason: str, *, queue_files: bool = True,
     ) -> bool:
-        ids = (
-            self.media_hashes.queue(file_ids)
-            if queue_files else list(dict.fromkeys(file_ids))
-        )
-        if not ids:
+        # Protect the queue/start transition itself. Once the thread is visible as
+        # starting/running, recovery's post-gate quiescence check owns the handoff.
+        if not APPLICATION_MAINTENANCE_GATE.try_enter_operation():
             return False
-        with self.media_hash_lock:
-            if self.media_hash_job.get("status") in {"starting", "running"}:
+        try:
+            ids = (
+                self.media_hashes.queue(file_ids)
+                if queue_files else list(dict.fromkeys(file_ids))
+            )
+            if not ids:
                 return False
-            self.media_hash_job.clear()
-            self.media_hash_job.update({
-                "status": "starting", "processed": 0,
-                "total": len(ids), "reason": reason,
-            })
-        threading.Thread(
-            target=self.run_media_hashing, args=(ids, reason), daemon=True,
-        ).start()
-        return True
+            with self.media_hash_lock:
+                if self.media_hash_job.get("status") in {"starting", "running"}:
+                    return False
+                self.media_hash_job.clear()
+                self.media_hash_job.update({
+                    "status": "starting", "processed": 0,
+                    "total": len(ids), "reason": reason,
+                })
+            threading.Thread(
+                target=self.run_media_hashing, args=(ids, reason), daemon=True,
+            ).start()
+            return True
+        finally:
+            APPLICATION_MAINTENANCE_GATE.leave_operation()
 
     def handle_import_hashing(self, file_ids: list[int], reason: str) -> None:
         mode = self.app_settings.get("hash_mode")
@@ -279,6 +287,11 @@ class BackgroundCoordinator:
     def run_scheduler(self) -> None:
         """Run installation schedules even when no browser is open."""
         while not self.scheduler_stop.wait(30):
+            # The scheduler itself is ordinary application work. Holding admission
+            # across the complete tick prevents recovery from entering exclusive
+            # mode while the scheduler is reading state or starting a worker.
+            if not APPLICATION_MAINTENANCE_GATE.try_enter_operation():
+                continue
             try:
                 self.maybe_start_scheduled_hashing()
                 self.maybe_start_trash_cleanup()
@@ -289,6 +302,8 @@ class BackgroundCoordinator:
                     "InfoMancer will try again automatically.",
                     level="error", detail=str(exc),
                 )
+            finally:
+                APPLICATION_MAINTENANCE_GATE.leave_operation()
 
     def start(self) -> None:
         self.runtime_lease.start()
