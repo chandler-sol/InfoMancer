@@ -1,0 +1,286 @@
+from pathlib import Path
+import re
+
+path = Path("app/routes/titles.py")
+text = path.read_text(encoding="utf-8")
+
+import_anchor = "from ..season_folders import SeasonFolderError, SeasonFolderService\n"
+import_insert = import_anchor + "from ..safe_file_rename import SafeFileRenameError, SafeFileRenameService\n"
+if text.count(import_anchor) != 1 or "SafeFileRenameService" in text:
+    raise SystemExit("Unexpected safe rename import state")
+text = text.replace(import_anchor, import_insert, 1)
+
+service_anchor = "    season_folders = SeasonFolderService(db)\n    file_protection = FileProtectionService(app_settings)\n"
+service_insert = "    season_folders = SeasonFolderService(db)\n    safe_renames = SafeFileRenameService(db)\n    file_protection = FileProtectionService(app_settings)\n"
+if text.count(service_anchor) != 1:
+    raise SystemExit("Unexpected service construction state")
+text = text.replace(service_anchor, service_insert, 1)
+
+replacements = {
+"rename_folder": '''    @librarian_post("/titles/{title_id}/rename-folder")
+    def rename_folder(request: Request, title_id: int, confirm: str = Form("")):
+        try:
+            file_protection.require_media_write("rename show folders")
+        except MediaWriteBlocked as exc:
+            return redirect(f"/titles/{title_id}", str(exc))
+        if confirm != "RENAME":
+            return redirect(f"/titles/{title_id}", "Rename cancelled: confirmation did not match")
+        with db.connect() as conn:
+            title = conn.execute("SELECT * FROM titles WHERE id=?", (title_id,)).fetchone()
+        if not title or not title["tvdb_id"]:
+            raise HTTPException(400, "TVDB match required")
+        source = Path(title["folder_path"])
+        continuing = title["metadata_continuing"] if title["metadata_continuing"] is not None else title["continuing"]
+        new_name = plex_show_folder(
+            title["metadata_title"] or title["title"], title["metadata_year"] or title["year"],
+            title["tvdb_id"], title["metadata_end_year"] or title["end_year"], continuing,
+        )
+        destination = contained_destination(source, new_name)
+        if destination == source:
+            return redirect(f"/titles/{title_id}", "Folder already follows the Plex format")
+        try:
+            safe_renames.rename_folder(title_id, source, destination)
+        except SafeFileRenameError as exc:
+            record_event(
+                "filesystem", f"Show folder rename stopped for {source.name}.",
+                level="error", detail=str(exc),
+                context={"title_id": title_id, "source": str(source), "destination": str(destination)},
+            )
+            return redirect(f"/titles/{title_id}", str(exc))
+        operation_history.record_folder_rename(
+            title_id, source, destination, request.state.user.id,
+        )
+        record_event(
+            "filesystem", f"Show folder renamed from {source.name} to {destination.name}.",
+            context={"title_id": title_id, "source": str(source), "destination": str(destination)},
+        )
+        return redirect(f"/titles/{title_id}", "Show folder renamed")
+
+''',
+"bulk_rename_apply": '''    @librarian_post("/titles/{title_id}/rename-episodes")
+    def bulk_rename_apply(
+        request: Request, title_id: int, selected_file_ids: list[int] = Form(default=[]),
+    ):
+        try:
+            file_protection.require_media_write("rename episode files")
+        except MediaWriteBlocked as exc:
+            return redirect(f"/titles/{title_id}", str(exc))
+        selected = set(selected_file_ids)
+        if not selected:
+            return redirect(
+                f"/titles/{title_id}/rename-episodes",
+                "Select at least one episode file to rename",
+            )
+        renamed = 0
+        skipped = 0
+        renamed_operations = []
+        with db.connect() as conn:
+            title, proposals = episode_rename_proposals(conn, title_id)
+        if not title:
+            raise HTTPException(404, "Title not found")
+        for proposal in proposals:
+            if proposal["file_id"] not in selected:
+                continue
+            if proposal["status"] != "ready":
+                skipped += 1
+                continue
+            source, destination = proposal["source"], proposal["destination"]
+            try:
+                safe_renames.rename_file(proposal["file_id"], source, destination)
+            except SafeFileRenameError as exc:
+                skipped += 1
+                record_event(
+                    "filesystem", f"Episode file rename stopped for {source.name}.",
+                    level="error", detail=str(exc),
+                    context={"title_id": title_id, "source": str(source), "destination": str(destination)},
+                )
+                continue
+            renamed += 1
+            renamed_operations.append((proposal["file_id"], source, destination))
+        for renamed_file_id, source, destination in renamed_operations:
+            operation_history.record_file_rename(
+                renamed_file_id, source, destination, request.state.user.id,
+                label="Episode file renamed",
+            )
+        message = f"Renamed {renamed} selected episode files"
+        if skipped:
+            message += f"; skipped {skipped} conflicts, changed, or missing files"
+        record_event(
+            "filesystem", message + ".",
+            level="warning" if skipped else "info",
+            context={"title_id": title_id, "renamed": renamed, "skipped": skipped},
+        )
+        return redirect(f"/titles/{title_id}", message)
+
+''',
+"restore_filenames_apply": '''    @librarian_post("/titles/{title_id}/restore-filenames")
+    def restore_filenames_apply(request: Request, title_id: int):
+        try:
+            file_protection.require_media_write("restore original media filenames")
+        except MediaWriteBlocked as exc:
+            return redirect(f"/titles/{title_id}", str(exc))
+        restored = 0
+        skipped = 0
+        restored_operations = []
+        with db.connect() as conn:
+            title, proposals = restore_filename_proposals(conn, title_id)
+        if not title:
+            raise HTTPException(404, "Title not found")
+        for proposal in proposals:
+            if proposal["status"] != "ready":
+                skipped += proposal["status"] != "unchanged"
+                continue
+            source, destination = proposal["source"], proposal["destination"]
+            try:
+                safe_renames.rename_file(proposal["file_id"], source, destination)
+            except SafeFileRenameError as exc:
+                skipped += 1
+                record_event(
+                    "filesystem", f"Original filename restore stopped for {source.name}.",
+                    level="error", detail=str(exc),
+                    context={"title_id": title_id, "source": str(source), "destination": str(destination)},
+                )
+                continue
+            restored += 1
+            restored_operations.append((proposal["file_id"], source, destination))
+        for restored_file_id, source, destination in restored_operations:
+            operation_history.record_file_rename(
+                restored_file_id, source, destination, request.state.user.id,
+                label="Original filename restored",
+            )
+        message = f"Restored {restored} original filenames"
+        if skipped:
+            message += f"; skipped {skipped} conflicts, changed, or missing files"
+        record_event(
+            "filesystem", message + ".",
+            level="warning" if skipped else "info",
+            context={"title_id": title_id, "restored": restored, "skipped": skipped},
+        )
+        return redirect(f"/titles/{title_id}", message)
+
+''',
+"rename_file": '''    @librarian_post("/files/{file_id}/rename")
+    def rename_file(request: Request, file_id: int):
+        try:
+            file_protection.require_media_write("rename episode files")
+        except MediaWriteBlocked as exc:
+            return redirect("/library", str(exc))
+        with db.connect() as conn:
+            row = conn.execute(
+                """SELECT f.*, t.title, t.metadata_title, t.year, t.metadata_year,
+                   t.id matched_title_id FROM files f JOIN titles t ON t.id=f.title_id
+                   WHERE f.id=?""", (file_id,)
+            ).fetchone()
+            if not row:
+                raise HTTPException(404, "File not found")
+            episode_name = merged_episode_name(
+                expected_name_map(conn, row["matched_title_id"]), row["season"],
+                row["episode_start"], row["episode_end"],
+            )
+        new_name = plex_episode_filename(
+            row["metadata_title"] or row["title"], row["metadata_year"] or row["year"],
+            row["season"], row["episode_start"], episode_name, row["extension"],
+            row["episode_end"],
+        )
+        source = Path(row["path"])
+        destination = contained_destination(source, new_name)
+        if destination == source:
+            return redirect(f"/titles/{row['title_id']}", "Episode already follows the Plex format")
+        try:
+            safe_renames.rename_file(file_id, source, destination)
+        except SafeFileRenameError as exc:
+            record_event(
+                "filesystem", f"Episode file rename stopped for {source.name}.",
+                level="error", detail=str(exc),
+                context={"file_id": file_id, "source": str(source), "destination": str(destination)},
+            )
+            return redirect(f"/titles/{row['title_id']}", str(exc))
+        operation_history.record_file_rename(
+            file_id, source, destination, request.state.user.id,
+            label="Episode file renamed",
+        )
+        record_event(
+            "filesystem", f"Episode file renamed to {destination.name}.",
+            context={"file_id": file_id, "source": str(source), "destination": str(destination)},
+        )
+        return redirect(f"/titles/{row['title_id']}", "Episode renamed")
+
+''',
+"rename_movie": '''    @librarian_post("/files/{file_id}/rename-movie")
+    def rename_movie(request: Request, file_id: int):
+        try:
+            file_protection.require_media_write("rename movie files")
+        except MediaWriteBlocked as exc:
+            return redirect("/library", str(exc))
+        with db.connect() as conn:
+            row = conn.execute(
+                """SELECT f.*, t.title, t.metadata_title, t.year, t.metadata_year,
+                   t.tmdb_id, t.imdb_id, t.kind title_kind, t.folder_path
+                   FROM files f JOIN titles t ON t.id=f.title_id WHERE f.id=?""",
+                (file_id,),
+            ).fetchone()
+        if not row or row["title_kind"] != "movie":
+            raise HTTPException(404, "Movie file not found")
+        new_name = plex_movie_filename(
+            row["metadata_title"] or row["title"], row["metadata_year"] or row["year"],
+            row["extension"], row["tmdb_id"] or "", row["imdb_id"] or "",
+        )
+        source = Path(row["path"])
+        destination = contained_destination(source, new_name)
+        if destination == source:
+            return redirect(f"/titles/{row['title_id']}", "Movie file already follows the Plex format")
+        try:
+            safe_renames.rename_file(file_id, source, destination)
+        except SafeFileRenameError as exc:
+            record_event(
+                "filesystem", f"Movie file rename stopped for {source.name}.",
+                level="error", detail=str(exc),
+                context={"file_id": file_id, "source": str(source), "destination": str(destination)},
+            )
+            return redirect(f"/titles/{row['title_id']}", str(exc))
+        operation_history.record_file_rename(
+            file_id, source, destination, request.state.user.id,
+            label="Movie file renamed",
+        )
+        record_event(
+            "filesystem", f"Movie file renamed to {destination.name}.",
+            context={"file_id": file_id, "source": str(source), "destination": str(destination)},
+        )
+        return redirect(f"/titles/{row['title_id']}", "Movie file renamed")
+
+''',
+}
+
+specs = [
+    ("rename_folder", r'    @librarian_post\("/titles/\{title_id\}/rename-folder"\)\n    def rename_folder\(.*?(?=    @librarian_get\("/titles/\{title_id\}/rename-episodes")'),
+    ("bulk_rename_apply", r'    @librarian_post\("/titles/\{title_id\}/rename-episodes"\)\n    def bulk_rename_apply\(.*?(?=    @librarian_get\("/titles/\{title_id\}/restore-filenames")'),
+    ("restore_filenames_apply", r'    @librarian_post\("/titles/\{title_id\}/restore-filenames"\)\n    def restore_filenames_apply\(.*?(?=    @librarian_get\("/files/\{file_id\}/rename")'),
+    ("rename_file", r'    @librarian_post\("/files/\{file_id\}/rename"\)\n    def rename_file\(.*?(?=    @librarian_get\("/files/\{file_id\}/rename-movie")'),
+    ("rename_movie", r'    @librarian_post\("/files/\{file_id\}/rename-movie"\)\n    def rename_movie\(.*?(?=    return router, \{)'),
+]
+for name, pattern in specs:
+    text, count = re.subn(pattern, replacements[name], text, count=1, flags=re.S)
+    if count != 1:
+        raise SystemExit(f"Expected exactly one {name} block, got {count}")
+
+if "source.rename(destination)" in text or 'proposal["source"].rename(proposal["destination"])' in text:
+    raise SystemExit("Raw source rename remains in title routes")
+
+path.write_text(text, encoding="utf-8")
+
+test_path = Path("tests/test_safe_file_rename.py")
+test_text = test_path.read_text(encoding="utf-8")
+marker = '\n\nif __name__ == "__main__":\n    unittest.main()\n'
+addition = '''\n\nclass SafeRenameRouteContractTests(unittest.TestCase):
+    def test_live_title_rename_routes_use_safe_service(self):
+        root = Path(__file__).resolve().parents[1]
+        routes = (root / "app/routes/titles.py").read_text(encoding="utf-8")
+        self.assertIn("safe_renames = SafeFileRenameService(db)", routes)
+        self.assertEqual(routes.count("safe_renames.rename_file("), 4)
+        self.assertEqual(routes.count("safe_renames.rename_folder("), 1)
+        self.assertNotIn("source.rename(destination)", routes)
+        self.assertNotIn('proposal["source"].rename(proposal["destination"])', routes)
+'''
+if marker not in test_text or "SafeRenameRouteContractTests" in test_text:
+    raise SystemExit("Unexpected safe rename test state")
+test_path.write_text(test_text.replace(marker, addition + marker), encoding="utf-8")
