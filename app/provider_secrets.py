@@ -271,12 +271,13 @@ class ProviderSecretStore:
             os.replace(temporary, self.path)
             temporary = ""
         except OSError as exc:
+            raise ProviderSecretError(
+                "InfoMancer verified the credentials but could not save them. Check that the "
+                "application data folder is writable, then try again."
+            ) from exc
+        finally:
             if temporary:
                 try:
                     os.unlink(temporary)
                 except OSError:
                     pass
-            raise ProviderSecretError(
-                "InfoMancer verified the credentials but could not save them. Check that the "
-                "application data folder is writable, then try again."
-            ) from exc
