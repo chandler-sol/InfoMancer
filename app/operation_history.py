@@ -305,9 +305,13 @@ class OperationHistoryService:
                         "UPDATE titles SET folder_path=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                         (str(source), row["title_id"]),
                     )
-        except Exception:
+        except Exception as exc:
             self._require_inside(source, root)
             self._require_inside(destination, root)
+            if destination.exists():
+                raise OperationHistoryError(
+                    "Undo moved the file but the catalog update failed, and another file appeared at the renamed path before rollback. InfoMancer refused to overwrite it. Review both paths before retrying."
+                ) from exc
             source.rename(destination)
             raise
         return f"Restored the previous filename: {source.name}"
@@ -376,9 +380,13 @@ class OperationHistoryService:
                     conn.execute(
                         "UPDATE files SET path=? WHERE id=?", (str(source / relative), file_id)
                     )
-        except Exception:
+        except Exception as exc:
             self._require_inside(source, root)
             self._require_inside(destination, root)
+            if destination.exists():
+                raise OperationHistoryError(
+                    "Undo moved the folder but the catalog update failed, and another folder appeared at the renamed path before rollback. InfoMancer refused to overwrite it. Review both paths before retrying."
+                ) from exc
             source.rename(destination)
             raise
         return f"Restored the previous show folder name: {source.name}"
