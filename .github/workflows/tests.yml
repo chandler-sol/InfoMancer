@@ -94,6 +94,25 @@ jobs:
       - name: Compile application
         run: python -m compileall -q app
 
+  desktop-rust-test:
+    name: Rust desktop tests on Windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Stage test sidecar path
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
+          New-Item -ItemType File -Force desktop/src-tauri/binaries/infomancer-core-x86_64-pc-windows-msvc.exe | Out-Null
+
+      - name: Run Rust desktop tests
+        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked
+
   acceptance:
     name: Browser acceptance
     runs-on: ubuntu-latest
@@ -148,6 +167,7 @@ jobs:
     needs:
       - audit
       - test
+      - desktop-rust-test
       - acceptance
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -202,6 +222,7 @@ jobs:
     needs:
       - audit
       - test
+      - desktop-rust-test
       - acceptance
     permissions:
       contents: write
