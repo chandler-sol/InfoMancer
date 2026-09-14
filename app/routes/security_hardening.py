@@ -13,6 +13,7 @@ from fastapi.responses import Response
 from jinja2 import BaseLoader
 
 from ..access import require_librarian
+from ..maintenance_gate import APPLICATION_MAINTENANCE_GATE
 from .context import RouteContext
 
 
@@ -198,6 +199,51 @@ class HardenedTemplateLoader(BaseLoader):
         return self.wrapped.list_templates()
 
 
+def _install_maintenance_admission_middleware(ctx: RouteContext) -> None:
+    """Block ordinary requests while an exclusive data-maintenance operation runs.
+
+    The recovery apply request is the operation that acquires exclusive mode, so it
+    must pass through without registering itself as ordinary work. Authentication
+    and CSRF middleware still process that request normally. Static files and the
+    health probe are read-only and remain available while maintenance is active.
+    """
+    app = ctx.get("app")
+    if app is None or getattr(
+        app.state, "infomancer_maintenance_admission_installed", False
+    ):
+        return
+
+    @app.middleware("http")
+    async def maintenance_admission(request: Request, call_next):
+        path = request.url.path
+        recovery_apply = (
+            request.method.upper() == "POST" and path == "/settings/recovery/apply"
+        )
+        bypass = path == "/health" or path.startswith("/static/") or recovery_apply
+        if bypass:
+            return await call_next(request)
+
+        if not APPLICATION_MAINTENANCE_GATE.try_enter_operation():
+            return Response(
+                "InfoMancer is completing exclusive maintenance. Try again after the application restarts.",
+                status_code=503,
+                media_type="text/plain",
+                headers={
+                    "Retry-After": "5",
+                    "Cache-Control": "no-store",
+                    "X-Content-Type-Options": "nosniff",
+                    "X-Frame-Options": "DENY",
+                    "Referrer-Policy": "same-origin",
+                },
+            )
+        try:
+            return await call_next(request)
+        finally:
+            APPLICATION_MAINTENANCE_GATE.leave_operation()
+
+    app.state.infomancer_maintenance_admission_installed = True
+
+
 def build_router(ctx: RouteContext):
     router = APIRouter()
     templates = ctx.live("templates")
@@ -207,6 +253,8 @@ def build_router(ctx: RouteContext):
     mie = ctx.live("mie")
     list_database_backups = ctx.live("list_database_backups")
     record_event = ctx.live("record_event")
+
+    _install_maintenance_admission_middleware(ctx)
 
     templates.env.globals["csp_nonce"] = _nonce
     templates.env.globals["deployment_secret_warning"] = (
