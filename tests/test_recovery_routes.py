@@ -1,8 +1,10 @@
 import os
+import re
 import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -14,6 +16,7 @@ from app.auth import AuthService, SESSION_COOKIE
 from app.db import Database
 from app.engagement import EngagementService
 from app.event_log import EventLog
+from app.maintenance_gate import APPLICATION_MAINTENANCE_GATE
 from app.recovery_package import RecoveryPackageService
 
 
@@ -21,6 +24,11 @@ class RecoveryRouteTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
+        self.assertEqual(
+            APPLICATION_MAINTENANCE_GATE.status()["active_operations"], 0
+        )
+        APPLICATION_MAINTENANCE_GATE.end_exclusive()
+        self.addCleanup(APPLICATION_MAINTENANCE_GATE.end_exclusive)
         settings = replace(
             main.settings,
             database=Path(self.temporary.name) / "recovery-route.db",
@@ -53,7 +61,6 @@ class RecoveryRouteTests(unittest.TestCase):
         self.client = TestClient(main.app, follow_redirects=False)
         self.addCleanup(self.client.close)
         login = self.client.get("/login")
-        import re
         preauth = re.search(r'name="preauth_token" value="([^"]+)', login.text).group(1)
         signed_in = self.client.post("/login", data={
             "preauth_token": preauth,
@@ -75,6 +82,23 @@ class RecoveryRouteTests(unittest.TestCase):
         session = main.auth_service.session_from_token(raw)
         self.assertIsNotNone(session)
         return session.csrf_token
+
+    def preview_token(self) -> str:
+        response = self.client.post(
+            "/settings/recovery/preview",
+            headers={"X-CSRF-Token": self.csrf_token()},
+            files={
+                "recovery_file": (
+                    self.package.name,
+                    self.package.read_bytes(),
+                    "application/octet-stream",
+                )
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        match = re.search(r'name="staged_token" value="([^"]+)', response.text)
+        self.assertIsNotNone(match)
+        return match.group(1)
 
     def test_recovery_page_is_librarian_accessible(self):
         response = self.client.get("/settings/recovery")
@@ -114,6 +138,36 @@ class RecoveryRouteTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
         self.assertIn("Request verification failed", response.text)
+
+    def test_restore_refuses_to_enter_exclusive_mode_while_request_work_is_active(self):
+        token = self.preview_token()
+        self.assertTrue(APPLICATION_MAINTENANCE_GATE.try_enter_operation())
+        try:
+            response = self.client.post(
+                "/settings/recovery/apply",
+                headers={"X-CSRF-Token": self.csrf_token()},
+                data={"staged_token": token, "confirm": "RESTORE"},
+            )
+        finally:
+            APPLICATION_MAINTENANCE_GATE.leave_operation()
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("became+busy", response.headers.get("location", ""))
+        self.assertFalse(APPLICATION_MAINTENANCE_GATE.exclusive_active())
+
+    def test_successful_restore_stays_exclusive_until_restart(self):
+        token = self.preview_token()
+        with patch.object(main, "restart_after_restore", return_value=None):
+            response = self.client.post(
+                "/settings/recovery/apply",
+                headers={"X-CSRF-Token": self.csrf_token()},
+                data={"staged_token": token, "confirm": "RESTORE"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("recovery", response.text.casefold())
+        self.assertTrue(APPLICATION_MAINTENANCE_GATE.exclusive_active())
+        self.assertEqual(
+            APPLICATION_MAINTENANCE_GATE.status()["reason"], "portable recovery"
+        )
 
 
 if __name__ == "__main__":
