@@ -254,6 +254,21 @@ class DuplicateTrashService:
             ) from exc
         try:
             destination.parent.mkdir(parents=True, exist_ok=True)
+            # Re-resolve after parent creation. A concurrently created symlink or
+            # Windows junction must not be able to redirect a restore outside the
+            # configured media root, and managed Trash itself must still resolve
+            # inside that root immediately before the move.
+            trash_root = self._managed_trash_root(root)
+            self._require_inside(source, trash_root)
+            self._require_inside(destination, root)
+            if destination.exists():
+                raise DuplicateTrashError(
+                    f"Restore stopped because another file appeared at the original path: {destination}. No file was changed."
+                )
+            if not source.is_file():
+                raise DuplicateTrashError(
+                    "Restore stopped because the managed Trash file changed before the restore could begin. No file was changed."
+                )
             shutil.move(str(source), str(destination))
         except OSError as exc:
             raise DuplicateTrashError(
