@@ -89,6 +89,24 @@ class SupplyChainTests(unittest.TestCase):
             tests.index("cargo audit --file desktop/src-tauri/Cargo.lock"),
         )
 
+    def test_qualified_dev_publisher_keeps_immutable_and_rolling_feeds_connected(self):
+        tests = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5",
+            tests,
+        )
+        self.assertIn("releaseCommitish: ${{ github.sha }}", tests)
+        self.assertIn("includeUpdaterJson: true", tests)
+        self.assertIn("gh release download $env:DEV_TAG --pattern latest.json", tests)
+        self.assertIn("gh release upload desktop-dev", tests)
+        self.assertIn("gh release upload update-channels", tests)
+        self.assertIn(
+            '$artifactSpec = "windows=tauri-updater,${{ steps.assets.outputs.installer_url }},${{ steps.assets.outputs.installer_path }},$signature"',
+            tests,
+        )
+        self.assertNotIn("--artifact-digest-source", tests)
+        self.assertNotIn("windows-x86_64=$archiveUrl=$archivePath=$signature", tests)
+
 
 if __name__ == "__main__":
     unittest.main()
