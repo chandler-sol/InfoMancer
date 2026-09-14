@@ -159,6 +159,24 @@ class ChannelPromotion09Tests(unittest.TestCase):
         self.assertEqual(platform, "windows")
         self.assertEqual(artifact["signature"], "minisign-value")
 
+    def test_artifact_spec_rejects_plaintext_http(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = Path(tmp) / "InfoMancer.exe"
+            artifact_path.write_bytes(b"signed-package-bytes")
+            with self.assertRaisesRegex(ValueError, "credential-free HTTPS"):
+                promotion.parse_artifact_spec(
+                    f"windows=tauri-updater,http://example.invalid/InfoMancer.exe,{artifact_path}"
+                )
+
+    def test_artifact_spec_rejects_embedded_url_credentials(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = Path(tmp) / "InfoMancer.exe"
+            artifact_path.write_bytes(b"signed-package-bytes")
+            with self.assertRaisesRegex(ValueError, "credential-free HTTPS"):
+                promotion.parse_artifact_spec(
+                    f"windows=tauri-updater,https://user:pass@example.invalid/InfoMancer.exe,{artifact_path}"
+                )
+
     def test_artifact_spec_rejects_wrong_field_count(self):
         with self.assertRaisesRegex(ValueError, "platform=kind,url,path"):
             promotion.parse_artifact_spec("windows=tauri-updater,https://example.invalid/InfoMancer.exe")
