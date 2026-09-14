@@ -4,6 +4,7 @@ from ..access import require_librarian
 from ..file_protection import FileProtectionService, MediaWriteBlocked
 from ..operation_history import OperationHistoryService
 from ..season_folders import SeasonFolderError, SeasonFolderService
+from ..safe_file_rename import SafeFileRenameError, SafeFileRenameService
 from .context import RouteContext
 
 
@@ -36,6 +37,7 @@ def build_router(ctx: RouteContext):
     merged_episode_name = ctx.live("merged_episode_name")
     operation_history = OperationHistoryService(db)
     season_folders = SeasonFolderService(db)
+    safe_renames = SafeFileRenameService(db)
     file_protection = FileProtectionService(app_settings)
     plex_episode_filename = ctx.live("plex_episode_filename")
     plex_movie_filename = ctx.live("plex_movie_filename")
@@ -952,37 +954,26 @@ def build_router(ctx: RouteContext):
             return redirect(f"/titles/{title_id}", "Rename cancelled: confirmation did not match")
         with db.connect() as conn:
             title = conn.execute("SELECT * FROM titles WHERE id=?", (title_id,)).fetchone()
-            if not title or not title["tvdb_id"]:
-                raise HTTPException(400, "TVDB match required")
-            source = Path(title["folder_path"])
-            continuing = title["metadata_continuing"] if title["metadata_continuing"] is not None else title["continuing"]
-            new_name = plex_show_folder(
-                title["metadata_title"] or title["title"], title["metadata_year"] or title["year"],
-                title["tvdb_id"], title["metadata_end_year"] or title["end_year"], continuing,
+        if not title or not title["tvdb_id"]:
+            raise HTTPException(400, "TVDB match required")
+        source = Path(title["folder_path"])
+        continuing = title["metadata_continuing"] if title["metadata_continuing"] is not None else title["continuing"]
+        new_name = plex_show_folder(
+            title["metadata_title"] or title["title"], title["metadata_year"] or title["year"],
+            title["tvdb_id"], title["metadata_end_year"] or title["end_year"], continuing,
+        )
+        destination = contained_destination(source, new_name)
+        if destination == source:
+            return redirect(f"/titles/{title_id}", "Folder already follows the Plex format")
+        try:
+            safe_renames.rename_folder(title_id, source, destination)
+        except SafeFileRenameError as exc:
+            record_event(
+                "filesystem", f"Show folder rename stopped for {source.name}.",
+                level="error", detail=str(exc),
+                context={"title_id": title_id, "source": str(source), "destination": str(destination)},
             )
-            destination = contained_destination(source, new_name)
-            if destination == source:
-                return redirect(f"/titles/{title_id}", "Folder already follows the Plex format")
-            if destination.exists():
-                return redirect(f"/titles/{title_id}", f"Destination already exists: {destination}")
-            try:
-                source.rename(destination)
-            except OSError as exc:
-                record_event(
-                    "filesystem", f"Show folder could not be renamed: {source.name}.",
-                    level="error", detail=str(exc),
-                    context={"title_id": title_id, "source": str(source), "destination": str(destination)},
-                )
-                return redirect(
-                    f"/titles/{title_id}",
-                    "The show folder could not be renamed. Check that the folder still exists and InfoMancer has permission to change it, then try again. No catalog paths were changed.",
-                )
-            old_prefix, new_prefix = str(source), str(destination)
-            conn.execute("UPDATE titles SET folder_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (new_prefix, title_id))
-            rows = conn.execute("SELECT id, path FROM files WHERE title_id=?", (title_id,)).fetchall()
-            for row in rows:
-                new_path = new_prefix + row["path"][len(old_prefix):]
-                conn.execute("UPDATE files SET path=? WHERE id=?", (new_path, row["id"]))
+            return redirect(f"/titles/{title_id}", str(exc))
         operation_history.record_folder_rename(
             title_id, source, destination, request.state.user.id,
         )
@@ -1025,33 +1016,27 @@ def build_router(ctx: RouteContext):
         renamed_operations = []
         with db.connect() as conn:
             title, proposals = episode_rename_proposals(conn, title_id)
-            if not title:
-                raise HTTPException(404, "Title not found")
-            for proposal in proposals:
-                if proposal["file_id"] not in selected:
-                    continue
-                if proposal["status"] != "ready":
-                    skipped += 1
-                    continue
-                source, destination = proposal["source"], proposal["destination"]
-                try:
-                    if destination.exists():
-                        skipped += 1
-                        continue
-                    source.rename(destination)
-                    conn.execute(
-                        "UPDATE files SET path=?, filename=? WHERE id=?",
-                        (str(destination), destination.name, proposal["file_id"]),
-                    )
-                    renamed += 1
-                    renamed_operations.append((proposal["file_id"], source, destination))
-                except OSError as exc:
-                    skipped += 1
-                    record_event(
-                        "filesystem", f"Episode file could not be renamed: {source.name}.",
-                        level="error", detail=str(exc),
-                        context={"title_id": title_id, "source": str(source), "destination": str(destination)},
-                    )
+        if not title:
+            raise HTTPException(404, "Title not found")
+        for proposal in proposals:
+            if proposal["file_id"] not in selected:
+                continue
+            if proposal["status"] != "ready":
+                skipped += 1
+                continue
+            source, destination = proposal["source"], proposal["destination"]
+            try:
+                safe_renames.rename_file(proposal["file_id"], source, destination)
+            except SafeFileRenameError as exc:
+                skipped += 1
+                record_event(
+                    "filesystem", f"Episode file rename stopped for {source.name}.",
+                    level="error", detail=str(exc),
+                    context={"title_id": title_id, "source": str(source), "destination": str(destination)},
+                )
+                continue
+            renamed += 1
+            renamed_operations.append((proposal["file_id"], source, destination))
         for renamed_file_id, source, destination in renamed_operations:
             operation_history.record_file_rename(
                 renamed_file_id, source, destination, request.state.user.id,
@@ -1059,7 +1044,7 @@ def build_router(ctx: RouteContext):
             )
         message = f"Renamed {renamed} selected episode files"
         if skipped:
-            message += f"; skipped {skipped} conflicts or missing files"
+            message += f"; skipped {skipped} conflicts, changed, or missing files"
         record_event(
             "filesystem", message + ".",
             level="warning" if skipped else "info",
@@ -1090,31 +1075,25 @@ def build_router(ctx: RouteContext):
         restored_operations = []
         with db.connect() as conn:
             title, proposals = restore_filename_proposals(conn, title_id)
-            if not title:
-                raise HTTPException(404, "Title not found")
-            for proposal in proposals:
-                if proposal["status"] != "ready":
-                    skipped += proposal["status"] != "unchanged"
-                    continue
-                try:
-                    proposal["source"].rename(proposal["destination"])
-                    conn.execute(
-                        "UPDATE files SET path=?, filename=? WHERE id=?",
-                        (str(proposal["destination"]), proposal["destination"].name,
-                         proposal["file_id"]),
-                    )
-                    restored += 1
-                    restored_operations.append(
-                        (proposal["file_id"], proposal["source"], proposal["destination"])
-                    )
-                except OSError as exc:
-                    skipped += 1
-                    record_event(
-                        "filesystem",
-                        f"Original filename could not be restored for {proposal['source'].name}.",
-                        level="error", detail=str(exc),
-                        context={"title_id": title_id, "source": str(proposal["source"])},
-                    )
+        if not title:
+            raise HTTPException(404, "Title not found")
+        for proposal in proposals:
+            if proposal["status"] != "ready":
+                skipped += proposal["status"] != "unchanged"
+                continue
+            source, destination = proposal["source"], proposal["destination"]
+            try:
+                safe_renames.rename_file(proposal["file_id"], source, destination)
+            except SafeFileRenameError as exc:
+                skipped += 1
+                record_event(
+                    "filesystem", f"Original filename restore stopped for {source.name}.",
+                    level="error", detail=str(exc),
+                    context={"title_id": title_id, "source": str(source), "destination": str(destination)},
+                )
+                continue
+            restored += 1
+            restored_operations.append((proposal["file_id"], source, destination))
         for restored_file_id, source, destination in restored_operations:
             operation_history.record_file_rename(
                 restored_file_id, source, destination, request.state.user.id,
@@ -1122,7 +1101,7 @@ def build_router(ctx: RouteContext):
             )
         message = f"Restored {restored} original filenames"
         if skipped:
-            message += f"; skipped {skipped} conflicts or missing files"
+            message += f"; skipped {skipped} conflicts, changed, or missing files"
         record_event(
             "filesystem", message + ".",
             level="warning" if skipped else "info",
@@ -1161,7 +1140,6 @@ def build_router(ctx: RouteContext):
             file_protection.require_media_write("rename episode files")
         except MediaWriteBlocked as exc:
             return redirect("/library", str(exc))
-        renamed_operation = None
         with db.connect() as conn:
             row = conn.execute(
                 """SELECT f.*, t.title, t.metadata_title, t.year, t.metadata_year,
@@ -1174,39 +1152,32 @@ def build_router(ctx: RouteContext):
                 expected_name_map(conn, row["matched_title_id"]), row["season"],
                 row["episode_start"], row["episode_end"],
             )
-            new_name = plex_episode_filename(
-                row["metadata_title"] or row["title"], row["metadata_year"] or row["year"],
-                row["season"], row["episode_start"], episode_name, row["extension"],
-                row["episode_end"],
+        new_name = plex_episode_filename(
+            row["metadata_title"] or row["title"], row["metadata_year"] or row["year"],
+            row["season"], row["episode_start"], episode_name, row["extension"],
+            row["episode_end"],
+        )
+        source = Path(row["path"])
+        destination = contained_destination(source, new_name)
+        if destination == source:
+            return redirect(f"/titles/{row['title_id']}", "Episode already follows the Plex format")
+        try:
+            safe_renames.rename_file(file_id, source, destination)
+        except SafeFileRenameError as exc:
+            record_event(
+                "filesystem", f"Episode file rename stopped for {source.name}.",
+                level="error", detail=str(exc),
+                context={"file_id": file_id, "source": str(source), "destination": str(destination)},
             )
-            source = Path(row["path"])
-            destination = contained_destination(source, new_name)
-            if destination.exists() and destination != source:
-                return redirect(f"/titles/{row['title_id']}", f"Destination already exists: {destination}")
-            if destination != source:
-                try:
-                    source.rename(destination)
-                except OSError as exc:
-                    record_event(
-                        "filesystem", f"Episode file could not be renamed: {source.name}.",
-                        level="error", detail=str(exc),
-                        context={"file_id": file_id, "source": str(source), "destination": str(destination)},
-                    )
-                    return redirect(
-                        f"/titles/{row['title_id']}",
-                        "The episode could not be renamed. Check that the file still exists and InfoMancer has permission to change it, then try again. The catalog was not changed.",
-                    )
-                conn.execute("UPDATE files SET path=?, filename=? WHERE id=?", (str(destination), destination.name, file_id))
-                renamed_operation = (source, destination)
-                record_event(
-                    "filesystem", f"Episode file renamed to {destination.name}.",
-                    context={"file_id": file_id, "source": str(source), "destination": str(destination)},
-                )
-        if renamed_operation:
-            operation_history.record_file_rename(
-                file_id, renamed_operation[0], renamed_operation[1], request.state.user.id,
-                label="Episode file renamed",
-            )
+            return redirect(f"/titles/{row['title_id']}", str(exc))
+        operation_history.record_file_rename(
+            file_id, source, destination, request.state.user.id,
+            label="Episode file renamed",
+        )
+        record_event(
+            "filesystem", f"Episode file renamed to {destination.name}.",
+            context={"file_id": file_id, "source": str(source), "destination": str(destination)},
+        )
         return redirect(f"/titles/{row['title_id']}", "Episode renamed")
 
     @librarian_get("/files/{file_id}/rename-movie", response_class=HTMLResponse)
@@ -1236,7 +1207,6 @@ def build_router(ctx: RouteContext):
             file_protection.require_media_write("rename movie files")
         except MediaWriteBlocked as exc:
             return redirect("/library", str(exc))
-        renamed_operation = None
         with db.connect() as conn:
             row = conn.execute(
                 """SELECT f.*, t.title, t.metadata_title, t.year, t.metadata_year,
@@ -1244,48 +1214,33 @@ def build_router(ctx: RouteContext):
                    FROM files f JOIN titles t ON t.id=f.title_id WHERE f.id=?""",
                 (file_id,),
             ).fetchone()
-            if not row or row["title_kind"] != "movie":
-                raise HTTPException(404, "Movie file not found")
-            new_name = plex_movie_filename(
-                row["metadata_title"] or row["title"], row["metadata_year"] or row["year"],
-                row["extension"], row["tmdb_id"] or "", row["imdb_id"] or "",
+        if not row or row["title_kind"] != "movie":
+            raise HTTPException(404, "Movie file not found")
+        new_name = plex_movie_filename(
+            row["metadata_title"] or row["title"], row["metadata_year"] or row["year"],
+            row["extension"], row["tmdb_id"] or "", row["imdb_id"] or "",
+        )
+        source = Path(row["path"])
+        destination = contained_destination(source, new_name)
+        if destination == source:
+            return redirect(f"/titles/{row['title_id']}", "Movie file already follows the Plex format")
+        try:
+            safe_renames.rename_file(file_id, source, destination)
+        except SafeFileRenameError as exc:
+            record_event(
+                "filesystem", f"Movie file rename stopped for {source.name}.",
+                level="error", detail=str(exc),
+                context={"file_id": file_id, "source": str(source), "destination": str(destination)},
             )
-            source = Path(row["path"])
-            destination = contained_destination(source, new_name)
-            if destination.exists() and destination != source:
-                return redirect(f"/titles/{row['title_id']}", f"Destination already exists: {destination}")
-            if destination != source:
-                try:
-                    source.rename(destination)
-                except OSError as exc:
-                    record_event(
-                        "filesystem", f"Movie file could not be renamed: {source.name}.",
-                        level="error", detail=str(exc),
-                        context={"file_id": file_id, "source": str(source), "destination": str(destination)},
-                    )
-                    return redirect(
-                        f"/titles/{row['title_id']}",
-                        "The movie could not be renamed. Check that the file still exists and InfoMancer has permission to change it, then try again. The catalog was not changed.",
-                    )
-                conn.execute(
-                    "UPDATE files SET path=?, filename=? WHERE id=?",
-                    (str(destination), destination.name, file_id),
-                )
-                if row["folder_path"] == str(source):
-                    conn.execute(
-                        "UPDATE titles SET folder_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                        (str(destination), row["title_id"]),
-                    )
-                renamed_operation = (source, destination)
-                record_event(
-                    "filesystem", f"Movie file renamed to {destination.name}.",
-                    context={"file_id": file_id, "source": str(source), "destination": str(destination)},
-                )
-        if renamed_operation:
-            operation_history.record_file_rename(
-                file_id, renamed_operation[0], renamed_operation[1], request.state.user.id,
-                label="Movie file renamed",
-            )
+            return redirect(f"/titles/{row['title_id']}", str(exc))
+        operation_history.record_file_rename(
+            file_id, source, destination, request.state.user.id,
+            label="Movie file renamed",
+        )
+        record_event(
+            "filesystem", f"Movie file renamed to {destination.name}.",
+            context={"file_id": file_id, "source": str(source), "destination": str(destination)},
+        )
         return redirect(f"/titles/{row['title_id']}", "Movie file renamed")
 
     return router, {

@@ -152,5 +152,16 @@ class SafeFileRenameTests(unittest.TestCase):
         self.assertFalse(target.exists())
 
 
+class SafeRenameRouteContractTests(unittest.TestCase):
+    def test_live_title_rename_routes_use_safe_service(self):
+        root = Path(__file__).resolve().parents[1]
+        routes = (root / "app/routes/titles.py").read_text(encoding="utf-8")
+        self.assertIn("safe_renames = SafeFileRenameService(db)", routes)
+        self.assertEqual(routes.count("safe_renames.rename_file("), 4)
+        self.assertEqual(routes.count("safe_renames.rename_folder("), 1)
+        self.assertNotIn("source.rename(destination)", routes)
+        self.assertNotIn('proposal["source"].rename(proposal["destination"])', routes)
+
+
 if __name__ == "__main__":
     unittest.main()
