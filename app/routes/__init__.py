@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from functools import wraps
+
 from .security_hardening import build_router as build_security_hardening_router
 from .resilience import build_router as build_resilience_router
 from .final_polish import build_router as build_final_polish_router
@@ -33,6 +35,69 @@ from .title_media_info import build_router as build_title_media_info_router
 from .title_metadata_async import build_router as build_title_metadata_async_router
 from .movie_manual_match import build_router as build_movie_manual_match_router
 from .titles import build_router as build_titles_router
+
+
+def _without_shadowed_routes(builder, *method_paths: tuple[str, str]):
+    """Keep legacy handler aliases while refusing duplicate route registration.
+
+    Several focused hardening/polish routers intentionally replaced broader legacy
+    handlers during 0.8. Route order previously decided which implementation won.
+    Cycle 0D makes that ownership explicit: the legacy builder still constructs and
+    returns its compatibility handlers, but its shadowed FastAPI routes are removed
+    before the router is attached to the application.
+    """
+    shadowed = {(method.upper(), path) for method, path in method_paths}
+
+    @wraps(builder)
+    def build_without_shadowed_routes(ctx):
+        router, handlers = builder(ctx)
+        router.routes[:] = [
+            route
+            for route in router.routes
+            if not any(
+                (method.upper(), getattr(route, "path", "")) in shadowed
+                for method in (getattr(route, "methods", set()) or set())
+            )
+        ]
+        return router, handlers
+
+    return build_without_shadowed_routes
+
+
+# Focused routers above are the canonical owners for these method/path pairs. Keep
+# the shadowed functions available as compatibility aliases, but never register a
+# second live HTTP route for the same operation.
+build_operations_router = _without_shadowed_routes(
+    build_operations_router,
+    ("POST", "/titles/{title_id}/imdb-refresh"),
+)
+build_review_router = _without_shadowed_routes(
+    build_review_router,
+    ("GET", "/movies/bulk-match"),
+    ("POST", "/movies/bulk-match"),
+    ("GET", "/shows/bulk-match"),
+    ("POST", "/shows/bulk-match"),
+)
+build_title_bulk_actions_router = _without_shadowed_routes(
+    build_title_bulk_actions_router,
+    ("POST", "/api/titles/{title_id}/favorite"),
+)
+build_settings_router = _without_shadowed_routes(
+    build_settings_router,
+    ("GET", "/maintenance/diagnostics"),
+    ("POST", "/roots"),
+)
+build_collections_router = _without_shadowed_routes(
+    build_collections_router,
+    ("POST", "/collections/{collection_id}/delete"),
+)
+build_titles_router = _without_shadowed_routes(
+    build_titles_router,
+    ("POST", "/titles/organize-bulk"),
+    ("POST", "/titles/{title_id}/media-info"),
+    ("POST", "/titles/{title_id}/movie/{movie_id}"),
+)
+
 
 ROUTER_BUILDERS = (
     # Install cross-cutting security and error-shaping hooks before domain routers
