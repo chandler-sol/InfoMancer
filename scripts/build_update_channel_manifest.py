@@ -50,9 +50,14 @@ GATES_DEFAULT = (
 )
 
 
-def valid_url(value: str) -> bool:
+def valid_https_url(value: str) -> bool:
     parsed = urlparse(value)
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+    return (
+        parsed.scheme.casefold() == "https"
+        and bool(parsed.hostname)
+        and parsed.username is None
+        and parsed.password is None
+    )
 
 
 def parse_artifact(value: str) -> tuple[str, dict]:
@@ -66,8 +71,8 @@ def parse_artifact(value: str) -> tuple[str, dict]:
         raise ValueError("Artifact must use platform=kind,url,path[,signature].")
     kind, url, file_name = fields[:3]
     signature = fields[3] if len(fields) == 4 else ""
-    if not kind or not valid_url(url):
-        raise ValueError("Artifact kind and HTTP(S) URL are required.")
+    if not kind or not valid_https_url(url):
+        raise ValueError("Artifact kind and credential-free HTTPS URL are required.")
     path = Path(file_name)
     if not path.is_file():
         raise ValueError(f"Artifact file does not exist: {path}")
@@ -119,12 +124,12 @@ def build_manifest(arguments: argparse.Namespace) -> dict:
         "artifacts": artifacts,
     }
     if arguments.run_url:
-        if not valid_url(arguments.run_url):
-            raise ValueError("Qualification run URL must be HTTP(S).")
+        if not valid_https_url(arguments.run_url):
+            raise ValueError("Qualification run URL must use credential-free HTTPS.")
         manifest["qualification"]["run_url"] = arguments.run_url
     if arguments.release_notes_url:
-        if not valid_url(arguments.release_notes_url):
-            raise ValueError("Release notes URL must be HTTP(S).")
+        if not valid_https_url(arguments.release_notes_url):
+            raise ValueError("Release notes URL must use credential-free HTTPS.")
         manifest["release_notes_url"] = arguments.release_notes_url
     return manifest
 
