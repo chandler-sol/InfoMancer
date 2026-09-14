@@ -281,6 +281,18 @@ class OperationHistoryService:
             raise OperationHistoryError(
                 "Undo stopped because the original parent folder no longer exists. Nothing was changed."
             )
+        # Re-resolve immediately before mutation. A symlink/junction swap after the
+        # earlier validation must not redirect an undo outside the configured root.
+        self._require_inside(source, root)
+        self._require_inside(destination, root)
+        if source.exists():
+            raise OperationHistoryError(
+                f"Undo stopped because another file appeared at the original path: {source}"
+            )
+        if not destination.is_file() or not source.parent.is_dir():
+            raise OperationHistoryError(
+                "Undo stopped because the live filesystem changed before the rename could begin. Nothing was changed."
+            )
         destination.rename(source)
         try:
             with self.database.connect() as conn:
@@ -294,6 +306,8 @@ class OperationHistoryService:
                         (str(source), row["title_id"]),
                     )
         except Exception:
+            self._require_inside(source, root)
+            self._require_inside(destination, root)
             source.rename(destination)
             raise
         return f"Restored the previous filename: {source.name}"
@@ -339,6 +353,18 @@ class OperationHistoryService:
                     "Undo stopped because a cataloged episode is no longer inside the renamed show folder."
                 ) from exc
             relative_paths.append((file_row["id"], relative))
+        # Re-resolve after all catalog work and immediately before the directory
+        # rename so a junction/symlink replacement cannot escape the media root.
+        self._require_inside(source, root)
+        self._require_inside(destination, root)
+        if source.exists():
+            raise OperationHistoryError(
+                f"Undo stopped because another folder appeared at the original path: {source}"
+            )
+        if not destination.is_dir() or not source.parent.is_dir():
+            raise OperationHistoryError(
+                "Undo stopped because the live filesystem changed before the folder rename could begin. Nothing was changed."
+            )
         destination.rename(source)
         try:
             with self.database.connect() as conn:
@@ -351,6 +377,8 @@ class OperationHistoryService:
                         "UPDATE files SET path=? WHERE id=?", (str(source / relative), file_id)
                     )
         except Exception:
+            self._require_inside(source, root)
+            self._require_inside(destination, root)
             source.rename(destination)
             raise
         return f"Restored the previous show folder name: {source.name}"
@@ -359,6 +387,10 @@ class OperationHistoryService:
     def _require_inside(path: Path, parent: Path) -> None:
         try:
             path.resolve(strict=False).relative_to(parent.resolve(strict=False))
+        except OSError as exc:
+            raise OperationHistoryError(
+                "Undo stopped because the storage path is unavailable or unreadable. Nothing was changed."
+            ) from exc
         except ValueError as exc:
             raise OperationHistoryError(
                 "Undo stopped because the recorded path is outside its configured source. Nothing was changed."
