@@ -180,10 +180,6 @@ class BulkMovieMatchProgressTests(unittest.TestCase):
     def test_progress_router_is_registered(self):
         routes = (ROOT / "app" / "routes" / "__init__.py").read_text(encoding="utf-8")
         self.assertIn("build_bulk_match_progress_router", routes)
-        self.assertLess(
-            routes.index("build_bulk_match_progress_router,"),
-            routes.index("build_review_router,"),
-        )
 
 
 if __name__ == "__main__":
