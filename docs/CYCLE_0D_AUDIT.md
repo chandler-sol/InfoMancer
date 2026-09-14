@@ -1,6 +1,6 @@
 # Cycle 0D architecture and security audit
 
-This document is the working evidence log for Issue #82. Cycle 0D is intentionally a hardening and behavior-preserving refactor cycle. Findings are separated from hypotheses so a concern is not treated as a defect until the code path and failure mode are established.
+This document is the working evidence log for Issue #82. Cycle 0D is a hardening and behavior-preserving refactor cycle. Findings are separated from follow-up cleanup so a concern is not treated as a release blocker unless the code path and failure mode are established.
 
 ## Frozen baseline
 
@@ -11,188 +11,279 @@ This document is the working evidence log for Issue #82. Cycle 0D is intentional
 - Exact-source Beta: `0.9.0-beta.2`, tag `desktop-beta-0.9.0-beta.2-f04eb201`
 - Signed downgrade proof: workflow run `34797581818`, successful
 - Audit branch: `audit/0.9-cycle-0d`
+- Draft audit PR: #83
 
-The canonical baseline stays frozen while read-only review and isolated audit changes proceed on the audit branch.
+The canonical baseline remains frozen while Cycle 0D changes are isolated on the audit branch.
 
-## Architecture inventory, first pass
+## Current checkpoint
+
+The audit branch has now completed the major security, data-integrity, update-channel, desktop-navigation, and qualification work discovered during the 0D review. The latest clean code checkpoint before this document refresh was commit `69a2d5d966db1bd615f776d06496ffe303b25691`.
+
+The most recent fully qualified combined checkpoint before the final rename error-contract cleanup was PR Tests run #2588. That run covered Windows, macOS, Ubuntu, browser acceptance, Rust desktop tests, and the security/dependency audit. A final exact-head run is required after the last tiny rename error-contract change and this document-only refresh.
+
+One confirmed release-process blocker remains outside the audit branch: repository-level protection for `testing/0.9-alpha`. The connected GitHub App cannot configure that owner-controlled setting.
+
+## Architecture inventory
 
 ### Composition and lifecycle
 
-`app/main.py` is still both the ASGI composition root and a large application module. Importing it currently initializes the database, creates authentication and domain services, seeds engagement data, loads provider secrets, creates a TVDB client, creates collection-art storage, builds the background coordinator, configures middleware, defines first-run/auth/account/admin routes, owns many scan/metadata helpers, and finally assembles domain routers.
+`app/main.py` remains both the ASGI composition root and a large application module. Importing it still initializes the database, authentication and domain services, provider secrets, TVDB, background coordination, middleware, first-run/auth/account/admin routes, scan/metadata helpers, and router assembly.
 
-The existing W1.5 extraction pattern uses `RouteContext(globals())`. Route modules obtain `LiveRef` proxies back into the mutable `app.main` namespace, and router assembly writes returned handlers back into `globals()` for compatibility. This preserved test/runtime replacement behavior during the 0.8 decomposition, but it now makes dependencies and mutation ownership implicit.
+The older W1.5 extraction pattern uses `RouteContext(globals())`. Route modules can obtain `LiveRef` proxies into the mutable `app.main` namespace, and the composition root still publishes returned compatibility handlers through `globals().update()`.
 
-Target direction for 0D, subject to the completed inventory:
-
-- a small application factory / ASGI assembly layer;
-- explicit startup and shutdown ownership;
-- centralized request/authentication/CSRF/security-header policy;
-- explicit service dependencies instead of arbitrary live access to `main.py` globals;
-- domain routes that do not depend on route-registration order to override older handlers;
-- compatibility facades only where an actual external or regression contract requires them.
+Cycle 0D removed the route-context write channel and several hidden replacement patterns, but it intentionally did not turn this audit into a wholesale application-factory rewrite. Remaining `LiveRef` read-through dependencies are maintainability debt for incremental cleanup, not a newly discovered release blocker.
 
 ### Route ownership
 
-The runtime route inventory found 12 duplicate method/path registrations. Focused hardening or release-polish routers were registered before broader legacy routers, so the intended handler won only because Starlette selects the first matching route. The audit branch now removes those shadowed route registrations centrally while retaining the legacy function aliases for compatibility. A regression test requires every method/path pair to have exactly one live owner and separately pins the 12 canonical owners.
+The baseline runtime had 12 duplicate method/path registrations whose behavior depended on Starlette first-match order. Cycle 0D reduced every method/path pair to one live owner while retaining compatibility aliases where required. Regression tests now reject duplicate live route ownership.
 
 ### Background work
 
-`BackgroundCoordinator` owns process-local state for scanning, metadata work, hashing, duplicate verification, media inspection, and managed-Trash cleanup, plus the scheduler and single-runtime lease. Several older entry points are still re-exported from `main.py` as globals for route compatibility.
+`BackgroundCoordinator` owns process-local state for scans, metadata work, hashing, duplicate verification, media inspection, managed-Trash cleanup, the scheduler, and the single-runtime lease. Recovery now coordinates with an application-wide maintenance gate so restore cannot race ordinary requests or new background starts.
 
-## Security controls confirmed in first pass
+## Security controls confirmed and preserved
 
-The first pass found substantial existing hardening. These controls should be preserved during refactoring:
+Cycle 0D preserved the existing controls that were already sound:
 
-- Argon2 password hashing with an explicit cost profile and a dummy hash for missing accounts.
-- Random session tokens stored as SHA-256 hashes rather than plaintext.
-- Random CSRF tokens and constant-time token comparisons.
-- Per-account/IP login throttling plus persistent aggregate lockouts.
+- Argon2 password hashing with explicit cost settings and a dummy hash for missing accounts.
+- Random session tokens stored only as SHA-256 hashes.
+- Random CSRF tokens and constant-time comparisons.
+- Per-account/IP throttling plus persistent aggregate login lockouts.
 - Expiring, one-time, hashed invitation tokens.
 - Host-header validation and local-only redirect validation.
-- Unsafe authenticated requests are globally CSRF checked. Disabled-auth local mode still requires same-origin validation and CSRF.
-- Cloudflare identity validation uses signed JWT claims and does not itself grant an InfoMancer account.
-- Jinja templates receive request-local CSP nonces through the hardened loader.
-- Diagnostics are Librarian-only and redact paths, identities, network values, credentials, sessions, and secrets.
-- Portable recovery rejects unsafe paths, duplicate/cross-platform-colliding names, encrypted members, unsupported compression, excessive expansion ratios, undeclared files, checksum mismatches, invalid database snapshots, and unsupported roles.
-- Recovery extracts only after verification and rechecks size/hash while staging.
-- Tauri uses an exact signed updater public key and fixed GitHub channel endpoints.
-- The Tauri capability file grants the `main` window only `core:default`; there is no remote-origin capability. Current Tauri 2.11.5 is after the upstream 2.11.1 remote-origin ACL security fix.
-- GitHub Actions qualification uses read-only default contents permission, immutable SHA-pinned first-party Actions in the main test workflow, dependency audits, all-platform Python tests, browser acceptance, and exact-commit signed packaging.
+- Global CSRF checks for unsafe authenticated requests.
+- Same-origin and CSRF enforcement in disabled-auth local mode.
+- Signed Cloudflare identity validation without automatic account creation.
+- Request-local CSP nonces for Jinja-rendered pages.
+- Librarian-only diagnostics with path, identity, network, credential, session, and secret redaction.
+- Recovery package validation for unsafe paths, collisions, unsupported compression, expansion abuse, undeclared files, checksum failures, invalid database snapshots, and unsupported roles.
+- Tauri updater signature verification with a fixed public key.
+- No remote-origin Tauri capability grant to the main window.
+- SHA-pinned first-party Actions in the main qualification workflow.
+- Read-only default workflow contents permission in the main test workflow.
+- Python, Rust, npm, browser, and multi-platform qualification gates.
 
-## Confirmed findings
+## Confirmed findings and disposition
 
 ### D0-001: qualified release branch is not protected
 
 **Severity: High, supply-chain/process**
 
-`testing/0.9-alpha` currently reports no branch protection and no required status checks. A push to this branch can enter the qualification workflow and, after gates pass, produce and advance signed Dev artifacts. The workflow gates reduce accidental bad releases, but they do not replace repository-level protection against an unauthorized or mistaken direct branch update.
+`testing/0.9-alpha` does not currently expose an active repository ruleset through the available integration, and earlier branch inspection showed no required status checks. A direct update to the qualified branch can therefore bypass the intended review boundary and later participate in signed Dev publication if qualification succeeds.
 
-**Required remediation:** configure repository rules/branch protection appropriate to the project so direct changes to qualified release branches cannot bypass the intended review/CI policy. Exact settings must be chosen with the repository's GitHub plan and owner workflow in mind. Signed publication secrets should remain unavailable to untrusted pull-request code.
+**Status: OPEN, repository-owner action required.**
 
-**Current verification:** the repository-rulesets endpoint returns no configured rulesets. The connected GitHub App does not have administration permission to inspect or change classic branch protection, so this finding remains intentionally open for repository-owner configuration rather than being changed blindly from the audit branch.
+The connected GitHub App does not have repository administration permission, so Cycle 0D intentionally does not guess or force branch-protection settings. Before treating the qualified release branch as fully protected, the repository owner should configure branch/ruleset policy so direct updates cannot bypass the intended PR and CI flow. Signed publication secrets should remain inaccessible to untrusted pull-request code.
 
 ### D0-002: recovery did not establish an exclusive application maintenance barrier
 
-**Severity: High, data-integrity risk**
+**Severity: High, data integrity**
 
-The baseline recovery route checked that known background jobs were idle, wrote a restore-start event, then checked again before swapping the live database/artwork. `RecoveryPackageService.restore()` subsequently replaced the live database and removed the WAL/SHM sidecars. However, the scheduler remained active and ordinary authenticated mutation requests remained accepted. The local `restore_lock` prevented a second restore only; it did not prevent another request or the scheduler from starting a new scan/hash/trash/metadata job after the final idle check.
+The baseline restore flow checked background status but did not prevent a new ordinary request, scheduler tick, or background job from starting between the final check and database replacement.
 
-This created a check-then-act window in which new work could begin while recovery was staging or swapping the database. A worker could hold a connection to the old database or write during the replacement boundary. Because restore is specifically a data-durability operation, relying on two status snapshots was not sufficient.
+**Status: FIXED.**
 
-**Required remediation:** introduce an application-wide exclusive maintenance state that is established before the final quiescence check, prevents new mutation/background work from starting, drains or rejects active work, pauses the scheduler, performs the restore, and remains active until the process exits/restarts. Add an adversarial regression test that attempts to start work after recovery has entered exclusive mode.
+`MaintenanceGate` now coordinates ordinary HTTP admission, scheduler ticks, and background-job start transitions. Recovery acquires exclusive mode before final quiescence, failed recovery releases the gate, and successful database replacement remains exclusive until restart. Regression coverage includes busy admission, health probes, active-work refusal, and successful-restore exclusivity. The implementation first passed the full matrix in PR Tests run #2513 and remained green in later combined runs.
 
-**Audit-branch status: implemented and regression-verified.** `MaintenanceGate` now coordinates ordinary HTTP work, scheduler ticks and background-job start transitions. Recovery acquires exclusive mode before its final quiescence check, failed recovery releases the gate, and a successful database replacement remains exclusive until restart. Regression coverage includes admission blocking, health-probe availability, active-work refusal and successful-restore exclusivity. The implementation passed the Windows, macOS, Ubuntu, browser-acceptance and security/dependency jobs in PR Tests run #2513.
+### D0-003: route dependencies could mutate the `main.py` namespace during router construction
 
-### D0-003: route dependency injection remains coupled to mutable `main.py` globals
+**Severity: High, architecture/auditability**
 
-**Severity: High, architecture/maintainability**
+The baseline route context allowed hidden writes into the mutable composition-root namespace, including security-sensitive wrapper replacement.
 
-`RouteContext` and `LiveRef` deliberately proxy arbitrary names in the mutable `app.main` namespace. Router assembly then publishes handlers back into `main.py` with `globals().update()`. This makes dependency ownership implicit, allows construction order to change live dependencies, and makes security-sensitive wrappers harder to prove statically. For example, the baseline `security_hardening` router replaced `library_export_rows` through the live context during route construction.
+**Status: FIXED for mutation ownership; incremental read-through cleanup remains.**
 
-This is not presently evidence of an exploit, but it is a major auditability problem and raises the cost/risk of every future security and Cycle 1 change.
+`RouteContext.set()` has been removed. `security_hardening` and `final_polish` return compatibility handlers explicitly for installation by the composition root. A regression contract rejects future `ctx.set()` calls under `app/routes`. TVDB credential rotation now mutates the existing verified client in place after persistence instead of replacing the global client object and invalidating `LiveRef` consumers. The combined change passed PR Tests run #2537.
 
-**Required remediation:** replace arbitrary namespace access with explicit application/service dependencies in incremental slices. Preserve centralized security policy and compatibility only where a real contract requires it.
+`LiveRef` read-through dependencies and `globals().update()` compatibility publication remain architecture debt for later incremental decomposition, but the hidden route-construction write channel is closed.
 
-**Audit-branch status: application write channel removed; read-through cleanup remains.** `security_hardening` now returns the secured `library_export_rows` compatibility handler instead of mutating the route context. The five compatibility replacements in `final_polish` are also returned explicitly and installed by the composition root. `RouteContext.set()` has been removed entirely, and a regression contract rejects any future `ctx.set()` call under `app/routes`. TVDB credential rotation no longer replaces `tvdb`, `stored_provider_secrets`, or `provider_secret_error` globals from a request handler; the verified credentials are persisted first and then applied in place to the existing live `TVDBClient`, with its cached authentication token invalidated. PR Tests run #2537 passed Windows, macOS, Ubuntu, browser acceptance, and security/dependency audit on the combined change. `LiveRef` read-through dependencies and compatibility publication through `globals().update()` still remain for later incremental cleanup.
+### D0-004: duplicate route ownership made security behavior registration-order dependent
 
-### D0-004: duplicate route ownership made security behavior order-dependent
+**Severity: High, authorization/security correctness**
 
-**Severity: High, security/authorization correctness**
+The baseline had 12 duplicate method/path registrations, including diagnostics and source-management routes where the hardened behavior won only because its router happened to be registered first.
 
-Runtime enumeration confirmed 12 duplicate method/path registrations. Starlette resolves them by first-match order, so the intended implementation was not the only live owner. The duplicates were:
+**Status: FIXED.**
 
-- `GET /maintenance/diagnostics`
-- `GET /movies/bulk-match`
-- `GET /shows/bulk-match`
-- `POST /api/titles/{title_id}/favorite`
-- `POST /collections/{collection_id}/delete`
-- `POST /movies/bulk-match`
-- `POST /roots`
-- `POST /shows/bulk-match`
-- `POST /titles/organize-bulk`
-- `POST /titles/{title_id}/imdb-refresh`
-- `POST /titles/{title_id}/media-info`
-- `POST /titles/{title_id}/movie/{movie_id}`
+`app/routes/__init__.py` suppresses shadowed legacy registrations while retaining callable aliases. Tests require method/path uniqueness and pin the intended canonical owners. The route changes passed Windows, macOS, Ubuntu, and browser qualification in #2523 and remained green in later full runs.
 
-This was more than a maintainability smell. `GET /maintenance/diagnostics` had both the privacy-sanitized security-hardening implementation and an older Settings implementation that serialized `mie.summary()` directly and retained event fields other than `user_id`. The hardened implementation won only because it was registered first. Similarly, `POST /roots` depended on focused route priority so the source-browser validation contract won over the broader Settings handler. A future router-order refactor could therefore have silently changed a security-sensitive behavior without changing the URL.
-
-**Required remediation:** one live owner per method/path, with canonical owners tested directly. Legacy callable aliases may remain temporarily where compatibility tests or internal callers require them, but they must not register duplicate HTTP routes.
-
-**Audit-branch status: remediation implemented and route-regression verified.** `app/routes/__init__.py` explicitly suppresses shadowed legacy registrations while keeping their handler aliases available. `tests/test_route_contract.py` requires global method/path uniqueness and pins all 12 intended owners. `tests/test_route_authorization.py` refuses to inspect an ambiguous path instead of silently accepting the first match. Older tests that encoded router source-order requirements were converted to behavior/registration contracts. The route changes passed the Windows, macOS, Ubuntu and browser jobs in PR Tests run #2523. That workflow's security/dependency job later failed only because RustSec published the new `rustls` advisory recorded as D0-006.
-
-### D0-005: migration compatibility declarations needed semantic re-audit
+### D0-005: migration compatibility declarations overstated additive behavior
 
 **Severity: Medium, downgrade-contract correctness**
 
-All baseline migrations 1 through 17 were declared through `additive_migration()` with a compatible downgrade policy. Migration 17 does not only add passive schema. It backfills announcement receipts and installs triggers that alter behavior on future user and announcement inserts. The compatibility framework already has `behavioral` and `breaking` classifications, so calling every migration additive weakened the meaning of the ledger even though the tested Dev/Beta round trip remained safe.
+Migration 17 installs behavioral triggers and therefore was not purely additive even though its downgrade contract remains compatible.
 
-**Required remediation:** review every migration against the documented reader/writer/downgrade semantics and correct classifications without rewriting historical installed snapshots silently. Define the rule Cycle 1 must follow before Migration 18 is authored.
+**Status: FIXED.**
 
-**Audit-branch status: implemented and regression-verified.** Migration 17 now uses an explicit `behavioral_migration()` declaration while retaining schema-1 reader/writer compatibility and the compatible downgrade policy. Fresh installations record the corrected semantic class. Existing installations keep the compatibility snapshot they recorded when Migration 17 originally ran because the ledger remains append-only through `INSERT OR IGNORE` semantics. Tests cover both fresh classification and non-rewrite of historical snapshots. The change passed the full PR Tests run #2513 matrix.
+Migration 17 now uses the behavioral classification while preserving historical append-only compatibility snapshots. Tests cover fresh classification and non-rewrite of existing snapshots. Full qualification passed in #2513.
 
-### D0-006: desktop TLS dependency acquired a newly published RustSec advisory
+### D0-006: desktop TLS dependency acquired a RustSec advisory
 
-**Severity: Medium, desktop TLS/supply-chain**
+**Severity: Medium, desktop TLS/supply chain**
 
-On September 14, 2026, RustSec published `RUSTSEC-2026-0285`, "TLS 1.3 handshake messages incorrectly accepted across encryption level boundaries." The frozen desktop lockfile resolved `rustls` 0.23.43, while the advisory identifies 0.23.45 as the first fixed release. This advisory did not exist during the frozen baseline qualification, but it correctly caused the audit branch's security/dependency gate to fail as soon as the advisory database learned about it.
+`rustls` 0.23.43 became affected by `RUSTSEC-2026-0285` after the frozen baseline had originally qualified.
 
-**Required remediation:** update the locked desktop dependency to a fixed `rustls` release without suppressing the advisory or weakening `cargo audit`, then rerun the normal qualification matrix.
+**Status: FIXED.**
 
-**Audit-branch status: implemented and regression-verified.** Cargo generated the lockfile update to `rustls` 0.23.45. The same resolution corrected stale root-package lock metadata from `infomancer-desktop` 0.8.1-beta.1 to 0.8.1-beta.2 and added the already-declared direct `serde_json` dependency; no unrelated transitive package versions moved. A permanent CI gate now checks `Cargo.toml`/`Cargo.lock` synchronization with Cargo's own locked metadata resolution before `cargo audit`. PR Tests runs #2537, #2539, #2541, and #2543 all passed the security/dependency audit with the fixed lockfile.
+Cargo-generated lock resolution updated `rustls` to 0.23.45 without suppressing the advisory. CI now verifies Cargo manifest/lock synchronization with `cargo metadata --locked` before `cargo audit`. The fixed lockfile has remained green in subsequent security/dependency runs.
 
 ### D0-007: configured provider-secret encryption used a fast password derivation
 
 **Severity: Medium, secret-at-rest hardening**
 
-When `INFOMANCER_SECRET` was configured, the baseline `ProviderSecretStore` hashed the supplied string once with SHA-256 and used that digest directly as Fernet key material. This is sound when the configured value is truly random high-entropy key material, but configuration accepted any non-empty string. If an operator chose a human-memorable secret and an attacker later obtained `provider-secrets.enc`, the fast derivation unnecessarily reduced the cost of offline guessing.
+The baseline converted `INFOMANCER_SECRET` directly through one SHA-256 operation before using it as Fernet key material. That is acceptable for high-entropy key material but unnecessarily weak for a human-chosen secret.
 
-The existing raw Fernet file also carried no format/KDF version, so simply changing derivation would have made already-saved TVDB/provider credentials unreadable. A second compatibility case existed for installations that initially used the generated local key and later added `INFOMANCER_SECRET`.
+**Status: FIXED.**
 
-**Required remediation:** introduce an explicitly versioned encrypted format, use a salted password-hardening KDF for configured application secrets, preserve the generated-local-key mode, and retain safe readers for both legacy ciphertext formats so upgrades do not require credential resets.
+New configured-secret writes use a version-2 envelope with a random 16-byte salt and Scrypt (`N=2^15`, `r=8`, `p=1`) before Fernet. Local-key installs use the same versioned envelope with an explicit key source. Legacy application-secret and local-key ciphertext remain readable, and the next successful write migrates them. Wrong secrets and unknown future versions fail closed. Local-key creation uses exclusive creation and restrictive permissions where supported.
 
-**Audit-branch status: implemented and regression-verified.** New configured-secret writes use a version-2 provider-secret envelope with a random 16-byte salt and Scrypt-derived Fernet key (`N=2^15`, `r=8`, `p=1`). Local-key installations use the same versioned envelope with an explicit `local_key` source. Legacy direct-SHA-256 application-secret ciphertext and legacy raw local-key ciphertext remain readable. A successful subsequent write migrates legacy data to the current envelope, including the case where `INFOMANCER_SECRET` is added after a local-key installation. Wrong secrets and unknown future envelope versions fail closed. Tests cover every compatibility path, and PR Tests run #2539 passed Windows, macOS, Ubuntu, browser acceptance, and security/dependency audit.
+A later filesystem pass also made failed provider-secret writes clean up unique temporary files rather than leaving stale restricted temp files behind. The provider-secret work passed #2539 and the later cleanup remained green through #2578 and subsequent combined runs.
 
-### D0-008: directory creation could invalidate filesystem containment checks before a media move
+### D0-008: media rename/move paths had containment, collision, and rollback race gaps
 
-**Severity: Medium, filesystem-integrity**
+**Severity: High, filesystem/data integrity**
 
-Most media-mutation paths already resolve and validate cataloged paths against configured media roots. Two paths still had a deterministic post-validation gap. `SeasonFolderService.apply()` validated the proposed season destination, then created the missing `Season NN` directory and moved the episode without resolving containment again. `DuplicateTrashService.restore()` validated the original destination, then created a missing destination parent and restored the trashed file without re-resolving that parent. On storage where an attacker or competing process can replace the just-created directory entry with a symlink or Windows junction, the subsequent move could be redirected outside the configured library boundary.
+The first manifestations were season-folder creation and managed-Trash restore, where a directory could change after validation but before the media move. Broader review then found the same class in operation-history undo, persisted rename proposals, and legacy live title rename routes.
 
-**Required remediation:** after any directory creation that occurs between preview/validation and mutation, resolve the live source and destination again against their authoritative roots, then recheck source presence and destination collision immediately before the move. Add adversarial tests that replace the newly created directory with an outside symlink and prove the file remains at its safe source.
+**Status: FIXED for the reviewed application mutation paths.**
 
-**Audit-branch status: confirmed manifestations implemented and regression-verified; broader mutation review remains open.** Season-folder apply now revalidates the show folder, source file, and live season destination after folder creation and rechecks collision immediately before `rename()`. Managed-Trash restore recomputes the live managed-Trash boundary, revalidates source and destination after destination-parent creation, then rechecks collision and source presence before `shutil.move()`. The regression tests perform the actual directory-to-symlink substitution on runners that support directory symlinks and require fail-closed behavior with the outside directory untouched. The season-folder fix passed the full PR Tests run #2541 matrix; the combined season-folder and managed-Trash restore fixes passed the full #2543 matrix.
+Cycle 0D now applies the following protections across the reviewed rename/move paths:
 
-A residual pathname race can still exist in the very small interval between the final containment/collision check and the OS rename operation. Eliminating that class completely and portably would require descriptor-based or platform-specific no-replace primitives rather than additional `pathlib` checks. The remaining rename/undo paths therefore still need review, but the code no longer creates a new unchecked directory boundary itself immediately before these two mutations.
+- re-resolve source and destination against their authoritative media root immediately before mutation;
+- recheck source type/presence and destination collision immediately before the rename/move;
+- refuse to overwrite a new destination that appears during rollback;
+- fail closed when a parent is replaced by a symlink or junction-like path boundary;
+- preserve both conflicting files when a safe rollback cannot be completed;
+- return a controlled domain error when a catalog failure is rolled back successfully instead of exposing a raw database 500;
+- centralize the live title-route file/folder mutations through `SafeFileRenameService` rather than five independent raw `Path.rename()` implementations.
 
-### Migration classification rule for Cycle 1+
+Adversarial tests cover late symlink substitution, source/destination collision appearance, catalog failure, safe rollback, rollback collision refusal, undo safety, managed-Trash restore, season-folder mutation, persisted rename proposals, live file rename, and live folder rename.
+
+The broad filesystem hardening was progressively qualified through #2541, #2543, #2578, #2580, and #2588. A final exact-head run is required after the last controlled-error cleanup.
+
+A very small residual pathname race still exists between the final userspace check and the operating-system rename primitive. Eliminating that class completely on every supported platform would require descriptor-based or platform-specific no-replace primitives. Cycle 0D treats that as future platform hardening rather than a reason to duplicate more userspace checks.
+
+### D0-009: update metadata and artifact transport allowed weaker URL contracts
+
+**Severity: High, update integrity**
+
+The update-channel runtime and publication tooling did not consistently require credential-free HTTPS for metadata, redirects, and published artifact URLs.
+
+**Status: FIXED.**
+
+Runtime update metadata fetches require credential-free HTTPS, reject HTTPS-to-HTTP downgrade redirects and credentialed redirects, and cap metadata responses at 2 MiB. Published artifact, qualification, and release-note URLs are required to use HTTPS by both the manifest builder and schema. The promotion helper uses the same credential-free HTTPS artifact contract.
+
+The operator-configured `INFOMANCER_UPDATE_MANIFEST_BASE_URL` remains a deliberate deployment trust boundary and may point to private/LAN HTTPS infrastructure. That value is not ordinary web-user input.
+
+Runtime transport hardening passed #2548. Publication/schema hardening passed #2551 and remained green in later combined runs.
+
+### D0-010: signed Dev publication workflow had incorrect updater assumptions
+
+**Severity: High, supply chain/release correctness**
+
+The signed Dev publisher had drifted from the actual Tauri updater artifact contract, did not reliably advance the rolling feeds, and blurred Authenticode packaging with Tauri updater signing.
+
+**Status: FIXED.**
+
+The Dev publisher now uses a SHA-pinned Tauri action, pins publication to the exact triggering commit, emits updater JSON, prefers the NSIS updater artifact, verifies immutable release assets, uses the expected updater signature artifact, and advances both the rolling `desktop-dev/latest.json` and `update-channels/dev.json` feeds. Source-contract tests protect the publisher assumptions.
+
+Later full qualification runs, including #2588, exercise the retained supply-chain contracts.
+
+### D0-011: Rust desktop tests existed but were not part of required PR qualification
+
+**Severity: High, desktop correctness/security process**
+
+Desktop Rust unit tests could exist and regress without failing the normal PR qualification matrix.
+
+**Status: FIXED.**
+
+The main Tests workflow now includes required Windows `cargo test --locked` desktop qualification. CI generates the Tauri native test icons and stages the expected sidecar path before running Rust tests. Both qualified Dev candidacy and Windows Dev packaging depend on that job. A source-contract test prevents silent removal of the gate.
+
+The first attempt usefully exposed missing generated icons. The corrected gate passed #2560 and #2562 and continues to run in later matrices.
+
+### D0-012: desktop webview could retain unrelated top-level web navigation
+
+**Severity: High, desktop trust-boundary integrity**
+
+The Tauri shell had no remote capability grant, but unrelated HTTP/HTTPS top-level navigation could remain inside the address-bar-less primary webview after startup.
+
+**Status: FIXED.**
+
+The desktop now pins a trusted InfoMancer origin after the selected server finishes loading. Same-origin navigation remains in the webview. Unrelated HTTP/HTTPS navigation after trust is established is opened in the system browser instead. Unsafe schemes and credentialed URLs fail closed. Local bootstrap rejects cross-origin redirects, while remote bootstrap may traverse HTTPS identity-provider redirects before the selected InfoMancer origin becomes trusted. A safe same-host HTTP-to-HTTPS upgrade can re-pin the origin.
+
+Rust tests cover launcher behavior, trust establishment, local/remote bootstrap, cross-origin externalization, upgrade behavior, unsafe schemes, TVDB externalization, and the dark bootstrap bridge. The combined change passed the full matrix in #2562.
+
+### D0-013: browser acceptance dependencies were not strictly lockfile-reproducible
+
+**Severity: Medium, test/supply-chain reproducibility**
+
+The E2E project declared an exact direct Playwright version but had no npm lockfile and the workflow used `npm install --ignore-scripts`, allowing transitive resolution to float.
+
+**Status: FIXED.**
+
+An npm-generated lockfile is now committed. Browser acceptance uses `npm ci --ignore-scripts`, and the supply-chain tests require both the lockfile and the strict CI command. A later synchronization improvement made the deep acceptance test poll the actual Library page for bounded visibility rather than assuming one render would immediately expose the seeded catalog row.
+
+The locked E2E path is included in later full green matrices, including #2588.
+
+## Additional review dispositions
+
+### Outbound HTTP and SSRF review
+
+The reviewed server-side provider paths do not expose ordinary user-controlled arbitrary fetches:
+
+- TVDB uses its fixed HTTPS API host and explicit timeouts.
+- IMDb dataset sync uses the fixed IMDb dataset host with a timeout.
+- update-channel fetching is hardened as described in D0-009.
+- host-updater health checks are operator CLI configuration and default to loopback.
+- external search provider URL templates create browser links rather than server-side fetches.
+- no separate arbitrary server-side poster/artwork downloader was found in the reviewed path.
+
+The fixed GitHub releases check in `app/main.py` is an availability/robustness follow-up because its response-size behavior can be bounded further, but it is not an SSRF finding.
+
+### Authentication session rotation
+
+Password changes already revoke other sessions. The current browser session remains valid rather than being rotated after the password update. A copied current-session token would therefore remain usable until its normal expiration/revocation boundary.
+
+This is a useful hardening improvement, but Cycle 0D currently classifies it as follow-up work rather than a blocker because password-change revocation is already present for other sessions and account-reset/recovery flows have their own stronger invalidation behavior. A future change should revoke all old session material, mint a fresh current-session token, and set a replacement cookie atomically.
+
+### CSP fallback
+
+Template-rendered pages use request-local CSP nonces. Middleware still has a legacy `script-src 'unsafe-inline'` fallback for responses that did not render through the nonce-aware template path. The audit did not establish that this creates a reachable executable-inline-script path on sensitive non-template responses. It remains defense-in-depth cleanup, not a confirmed exploit.
+
+### Workflow permissions outside the main Tests workflow
+
+The main qualification workflow uses constrained default permission and pinned actions. Some older auxiliary workflows still carry write permission because they publish, clean, or capture historical release assets. Those should be reviewed or retired as the 0.9 release workflow is consolidated, but no evidence was found that they are currently part of untrusted PR execution with signing secrets.
+
+### Promotion-token scope
+
+Further splitting publication into a read-only qualification stage and a minimal write-only promotion stage would reduce token exposure. That is worthwhile process hardening, but it is a workflow architecture improvement rather than an established release blocker after the publisher contract fixes.
+
+## Migration classification rule for Cycle 1+
 
 Compatibility class and downgrade policy are separate decisions:
 
-- **additive**: passive schema/index additions or compatible data population that older code can safely ignore and that does not alter the semantics of future writes;
-- **behavioral**: triggers, workflow-visible defaults/backfills, automatic receipts/state transitions or other changes that alter future database behavior while remaining compatible with explicitly declared older readers/writers;
-- **breaking**: a migration whose resulting database cannot safely preserve the declared older reader/writer contract and therefore needs a stricter minimum schema, read-only downgrade or restore-required policy.
+- **additive**: passive schema/index additions or compatible data population that older code can safely ignore and that does not alter future-write semantics;
+- **behavioral**: triggers, workflow-visible defaults/backfills, automatic receipts/state transitions, or other changes that alter future database behavior while preserving explicitly declared compatibility;
+- **breaking**: a migration whose resulting database cannot safely preserve the declared older reader/writer contract and therefore requires a stricter minimum schema, read-only downgrade, or restore-required policy.
 
-A data backfill is not automatically behavioral. The classification is about the resulting database contract. Migration 17 is behavioral because its triggers continue changing future insert behavior after the migration completes. Migration 18 and later must state both semantic class and downgrade contract deliberately rather than inheriting a convenient default.
+A data backfill is not automatically behavioral. Classification describes the resulting database contract. Migration 18 and later must state both semantic class and downgrade policy deliberately.
 
-## Open review items, not yet findings
+## Remaining work before Cycle 0D can be considered complete
 
-These remain hypotheses until the relevant paths/tests are fully inspected:
+1. Obtain a full green Tests run on the exact final audit head after the last rename error-contract repair and documentation refresh.
+2. Refresh PR #83 with the exact final commit and qualification run.
+3. Perform one final read-only PR diff review for accidental helper files, unrelated changes, or stale claims.
+4. Leave PR #83 in draft until the independent review is complete.
+5. Configure branch/ruleset protection for `testing/0.9-alpha` as a repository-owner action.
 
-- middleware CSP has a legacy `script-src 'unsafe-inline'` fallback when no request nonce exists; inventory non-template HTML responses before assigning severity;
-- remaining filesystem mutations still use pathname-based revalidation. Review rename/undo paths, Windows junction and UNC behavior, case-insensitive collisions, and whether any platform-specific no-replace primitive is justified before assigning another finding;
-- recovery update-manifest base URL can be operator-configured. It is not ordinary user input, but redirect/private-network behavior should still be documented as a deployment trust boundary;
-- session rotation after password change should be reviewed. Other sessions are revoked today, while the current session remains valid;
-- E2E CI uses `npm install --ignore-scripts` rather than `npm ci`; verify lockfile/reproducibility behavior before changing it;
-- all remaining workflows still need an action-pin, permission, secret-flow, and artifact-retention pass;
-- all outbound provider/image/download paths still need explicit timeout, redirect, content-size, and SSRF review;
-- provider-secret temporary-file creation and other secret-at-rest filesystem writes still need the same local symlink/collision review applied to media mutation paths.
+## Non-blocking follow-up for later cycles
 
-## Next audit slices
+- Continue incremental replacement of `LiveRef` read-through dependencies and shrink `app/main.py`.
+- Rotate the current session token after password change.
+- Remove or tighten the CSP `unsafe-inline` fallback where practical.
+- Bound the fixed GitHub releases response in `app/main.py`.
+- Review and retire stale write-capable auxiliary workflows.
+- Consider platform-specific no-replace filesystem primitives if Windows junction/case-insensitive edge behavior requires stronger guarantees.
+- Separate signed publication into narrower qualification and promotion permission stages if release automation grows more complex.
 
-1. Finish the remaining filesystem mutation/undo review, including Windows junction/UNC and case-insensitive behavior.
-2. Complete outbound HTTP/SSRF/provider and update-manifest trust-boundary review.
-3. Complete Tauri IPC/navigation/capability and installer review.
-4. Review every remaining GitHub Actions workflow, lockfile, permission, secret flow, and artifact-retention policy.
-5. Continue replacing `LiveRef` read-through dependencies and review auth/CSRF/effect ownership now that the route-context write channel is gone.
-6. Review logging, diagnostics, exports, and remaining secret-at-rest behavior.
-7. Only after security/data-loss findings are dispositioned, begin incremental `main.py` decomposition.
+Cycle 0D should not expand into broad architecture redesign unless the final independent review finds a concrete security, correctness, concurrency, data-loss, compatibility, or supply-chain blocker.
