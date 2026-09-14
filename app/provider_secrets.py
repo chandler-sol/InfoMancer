@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import tempfile
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
@@ -249,19 +250,32 @@ class ProviderSecretStore:
     def update(self, values: dict[str, str]) -> None:
         current = self.load()
         current.update({key: value.strip() for key, value in values.items()})
-        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
+        temporary = ""
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            temporary.write_bytes(
-                self._encrypt(json.dumps(current, sort_keys=True).encode("utf-8"))
+            descriptor, temporary = tempfile.mkstemp(
+                dir=self.path.parent,
+                prefix=f".{self.path.name}.",
+                suffix=".tmp",
             )
-            temporary.chmod(0o600)
-            temporary.replace(self.path)
-        except OSError as exc:
             try:
-                temporary.unlink(missing_ok=True)
+                os.chmod(temporary, 0o600)
             except OSError:
                 pass
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(
+                    self._encrypt(json.dumps(current, sort_keys=True).encode("utf-8"))
+                )
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.path)
+            temporary = ""
+        except OSError as exc:
+            if temporary:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
             raise ProviderSecretError(
                 "InfoMancer verified the credentials but could not save them. Check that the "
                 "application data folder is writable, then try again."
