@@ -1,0 +1,79 @@
+name: Repair Rust Desktop Test Gate
+
+on:
+  push:
+    branches:
+      - audit/0.9-cycle-0d
+    paths:
+      - .github/workflows/_agent_fix_rust_test.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out audit branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: audit/0.9-cycle-0d
+          persist-credentials: false
+
+      - name: Add icon generation prerequisite to Rust test gate
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('.github/workflows/tests.yml')
+          text = path.read_text(encoding='utf-8')
+          old = '''      - name: Stage test sidecar path
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
+          New-Item -ItemType File -Force desktop/src-tauri/binaries/infomancer-core-x86_64-pc-windows-msvc.exe | Out-Null
+
+      - name: Run Rust desktop tests
+        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked
+'''
+          new = '''      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: Generate native test icons
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run icon
+
+      - name: Stage test sidecar path
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
+          New-Item -ItemType File -Force desktop/src-tauri/binaries/infomancer-core-x86_64-pc-windows-msvc.exe | Out-Null
+
+      - name: Run Rust desktop tests
+        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked
+'''
+          if text.count(old) != 1:
+              raise SystemExit('Expected Rust test block was not found exactly once; refusing edit.')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+
+      - name: Commit exact workflow repair
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          changed="$(git status --short)"
+          echo "$changed"
+          if [ "$changed" != ' M .github/workflows/tests.yml' ]; then
+            echo 'Unexpected files changed; refusing commit.' >&2
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/tests.yml
+          git commit -m 'Generate icons before Rust desktop tests'
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:audit/0.9-cycle-0d
