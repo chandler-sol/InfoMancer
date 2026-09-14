@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import unittest
 from pathlib import Path
@@ -28,10 +29,6 @@ class SupplyChainTests(unittest.TestCase):
         installation = (ROOT / "docs" / "INSTALLATION.md").read_text(encoding="utf-8")
         self.assertIn("cap_drop:\n      - ALL", compose)
         self.assertIn("no-new-privileges:true", compose)
-        # Missing configuration must fail back to host-only. The distributed
-        # Server example deliberately opts into LAN access for a normal home
-        # deployment, with the install guide explicitly forbidding public
-        # port-forwarding.
         self.assertIn('"${INFOMANCER_BIND_ADDRESS:-127.0.0.1}:8787:8787"', compose)
         self.assertIn("INFOMANCER_BIND_ADDRESS=0.0.0.0", env_example)
         self.assertIn("Do not port-forward port 8787", installation)
@@ -102,6 +99,19 @@ class SupplyChainTests(unittest.TestCase):
         package = tests.index("  windows-dev-package:")
         self.assertLess(tests.index("      - desktop-rust-test\n", qualified), package)
         self.assertGreater(tests.index("      - desktop-rust-test\n", package), package)
+
+    def test_e2e_acceptance_has_a_locked_dependency_install(self):
+        package_path = ROOT / "e2e" / "package.json"
+        lock_path = ROOT / "e2e" / "package-lock.json"
+        self.assertTrue(lock_path.is_file(), "E2E dependencies must have an npm lockfile")
+        package = json.loads(package_path.read_text(encoding="utf-8"))
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        self.assertEqual(package["scripts"].get("pretest"), "npm ci --ignore-scripts")
+        self.assertEqual(lock.get("lockfileVersion"), 3)
+        self.assertEqual(
+            lock["packages"][""]["devDependencies"],
+            package["devDependencies"],
+        )
 
     def test_qualified_dev_publisher_keeps_immutable_and_rolling_feeds_connected(self):
         tests = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
