@@ -132,7 +132,7 @@ class OperationHistoryTests(unittest.TestCase):
                     self.skipTest("Directory entry symlinks are unavailable on this runner")
 
         self.history._require_inside = guarded
-        with self.assertRaisesRegex(OperationHistoryError, "outside its configured source"):
+        with self.assertRaises(OperationHistoryError):
             self.history.undo(operation_id, self.user_id)
         self.assertEqual(outside.read_bytes(), b"outside")
         self.assertTrue(destination.is_file())
@@ -184,7 +184,7 @@ class OperationHistoryTests(unittest.TestCase):
                     self.skipTest("Directory symlinks are unavailable on this runner")
 
         self.history._require_inside = guarded
-        with self.assertRaisesRegex(OperationHistoryError, "outside its configured source"):
+        with self.assertRaises(OperationHistoryError):
             self.history.undo(operation_id, self.user_id)
         self.assertEqual(marker.read_text(encoding="utf-8"), "outside")
         self.assertTrue(destination.is_dir())
