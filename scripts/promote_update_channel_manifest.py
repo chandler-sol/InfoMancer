@@ -8,6 +8,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,6 +28,17 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _valid_https_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return (
+        parsed.scheme == "https"
+        and bool(parsed.netloc)
+        and bool(parsed.hostname)
+        and parsed.username is None
+        and parsed.password is None
+    )
+
+
 def parse_artifact_spec(value: str, server_tag: str = "") -> tuple[str, dict[str, Any]]:
     parts = [part.strip() for part in value.split(",")]
     if len(parts) not in {3, 4}:
@@ -39,8 +51,8 @@ def parse_artifact_spec(value: str, server_tag: str = "") -> tuple[str, dict[str
     platform, kind = (part.strip() for part in platform_and_kind.split("=", 1))
     if not platform or not kind:
         raise ValueError("Artifact platform and kind cannot be empty.")
-    if not url.startswith(("https://", "http://")):
-        raise ValueError("Artifact URL must use HTTP or HTTPS.")
+    if not _valid_https_url(url):
+        raise ValueError("Artifact URL must use credential-free HTTPS.")
     path = Path(local_path).expanduser().resolve()
     if not path.is_file():
         raise ValueError(f"Artifact file does not exist: {path}")
