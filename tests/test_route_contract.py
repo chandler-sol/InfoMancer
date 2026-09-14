@@ -16,6 +16,8 @@ import app.main as main
 
 
 class RouteOwnershipContractTests(unittest.TestCase):
+    maxDiff = None
+
     def test_each_method_path_pair_has_one_effective_owner(self):
         owners: dict[tuple[str, str], list[str]] = defaultdict(list)
         for route in main.app.routes:
