@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app.db import Database
 from app.naming import WINDOWS_RESERVED, contained_destination, safe_component
@@ -95,6 +96,45 @@ class FilesystemTortureTests(unittest.TestCase):
                 (first_id, second_id),
             ).fetchall()
         self.assertEqual({row["path"] for row in rows}, {str(first), str(second)})
+
+    def test_season_folder_symlink_swap_after_validation_is_blocked(self):
+        if not hasattr(os, "symlink"):
+            self.skipTest("symlinks are unavailable")
+        file_id, source = self.add_episode(7)
+        outside = self.base / "outside-season-destination"
+        outside.mkdir()
+
+        # Prove this runner permits directory symlinks before patching the service's
+        # mkdir call. A SkipTest raised from inside apply would be caught by the
+        # service's safety wrapper and would not behave as an actual skip.
+        probe = self.base / "symlink-probe"
+        try:
+            probe.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"Directory symlinks are unavailable: {exc}")
+        else:
+            probe.unlink()
+
+        target_folder = self.show / "Season 01"
+        original_mkdir = Path.mkdir
+
+        def replace_created_folder_with_symlink(path: Path, *args, **kwargs):
+            if path == target_folder:
+                path.symlink_to(outside, target_is_directory=True)
+                return None
+            return original_mkdir(path, *args, **kwargs)
+
+        with patch.object(Path, "mkdir", new=replace_created_folder_with_symlink):
+            with self.assertRaisesRegex(
+                SeasonFolderError, "outside the configured library boundary"
+            ):
+                self.service.apply(self.title_id, [file_id])
+
+        self.assertTrue(source.is_file())
+        self.assertEqual(list(outside.iterdir()), [])
+        with self.database.connect() as conn:
+            row = conn.execute("SELECT path FROM files WHERE id=?", (file_id,)).fetchone()
+        self.assertEqual(row["path"], str(source))
 
     def test_symlinked_media_file_outside_library_is_blocked(self):
         if not hasattr(os, "symlink"):
