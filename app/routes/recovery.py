@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, File, Request, UploadFile
 from fastapi.responses import HTMLResponse
 
 from ..access import require_librarian
+from ..maintenance_gate import APPLICATION_MAINTENANCE_GATE
 from ..recovery_inventory import (
     MAX_INVENTORY_PACKAGES,
     recommend_recovery_build,
@@ -309,6 +310,9 @@ def build_router(ctx: RouteContext):
                 "/settings/recovery",
                 "Another portable recovery is already in progress.",
             )
+
+        exclusive_acquired = False
+        restore_completed = False
         try:
             candidate = staged_path(staged_token)
             if not candidate.is_file():
@@ -319,18 +323,31 @@ def build_router(ctx: RouteContext):
                 raise RecoveryPackageError(
                     "Wait for active scans, metadata, fingerprint, duplicate, trash-cleanup, or maintenance work to finish before restoring."
                 )
-            record_event(
-                "restore",
-                "Portable recovery restore started.",
-                context={"path_mappings": len(path_mappings)},
-                user_id=request.state.user.id,
-            )
-            # Check once more after the event write so a task that was already
-            # transitioning to running cannot overlap the live database swap.
+
+            # Atomically close admission to ordinary requests and scheduler ticks.
+            # Any request that was already in flight keeps the gate busy, so recovery
+            # fails closed instead of racing it. Workers that completed their start
+            # transition immediately before this acquisition are caught by the
+            # second status check below.
+            if not APPLICATION_MAINTENANCE_GATE.try_begin_exclusive(
+                "portable recovery"
+            ):
+                raise RecoveryPackageError(
+                    "InfoMancer became busy while recovery was preparing. Wait for active requests or maintenance work to finish, then try again."
+                )
+            exclusive_acquired = True
+
             if restore_work_running():
                 raise RecoveryPackageError(
                     "Background work started while recovery was preparing. Wait for it to finish and try again."
                 )
+
+            record_event(
+                "restore",
+                "Portable recovery restore started under exclusive maintenance mode.",
+                context={"path_mappings": len(path_mappings)},
+                user_id=request.state.user.id,
+            )
             package_service = MappedRecoveryPackageService(
                 Path(db.path),
                 APP_VERSION,
@@ -338,6 +355,7 @@ def build_router(ctx: RouteContext):
                 settings.media_browse_roots,
             )
             result = package_service.restore(candidate, settings.media_browse_roots)
+            restore_completed = True
         except RecoveryPackageError as exc:
             record_event(
                 "restore",
@@ -348,6 +366,11 @@ def build_router(ctx: RouteContext):
             )
             return redirect("/settings/recovery", str(exc))
         finally:
+            # Failed preparation/restores return the application to normal service.
+            # A successful database swap stays exclusive until restart so no request
+            # can touch the replaced database/artwork using pre-restore process state.
+            if exclusive_acquired and not restore_completed:
+                APPLICATION_MAINTENANCE_GATE.end_exclusive()
             restore_lock.release()
             try:
                 staged_path(staged_token).unlink(missing_ok=True)
