@@ -9,10 +9,18 @@ from app.access import require_librarian
 
 class RouteAuthorizationTests(unittest.TestCase):
     def dependencies_for(self, path: str, method: str):
-        for route in main.app.routes:
-            if getattr(route, "path", None) == path and method in getattr(route, "methods", set()):
-                return [item.call for item in route.dependant.dependencies]
-        self.fail(f"Route not found: {method} {path}")
+        matches = [
+            route
+            for route in main.app.routes
+            if getattr(route, "path", None) == path
+            and method in getattr(route, "methods", set())
+        ]
+        self.assertEqual(
+            len(matches),
+            1,
+            f"Expected exactly one route owner for {method} {path}; found {len(matches)}.",
+        )
+        return [item.call for item in matches[0].dependant.dependencies]
 
     @staticmethod
     def member_safe_unsafe_route(path: str) -> bool:
