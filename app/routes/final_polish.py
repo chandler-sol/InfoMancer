@@ -82,9 +82,6 @@ def build_router(ctx: RouteContext):
                     )
         return base_redirect(path, message)
 
-    ctx.set("check_source_health", tracked_check_source_health)
-    ctx.set("redirect", source_aware_redirect)
-
     def reconciling_run_scan(
         root_id: int, *, hash_after: bool = True, force_cleanup: bool = False,
     ) -> list[int]:
@@ -162,9 +159,9 @@ def build_router(ctx: RouteContext):
                 )
         return changed
 
-    # Replace the live scan helper so manual scans, Scan All, scheduled work, and
-    # inspection preflight all use the same rename-vs-missing distinction.
-    ctx.set("run_scan", reconciling_run_scan)
+    # The composition root installs this replacement after the bundle returns, so
+    # manual scans, Scan All, scheduled work, and inspection preflight share the
+    # same rename-vs-missing distinction without route construction mutating main.py.
     run_scan = ctx.live("run_scan")
 
     def _inspection_rows(file_ids: list[int] | None):
@@ -216,8 +213,6 @@ def build_router(ctx: RouteContext):
         # keeps an intentionally empty preflight empty while still letting the
         # worker update its normal task state.
         return base_run_media_inspection(safe_ids or [-1])
-
-    ctx.set("run_media_inspection", reconciling_run_media_inspection)
 
     def cancellable_run_scan_all(roots: list[tuple[int, str]]) -> None:
         """Run Scan All with cooperative cancellation between source roots.
@@ -298,10 +293,6 @@ def build_router(ctx: RouteContext):
             # the worker sees it for the first time.
             _SCAN_ALL_CANCEL.clear()
 
-    # Main's existing /scan-all handler resolves this global at execution time, so
-    # replacing it here adds cancellation without duplicating the public scan route.
-    ctx.set("run_scan_all", cancellable_run_scan_all)
-
     @router.post(
         "/api/tasks/{task_id}/cancel",
         dependencies=[Depends(require_librarian)],
@@ -365,6 +356,11 @@ def build_router(ctx: RouteContext):
         )
 
     return router, {
+        "check_source_health": tracked_check_source_health,
+        "redirect": source_aware_redirect,
+        "run_scan": reconciling_run_scan,
+        "run_media_inspection": reconciling_run_media_inspection,
+        "run_scan_all": cancellable_run_scan_all,
         "cancel_background_task": cancel_background_task,
         "cancellable_run_scan_all": cancellable_run_scan_all,
     }
