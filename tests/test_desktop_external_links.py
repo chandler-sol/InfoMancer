@@ -31,6 +31,20 @@ class DesktopExternalLinkTests(unittest.TestCase):
         self.assertIn('target="_blank"', template)
         self.assertIn("Search TVDB website", template)
 
+    def test_top_level_navigation_is_pinned_after_selected_server_loads(self):
+        external = (ROOT / "desktop/src-tauri/src/external_links.rs").read_text(encoding="utf-8")
+
+        self.assertIn("struct NavigationPolicy", external)
+        self.assertIn("enum NavigationDecision", external)
+        self.assertIn("policy.page_loaded(payload.url())", external)
+        self.assertIn("NavigationDecision::External", external)
+        self.assertIn("NavigationDecision::Deny", external)
+        self.assertIn("expected.is_loopback()", external)
+        self.assertIn("expected.can_upgrade_to(url)", external)
+        self.assertIn("selected_server_becomes_trusted_only_after_it_finishes_loading", external)
+        self.assertIn("remote_bootstrap_can_traverse_https_identity_redirects_before_pin", external)
+        self.assertIn("trusted_server_sends_cross_origin_navigation_to_system_browser", external)
+
 
 if __name__ == "__main__":
     unittest.main()
