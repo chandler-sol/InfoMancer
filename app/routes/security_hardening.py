@@ -266,23 +266,26 @@ def build_router(ctx: RouteContext):
         templates.env.loader = HardenedTemplateLoader(templates.env.loader)
 
     original_export = ctx.get("library_export_rows")
-    if original_export and not getattr(original_export, "_infomancer_security_wrapped", False):
-        def secure_library_export_rows(user_id: int):
-            rows = original_export(user_id)
-            if int(user_id or 0) <= 0:
-                # Disabled-auth mode represents its trusted local Librarian as user 0.
-                return rows
-            with db.connect() as conn:
-                user = conn.execute(
-                    "SELECT role FROM users WHERE id=?", (user_id,)
-                ).fetchone()
-            return _strip_member_export_paths(
-                rows,
-                is_librarian=bool(user and user["role"] == "librarian"),
-            )
+    secure_library_export_rows = None
+    if original_export:
+        if getattr(original_export, "_infomancer_security_wrapped", False):
+            secure_library_export_rows = original_export
+        else:
+            def secure_library_export_rows(user_id: int):
+                rows = original_export(user_id)
+                if int(user_id or 0) <= 0:
+                    # Disabled-auth mode represents its trusted local Librarian as user 0.
+                    return rows
+                with db.connect() as conn:
+                    user = conn.execute(
+                        "SELECT role FROM users WHERE id=?", (user_id,)
+                    ).fetchone()
+                return _strip_member_export_paths(
+                    rows,
+                    is_librarian=bool(user and user["role"] == "librarian"),
+                )
 
-        secure_library_export_rows._infomancer_security_wrapped = True
-        ctx.set("library_export_rows", secure_library_export_rows)
+            secure_library_export_rows._infomancer_security_wrapped = True
 
     @router.get(
         "/maintenance/diagnostics",
@@ -331,6 +334,9 @@ def build_router(ctx: RouteContext):
             },
         )
 
-    return router, {
+    handlers = {
         "download_sanitized_diagnostics": download_sanitized_diagnostics,
     }
+    if secure_library_export_rows is not None:
+        handlers["library_export_rows"] = secure_library_export_rows
+    return router, handlers
