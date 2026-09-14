@@ -124,6 +124,24 @@ class WindowsDesktopContractTests(unittest.TestCase):
         self.assertNotIn(".version_comparator(", rust)
         self.assertIn("Automatic downgrade remains disabled", settings_route)
 
+    def test_desktop_core_exposes_stamped_version_for_installer_proof(self):
+        sidecar = (ROOT / "desktop/sidecar.py").read_text(encoding="utf-8")
+        self.assertIn('parser.add_argument("--version", action="version", version=DESKTOP_VERSION)', sidecar)
+
+    def test_signed_downgrade_proof_is_public_key_only_and_schema_preserving(self):
+        workflow = (ROOT / ".github/workflows/signed-downgrade-proof.yml").read_text(encoding="utf-8")
+        self.assertIn("if: github.actor == github.repository_owner", workflow)
+        self.assertIn("permissions:\n  contents: read", workflow)
+        self.assertIn("vars.TAURI_UPDATER_PUBLIC_KEY", workflow)
+        self.assertNotIn("TAURI_SIGNING_PRIVATE_KEY", workflow)
+        self.assertIn('base64 = "=0.22.1"', workflow)
+        self.assertIn('minisign-verify = "=0.2.5"', workflow)
+        self.assertIn("public_key.verify(&installer, &signature, true)?;", workflow)
+        self.assertIn("@('/S', '/UPDATE')", workflow)
+        self.assertIn("schema != 17 or ledger != 17", workflow)
+        self.assertIn("database_marker_preserved = $true", workflow)
+        self.assertIn("automatic_downgrade_selection = $false", workflow)
+
     def test_tauri_wrapper_preserves_native_updater_artifacts_for_action_discovery(self):
         wrapper = (ROOT / "desktop/scripts/tauri-wrapper.mjs").read_text(encoding="utf-8")
         self.assertIn("copyFileSync(source, destination)", wrapper)
