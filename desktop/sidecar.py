@@ -320,6 +320,7 @@ def _check_ffprobe() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="InfoMancer Desktop local core")
+    parser.add_argument("--version", action="version", version=DESKTOP_VERSION)
     parser.add_argument("--port", type=int)
     # Retained for backwards-compatible manual launches. The native launcher sends
     # this secret through the inherited environment so it is not exposed in process
