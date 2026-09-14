@@ -110,6 +110,36 @@ class OperationHistoryTests(unittest.TestCase):
         self.assertEqual(operation["status"], "completed")
         self.assertIn("already exists", operation["undo_error"])
 
+    def test_file_undo_revalidates_after_symlink_swap_before_rename(self):
+        destination = self.show_folder / "new.mkv"
+        self.file_path.rename(destination)
+        with self.database.connect() as conn:
+            conn.execute("UPDATE files SET path=?,filename=? WHERE id=?", (str(destination), destination.name, self.file_id))
+        operation_id = self.history.record_file_rename(self.file_id, self.file_path, destination, self.user_id)
+        outside = Path(self.temporary.name) / "outside-file.mkv"
+        outside.write_bytes(b"outside")
+        original_require = self.history._require_inside
+        calls = 0
+
+        def guarded(path, parent):
+            nonlocal calls
+            calls += 1
+            original_require(path, parent)
+            if calls == 2:
+                try:
+                    self.file_path.symlink_to(outside)
+                except (OSError, NotImplementedError):
+                    self.skipTest("Directory entry symlinks are unavailable on this runner")
+
+        self.history._require_inside = guarded
+        with self.assertRaisesRegex(OperationHistoryError, "outside its configured source"):
+            self.history.undo(operation_id, self.user_id)
+        self.assertEqual(outside.read_bytes(), b"outside")
+        self.assertTrue(destination.is_file())
+        with self.database.connect() as conn:
+            status = conn.execute("SELECT status FROM operation_history WHERE id=?", (operation_id,)).fetchone()["status"]
+        self.assertEqual(status, "completed")
+
     def test_folder_rename_undo_restores_all_catalog_paths(self):
         destination = self.root / "Example Show (2020) {tvdb-1}"
         self.show_folder.rename(destination)
@@ -127,6 +157,40 @@ class OperationHistoryTests(unittest.TestCase):
             file_row = conn.execute("SELECT path FROM files WHERE id=?", (self.file_id,)).fetchone()
         self.assertEqual(title["folder_path"], str(self.show_folder))
         self.assertEqual(file_row["path"], str(self.file_path))
+
+    def test_folder_undo_revalidates_after_symlink_swap_before_rename(self):
+        destination = self.root / "Example Show (2020) {tvdb-1}"
+        self.show_folder.rename(destination)
+        destination_file = destination / self.file_path.name
+        with self.database.connect() as conn:
+            conn.execute("UPDATE titles SET folder_path=? WHERE id=?", (str(destination), self.title_id))
+            conn.execute("UPDATE files SET path=? WHERE id=?", (str(destination_file), self.file_id))
+        operation_id = self.history.record_folder_rename(self.title_id, self.show_folder, destination, self.user_id)
+        outside = Path(self.temporary.name) / "outside-folder"
+        outside.mkdir()
+        marker = outside / "marker.txt"
+        marker.write_text("outside", encoding="utf-8")
+        original_require = self.history._require_inside
+        calls = 0
+
+        def guarded(path, parent):
+            nonlocal calls
+            calls += 1
+            original_require(path, parent)
+            if calls == 2:
+                try:
+                    self.show_folder.symlink_to(outside, target_is_directory=True)
+                except (OSError, NotImplementedError):
+                    self.skipTest("Directory symlinks are unavailable on this runner")
+
+        self.history._require_inside = guarded
+        with self.assertRaisesRegex(OperationHistoryError, "outside its configured source"):
+            self.history.undo(operation_id, self.user_id)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "outside")
+        self.assertTrue(destination.is_dir())
+        with self.database.connect() as conn:
+            status = conn.execute("SELECT status FROM operation_history WHERE id=?", (operation_id,)).fetchone()["status"]
+        self.assertEqual(status, "completed")
 
     def test_managed_trash_move_can_be_undone_through_existing_restore_guards(self):
         trash = DuplicateTrashService(self.database)
