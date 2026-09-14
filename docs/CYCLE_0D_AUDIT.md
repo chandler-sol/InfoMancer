@@ -33,7 +33,7 @@ Target direction for 0D, subject to the completed inventory:
 
 ### Route ownership
 
-`app/routes/__init__.py` explicitly documents several order-sensitive registrations where a newer route must be included before a broader or legacy router so that it owns the URL. This is an architectural risk even when current behavior is correct. Cycle 0D will generate an exact method/path inventory and eliminate unintended duplicate ownership before decomposing the composition root further.
+The runtime route inventory found 12 duplicate method/path registrations. Focused hardening or release-polish routers were registered before broader legacy routers, so the intended handler won only because Starlette selects the first matching route. The audit branch now removes those shadowed route registrations centrally while retaining the legacy function aliases for compatibility. A regression test requires every method/path pair to have exactly one live owner and separately pins the 12 canonical owners.
 
 ### Background work
 
@@ -69,17 +69,17 @@ The first pass found substantial existing hardening. These controls should be pr
 
 **Required remediation:** configure repository rules/branch protection appropriate to the project so direct changes to qualified release branches cannot bypass the intended review/CI policy. Exact settings must be chosen with the repository's GitHub plan and owner workflow in mind. Signed publication secrets should remain unavailable to untrusted pull-request code.
 
-### D0-002: recovery does not establish an exclusive application maintenance barrier
+### D0-002: recovery did not establish an exclusive application maintenance barrier
 
 **Severity: High, data-integrity risk**
 
-The recovery route checks that known background jobs are idle, writes a restore-start event, then checks again before swapping the live database/artwork. `RecoveryPackageService.restore()` subsequently replaces the live database and removes the WAL/SHM sidecars. However, the scheduler remains active and ordinary authenticated mutation requests remain accepted. The local `restore_lock` prevents a second restore only; it does not prevent another request or the scheduler from starting a new scan/hash/trash/metadata job after the final idle check.
+The baseline recovery route checked that known background jobs were idle, wrote a restore-start event, then checked again before swapping the live database/artwork. `RecoveryPackageService.restore()` subsequently replaced the live database and removed the WAL/SHM sidecars. However, the scheduler remained active and ordinary authenticated mutation requests remained accepted. The local `restore_lock` prevented a second restore only; it did not prevent another request or the scheduler from starting a new scan/hash/trash/metadata job after the final idle check.
 
-This creates a check-then-act window in which new work can begin while recovery is staging or swapping the database. A worker may hold a connection to the old database or write during the replacement boundary. Because restore is specifically a data-durability operation, relying on two status snapshots is not sufficient.
+This created a check-then-act window in which new work could begin while recovery was staging or swapping the database. A worker could hold a connection to the old database or write during the replacement boundary. Because restore is specifically a data-durability operation, relying on two status snapshots was not sufficient.
 
 **Required remediation:** introduce an application-wide exclusive maintenance state that is established before the final quiescence check, prevents new mutation/background work from starting, drains or rejects active work, pauses the scheduler, performs the restore, and remains active until the process exits/restarts. Add an adversarial regression test that attempts to start work after recovery has entered exclusive mode.
 
-**Audit-branch status:** implemented, pending CI verification. `MaintenanceGate` now coordinates ordinary HTTP work, scheduler ticks and background-job start transitions. Recovery acquires exclusive mode before its final quiescence check, failed recovery releases the gate, and a successful database replacement remains exclusive until restart. Regression coverage includes admission blocking, health-probe availability, active-work refusal and successful-restore exclusivity. This finding remains open until the audit branch passes the full test matrix.
+**Audit-branch status: implemented and regression-verified.** `MaintenanceGate` now coordinates ordinary HTTP work, scheduler ticks and background-job start transitions. Recovery acquires exclusive mode before its final quiescence check, failed recovery releases the gate, and a successful database replacement remains exclusive until restart. Regression coverage includes admission blocking, health-probe availability, active-work refusal and successful-restore exclusivity. The implementation passed the Windows, macOS, Ubuntu, browser-acceptance and security/dependency jobs in PR Tests run #2513.
 
 ### D0-003: route dependency injection remains coupled to mutable `main.py` globals
 
@@ -91,23 +91,40 @@ This is not presently evidence of an exploit, but it is a major auditability pro
 
 **Required remediation:** replace arbitrary namespace access with explicit application/service dependencies in incremental slices. Preserve centralized security policy and compatibility only where a real contract requires it.
 
-### D0-004: route registration order is an observable behavior contract
+### D0-004: duplicate route ownership made security behavior order-dependent
 
-**Severity: Medium, authorization/maintenance risk**
+**Severity: High, security/authorization correctness**
 
-The route registry contains explicit comments that some route bundles must be registered before broader or legacy routers so the newer handler owns a URL. FastAPI/Starlette route matching is order-sensitive, so duplicate method/path registrations can silently leave a later implementation unreachable or make a refactor change which authorization/dependency set actually executes.
+Runtime enumeration confirmed 12 duplicate method/path registrations. Starlette resolves them by first-match order, so the intended implementation was not the only live owner. The duplicates were:
 
-**Required remediation:** generate the resolved runtime method/path table, identify every duplicate/overlap, verify authorization and CSRF expectations for the effective handler, then consolidate each URL to one intended owner unless an overlap is intentionally required and tested.
+- `GET /maintenance/diagnostics`
+- `GET /movies/bulk-match`
+- `GET /shows/bulk-match`
+- `POST /api/titles/{title_id}/favorite`
+- `POST /collections/{collection_id}/delete`
+- `POST /movies/bulk-match`
+- `POST /roots`
+- `POST /shows/bulk-match`
+- `POST /titles/organize-bulk`
+- `POST /titles/{title_id}/imdb-refresh`
+- `POST /titles/{title_id}/media-info`
+- `POST /titles/{title_id}/movie/{movie_id}`
 
-### D0-005: migration compatibility declarations need semantic re-audit
+This was more than a maintainability smell. `GET /maintenance/diagnostics` had both the privacy-sanitized security-hardening implementation and an older Settings implementation that serialized `mie.summary()` directly and retained event fields other than `user_id`. The hardened implementation won only because it was registered first. Similarly, `POST /roots` depended on focused route priority so the source-browser validation contract won over the broader Settings handler. A future router-order refactor could therefore have silently changed a security-sensitive behavior without changing the URL.
+
+**Required remediation:** one live owner per method/path, with canonical owners tested directly. Legacy callable aliases may remain temporarily where compatibility tests or internal callers require them, but they must not register duplicate HTTP routes.
+
+**Audit-branch status: remediation implemented, CI verification in progress.** `app/routes/__init__.py` now explicitly suppresses shadowed legacy registrations while keeping their handler aliases available. `tests/test_route_contract.py` requires global method/path uniqueness and pins all 12 intended owners. `tests/test_route_authorization.py` now also refuses to inspect an ambiguous path instead of silently accepting the first match. No production behavior is intentionally changed because each retained owner is the implementation that already won under the previous route order.
+
+### D0-005: migration compatibility declarations needed semantic re-audit
 
 **Severity: Medium, downgrade-contract correctness**
 
-All current migrations 1 through 17 were declared through `additive_migration()` with a compatible downgrade policy. Migration 17 does not only add passive schema. It backfills announcement receipts and installs triggers that alter behavior on future user and announcement inserts. The compatibility framework already has `behavioral` and `breaking` classifications, so calling every migration additive weakens the meaning of the ledger even if the tested Dev/Beta round trip remains safe.
+All baseline migrations 1 through 17 were declared through `additive_migration()` with a compatible downgrade policy. Migration 17 does not only add passive schema. It backfills announcement receipts and installs triggers that alter behavior on future user and announcement inserts. The compatibility framework already has `behavioral` and `breaking` classifications, so calling every migration additive weakened the meaning of the ledger even though the tested Dev/Beta round trip remained safe.
 
 **Required remediation:** review every migration against the documented reader/writer/downgrade semantics and correct classifications without rewriting historical installed snapshots silently. Define the rule Cycle 1 must follow before Migration 18 is authored.
 
-**Audit-branch status:** implemented, pending CI verification. Migration 17 now uses an explicit `behavioral_migration()` declaration while retaining schema-1 reader/writer compatibility and the compatible downgrade policy. Fresh installations record the corrected semantic class. Existing installations keep the compatibility snapshot they recorded when Migration 17 originally ran because the ledger remains append-only through `INSERT OR IGNORE` semantics. Tests cover both fresh classification and non-rewrite of historical snapshots.
+**Audit-branch status: implemented and regression-verified.** Migration 17 now uses an explicit `behavioral_migration()` declaration while retaining schema-1 reader/writer compatibility and the compatible downgrade policy. Fresh installations record the corrected semantic class. Existing installations keep the compatibility snapshot they recorded when Migration 17 originally ran because the ledger remains append-only through `INSERT OR IGNORE` semantics. Tests cover both fresh classification and non-rewrite of historical snapshots. The change passed the full PR Tests run #2513 matrix.
 
 ### Migration classification rule for Cycle 1+
 
@@ -134,7 +151,7 @@ These remain hypotheses until the relevant paths/tests are fully inspected:
 
 ## Next audit slices
 
-1. Produce the resolved route/auth/CSRF/filesystem/DB/network-effect matrix.
+1. Finish route ownership CI and then replace mutable route dependencies in security-sensitive slices.
 2. Complete filesystem mutation and portable-recovery concurrency review.
 3. Complete outbound HTTP/SSRF/provider review.
 4. Complete Tauri IPC/navigation/capability and installer review.
