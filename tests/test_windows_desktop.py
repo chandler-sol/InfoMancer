@@ -122,7 +122,7 @@ class WindowsDesktopContractTests(unittest.TestCase):
         settings_route = (ROOT / "app/routes/update_channel_settings.py").read_text(encoding="utf-8")
         self.assertTrue(config["bundle"]["windows"]["allowDowngrades"])
         self.assertNotIn(".version_comparator(", rust)
-        self.assertIn("Automatic downgrade remains disabled", settings_route)
+        self.assertIn("downgrade remains disabled until the updater path is qualified for rollback.", settings_route)
 
     def test_desktop_core_exposes_stamped_version_for_installer_proof(self):
         sidecar = (ROOT / "desktop/sidecar.py").read_text(encoding="utf-8")
