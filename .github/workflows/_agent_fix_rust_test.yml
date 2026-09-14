@@ -26,41 +26,38 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-
           path = Path('.github/workflows/tests.yml')
           text = path.read_text(encoding='utf-8')
-          old = '''      - name: Stage test sidecar path
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
-          New-Item -ItemType File -Force desktop/src-tauri/binaries/infomancer-core-x86_64-pc-windows-msvc.exe | Out-Null
-
-      - name: Run Rust desktop tests
-        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked
-'''
-          new = '''      - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: '22'
-
-      - name: Generate native test icons
-        working-directory: desktop
-        run: |
-          npm ci
-          npm run icon
-
-      - name: Stage test sidecar path
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
-          New-Item -ItemType File -Force desktop/src-tauri/binaries/infomancer-core-x86_64-pc-windows-msvc.exe | Out-Null
-
-      - name: Run Rust desktop tests
-        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked
-'''
-          if text.count(old) != 1:
-              raise SystemExit('Expected Rust test block was not found exactly once; refusing edit.')
-          path.write_text(text.replace(old, new), encoding='utf-8')
+          start_marker = '      - name: Stage test sidecar path\n'
+          end_marker = '\n  acceptance:\n'
+          start = text.index(start_marker)
+          end = text.index(end_marker, start)
+          if text.rfind('  desktop-rust-test:', 0, start) < 0:
+              raise SystemExit('Rust desktop job marker was not found before replacement block.')
+          block = ''.join([
+              '      - name: Set up Node\n',
+              '        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0\n',
+              '        with:\n',
+              "          node-version: '22'\n",
+              '\n',
+              '      - name: Generate native test icons\n',
+              '        working-directory: desktop\n',
+              '        run: |\n',
+              '          npm ci\n',
+              '          npm run icon\n',
+              '\n',
+              '      - name: Stage test sidecar path\n',
+              '        shell: pwsh\n',
+              '        run: |\n',
+              '          New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null\n',
+              '          New-Item -ItemType File -Force desktop/src-tauri/binaries/infomancer-core-x86_64-pc-windows-msvc.exe | Out-Null\n',
+              '\n',
+              '      - name: Run Rust desktop tests\n',
+              '        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked\n',
+          ])
+          if 'Generate native test icons' in text[start:end]:
+              raise SystemExit('Rust test icon prerequisite is already present; refusing duplicate edit.')
+          path.write_text(text[:start] + block + text[end:], encoding='utf-8')
           PY
 
       - name: Commit exact workflow repair
@@ -75,7 +72,7 @@ jobs:
             exit 1
           fi
           git config user.name 'github-actions[bot]'
-          git config user.email '41898282+chandler-sol@users.noreply.github.com'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add .github/workflows/tests.yml
           git commit -m 'Generate icons before Rust desktop tests'
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:audit/0.9-cycle-0d
