@@ -85,11 +85,13 @@ This created a check-then-act window in which new work could begin while recover
 
 **Severity: High, architecture/maintainability**
 
-`RouteContext` and `LiveRef` deliberately proxy arbitrary names in the mutable `app.main` namespace. Router assembly then publishes handlers back into `main.py` with `globals().update()`. This makes dependency ownership implicit, allows construction order to change live dependencies, and makes security-sensitive wrappers harder to prove statically. For example, `security_hardening` replaces `library_export_rows` through the live context during route construction.
+`RouteContext` and `LiveRef` deliberately proxy arbitrary names in the mutable `app.main` namespace. Router assembly then publishes handlers back into `main.py` with `globals().update()`. This makes dependency ownership implicit, allows construction order to change live dependencies, and makes security-sensitive wrappers harder to prove statically. For example, the baseline `security_hardening` router replaced `library_export_rows` through the live context during route construction.
 
 This is not presently evidence of an exploit, but it is a major auditability problem and raises the cost/risk of every future security and Cycle 1 change.
 
 **Required remediation:** replace arbitrary namespace access with explicit application/service dependencies in incremental slices. Preserve centralized security policy and compatibility only where a real contract requires it.
+
+**Audit-branch status: first explicit-dependency slice implemented.** `security_hardening` no longer calls `ctx.set()` to replace `library_export_rows` as a side effect of constructing the router. It now returns the secured compatibility handler to the composition root, where compatibility aliases are already installed explicitly through the route-bundle handler contract. Regression coverage proves router construction leaves the supplied context unchanged while the returned wrapper still removes physical server paths from Member exports. The behavior-preserving slice passed Ubuntu, macOS and browser acceptance in PR Tests run #2525 before the branch advanced for the Rust dependency remediation below; Windows was still running when that superseding push occurred.
 
 ### D0-004: duplicate route ownership made security behavior order-dependent
 
@@ -114,7 +116,7 @@ This was more than a maintainability smell. `GET /maintenance/diagnostics` had b
 
 **Required remediation:** one live owner per method/path, with canonical owners tested directly. Legacy callable aliases may remain temporarily where compatibility tests or internal callers require them, but they must not register duplicate HTTP routes.
 
-**Audit-branch status: remediation implemented, CI verification in progress.** `app/routes/__init__.py` now explicitly suppresses shadowed legacy registrations while keeping their handler aliases available. `tests/test_route_contract.py` requires global method/path uniqueness and pins all 12 intended owners. `tests/test_route_authorization.py` now also refuses to inspect an ambiguous path instead of silently accepting the first match. No production behavior is intentionally changed because each retained owner is the implementation that already won under the previous route order.
+**Audit-branch status: remediation implemented and route-regression verified.** `app/routes/__init__.py` explicitly suppresses shadowed legacy registrations while keeping their handler aliases available. `tests/test_route_contract.py` requires global method/path uniqueness and pins all 12 intended owners. `tests/test_route_authorization.py` refuses to inspect an ambiguous path instead of silently accepting the first match. Older tests that encoded router source-order requirements were converted to behavior/registration contracts. The route changes passed the Windows, macOS, Ubuntu and browser jobs in PR Tests run #2523. That workflow's security/dependency job later failed only because RustSec published the new `rustls` advisory recorded as D0-006.
 
 ### D0-005: migration compatibility declarations needed semantic re-audit
 
@@ -125,6 +127,16 @@ All baseline migrations 1 through 17 were declared through `additive_migration()
 **Required remediation:** review every migration against the documented reader/writer/downgrade semantics and correct classifications without rewriting historical installed snapshots silently. Define the rule Cycle 1 must follow before Migration 18 is authored.
 
 **Audit-branch status: implemented and regression-verified.** Migration 17 now uses an explicit `behavioral_migration()` declaration while retaining schema-1 reader/writer compatibility and the compatible downgrade policy. Fresh installations record the corrected semantic class. Existing installations keep the compatibility snapshot they recorded when Migration 17 originally ran because the ledger remains append-only through `INSERT OR IGNORE` semantics. Tests cover both fresh classification and non-rewrite of historical snapshots. The change passed the full PR Tests run #2513 matrix.
+
+### D0-006: desktop TLS dependency acquired a newly published RustSec advisory
+
+**Severity: Medium, desktop TLS/supply-chain**
+
+On September 14, 2026, RustSec published `RUSTSEC-2026-0285`, "TLS 1.3 handshake messages incorrectly accepted across encryption level boundaries." The frozen desktop lockfile resolved `rustls` 0.23.43, while the advisory identifies 0.23.45 as the first fixed release. This advisory did not exist during the frozen baseline qualification, but it correctly caused the audit branch's security/dependency gate to fail as soon as the advisory database learned about it.
+
+**Required remediation:** update the locked desktop dependency to a fixed `rustls` release without suppressing the advisory or weakening `cargo audit`, then rerun the normal qualification matrix.
+
+**Audit-branch status: implemented, CI verification in progress.** Cargo itself generated the lockfile update to `rustls` 0.23.45. The same resolution also corrected stale root-package lock metadata from `infomancer-desktop` 0.8.1-beta.1 to 0.8.1-beta.2 and added the already-declared direct `serde_json` dependency; no unrelated transitive package versions moved. A temporary branch-only workflow was used solely to let Cargo perform the resolution because the audit environment could not reach crates.io, and that helper was removed immediately after the generated diff was inspected. The permanent test workflow and `cargo audit` policy are unchanged.
 
 ### Migration classification rule for Cycle 1+
 
@@ -151,10 +163,10 @@ These remain hypotheses until the relevant paths/tests are fully inspected:
 
 ## Next audit slices
 
-1. Finish route ownership CI and then replace mutable route dependencies in security-sensitive slices.
+1. Continue replacing mutable route dependencies in security-sensitive slices, now that the first `security_hardening` mutation is explicit.
 2. Complete filesystem mutation and portable-recovery concurrency review.
 3. Complete outbound HTTP/SSRF/provider review.
 4. Complete Tauri IPC/navigation/capability and installer review.
-5. Review every GitHub Actions workflow and lockfile.
+5. Review every GitHub Actions workflow and lockfile, including reproducible lockfile synchronization checks.
 6. Review logging, diagnostics, exports, and secret-at-rest behavior.
 7. Only after security/data-loss findings are dispositioned, begin incremental `main.py` decomposition.
