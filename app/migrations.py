@@ -39,6 +39,30 @@ def additive_migration(
     )
 
 
+def behavioral_migration(
+    version: int,
+    name: str,
+    apply: Callable[[sqlite3.Connection], None],
+    compatible_from_schema: int = 1,
+) -> Migration:
+    """Declare a behavior-changing migration that remains reader/writer compatible.
+
+    Use this class when a migration changes future database semantics, such as by
+    installing triggers or changing workflow-visible behavior, but older builds may
+    still safely read and write the resulting database. The compatibility ledger
+    records the semantic distinction without unnecessarily blocking a safe downgrade.
+    """
+    return Migration(
+        version=version,
+        name=name,
+        apply=apply,
+        compatibility="behavioral",
+        minimum_reader_schema=compatible_from_schema,
+        minimum_writer_schema=compatible_from_schema,
+        downgrade_policy="compatible",
+    )
+
+
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})")}
 
@@ -311,7 +335,7 @@ MIGRATIONS = (
     additive_migration(14, "persisted global rename proposals", _rename_proposals),
     additive_migration(15, "library read-path indexes", _library_read_indexes),
     additive_migration(16, "shared chrome read indexes", _shared_chrome_indexes),
-    additive_migration(17, "historical announcement onboarding receipts", _announcement_onboarding_receipts),
+    behavioral_migration(17, "historical announcement onboarding receipts", _announcement_onboarding_receipts),
 )
 
 CURRENT_SCHEMA_VERSION = max(migration.version for migration in MIGRATIONS)
