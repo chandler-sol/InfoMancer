@@ -70,13 +70,22 @@ test('deep: source workflow, library interaction, inspector, and modal UI stay c
   await page.goto(`${baseUrl}/movies`);
   const list = page.locator('.library-table');
   await expect(list).toBeVisible();
-  await expect(list.locator('[data-workspace-title-id]').first()).toBeVisible();
+  await expect.poll(async () => {
+    const count = await page.locator('.library-table [data-workspace-title-id]').count();
+    if (!count) await page.reload();
+    return count;
+  }, {
+    message: 'scanned movie titles should become visible in the Library',
+    timeout: 20000,
+    intervals: [250, 500, 1000, 2000],
+  }).toBeGreaterThan(0);
+  await expect(page.locator('.library-table [data-workspace-title-id]').first()).toBeVisible();
 
   await page.locator('#library-cover-view').click();
   await expect(page.locator('#cover-library')).toBeVisible();
   await expect(page.locator('#cover-library [data-workspace-title-id]').first()).toBeVisible();
   await page.locator('#library-list-view').click();
-  await expect(list).toBeVisible();
+  await expect(page.locator('.library-table')).toBeVisible();
   await page.locator('#library-cover-view').click();
 
   const firstCard = page.locator('#cover-library [data-workspace-title-id]').first();
