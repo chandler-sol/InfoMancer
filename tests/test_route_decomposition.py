@@ -62,6 +62,32 @@ class RouteDecompositionTests(unittest.TestCase):
             "Route builders must return application-level replacements to the composition root instead of mutating main.py through RouteContext.",
         )
 
+    def test_route_builders_do_not_mutate_application_context(self):
+        offenders = []
+        for path in sorted((ROOT / "app" / "routes").glob("*.py")):
+            if "ctx.set(" in path.read_text(encoding="utf-8"):
+                offenders.append(path.name)
+        self.assertEqual(
+            offenders,
+            [],
+            "Route builders must expose replacements through their returned handler map, not ctx.set().",
+        )
+
+    def test_security_and_final_polish_replacements_are_explicitly_installed(self):
+        expected_modules = {
+            "library_export_rows": "app.routes.security_hardening",
+            "check_source_health": "app.routes.final_polish",
+            "redirect": "app.routes.final_polish",
+            "run_scan": "app.routes.final_polish",
+            "run_media_inspection": "app.routes.final_polish",
+            "run_scan_all": "app.routes.final_polish",
+        }
+        observed = {
+            name: getattr(getattr(main, name), "__module__", "")
+            for name in expected_modules
+        }
+        self.assertEqual(observed, expected_modules)
+
 
 if __name__ == "__main__":
     unittest.main()
