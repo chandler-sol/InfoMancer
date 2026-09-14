@@ -56,6 +56,12 @@ class RouteDecompositionTests(unittest.TestCase):
         finally:
             main.db = original
 
+    def test_route_context_has_no_application_mutation_api(self):
+        self.assertFalse(
+            hasattr(main._route_context, "set"),
+            "Route builders must return application-level replacements to the composition root instead of mutating main.py through RouteContext.",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
