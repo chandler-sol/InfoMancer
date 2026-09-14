@@ -177,7 +177,7 @@ jobs:
           }
           '@ | Set-Content (Join-Path $verifierRoot 'src/main.rs') -Encoding utf8
 
-          cargo build --release --locked --manifest-path (Join-Path $verifierRoot 'Cargo.toml')
+          cargo build --release --manifest-path (Join-Path $verifierRoot 'Cargo.toml')
           if ($LASTEXITCODE -ne 0) { throw 'Could not build the pinned Minisign proof verifier.' }
           $verifier = Join-Path $verifierRoot 'target/release/infomancer-signature-proof.exe'
           & $verifier $env:DEV_INSTALLER $env:DEV_SIGNATURE
@@ -274,6 +274,7 @@ jobs:
             $process = Start-Process -FilePath $core -ArgumentList $argumentLine -PassThru -WindowStyle Hidden
             try {
               Wait-ForHealth $port $process
+              Stop-ProofCore
               if ($createMarker) {
                 $env:PROOF_DATABASE = $database
                 $env:PROOF_MARKER = $marker
