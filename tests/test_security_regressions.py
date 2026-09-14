@@ -1,18 +1,22 @@
 import json
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
+from jinja2 import DictLoader, Environment
 from starlette.requests import Request
 
 import app.main as main
 from app.access import require_librarian
 from app.request_security import MISSING_CSRF_TOKEN, csrf_submission
+from app.routes.context import RouteContext
 from app.routes.security_hardening import (
     _deployment_secret_warning,
     _harden_template_source,
     _nonce,
     _safe_diagnostic_event,
     _strip_member_export_paths,
+    build_router as build_security_hardening_router,
 )
 
 
@@ -36,6 +40,27 @@ def request_with(*, body: bytes = b"", content_type: str = "") -> Request:
         "headers": headers, "client": ("127.0.0.1", 12345),
         "server": ("127.0.0.1", 8787), "state": {},
     }, receive)
+
+
+class _MemberConnection:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False
+
+    def execute(self, _sql, _parameters):
+        return self
+
+    def fetchone(self):
+        return {"role": "member"}
+
+
+class _MemberDatabase:
+    path = Path("/nonexistent-infomancer-test.db")
+
+    def connect(self):
+        return _MemberConnection()
 
 
 class CsrfRegressionTests(unittest.IsolatedAsyncioTestCase):
@@ -65,6 +90,46 @@ class SecurityHardeningUnitTests(unittest.TestCase):
         self.assertEqual(member[0]["title"], "Example")
         librarian = _strip_member_export_paths(rows, is_librarian=True)
         self.assertEqual(librarian[0]["file_path"], rows[0]["file_path"])
+
+    def test_security_router_returns_export_wrapper_without_mutating_context(self):
+        original_rows = [{
+            "title": "Example",
+            "source_path": "/srv/media/movies",
+            "file_path": "/srv/media/movies/Example.mkv",
+        }]
+
+        def original_export(_user_id):
+            return original_rows
+
+        namespace = {
+            "templates": SimpleNamespace(
+                env=Environment(loader=DictLoader({"empty.html": "<html></html>"}))
+            ),
+            "settings": SimpleNamespace(
+                sandbox=False,
+                application_secret="test-secret",
+                auth_mode="local",
+                public_url="",
+                trusted_hosts=(),
+            ),
+            "db": _MemberDatabase(),
+            "event_log": SimpleNamespace(query=lambda limit: []),
+            "mie": SimpleNamespace(summary=lambda: {}),
+            "list_database_backups": lambda _path: [],
+            "record_event": lambda *args, **kwargs: None,
+            "library_export_rows": original_export,
+            "APP_VERSION": "test",
+        }
+
+        _router, handlers = build_security_hardening_router(RouteContext(namespace))
+
+        self.assertIs(namespace["library_export_rows"], original_export)
+        self.assertIn("library_export_rows", handlers)
+        self.assertIsNot(handlers["library_export_rows"], original_export)
+        exported = handlers["library_export_rows"](7)
+        self.assertEqual(exported[0]["source_path"], "")
+        self.assertEqual(exported[0]["file_path"], "")
+        self.assertEqual(original_rows[0]["source_path"], "/srv/media/movies")
 
     def test_remote_installation_without_application_secret_gets_warning(self):
         local = SimpleNamespace(
