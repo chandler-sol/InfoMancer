@@ -96,6 +96,31 @@ class RenameProposalTests(unittest.TestCase):
         self.assertEqual(self.source.read_bytes(), b"movie")
         self.assertEqual(outside.read_bytes(), b"outside")
 
+    def test_apply_catalog_failure_rolls_back_and_returns_domain_error(self):
+        self.service.refresh_all()
+        proposal = self.service.list_for_review("active")[0]
+        destination = Path(proposal["destination_path"])
+        real_connect = self.database.connect
+        calls = 0
+
+        @contextmanager
+        def controlled_connect():
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                self.assertTrue(destination.is_file())
+                self.assertFalse(self.source.exists())
+                raise sqlite3.OperationalError("synthetic catalog failure")
+            with real_connect() as conn:
+                yield conn
+
+        self.database.connect = controlled_connect
+        with self.assertRaisesRegex(RenameProposalError, "restored the original filename"):
+            self.service.apply(proposal["id"])
+        self.assertTrue(self.source.is_file())
+        self.assertEqual(self.source.read_bytes(), b"movie")
+        self.assertFalse(destination.exists())
+
     def test_apply_rollback_refuses_to_overwrite_new_source_collision(self):
         self.service.refresh_all()
         proposal = self.service.list_for_review("active")[0]

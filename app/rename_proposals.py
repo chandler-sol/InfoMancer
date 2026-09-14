@@ -348,7 +348,9 @@ class RenameProposalService:
                 raise RenameProposalError(
                     f"The catalog update failed and automatic rename rollback also failed: {rollback_exc}"
                 ) from rollback_exc
-            raise
+            raise RenameProposalError(
+                "The catalog update failed, so InfoMancer restored the original filename. Nothing was changed."
+            ) from exc
         proposal["status"] = "applied"
         return proposal
 
