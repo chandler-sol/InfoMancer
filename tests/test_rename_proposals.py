@@ -1,5 +1,7 @@
+import sqlite3
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 
 from app.db import Database
@@ -67,6 +69,57 @@ class RenameProposalTests(unittest.TestCase):
         self.assertEqual(file_row["path"], str(destination))
         self.assertEqual(file_row["filename"], destination.name)
         self.assertEqual(self.service.get(proposal["id"])["status"], "applied")
+
+    def test_apply_revalidates_destination_after_late_symlink_swap(self):
+        self.service.refresh_all()
+        proposal = self.service.list_for_review("active")[0]
+        destination = Path(proposal["destination_path"])
+        outside = Path(self.temporary.name) / "outside.mkv"
+        outside.write_bytes(b"outside")
+        original_require = self.service._require_inside
+        calls = 0
+
+        def guarded(path, root):
+            nonlocal calls
+            calls += 1
+            original_require(path, root)
+            if calls == 3:
+                try:
+                    destination.symlink_to(outside)
+                except (OSError, NotImplementedError):
+                    self.skipTest("File symlinks are unavailable on this runner")
+
+        self.service._require_inside = guarded
+        with self.assertRaises(RenameProposalError):
+            self.service.apply(proposal["id"])
+        self.assertTrue(self.source.is_file())
+        self.assertEqual(self.source.read_bytes(), b"movie")
+        self.assertEqual(outside.read_bytes(), b"outside")
+
+    def test_apply_rollback_refuses_to_overwrite_new_source_collision(self):
+        self.service.refresh_all()
+        proposal = self.service.list_for_review("active")[0]
+        destination = Path(proposal["destination_path"])
+        real_connect = self.database.connect
+        calls = 0
+
+        @contextmanager
+        def controlled_connect():
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                self.assertTrue(destination.is_file())
+                self.assertFalse(self.source.exists())
+                self.source.write_bytes(b"new collision")
+                raise sqlite3.OperationalError("synthetic catalog failure")
+            with real_connect() as conn:
+                yield conn
+
+        self.database.connect = controlled_connect
+        with self.assertRaisesRegex(RenameProposalError, "refused to overwrite"):
+            self.service.apply(proposal["id"])
+        self.assertEqual(self.source.read_bytes(), b"new collision")
+        self.assertEqual(destination.read_bytes(), b"movie")
 
     def test_dismissed_snapshot_stays_dismissed_until_file_or_destination_changes(self):
         self.service.refresh_all()
