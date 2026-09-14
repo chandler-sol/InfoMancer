@@ -1,0 +1,345 @@
+name: Signed Windows Downgrade Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      dev_tag:
+        description: Immutable qualified Dev release tag
+        required: true
+        type: string
+      beta_tag:
+        description: Immutable promoted Beta release tag
+        required: true
+        type: string
+      expected_source_sha:
+        description: Exact qualified 40-character source commit SHA shared by both releases
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  signed-downgrade-proof:
+    name: Dev to Beta to Dev signed round trip
+    if: github.actor == github.repository_owner
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      INFOMANCER_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+    steps:
+      - name: Validate proof inputs and signing trust
+        shell: pwsh
+        run: |
+          $devTag = '${{ inputs.dev_tag }}'.Trim()
+          $betaTag = '${{ inputs.beta_tag }}'.Trim()
+          $sourceSha = '${{ inputs.expected_source_sha }}'.Trim().ToLowerInvariant()
+          if ($devTag -notmatch '^desktop-dev-[0-9]+-[0-9a-fA-F]{8}$') {
+            throw 'Dev tag must be an immutable desktop-dev-<run>-<sha8> release tag.'
+          }
+          if ($betaTag -notmatch '^desktop-beta-[0-9]+\.[0-9]+\.[0-9]+-(beta|rc)\.[0-9]+-[0-9a-fA-F]{8}$') {
+            throw 'Beta tag must be an immutable desktop-beta-<version>-<sha8> release tag.'
+          }
+          if ($sourceSha -notmatch '^[0-9a-f]{40}$') {
+            throw 'Expected source SHA must contain exactly 40 hexadecimal characters.'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:INFOMANCER_UPDATER_PUBLIC_KEY)) {
+            throw 'Repository variable TAURI_UPDATER_PUBLIC_KEY is required to verify published updater signatures.'
+          }
+
+      - name: Resolve exact published releases and updater assets
+        id: releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEV_TAG: ${{ inputs.dev_tag }}
+          BETA_TAG: ${{ inputs.beta_tag }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proofRoot = Join-Path $env:RUNNER_TEMP 'infomancer-downgrade-proof'
+          New-Item -ItemType Directory -Force $proofRoot | Out-Null
+
+          function Resolve-TagCommit([string]$tag) {
+            $remote = "https://github.com/$env:GITHUB_REPOSITORY.git"
+            $peeled = git ls-remote $remote "refs/tags/$tag^{}"
+            $direct = git ls-remote $remote "refs/tags/$tag"
+            $line = if (-not [string]::IsNullOrWhiteSpace($peeled)) { $peeled } else { $direct }
+            if ([string]::IsNullOrWhiteSpace($line)) { throw "Published tag $tag was not found." }
+            return ($line -split '\s+')[0].ToLowerInvariant()
+          }
+
+          function Download-Release([string]$tag, [string]$label) {
+            $resolvedSha = Resolve-TagCommit $tag
+            $expectedSha = $env:EXPECTED_SOURCE_SHA.Trim().ToLowerInvariant()
+            if ($resolvedSha -ne $expectedSha) {
+              throw "$label tag $tag resolves to $resolvedSha instead of qualified source $expectedSha."
+            }
+
+            $directory = Join-Path $proofRoot $label
+            New-Item -ItemType Directory -Force $directory | Out-Null
+            $release = gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json
+            $installer = $release.assets | Where-Object { $_.name -like '*.exe' -and $_.name -notlike '*.sig' } | Select-Object -First 1
+            if ($null -eq $installer) { throw "$label release has no Windows installer." }
+            $signatureName = "$($installer.name).sig"
+            $signature = $release.assets | Where-Object { $_.name -eq $signatureName } | Select-Object -First 1
+            $latest = $release.assets | Where-Object { $_.name -eq 'latest.json' } | Select-Object -First 1
+            if ($null -eq $signature) { throw "$label release has no updater signature matching $($installer.name)." }
+            if ($null -eq $latest) { throw "$label release has no latest.json updater manifest." }
+
+            gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern $installer.name --dir $directory
+            gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern $signature.name --dir $directory
+            gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern latest.json --dir $directory
+
+            $installerPath = Join-Path $directory $installer.name
+            $signaturePath = Join-Path $directory $signature.name
+            $latestPath = Join-Path $directory 'latest.json'
+            $latestJson = Get-Content $latestPath -Raw | ConvertFrom-Json
+            if ([string]::IsNullOrWhiteSpace([string]$latestJson.version)) { throw "$label latest.json has no version." }
+            $windowsPlatform = $latestJson.platforms.PSObject.Properties | Where-Object { $_.Name -like 'windows-*' } | Select-Object -First 1
+            if ($null -eq $windowsPlatform) { throw "$label latest.json has no Windows updater platform." }
+            $publishedSignature = (Get-Content $signaturePath -Raw).Trim()
+            $manifestSignature = ([string]$windowsPlatform.Value.signature).Trim()
+            if ([string]::IsNullOrWhiteSpace($publishedSignature) -or $manifestSignature -ne $publishedSignature) {
+              throw "$label latest.json signature does not exactly match the published .sig asset."
+            }
+            $manifestUrl = [string]$windowsPlatform.Value.url
+            if ($manifestUrl -notlike "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag/*") {
+              throw "$label latest.json does not point back to the immutable release tag being proved."
+            }
+
+            return @{
+              Installer = $installerPath
+              Signature = $signaturePath
+              Latest = $latestPath
+              Version = [string]$latestJson.version
+            }
+          }
+
+          $dev = Download-Release $env:DEV_TAG 'dev'
+          $beta = Download-Release $env:BETA_TAG 'beta'
+          if ($dev.Version -notmatch '-dev\.') { throw "Dev release version $($dev.Version) is not a Dev version." }
+          if ($beta.Version -notmatch '-(beta|rc)\.') { throw "Beta release version $($beta.Version) is not a Beta/RC version." }
+          if ([version]::Parse(($dev.Version -split '-')[0]) -ne [version]::Parse(($beta.Version -split '-')[0])) {
+            throw 'Dev and Beta releases do not share the same base application version.'
+          }
+
+          "proof_root=$proofRoot" >> $env:GITHUB_OUTPUT
+          "dev_installer=$($dev.Installer)" >> $env:GITHUB_OUTPUT
+          "dev_signature=$($dev.Signature)" >> $env:GITHUB_OUTPUT
+          "dev_version=$($dev.Version)" >> $env:GITHUB_OUTPUT
+          "beta_installer=$($beta.Installer)" >> $env:GITHUB_OUTPUT
+          "beta_signature=$($beta.Signature)" >> $env:GITHUB_OUTPUT
+          "beta_version=$($beta.Version)" >> $env:GITHUB_OUTPUT
+
+      - name: Verify both updater signatures with Tauri-compatible Minisign verification
+        shell: pwsh
+        env:
+          DEV_INSTALLER: ${{ steps.releases.outputs.dev_installer }}
+          DEV_SIGNATURE: ${{ steps.releases.outputs.dev_signature }}
+          BETA_INSTALLER: ${{ steps.releases.outputs.beta_installer }}
+          BETA_SIGNATURE: ${{ steps.releases.outputs.beta_signature }}
+          PROOF_ROOT: ${{ steps.releases.outputs.proof_root }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $verifierRoot = Join-Path $env:PROOF_ROOT 'signature-verifier'
+          New-Item -ItemType Directory -Force (Join-Path $verifierRoot 'src') | Out-Null
+          @'
+          [package]
+          name = "infomancer-signature-proof"
+          version = "0.1.0"
+          edition = "2021"
+
+          [dependencies]
+          base64 = "=0.22.1"
+          minisign-verify = "=0.2.5"
+          '@ | Set-Content (Join-Path $verifierRoot 'Cargo.toml') -Encoding utf8
+          @'
+          use base64::{engine::general_purpose::STANDARD, Engine as _};
+          use minisign_verify::{PublicKey, Signature};
+          use std::{env, error::Error, fs};
+
+          fn main() -> Result<(), Box<dyn Error>> {
+              let args: Vec<String> = env::args().collect();
+              if args.len() != 3 {
+                  return Err("usage: verifier <installer> <signature>".into());
+              }
+              let encoded_key = env::var("INFOMANCER_UPDATER_PUBLIC_KEY")?;
+              let key_text = String::from_utf8(STANDARD.decode(encoded_key.trim())?)?;
+              let public_key = PublicKey::decode(&key_text)?;
+              let encoded_signature = fs::read_to_string(&args[2])?;
+              let signature_text = String::from_utf8(STANDARD.decode(encoded_signature.trim())?)?;
+              let signature = Signature::decode(&signature_text)?;
+              let installer = fs::read(&args[1])?;
+              public_key.verify(&installer, &signature, true)?;
+              println!("verified {}", args[1]);
+              Ok(())
+          }
+          '@ | Set-Content (Join-Path $verifierRoot 'src/main.rs') -Encoding utf8
+
+          cargo build --release --manifest-path (Join-Path $verifierRoot 'Cargo.toml')
+          if ($LASTEXITCODE -ne 0) { throw 'Could not build the pinned Minisign proof verifier.' }
+          $verifier = Join-Path $verifierRoot 'target/release/infomancer-signature-proof.exe'
+          & $verifier $env:DEV_INSTALLER $env:DEV_SIGNATURE
+          if ($LASTEXITCODE -ne 0) { throw 'Qualified Dev updater signature verification failed.' }
+          & $verifier $env:BETA_INSTALLER $env:BETA_SIGNATURE
+          if ($LASTEXITCODE -ne 0) { throw 'Promoted Beta updater signature verification failed.' }
+
+      - name: Exercise real Dev to Beta downgrade and Dev restoration
+        shell: pwsh
+        env:
+          DEV_INSTALLER: ${{ steps.releases.outputs.dev_installer }}
+          DEV_VERSION: ${{ steps.releases.outputs.dev_version }}
+          BETA_INSTALLER: ${{ steps.releases.outputs.beta_installer }}
+          BETA_VERSION: ${{ steps.releases.outputs.beta_version }}
+          PROOF_ROOT: ${{ steps.releases.outputs.proof_root }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+          DEV_TAG: ${{ inputs.dev_tag }}
+          BETA_TAG: ${{ inputs.beta_tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installDir = Join-Path $env:LOCALAPPDATA 'InfoMancer'
+          $dataDir = Join-Path $env:APPDATA 'cloud.arsenik.infomancer'
+          $core = Join-Path $installDir 'infomancer-core.exe'
+          $database = Join-Path $dataDir 'infomancer.db'
+          $marker = "signed-downgrade-$([guid]::NewGuid().ToString('N'))"
+          New-Item -ItemType Directory -Force $dataDir | Out-Null
+
+          function Stop-ProofCore {
+            Get-Process 'infomancer-core' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 800
+          }
+
+          function Install-Package([string]$path, [bool]$updateMode) {
+            Stop-ProofCore
+            $args = if ($updateMode) { @('/S', '/UPDATE') } else { @('/S') }
+            $process = Start-Process -FilePath $path -ArgumentList $args -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw "Installer $path exited with code $($process.ExitCode)." }
+            if (-not (Test-Path $core)) { throw "Installed core was not found at $core." }
+          }
+
+          function Assert-CoreVersion([string]$expected) {
+            $actual = (& $core --version | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0) { throw 'Installed core could not report its stamped version.' }
+            if ($actual -ne $expected) { throw "Installed core version is $actual, expected $expected." }
+          }
+
+          function Wait-ForHealth([int]$port, $process) {
+            $deadline = (Get-Date).AddSeconds(60)
+            $lastError = ''
+            while ((Get-Date) -lt $deadline) {
+              if ($process.HasExited) { throw "Installed core exited before health became ready with code $($process.ExitCode)." }
+              try {
+                $response = Invoke-RestMethod -Uri "http://127.0.0.1:$port/health" -TimeoutSec 2
+                if ($response.status -eq 'ok') { return }
+              } catch {
+                $lastError = $_.Exception.Message
+              }
+              Start-Sleep -Milliseconds 250
+            }
+            throw "Installed core did not become healthy on port $port. Last error: $lastError"
+          }
+
+          function Check-Database([string]$expectedMarker) {
+            if (-not (Test-Path $database)) { throw "Expected database $database was not created." }
+            $env:PROOF_DATABASE = $database
+            $env:PROOF_MARKER = $expectedMarker
+            @'
+          import os, sqlite3
+          database = os.environ["PROOF_DATABASE"]
+          marker = os.environ["PROOF_MARKER"]
+          conn = sqlite3.connect(database)
+          try:
+              integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+              if integrity != "ok":
+                  raise SystemExit(f"SQLite integrity_check failed: {integrity}")
+              schema = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
+              ledger = conn.execute("SELECT MAX(migration_version) FROM schema_compatibility").fetchone()[0]
+              if schema != 17 or ledger != 17:
+                  raise SystemExit(f"Expected schema/ledger 17, got schema={schema}, ledger={ledger}")
+              row = conn.execute("SELECT marker FROM signed_downgrade_proof LIMIT 1").fetchone()
+              if row is None or row[0] != marker:
+                  raise SystemExit("Database proof marker did not survive the installer transition")
+              print(f"database ok: schema={schema}, ledger={ledger}, marker={marker}")
+          finally:
+              conn.close()
+          '@ | python -
+            if ($LASTEXITCODE -ne 0) { throw 'Database integrity/schema proof failed.' }
+          }
+
+          function Run-CoreProof([string]$label, [string]$expectedVersion, [int]$port, [bool]$createMarker) {
+            Assert-CoreVersion $expectedVersion
+            $env:INFOMANCER_BOOTSTRAP_TOKEN = "proof-$label-$marker"
+            $argumentLine = "--port $port --data-dir `"$dataDir`""
+            $process = Start-Process -FilePath $core -ArgumentList $argumentLine -PassThru -WindowStyle Hidden
+            try {
+              Wait-ForHealth $port $process
+              Stop-ProofCore
+              if ($createMarker) {
+                $env:PROOF_DATABASE = $database
+                $env:PROOF_MARKER = $marker
+                @'
+          import os, sqlite3
+          conn = sqlite3.connect(os.environ["PROOF_DATABASE"])
+          try:
+              conn.execute("CREATE TABLE IF NOT EXISTS signed_downgrade_proof (marker TEXT NOT NULL)")
+              conn.execute("DELETE FROM signed_downgrade_proof")
+              conn.execute("INSERT INTO signed_downgrade_proof(marker) VALUES (?)", (os.environ["PROOF_MARKER"],))
+              conn.commit()
+          finally:
+              conn.close()
+          '@ | python -
+                if ($LASTEXITCODE -ne 0) { throw 'Could not create persistent database proof marker.' }
+              }
+              Check-Database $marker
+            } finally {
+              Stop-ProofCore
+            }
+          }
+
+          try {
+            Install-Package $env:DEV_INSTALLER $false
+            Run-CoreProof 'dev-before' $env:DEV_VERSION 18787 $true
+
+            Install-Package $env:BETA_INSTALLER $true
+            Run-CoreProof 'beta-downgrade' $env:BETA_VERSION 18788 $false
+
+            Install-Package $env:DEV_INSTALLER $true
+            Run-CoreProof 'dev-restored' $env:DEV_VERSION 18789 $false
+
+            $evidence = [ordered]@{
+              format = 'infomancer-signed-downgrade-proof'
+              version = 1
+              result = 'passed'
+              source_commit = $env:EXPECTED_SOURCE_SHA.ToLowerInvariant()
+              dev_tag = $env:DEV_TAG
+              dev_version = $env:DEV_VERSION
+              beta_tag = $env:BETA_TAG
+              beta_version = $env:BETA_VERSION
+              database_schema = 17
+              database_integrity = 'ok'
+              database_marker_preserved = $true
+              signature_verification = 'Tauri-compatible minisign-verify 0.2.5'
+              downgrade_invocation = 'NSIS /S /UPDATE'
+              restored_to_dev = $true
+              automatic_downgrade_selection = $false
+              completed_at = (Get-Date).ToUniversalTime().ToString('o')
+            }
+            $evidence | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $env:PROOF_ROOT 'evidence.json') -Encoding utf8
+            $coreLog = Join-Path $dataDir 'logs/desktop-core.log'
+            if (Test-Path $coreLog) { Copy-Item $coreLog (Join-Path $env:PROOF_ROOT 'desktop-core.log') -Force }
+            Get-Content (Join-Path $env:PROOF_ROOT 'evidence.json')
+          } finally {
+            Stop-ProofCore
+          }
+
+      - name: Upload signed downgrade proof evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-downgrade-proof-${{ github.run_number }}
+          path: |
+            ${{ runner.temp }}/infomancer-downgrade-proof/evidence.json
+            ${{ runner.temp }}/infomancer-downgrade-proof/desktop-core.log
+          if-no-files-found: warn
+          retention-days: 30
