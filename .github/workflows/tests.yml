@@ -307,173 +307,114 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Packaged ffprobe failed self-check: $output" }
           if ($output -notmatch '^ffprobe version') { throw "Unexpected ffprobe self-check output: $output" }
 
-      - name: Build signed desktop bundle
+      - name: Install and audit desktop dependencies
         if: steps.signing.outputs.configured == 'true'
         working-directory: desktop
-        shell: pwsh
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          INFOMANCER_BUILD_COMMIT: ${{ github.sha }}
-          INFOMANCER_BUILD_ID: ${{ steps.identity.outputs.build_id }}
         run: |
           npm ci
-          npm run tauri:release -- --bundles nsis
+          npm audit --audit-level=high
 
-      - name: Verify installed signed candidate
+      - name: Verify stamped packaging versions
         if: steps.signing.outputs.configured == 'true'
+        run: python -m unittest tests.test_windows_desktop -v
+
+      - name: Build, sign, and publish immutable Windows Dev updater
+        if: steps.signing.outputs.configured == 'true'
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          INFOMANCER_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+          INFOMANCER_BUILD_COMMIT: ${{ github.sha }}
+          INFOMANCER_BUILD_ID: ${{ steps.identity.outputs.build_id }}
+        with:
+          projectPath: desktop
+          tagName: ${{ steps.identity.outputs.tag }}
+          releaseCommitish: ${{ github.sha }}
+          releaseName: InfoMancer ${{ steps.identity.outputs.version }}
+          releaseBody: Qualified InfoMancer Dev build from Tests run ${{ github.run_number }} at commit ${{ github.sha }}.
+          releaseDraft: false
+          prerelease: true
+          args: --bundles nsis --config src-tauri/tauri.release.conf.json
+          updaterJsonPreferNsis: true
+          includeUpdaterJson: true
+
+      - name: Resolve and verify published updater assets
+        if: steps.signing.outputs.configured == 'true'
+        id: assets
         shell: pwsh
         env:
-          EXPECTED_VERSION: ${{ steps.identity.outputs.version }}
-          EXPECTED_BUILD_ID: ${{ steps.identity.outputs.build_id }}
-          EXPECTED_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEV_TAG: ${{ steps.identity.outputs.tag }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = Get-ChildItem 'desktop/src-tauri/target/release/bundle/nsis/*-setup.exe' | Select-Object -First 1
-          if (-not $installer) { throw 'Signed NSIS installer was not found.' }
-          $signature = Get-AuthenticodeSignature $installer.FullName
-          if ($signature.Status -ne 'Valid') {
-            throw "Installer Authenticode status was $($signature.Status), expected Valid."
+          $published = Join-Path $env:RUNNER_TEMP 'published-dev'
+          New-Item -ItemType Directory -Force $published | Out-Null
+          gh release download $env:DEV_TAG --pattern latest.json --dir $published
+          $release = gh release view $env:DEV_TAG --json assets | ConvertFrom-Json
+          $installer = $release.assets | Where-Object { $_.name -like '*.exe' -and $_.name -notlike '*.sig' } | Select-Object -First 1
+          if ($null -eq $installer) { throw 'The signed Dev release did not contain a Windows installer asset.' }
+          $signatureName = "$($installer.name).sig"
+          $signatureAsset = $release.assets | Where-Object { $_.name -eq $signatureName } | Select-Object -First 1
+          if ($null -eq $signatureAsset) { throw 'The signed Dev release did not contain the matching updater signature.' }
+          gh release download $env:DEV_TAG --pattern $installer.name --dir $published
+          gh release download $env:DEV_TAG --pattern $signatureAsset.name --dir $published
+          $installerPath = Join-Path $published $installer.name
+          $signaturePath = Join-Path $published $signatureAsset.name
+          $latestPath = Join-Path $published 'latest.json'
+          $latest = Get-Content $latestPath -Raw | ConvertFrom-Json
+          $platform = $latest.platforms.PSObject.Properties | Where-Object { $_.Name -like 'windows-*' } | Select-Object -First 1
+          if ($null -eq $platform) { throw 'The immutable Dev latest.json has no Windows updater platform.' }
+          $publishedSignature = (Get-Content $signaturePath -Raw).Trim()
+          if ([string]::IsNullOrWhiteSpace($publishedSignature) -or ([string]$platform.Value.signature).Trim() -ne $publishedSignature) {
+            throw 'The immutable Dev latest.json signature does not match the published updater signature.'
           }
-          $process = Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait -PassThru
-          if ($process.ExitCode -ne 0) { throw "Installer exited with code $($process.ExitCode)." }
-          $installed = Join-Path $env:LOCALAPPDATA 'InfoMancer\InfoMancer.exe'
-          if (-not (Test-Path $installed)) { throw "Installed InfoMancer executable was not found at $installed" }
-          $installedSignature = Get-AuthenticodeSignature $installed
-          if ($installedSignature.Status -ne 'Valid') {
-            throw "Installed executable Authenticode status was $($installedSignature.Status), expected Valid."
+          $expectedPrefix = "https://github.com/${{ github.repository }}/releases/download/$env:DEV_TAG/"
+          if (-not ([string]$platform.Value.url).StartsWith($expectedPrefix)) {
+            throw 'The immutable Dev latest.json does not point at its immutable qualified release.'
           }
-          $core = Join-Path $env:LOCALAPPDATA 'InfoMancer\infomancer-core-x86_64-pc-windows-msvc.exe'
-          if (-not (Test-Path $core)) { throw "Installed InfoMancer core was not found at $core" }
-          $coreSignature = Get-AuthenticodeSignature $core
-          if ($coreSignature.Status -ne 'Valid') {
-            throw "Installed core Authenticode status was $($coreSignature.Status), expected Valid."
-          }
-          $log = Join-Path $env:TEMP 'infomancer-qualified-core.log'
-          $env:INFOMANCER_SANDBOX = '1'
-          $env:INFOMANCER_BIND_HOST = '127.0.0.1'
-          $env:INFOMANCER_PORT = '8787'
-          $coreProcess = Start-Process -FilePath $core -PassThru -RedirectStandardOutput $log -RedirectStandardError $log
-          try {
-            $healthy = $false
-            for ($attempt = 0; $attempt -lt 60; $attempt++) {
-              Start-Sleep -Milliseconds 500
-              if ($coreProcess.HasExited) { break }
-              try {
-                $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8787/health' -TimeoutSec 2
-                if ($health.status -eq 'ok') { $healthy = $true; break }
-              } catch {}
-            }
-            if (-not $healthy) {
-              $detail = if (Test-Path $log) { Get-Content $log -Raw } else { 'No core log was written.' }
-              throw "Installed core did not become healthy. $detail"
-            }
-            $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8787/health' -TimeoutSec 2
-            if ($health.version -ne $env:EXPECTED_VERSION) {
-              throw "Installed core reported version $($health.version), expected $env:EXPECTED_VERSION"
-            }
-            if ($health.build_id -ne $env:EXPECTED_BUILD_ID) {
-              throw "Installed core reported build ID $($health.build_id), expected $env:EXPECTED_BUILD_ID"
-            }
-            if ($health.commit_sha -ne $env:EXPECTED_SHA) {
-              throw "Installed core reported commit $($health.commit_sha), expected $env:EXPECTED_SHA"
-            }
-          } finally {
-            if (-not $coreProcess.HasExited) { Stop-Process -Id $coreProcess.Id -Force }
-          }
+          "published_dir=$published" >> $env:GITHUB_OUTPUT
+          "installer_path=$installerPath" >> $env:GITHUB_OUTPUT
+          "installer_url=$($installer.url)" >> $env:GITHUB_OUTPUT
+          "signature_path=$signaturePath" >> $env:GITHUB_OUTPUT
 
-      - name: Locate signed updater artifacts
-        if: steps.signing.outputs.configured == 'true'
-        id: updater
-        shell: pwsh
-        run: |
-          $archive = Get-ChildItem 'desktop/src-tauri/target/release/bundle/nsis/*.nsis.zip' | Select-Object -First 1
-          if (-not $archive) { throw 'Tauri updater archive was not produced.' }
-          $signature = Get-Item "$($archive.FullName).sig"
-          if (-not $signature) { throw 'Tauri updater signature was not produced.' }
-          "archive=$($archive.FullName)" >> $env:GITHUB_OUTPUT
-          "signature=$($signature.FullName)" >> $env:GITHUB_OUTPUT
-          "archive_name=$($archive.Name)" >> $env:GITHUB_OUTPUT
-          "signature_name=$($signature.Name)" >> $env:GITHUB_OUTPUT
-
-      - name: Verify updater signature before publication
+      - name: Build installable Dev channel manifest
         if: steps.signing.outputs.configured == 'true'
         shell: pwsh
         env:
-          TAURI_SIGNING_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
-          ARCHIVE_PATH: ${{ steps.updater.outputs.archive }}
-          SIGNATURE_PATH: ${{ steps.updater.outputs.signature }}
+          QUALIFICATION_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $publicKey = $env:TAURI_SIGNING_PUBLIC_KEY
-          if ([string]::IsNullOrWhiteSpace($publicKey)) { throw 'TAURI_UPDATER_PUBLIC_KEY is not configured.' }
-          $signature = (Get-Content -Raw $env:SIGNATURE_PATH).Trim()
-          if ([string]::IsNullOrWhiteSpace($signature)) { throw 'Updater signature file is empty.' }
-          $minisign = Join-Path $env:RUNNER_TEMP 'minisign.exe'
-          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip' -OutFile "$minisign.zip"
-          Expand-Archive -Path "$minisign.zip" -DestinationPath "$minisign-unpack"
-          $found = Get-ChildItem "$minisign-unpack" -Recurse -Filter minisign.exe | Select-Object -First 1
-          if (-not $found) { throw 'minisign.exe was not found in the downloaded archive.' }
-          Copy-Item $found.FullName $minisign
-          Set-Content -Path "$env:SIGNATURE_PATH.minisig" -Value $signature -NoNewline
-          & $minisign -Vm $env:ARCHIVE_PATH -x "$env:SIGNATURE_PATH.minisig" -P $publicKey
-          if ($LASTEXITCODE -ne 0) { throw 'Updater signature verification failed.' }
-
-      - name: Rename native artifacts for humans
-        if: steps.signing.outputs.configured == 'true'
-        shell: pwsh
-        env:
-          CHANNEL: dev
-          VERSION: ${{ steps.identity.outputs.version }}
-        run: |
-          python scripts/rename_release_assets.py `
-            --platform windows `
-            --channel $env:CHANNEL `
-            --version $env:VERSION `
-            --directory desktop/src-tauri/target/release/bundle/nsis
-
-      - name: Build signed Dev update manifest
-        if: steps.signing.outputs.configured == 'true'
-        shell: pwsh
-        env:
-          CHANNEL: dev
-          VERSION: ${{ steps.identity.outputs.version }}
-          BUILD_ID: ${{ steps.identity.outputs.build_id }}
-          TAG: ${{ steps.identity.outputs.tag }}
-          SHORT_SHA: ${{ steps.identity.outputs.short_sha }}
-          ARCHIVE_NAME: ${{ steps.updater.outputs.archive_name }}
-          SIGNATURE_NAME: ${{ steps.updater.outputs.signature_name }}
-        run: |
-          $archivePath = "desktop/src-tauri/target/release/bundle/nsis/$env:ARCHIVE_NAME"
-          $signaturePath = "desktop/src-tauri/target/release/bundle/nsis/$env:SIGNATURE_NAME"
-          $installer = Get-ChildItem 'desktop/src-tauri/target/release/bundle/nsis/*-setup.exe' | Select-Object -First 1
-          if (-not $installer) { throw 'Renamed NSIS installer was not found.' }
-          $archiveUrl = "${{ github.server_url }}/${{ github.repository }}/releases/download/$env:TAG/$env:ARCHIVE_NAME"
-          $signature = (Get-Content -Raw $signaturePath).Trim()
+          New-Item -ItemType Directory -Force build/update-channel | Out-Null
+          $signature = (Get-Content '${{ steps.assets.outputs.signature_path }}' -Raw).Trim()
+          $artifactSpec = "windows=tauri-updater,${{ steps.assets.outputs.installer_url }},${{ steps.assets.outputs.installer_path }},$signature"
           python scripts/build_update_channel_manifest.py `
-            --channel $env:CHANNEL `
-            --version $env:VERSION `
-            --build-id $env:BUILD_ID `
-            --commit-sha "${{ github.sha }}" `
+            --channel dev `
+            --version "${{ steps.identity.outputs.version }}" `
+            --build-id "${{ steps.identity.outputs.build_id }}" `
+            --commit-sha "$env:GITHUB_SHA" `
             --workflow Tests `
             --run-id "${{ github.run_id }}" `
-            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" `
-            --artifact "windows-x86_64=$archiveUrl=$archivePath=$signature" `
-            --artifact-digest-source "windows-installer=$($installer.FullName)" `
+            --run-url "$env:QUALIFICATION_RUN_URL" `
+            --artifact $artifactSpec `
             --output build/update-channel/dev.json
+          Get-Content build/update-channel/dev.json
 
-      - name: Publish signed Dev release
+      - name: Advance rolling Desktop Dev and qualified channel manifests
         if: steps.signing.outputs.configured == 'true'
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.identity.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLISHED_DIR: ${{ steps.assets.outputs.published_dir }}
         run: |
-          gh release create $env:TAG `
-            --target "${{ github.sha }}" `
-            --title "InfoMancer ${{ steps.identity.outputs.version }}" `
-            --notes "Qualified Dev build from Tests run ${{ github.run_number }}. Commit ${{ github.sha }}." `
-            --prerelease `
-            desktop/src-tauri/target/release/bundle/nsis/*-setup.exe `
-            desktop/src-tauri/target/release/bundle/nsis/*.nsis.zip `
-            desktop/src-tauri/target/release/bundle/nsis/*.nsis.zip.sig `
-            build/update-channel/dev.json#dev.json
+          gh release view desktop-dev --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create desktop-dev --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title 'InfoMancer Desktop Dev Update Channel' --notes 'Rolling signed Tauri updater manifest. Only qualified 0.9 development builds advance this pointer.' --prerelease
+          }
+          gh release upload desktop-dev --repo $env:GITHUB_REPOSITORY (Join-Path $env:PUBLISHED_DIR 'latest.json') --clobber
+
+          gh release view update-channels --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create update-channels --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title 'InfoMancer Qualified Update Channels' --notes 'Rolling channel manifests for qualified InfoMancer builds.' --prerelease
+          }
+          gh release upload update-channels --repo $env:GITHUB_REPOSITORY build/update-channel/dev.json --clobber
