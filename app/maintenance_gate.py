@@ -59,3 +59,9 @@ class MaintenanceGate:
                 "reason": self._exclusive_reason,
                 "active_operations": self._active_operations,
             }
+
+
+# One process-wide coordination point. RuntimeLease already guarantees a single
+# InfoMancer process per catalog, so request, scheduler, and recovery code can use
+# this object without adding another database-backed lock protocol.
+APPLICATION_MAINTENANCE_GATE = MaintenanceGate()
