@@ -287,6 +287,26 @@ class RenameProposalService:
             raise RenameProposalError(
                 "A file now exists at the proposed destination. Nothing was overwritten."
             )
+        # Re-resolve the live paths immediately before mutation. This catches a
+        # symlink/junction replacement that occurs after the reviewed snapshot and
+        # collision checks but before the filesystem rename.
+        self._require_inside(source, root)
+        self._require_inside(destination, root)
+        if not source.is_file():
+            self._mark_stale(proposal_id, "The source changed before rename")
+            raise RenameProposalError(
+                "The source file changed before the rename could begin. Nothing was changed."
+            )
+        if destination.exists():
+            self._mark_stale(proposal_id, "The destination became occupied before rename")
+            raise RenameProposalError(
+                "A file appeared at the proposed destination before the rename could begin. Nothing was overwritten."
+            )
+        if not destination.parent.is_dir():
+            self._mark_stale(proposal_id, "The destination parent is unavailable")
+            raise RenameProposalError(
+                "The destination folder is no longer available. Nothing was changed."
+            )
         try:
             source.rename(destination)
         except OSError as exc:
@@ -309,13 +329,25 @@ class RenameProposalService:
                        updated_at=CURRENT_TIMESTAMP WHERE id=?""",
                     (proposal_id,),
                 )
-        except Exception:
+        except Exception as exc:
             try:
+                self._require_inside(destination, root)
+                self._require_inside(source, root)
+                if source.exists():
+                    raise RenameProposalError(
+                        "The file was renamed but the catalog update failed, and another file appeared at the original path before rollback. InfoMancer refused to overwrite it. Review both paths before retrying."
+                    ) from exc
+                if not destination.is_file() or not source.parent.is_dir():
+                    raise RenameProposalError(
+                        "The file was renamed but the catalog update failed, and the filesystem changed before rollback. InfoMancer stopped rather than risk moving the wrong file. Review both paths before retrying."
+                    ) from exc
                 destination.rename(source)
+            except RenameProposalError:
+                raise
             except OSError as rollback_exc:
                 raise RenameProposalError(
                     f"The catalog update failed and automatic rename rollback also failed: {rollback_exc}"
-                )
+                ) from rollback_exc
             raise
         proposal["status"] = "applied"
         return proposal
