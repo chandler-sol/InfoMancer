@@ -77,6 +77,18 @@ class SupplyChainTests(unittest.TestCase):
         self.assertIn("npm audit --audit-level=high", windows)
         self.assertIn("npm audit --audit-level=high", release)
 
+    def test_rust_audit_rejects_a_stale_lockfile_before_scanning(self):
+        tests = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+        sync_check = (
+            "cargo metadata --manifest-path desktop/src-tauri/Cargo.toml "
+            "--locked --format-version 1 --no-deps > /dev/null"
+        )
+        self.assertIn(sync_check, tests)
+        self.assertLess(
+            tests.index(sync_check),
+            tests.index("cargo audit --file desktop/src-tauri/Cargo.lock"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
