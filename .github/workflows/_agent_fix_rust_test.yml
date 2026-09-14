@@ -22,8 +22,9 @@ jobs:
           persist-credentials: false
 
       - name: Add icon generation prerequisite to Rust test gate
-        shell: python
+        shell: bash
         run: |
+          python - <<'PY'
           from pathlib import Path
 
           path = Path('.github/workflows/tests.yml')
@@ -60,6 +61,7 @@ jobs:
           if text.count(old) != 1:
               raise SystemExit('Expected Rust test block was not found exactly once; refusing edit.')
           path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
 
       - name: Commit exact workflow repair
         env:
@@ -73,7 +75,7 @@ jobs:
             exit 1
           fi
           git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.email '41898282+chandler-sol@users.noreply.github.com'
           git add .github/workflows/tests.yml
           git commit -m 'Generate icons before Rust desktop tests'
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:audit/0.9-cycle-0d
