@@ -180,6 +180,8 @@ class SeasonFolderService:
                 "The preview changed before apply. Refresh the season-folder preview "
                 "and review it again."
             )
+        root = Path(preview["title"]["root_path"])
+        title_folder = Path(preview["title"]["folder_path"])
 
         moved: list[dict[str, Any]] = []
         created_folders: set[Path] = set()
@@ -218,8 +220,17 @@ class SeasonFolderService:
                         "a folder."
                     )
 
-                # Check again after any directory creation. This protects the
-                # normal collision case and narrows the race window before move.
+                # Directory entries can change after the earlier proposal check.
+                # Resolve the live paths again after folder creation so a symlink,
+                # junction or replaced directory cannot redirect the move outside
+                # the configured source or show folder.
+                self._require_inside(title_folder, root, "The show folder")
+                self._require_inside(source, root, "The media file")
+                self._require_inside(destination, title_folder, "The season destination")
+
+                # Check again after directory creation and containment validation.
+                # This protects the normal collision case and narrows the race window
+                # immediately before the filesystem mutation.
                 if destination.exists():
                     raise SeasonFolderError(
                         f"Stopped before moving {source.name} because a file appeared "
