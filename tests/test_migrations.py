@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from app.db import Database
-from app.migrations import MIGRATIONS
+from app.migrations import MIGRATIONS, schema_contract
 
 
 class MigrationTests(unittest.TestCase):
@@ -56,6 +56,57 @@ class MigrationTests(unittest.TestCase):
                     {"scope", "lock_key", "locked_until", "created_at"},
                     lockout_columns,
                 )
+
+    def test_migration_17_records_behavioral_semantics_without_blocking_safe_downgrade(self):
+        migration = next(item for item in MIGRATIONS if item.version == 17)
+        self.assertEqual(migration.compatibility, "behavioral")
+        self.assertEqual(migration.minimum_reader_schema, 1)
+        self.assertEqual(migration.minimum_writer_schema, 1)
+        self.assertEqual(migration.downgrade_policy, "compatible")
+        self.assertEqual(schema_contract(), {
+            "current": 17,
+            "minimum_reader_schema": 1,
+            "minimum_writer_schema": 1,
+            "downgrade_policy": "compatible",
+        })
+
+        with tempfile.TemporaryDirectory() as temporary:
+            database = Database(Path(temporary) / "catalog.db")
+            database.initialize()
+            with database.connect() as conn:
+                row = conn.execute(
+                    """SELECT compatibility,minimum_reader_schema,
+                              minimum_writer_schema,downgrade_policy
+                       FROM schema_compatibility WHERE migration_version=17"""
+                ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["compatibility"], "behavioral")
+            self.assertEqual(row["minimum_reader_schema"], 1)
+            self.assertEqual(row["minimum_writer_schema"], 1)
+            self.assertEqual(row["downgrade_policy"], "compatible")
+
+    def test_existing_compatibility_snapshot_is_not_silently_rewritten(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            database = Database(Path(temporary) / "catalog.db")
+            database.initialize()
+            with database.connect() as conn:
+                conn.execute(
+                    """UPDATE schema_compatibility
+                       SET compatibility='additive'
+                       WHERE migration_version=17"""
+                )
+
+            # Simulate opening a database whose migration-17 compatibility snapshot
+            # was written by the earlier build. Initialization must preserve that
+            # historical record rather than rewriting installed downgrade history.
+            database.initialize()
+            with database.connect() as conn:
+                row = conn.execute(
+                    """SELECT compatibility FROM schema_compatibility
+                       WHERE migration_version=17"""
+                ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["compatibility"], "additive")
 
 
 if __name__ == "__main__":
