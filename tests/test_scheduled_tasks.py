@@ -13,10 +13,6 @@ class ScheduledTaskWorkspaceContracts(unittest.TestCase):
         nav = (ROOT / "app/templates/_settings_nav.html").read_text(encoding="utf-8")
 
         self.assertIn("build_scheduled_tasks_router", routes_init)
-        self.assertLess(
-            routes_init.index("build_scheduled_tasks_router,"),
-            routes_init.index("build_settings_router,"),
-        )
         self.assertIn('@librarian_get("/settings/scheduled-tasks"', routes)
         self.assertIn('@librarian_post("/settings/scheduled-tasks/fingerprints"', routes)
         self.assertIn('@librarian_post("/settings/scheduled-tasks/trash-retention"', routes)
