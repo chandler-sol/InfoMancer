@@ -116,6 +116,14 @@ class WindowsDesktopContractTests(unittest.TestCase):
         release_config = json.loads((ROOT / "desktop/src-tauri/tauri.release.conf.json").read_text(encoding="utf-8"))
         self.assertTrue(release_config["bundle"]["createUpdaterArtifacts"])
 
+    def test_signed_installer_can_accept_explicit_downgrade_without_auto_selecting_one(self):
+        config = json.loads((ROOT / "desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
+        rust = (ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
+        settings_route = (ROOT / "app/routes/update_channel_settings.py").read_text(encoding="utf-8")
+        self.assertTrue(config["bundle"]["windows"]["allowDowngrades"])
+        self.assertNotIn(".version_comparator(", rust)
+        self.assertIn("Automatic downgrade remains disabled", settings_route)
+
     def test_tauri_wrapper_preserves_native_updater_artifacts_for_action_discovery(self):
         wrapper = (ROOT / "desktop/scripts/tauri-wrapper.mjs").read_text(encoding="utf-8")
         self.assertIn("copyFileSync(source, destination)", wrapper)
