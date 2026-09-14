@@ -40,6 +40,21 @@ class ProviderSecretStoreTests(unittest.TestCase):
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
                 self.assertEqual(list(Path(temporary).glob(f".{path.name}.*.tmp")), [])
 
+    def test_failed_encryption_does_not_leave_provider_secret_temp_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "providers.enc"
+            store = ProviderSecretStore(path, "test-application-secret")
+
+            def fail_encrypt(_payload: bytes) -> bytes:
+                raise ProviderSecretError("synthetic encryption failure")
+
+            store._encrypt = fail_encrypt
+            with self.assertRaisesRegex(ProviderSecretError, "synthetic encryption failure"):
+                store.update({"tvdb_api_key": "secret-key"})
+
+            self.assertFalse(path.exists())
+            self.assertEqual(list(Path(temporary).glob(f".{path.name}.*.tmp")), [])
+
     def test_wrong_application_secret_fails_closed_for_versioned_credentials(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "providers.enc"
