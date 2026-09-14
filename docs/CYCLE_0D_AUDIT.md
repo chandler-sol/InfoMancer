@@ -69,6 +69,8 @@ The first pass found substantial existing hardening. These controls should be pr
 
 **Required remediation:** configure repository rules/branch protection appropriate to the project so direct changes to qualified release branches cannot bypass the intended review/CI policy. Exact settings must be chosen with the repository's GitHub plan and owner workflow in mind. Signed publication secrets should remain unavailable to untrusted pull-request code.
 
+**Current verification:** the repository-rulesets endpoint returns no configured rulesets. The connected GitHub App does not have administration permission to inspect or change classic branch protection, so this finding remains intentionally open for repository-owner configuration rather than being changed blindly from the audit branch.
+
 ### D0-002: recovery did not establish an exclusive application maintenance barrier
 
 **Severity: High, data-integrity risk**
@@ -91,7 +93,7 @@ This is not presently evidence of an exploit, but it is a major auditability pro
 
 **Required remediation:** replace arbitrary namespace access with explicit application/service dependencies in incremental slices. Preserve centralized security policy and compatibility only where a real contract requires it.
 
-**Audit-branch status: first explicit-dependency slice implemented.** `security_hardening` no longer calls `ctx.set()` to replace `library_export_rows` as a side effect of constructing the router. It now returns the secured compatibility handler to the composition root, where compatibility aliases are already installed explicitly through the route-bundle handler contract. Regression coverage proves router construction leaves the supplied context unchanged while the returned wrapper still removes physical server paths from Member exports. The behavior-preserving slice passed Ubuntu, macOS and browser acceptance in PR Tests run #2525 before the branch advanced for the Rust dependency remediation below; Windows was still running when that superseding push occurred.
+**Audit-branch status: application write channel removed; read-through cleanup remains.** `security_hardening` now returns the secured `library_export_rows` compatibility handler instead of mutating the route context. The five compatibility replacements in `final_polish` are also returned explicitly and installed by the composition root. `RouteContext.set()` has been removed entirely, and a regression contract rejects any future `ctx.set()` call under `app/routes`. TVDB credential rotation no longer replaces `tvdb`, `stored_provider_secrets`, or `provider_secret_error` globals from a request handler; the verified credentials are persisted first and then applied in place to the existing live `TVDBClient`, with its cached authentication token invalidated. PR Tests run #2537 passed Windows, macOS, Ubuntu, browser acceptance, and security/dependency audit on the combined change. `LiveRef` read-through dependencies and compatibility publication through `globals().update()` still remain for later incremental cleanup.
 
 ### D0-004: duplicate route ownership made security behavior order-dependent
 
@@ -136,7 +138,31 @@ On September 14, 2026, RustSec published `RUSTSEC-2026-0285`, "TLS 1.3 handshake
 
 **Required remediation:** update the locked desktop dependency to a fixed `rustls` release without suppressing the advisory or weakening `cargo audit`, then rerun the normal qualification matrix.
 
-**Audit-branch status: implemented, CI verification in progress.** Cargo itself generated the lockfile update to `rustls` 0.23.45. The same resolution also corrected stale root-package lock metadata from `infomancer-desktop` 0.8.1-beta.1 to 0.8.1-beta.2 and added the already-declared direct `serde_json` dependency; no unrelated transitive package versions moved. A temporary branch-only workflow was used solely to let Cargo perform the resolution because the audit environment could not reach crates.io, and that helper was removed immediately after the generated diff was inspected. The permanent test workflow and `cargo audit` policy are unchanged.
+**Audit-branch status: implemented and regression-verified.** Cargo generated the lockfile update to `rustls` 0.23.45. The same resolution corrected stale root-package lock metadata from `infomancer-desktop` 0.8.1-beta.1 to 0.8.1-beta.2 and added the already-declared direct `serde_json` dependency; no unrelated transitive package versions moved. A permanent CI gate now checks `Cargo.toml`/`Cargo.lock` synchronization with Cargo's own locked metadata resolution before `cargo audit`. PR Tests runs #2537, #2539, #2541, and #2543 all passed the security/dependency audit with the fixed lockfile.
+
+### D0-007: configured provider-secret encryption used a fast password derivation
+
+**Severity: Medium, secret-at-rest hardening**
+
+When `INFOMANCER_SECRET` was configured, the baseline `ProviderSecretStore` hashed the supplied string once with SHA-256 and used that digest directly as Fernet key material. This is sound when the configured value is truly random high-entropy key material, but configuration accepted any non-empty string. If an operator chose a human-memorable secret and an attacker later obtained `provider-secrets.enc`, the fast derivation unnecessarily reduced the cost of offline guessing.
+
+The existing raw Fernet file also carried no format/KDF version, so simply changing derivation would have made already-saved TVDB/provider credentials unreadable. A second compatibility case existed for installations that initially used the generated local key and later added `INFOMANCER_SECRET`.
+
+**Required remediation:** introduce an explicitly versioned encrypted format, use a salted password-hardening KDF for configured application secrets, preserve the generated-local-key mode, and retain safe readers for both legacy ciphertext formats so upgrades do not require credential resets.
+
+**Audit-branch status: implemented and regression-verified.** New configured-secret writes use a version-2 provider-secret envelope with a random 16-byte salt and Scrypt-derived Fernet key (`N=2^15`, `r=8`, `p=1`). Local-key installations use the same versioned envelope with an explicit `local_key` source. Legacy direct-SHA-256 application-secret ciphertext and legacy raw local-key ciphertext remain readable. A successful subsequent write migrates legacy data to the current envelope, including the case where `INFOMANCER_SECRET` is added after a local-key installation. Wrong secrets and unknown future envelope versions fail closed. Tests cover every compatibility path, and PR Tests run #2539 passed Windows, macOS, Ubuntu, browser acceptance, and security/dependency audit.
+
+### D0-008: directory creation could invalidate filesystem containment checks before a media move
+
+**Severity: Medium, filesystem-integrity**
+
+Most media-mutation paths already resolve and validate cataloged paths against configured media roots. Two paths still had a deterministic post-validation gap. `SeasonFolderService.apply()` validated the proposed season destination, then created the missing `Season NN` directory and moved the episode without resolving containment again. `DuplicateTrashService.restore()` validated the original destination, then created a missing destination parent and restored the trashed file without re-resolving that parent. On storage where an attacker or competing process can replace the just-created directory entry with a symlink or Windows junction, the subsequent move could be redirected outside the configured library boundary.
+
+**Required remediation:** after any directory creation that occurs between preview/validation and mutation, resolve the live source and destination again against their authoritative roots, then recheck source presence and destination collision immediately before the move. Add adversarial tests that replace the newly created directory with an outside symlink and prove the file remains at its safe source.
+
+**Audit-branch status: confirmed manifestations implemented and regression-verified; broader mutation review remains open.** Season-folder apply now revalidates the show folder, source file, and live season destination after folder creation and rechecks collision immediately before `rename()`. Managed-Trash restore recomputes the live managed-Trash boundary, revalidates source and destination after destination-parent creation, then rechecks collision and source presence before `shutil.move()`. The regression tests perform the actual directory-to-symlink substitution on runners that support directory symlinks and require fail-closed behavior with the outside directory untouched. The season-folder fix passed the full PR Tests run #2541 matrix; the combined season-folder and managed-Trash restore fixes passed the full #2543 matrix.
+
+A residual pathname race can still exist in the very small interval between the final containment/collision check and the OS rename operation. Eliminating that class completely and portably would require descriptor-based or platform-specific no-replace primitives rather than additional `pathlib` checks. The remaining rename/undo paths therefore still need review, but the code no longer creates a new unchecked directory boundary itself immediately before these two mutations.
 
 ### Migration classification rule for Cycle 1+
 
@@ -153,20 +179,20 @@ A data backfill is not automatically behavioral. The classification is about the
 These remain hypotheses until the relevant paths/tests are fully inspected:
 
 - middleware CSP has a legacy `script-src 'unsafe-inline'` fallback when no request nonce exists; inventory non-template HTML responses before assigning severity;
-- `ProviderSecretStore` derives a Fernet key from configured `INFOMANCER_SECRET` using direct SHA-256. The documented expectation is a long random value; determine whether entropy should be enforced or a password KDF should be used;
-- filesystem mutations perform path revalidation, but rename/trash operations still have unavoidable pathname TOCTOU windows. Review Windows junction, symlink, UNC and case-insensitive behavior before deciding what additional defenses are practical;
+- remaining filesystem mutations still use pathname-based revalidation. Review rename/undo paths, Windows junction and UNC behavior, case-insensitive collisions, and whether any platform-specific no-replace primitive is justified before assigning another finding;
 - recovery update-manifest base URL can be operator-configured. It is not ordinary user input, but redirect/private-network behavior should still be documented as a deployment trust boundary;
 - session rotation after password change should be reviewed. Other sessions are revoked today, while the current session remains valid;
 - E2E CI uses `npm install --ignore-scripts` rather than `npm ci`; verify lockfile/reproducibility behavior before changing it;
 - all remaining workflows still need an action-pin, permission, secret-flow, and artifact-retention pass;
-- all outbound provider/image/download paths still need explicit timeout, redirect, content-size, and SSRF review.
+- all outbound provider/image/download paths still need explicit timeout, redirect, content-size, and SSRF review;
+- provider-secret temporary-file creation and other secret-at-rest filesystem writes still need the same local symlink/collision review applied to media mutation paths.
 
 ## Next audit slices
 
-1. Continue replacing mutable route dependencies in security-sensitive slices, now that the first `security_hardening` mutation is explicit.
-2. Complete filesystem mutation and portable-recovery concurrency review.
-3. Complete outbound HTTP/SSRF/provider review.
-4. Complete Tauri IPC/navigation/capability and installer review.
-5. Review every GitHub Actions workflow and lockfile, including reproducible lockfile synchronization checks.
-6. Review logging, diagnostics, exports, and secret-at-rest behavior.
+1. Finish the remaining filesystem mutation/undo review, including Windows junction/UNC and case-insensitive behavior.
+2. Complete outbound HTTP/SSRF/provider and update-manifest trust-boundary review.
+3. Complete Tauri IPC/navigation/capability and installer review.
+4. Review every remaining GitHub Actions workflow, lockfile, permission, secret flow, and artifact-retention policy.
+5. Continue replacing `LiveRef` read-through dependencies and review auth/CSRF/effect ownership now that the route-context write channel is gone.
+6. Review logging, diagnostics, exports, and remaining secret-at-rest behavior.
 7. Only after security/data-loss findings are dispositioned, begin incremental `main.py` decomposition.
