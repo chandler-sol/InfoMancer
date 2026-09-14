@@ -89,6 +89,20 @@ class SupplyChainTests(unittest.TestCase):
             tests.index("cargo audit --file desktop/src-tauri/Cargo.lock"),
         )
 
+    def test_rust_desktop_tests_are_required_for_dev_qualification(self):
+        tests = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+        self.assertIn("desktop-rust-test:", tests)
+        self.assertIn("name: Rust desktop tests on Windows", tests)
+        self.assertIn(
+            "cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked",
+            tests,
+        )
+        self.assertEqual(tests.count("      - desktop-rust-test\n"), 2)
+        qualified = tests.index("  qualified-dev-candidate:")
+        package = tests.index("  windows-dev-package:")
+        self.assertLess(tests.index("      - desktop-rust-test\n", qualified), package)
+        self.assertGreater(tests.index("      - desktop-rust-test\n", package), package)
+
     def test_qualified_dev_publisher_keeps_immutable_and_rolling_feeds_connected(self):
         tests = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
         self.assertIn(
