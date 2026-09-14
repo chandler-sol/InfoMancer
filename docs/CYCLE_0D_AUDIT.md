@@ -79,6 +79,8 @@ This creates a check-then-act window in which new work can begin while recovery 
 
 **Required remediation:** introduce an application-wide exclusive maintenance state that is established before the final quiescence check, prevents new mutation/background work from starting, drains or rejects active work, pauses the scheduler, performs the restore, and remains active until the process exits/restarts. Add an adversarial regression test that attempts to start work after recovery has entered exclusive mode.
 
+**Audit-branch status:** implemented, pending CI verification. `MaintenanceGate` now coordinates ordinary HTTP work, scheduler ticks and background-job start transitions. Recovery acquires exclusive mode before its final quiescence check, failed recovery releases the gate, and a successful database replacement remains exclusive until restart. Regression coverage includes admission blocking, health-probe availability, active-work refusal and successful-restore exclusivity. This finding remains open until the audit branch passes the full test matrix.
+
 ### D0-003: route dependency injection remains coupled to mutable `main.py` globals
 
 **Severity: High, architecture/maintainability**
@@ -101,9 +103,21 @@ The route registry contains explicit comments that some route bundles must be re
 
 **Severity: Medium, downgrade-contract correctness**
 
-All current migrations 1 through 17 are declared through `additive_migration()` with a compatible downgrade policy. Migration 17 does not only add passive schema. It backfills announcement receipts and installs triggers that alter behavior on future user and announcement inserts. The compatibility framework already has `behavioral` and `breaking` classifications, so calling every migration additive weakens the meaning of the ledger even if the tested Dev/Beta round trip remains safe.
+All current migrations 1 through 17 were declared through `additive_migration()` with a compatible downgrade policy. Migration 17 does not only add passive schema. It backfills announcement receipts and installs triggers that alter behavior on future user and announcement inserts. The compatibility framework already has `behavioral` and `breaking` classifications, so calling every migration additive weakens the meaning of the ledger even if the tested Dev/Beta round trip remains safe.
 
 **Required remediation:** review every migration against the documented reader/writer/downgrade semantics and correct classifications without rewriting historical installed snapshots silently. Define the rule Cycle 1 must follow before Migration 18 is authored.
+
+**Audit-branch status:** implemented, pending CI verification. Migration 17 now uses an explicit `behavioral_migration()` declaration while retaining schema-1 reader/writer compatibility and the compatible downgrade policy. Fresh installations record the corrected semantic class. Existing installations keep the compatibility snapshot they recorded when Migration 17 originally ran because the ledger remains append-only through `INSERT OR IGNORE` semantics. Tests cover both fresh classification and non-rewrite of historical snapshots.
+
+### Migration classification rule for Cycle 1+
+
+Compatibility class and downgrade policy are separate decisions:
+
+- **additive**: passive schema/index additions or compatible data population that older code can safely ignore and that does not alter the semantics of future writes;
+- **behavioral**: triggers, workflow-visible defaults/backfills, automatic receipts/state transitions or other changes that alter future database behavior while remaining compatible with explicitly declared older readers/writers;
+- **breaking**: a migration whose resulting database cannot safely preserve the declared older reader/writer contract and therefore needs a stricter minimum schema, read-only downgrade or restore-required policy.
+
+A data backfill is not automatically behavioral. The classification is about the resulting database contract. Migration 17 is behavioral because its triggers continue changing future insert behavior after the migration completes. Migration 18 and later must state both semantic class and downgrade contract deliberately rather than inheriting a convenient default.
 
 ## Open review items, not yet findings
 
