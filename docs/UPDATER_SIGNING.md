@@ -64,6 +64,20 @@ Promotion to a less stable channel is rejected.
 
 Version-bearing signed artifacts are never silently copied to a different release version. A promotion must supply newly verified target-version artifact metadata even though the application source commit and qualification identity stay unchanged.
 
+## Explicit downgrade proof boundary
+
+Windows release installers are allowed to accept an explicitly invoked older signed package. This is an installer capability required to prove a schema-compatible rollback path and does not enable automatic downgrade selection.
+
+InfoMancer's Tauri updater still uses the plugin's normal update comparison and does not install a lower version simply because the selected channel contains one. The Settings flow separately reports older channel builds as waiting for the selected channel and keeps automatic downgrade disabled until the signed end-to-end proof is complete.
+
+The distinction is intentional:
+
+- installer capability: an operator or verified proof workflow may explicitly run an older signed installer with update semantics
+- updater policy: normal automatic update checks remain upgrade-only
+- application policy: schema compatibility is evaluated before any future product-supported downgrade can be offered
+
+This keeps the proof path testable without turning channel changes into implicit downgrades.
+
 ## Server trust remains separate
 
 The channel manifest is not a replacement for server release signing.
