@@ -47,6 +47,28 @@ DEFAULT_MANIFEST_BASE_URL = (
 )
 
 
+def _require_https_update_url(url: str) -> None:
+    parsed = urlparse(url)
+    if (
+        parsed.scheme.casefold() != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise ValueError("Update metadata URL must use HTTPS without embedded credentials.")
+
+
+class _HttpsOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        try:
+            _require_https_update_url(newurl)
+        except ValueError as exc:
+            raise urllib.error.URLError(
+                "Update metadata redirects must remain on HTTPS."
+            ) from exc
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def build_router(ctx: RouteContext):
     router = APIRouter()
     APP_VERSION = ctx.get("APP_VERSION")
@@ -92,9 +114,7 @@ def build_router(ctx: RouteContext):
         }
 
     def fetch_json(url: str) -> object:
-        parsed = urlparse(url)
-        if parsed.scheme not in {"https", "http"} or not parsed.netloc:
-            raise ValueError("Update metadata URL must use HTTP or HTTPS.")
+        _require_https_update_url(url)
         update_request = urllib.request.Request(
             url,
             headers={
@@ -102,7 +122,8 @@ def build_router(ctx: RouteContext):
                 "User-Agent": f"InfoMancer/{APP_VERSION}",
             },
         )
-        with urllib.request.urlopen(update_request, timeout=10) as response:
+        opener = urllib.request.build_opener(_HttpsOnlyRedirectHandler())
+        with opener.open(update_request, timeout=10) as response:
             payload = response.read(MAX_UPDATE_RESPONSE + 1)
         if len(payload) > MAX_UPDATE_RESPONSE:
             raise ValueError("Update metadata response is unexpectedly large.")
