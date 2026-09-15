@@ -30,6 +30,18 @@ else:
     raise SystemExit(0)
 '''
 
+_CRASHING_OWNER = r'''
+import os
+import sys
+from pathlib import Path
+from app.db import Database
+from app.runtime import RuntimeLease
+
+lease = RuntimeLease(Database(Path(sys.argv[1])), ttl_seconds=30)
+lease.acquire()
+os._exit(0)
+'''
+
 
 class R303RuntimeReplacementOwnershipTests(unittest.TestCase):
     def setUp(self):
@@ -38,25 +50,30 @@ class R303RuntimeReplacementOwnershipTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.database = Database(self.root / "catalog.db")
         self.database.initialize()
+        self.project_root = str(Path(__file__).resolve().parents[1])
 
-    def contender_code(self) -> int:
+    def subprocess_environment(self) -> dict[str, str]:
         env = os.environ.copy()
-        project_root = str(Path(__file__).resolve().parents[1])
         env["PYTHONPATH"] = (
-            project_root
+            self.project_root
             if not env.get("PYTHONPATH")
-            else project_root + os.pathsep + env["PYTHONPATH"]
+            else self.project_root + os.pathsep + env["PYTHONPATH"]
         )
-        result = subprocess.run(
-            [sys.executable, "-c", _CONTENDER, str(self.database.path)],
-            cwd=project_root,
-            env=env,
+        return env
+
+    def run_script(self, script: str) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run(
+            [sys.executable, "-c", script, str(self.database.path)],
+            cwd=self.project_root,
+            env=self.subprocess_environment(),
             check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=20,
         )
-        return result.returncode
+
+    def contender_code(self) -> int:
+        return self.run_script(_CONTENDER).returncode
 
     def assert_replacement_has_no_persisted_owner(self) -> None:
         with self.database.connect() as conn:
@@ -127,6 +144,19 @@ class R303RuntimeReplacementOwnershipTests(unittest.TestCase):
         self.assertTrue(result["authentication_reset"])
         self.assertEqual(self.contender_code(), 23)
         lease.rebind_after_restore()
+
+    def test_process_crash_releases_kernel_lock_for_immediate_reclaim(self):
+        crashed = self.run_script(_CRASHING_OWNER)
+        self.assertEqual(crashed.returncode, 0, crashed.stderr.decode(errors="replace"))
+
+        replacement = RuntimeLease(self.database, owner="replacement", ttl_seconds=30)
+        replacement.acquire()
+        self.addCleanup(replacement.release)
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT owner FROM runtime_leases WHERE name='web-runtime'"
+            ).fetchone()
+        self.assertEqual(row["owner"], "replacement")
 
 
 if __name__ == "__main__":
