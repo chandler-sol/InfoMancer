@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -103,10 +105,6 @@ class FilesystemTortureTests(unittest.TestCase):
         file_id, source = self.add_episode(7)
         outside = self.base / "outside-season-destination"
         outside.mkdir()
-
-        # Prove this runner permits directory symlinks before patching the service's
-        # mkdir call. A SkipTest raised from inside apply would be caught by the
-        # service's safety wrapper and would not behave as an actual skip.
         probe = self.base / "symlink-probe"
         try:
             probe.symlink_to(outside, target_is_directory=True)
@@ -125,13 +123,56 @@ class FilesystemTortureTests(unittest.TestCase):
             return original_mkdir(path, *args, **kwargs)
 
         with patch.object(Path, "mkdir", new=replace_created_folder_with_symlink):
-            with self.assertRaisesRegex(
-                SeasonFolderError, "outside the configured library boundary"
-            ):
+            with self.assertRaisesRegex(SeasonFolderError, "outside the configured library boundary"):
                 self.service.apply(self.title_id, [file_id])
 
         self.assertTrue(source.is_file())
         self.assertEqual(list(outside.iterdir()), [])
+        with self.database.connect() as conn:
+            row = conn.execute("SELECT path FROM files WHERE id=?", (file_id,)).fetchone()
+        self.assertEqual(row["path"], str(source))
+
+    def test_rollback_refuses_substituted_show_boundary_and_preserves_outside_file(self):
+        if not hasattr(os, "symlink"):
+            self.skipTest("symlinks are unavailable")
+        file_id, source = self.add_episode(8)
+        outside = self.base / "outside-rollback"
+        outside.mkdir()
+        probe = self.base / "rollback-symlink-probe"
+        try:
+            probe.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"Directory symlinks are unavailable: {exc}")
+        else:
+            probe.unlink()
+
+        displaced = self.media / "displaced-show"
+        outside_season = outside / "Season 01"
+        outside_season.mkdir()
+        outside_file = outside_season / source.name
+        outside_file.write_bytes(b"outside")
+        real_connect = self.database.connect
+        calls = 0
+
+        @contextmanager
+        def controlled_connect():
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                self.assertTrue((self.show / "Season 01" / source.name).is_file())
+                self.show.rename(displaced)
+                self.show.symlink_to(outside, target_is_directory=True)
+                raise sqlite3.OperationalError("synthetic catalog failure")
+            with real_connect() as conn:
+                yield conn
+
+        self.database.connect = controlled_connect
+        with self.assertRaisesRegex(SeasonFolderError, "rollback was incomplete"):
+            self.service.apply(self.title_id, [file_id])
+        self.assertEqual(outside_file.read_bytes(), b"outside")
+        self.assertEqual((displaced / "Season 01" / source.name).read_bytes(), b"test")
+
+        self.database.connect = real_connect
         with self.database.connect() as conn:
             row = conn.execute("SELECT path FROM files WHERE id=?", (file_id,)).fetchone()
         self.assertEqual(row["path"], str(source))
