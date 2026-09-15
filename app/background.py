@@ -58,6 +58,18 @@ class BackgroundCoordinator:
         self.trash_cleanup_last_check = 0.0
 
     def run_media_hashing(self, file_ids: list[int], reason: str) -> None:
+        with APPLICATION_MAINTENANCE_GATE.operation_lease() as admitted:
+            if not admitted:
+                with self.media_hash_lock:
+                    self.media_hash_job.update({
+                        "status": "paused",
+                        "current": "",
+                        "error": "Exclusive maintenance started before fingerprinting could run.",
+                    })
+                return
+            self._run_media_hashing_admitted(file_ids, reason)
+
+    def _run_media_hashing_admitted(self, file_ids: list[int], reason: str) -> None:
         ids = list(dict.fromkeys(file_ids))
         self.media_hash_cancel.clear()
         self.media_hash_pause.clear()
@@ -86,13 +98,10 @@ class BackgroundCoordinator:
         except Exception as exc:
             error = str(exc)[:1000]
             with self.media_hash_lock:
-                self.media_hash_job.update({
-                    "status": "error", "current": "", "error": error,
-                })
+                self.media_hash_job.update({"status": "error", "current": "", "error": error})
             self.record_event(
                 "media",
-                "File fingerprinting stopped because of an unexpected error. "
-                "Open Logs for details.",
+                "File fingerprinting stopped because of an unexpected error. Open Logs for details.",
                 level="error", context={"reason": reason, "error": error},
             )
             return
@@ -101,8 +110,7 @@ class BackgroundCoordinator:
             self.media_hash_job.update({"status": status, **result, "current": ""})
         self.record_event(
             "media",
-            f"File fingerprinting finished: {result['complete']:,} checked and "
-            f"{result['failed']:,} could not be read.",
+            f"File fingerprinting finished: {result['complete']:,} checked and {result['failed']:,} could not be read.",
             level="warning" if result["failed"] else "info",
             context={"reason": reason, **result},
         )
@@ -110,15 +118,10 @@ class BackgroundCoordinator:
     def start_media_hashing(
         self, file_ids: list[int], reason: str, *, queue_files: bool = True,
     ) -> bool:
-        # Protect the queue/start transition itself. Once the thread is visible as
-        # starting/running, recovery's post-gate quiescence check owns the handoff.
         if not APPLICATION_MAINTENANCE_GATE.try_enter_operation():
             return False
         try:
-            ids = (
-                self.media_hashes.queue(file_ids)
-                if queue_files else list(dict.fromkeys(file_ids))
-            )
+            ids = self.media_hashes.queue(file_ids) if queue_files else list(dict.fromkeys(file_ids))
             if not ids:
                 return False
             with self.media_hash_lock:
@@ -129,9 +132,7 @@ class BackgroundCoordinator:
                     "status": "starting", "processed": 0,
                     "total": len(ids), "reason": reason,
                 })
-            threading.Thread(
-                target=self.run_media_hashing, args=(ids, reason), daemon=True,
-            ).start()
+            threading.Thread(target=self.run_media_hashing, args=(ids, reason), daemon=True).start()
             return True
         finally:
             APPLICATION_MAINTENANCE_GATE.leave_operation()
@@ -149,21 +150,15 @@ class BackgroundCoordinator:
             if immediate and not started:
                 self.record_event(
                     "media",
-                    f"{len(queued):,} new or changed files were queued because another "
-                    "fingerprinting task is already running.",
+                    f"{len(queued):,} new or changed files were queued because another fingerprinting task is already running.",
                     context={"queued": len(queued), "reason": reason},
                 )
             if deferred:
                 self.record_event(
                     "media",
-                    f"{len(queued):,} new or changed files need fingerprints. "
-                    f"{len(immediate):,} "
-                    f"{'are being checked now' if started else 'remain queued'} "
-                    f"and {len(deferred):,} were queued for scheduled or manual processing.",
-                    context={
-                        "queued": len(queued), "immediate": len(immediate),
-                        "deferred": len(deferred),
-                    },
+                    f"{len(queued):,} new or changed files need fingerprints. {len(immediate):,} "
+                    f"{'are being checked now' if started else 'remain queued'} and {len(deferred):,} were queued for scheduled or manual processing.",
+                    context={"queued": len(queued), "immediate": len(immediate), "deferred": len(deferred)},
                 )
         elif queued:
             self.record_event(
@@ -179,14 +174,8 @@ class BackgroundCoordinator:
         ):
             return any((
                 self.scan_all_job.get("status") in {"starting", "running"},
-                any(
-                    job.get("status") in {"starting", "running"}
-                    for job in self.scan_jobs.values()
-                ),
-                any(
-                    job.get("status") in {"starting", "running"}
-                    for job in self.title_scan_jobs.values()
-                ),
+                any(job.get("status") in {"starting", "running"} for job in self.scan_jobs.values()),
+                any(job.get("status") in {"starting", "running"} for job in self.title_scan_jobs.values()),
                 self.movie_match_job.get("status") in {"starting", "running"},
                 self.tv_match_job.get("status") in {"starting", "running"},
                 self.media_info_job.get("status") in {"starting", "running"},
@@ -200,15 +189,10 @@ class BackgroundCoordinator:
         prefs = self.app_settings.values()
         if prefs["hash_mode"] not in {"automatic", "scheduled"}:
             return
-        if (
-            prefs["hash_pause_for_activity"] == "1"
-            and self.other_background_work_running()
-        ):
+        if prefs["hash_pause_for_activity"] == "1" and self.other_background_work_running():
             return
         local_now = datetime.now(ZoneInfo(prefs["timezone"]))
-        hour, minute = (
-            int(part) for part in prefs["hash_schedule_time"].split(":")
-        )
+        hour, minute = (int(part) for part in prefs["hash_schedule_time"].split(":"))
         if (local_now.hour, local_now.minute) < (hour, minute):
             return
         frequency = prefs["hash_schedule_frequency"]
@@ -222,25 +206,20 @@ class BackgroundCoordinator:
             last = datetime.fromisoformat(last_text)
             already_ran = (
                 frequency == "daily" and last.date() == local_now.date()
-                or frequency == "weekly"
-                and last.isocalendar()[:2] == local_now.isocalendar()[:2]
-                or frequency == "monthly"
-                and (last.year, last.month) == (local_now.year, local_now.month)
+                or frequency == "weekly" and last.isocalendar()[:2] == local_now.isocalendar()[:2]
+                or frequency == "monthly" and (last.year, last.month) == (local_now.year, local_now.month)
             )
             if already_ran:
                 return
         ids = self.media_hashes.eligible_ids()
         if ids and self.start_media_hashing(ids, "Scheduled file fingerprinting"):
-            self.app_settings.set_internal(
-                "hash_last_scheduled_at", local_now.isoformat(),
-            )
+            self.app_settings.set_internal("hash_last_scheduled_at", local_now.isoformat())
 
     def trash_retention_days(self) -> int | None:
         value = self.app_settings.get("trash_retention_days")
         return None if value == "never" else int(value)
 
     def maybe_start_trash_cleanup(self) -> None:
-        """Check for expired managed-trash items at most once per day."""
         protection_mode = self.app_settings.file_protection_mode()
         if protection_mode in {"readonly", "lockdown"}:
             label = "Read-Only Mode" if protection_mode == "readonly" else "Lockdown Mode"
@@ -257,39 +236,41 @@ class BackgroundCoordinator:
                 return
             self.trash_cleanup_last_check = now
             self.trash_cleanup_job.clear()
-            self.trash_cleanup_job.update({
-                "status": "starting", "detail": "Checking retention dates",
-            })
+            self.trash_cleanup_job.update({"status": "starting", "detail": "Checking retention dates"})
 
         def run() -> None:
-            try:
-                with self.trash_cleanup_lock:
-                    self.trash_cleanup_job.update({
-                        "status": "running",
-                        "detail": "Removing expired managed-trash items",
-                    })
-                purged = self.duplicate_trash.purge_expired()
-                with self.trash_cleanup_lock:
-                    self.trash_cleanup_job.update({
-                        "status": "complete",
-                        "detail": f"{purged:,} expired item(s) removed",
-                    })
-            except (OSError, ValueError, sqlite3.Error) as exc:
-                with self.trash_cleanup_lock:
-                    self.trash_cleanup_job.update({
-                        "status": "error",
-                        "detail": "Trash cleanup could not finish. Open Logs for details.",
-                        "error": str(exc),
-                    })
+            with APPLICATION_MAINTENANCE_GATE.operation_lease() as admitted:
+                if not admitted:
+                    with self.trash_cleanup_lock:
+                        self.trash_cleanup_job.update({
+                            "status": "paused",
+                            "detail": "Exclusive maintenance started before trash cleanup could run",
+                        })
+                    return
+                try:
+                    with self.trash_cleanup_lock:
+                        self.trash_cleanup_job.update({
+                            "status": "running",
+                            "detail": "Removing expired managed-trash items",
+                        })
+                    purged = self.duplicate_trash.purge_expired()
+                    with self.trash_cleanup_lock:
+                        self.trash_cleanup_job.update({
+                            "status": "complete",
+                            "detail": f"{purged:,} expired item(s) removed",
+                        })
+                except (OSError, ValueError, sqlite3.Error) as exc:
+                    with self.trash_cleanup_lock:
+                        self.trash_cleanup_job.update({
+                            "status": "error",
+                            "detail": "Trash cleanup could not finish. Open Logs for details.",
+                            "error": str(exc),
+                        })
 
         threading.Thread(target=run, daemon=True).start()
 
     def run_scheduler(self) -> None:
-        """Run installation schedules even when no browser is open."""
         while not self.scheduler_stop.wait(30):
-            # The scheduler itself is ordinary application work. Holding admission
-            # across the complete tick prevents recovery from entering exclusive
-            # mode while the scheduler is reading state or starting a worker.
             if not APPLICATION_MAINTENANCE_GATE.try_enter_operation():
                 continue
             try:
@@ -298,8 +279,7 @@ class BackgroundCoordinator:
             except Exception as exc:
                 self.record_event(
                     "system",
-                    "A scheduled maintenance check could not be completed. "
-                    "InfoMancer will try again automatically.",
+                    "A scheduled maintenance check could not be completed. InfoMancer will try again automatically.",
                     level="error", detail=str(exc),
                 )
             finally:
