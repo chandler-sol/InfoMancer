@@ -1,34 +1,14 @@
 from __future__ import annotations
 
 import os
-import threading
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
+from .catalog_mutation import database_identity, root_mutation_lock, title_mutation_lock
 from .db import Database
 
 
 class SafeFileRenameError(ValueError):
     pass
-
-
-_TITLE_LOCKS_GUARD = threading.Lock()
-_TITLE_LOCKS: dict[tuple[str, int], threading.RLock] = {}
-
-
-def _database_identity(database: Database) -> str:
-    return os.path.normcase(str(database.path.resolve(strict=False)))
-
-
-@contextmanager
-def _title_mutation_lock(database: Database, title_id: int) -> Iterator[None]:
-    """Serialize filesystem/catalog mutations for one title in this process."""
-    key = (_database_identity(database), int(title_id))
-    with _TITLE_LOCKS_GUARD:
-        lock = _TITLE_LOCKS.setdefault(key, threading.RLock())
-    with lock:
-        yield
 
 
 class SafeFileRenameService:
@@ -79,15 +59,19 @@ class SafeFileRenameService:
 
         with self.database.connect() as conn:
             owner = conn.execute(
-                "SELECT title_id FROM files WHERE id=?", (file_id,),
+                """SELECT f.title_id,t.root_id FROM files f
+                   JOIN titles t ON t.id=f.title_id WHERE f.id=?""",
+                (file_id,),
             ).fetchone()
         if not owner:
             raise SafeFileRenameError(
                 "The cataloged media file no longer exists. Refresh and try again."
             )
 
-        with _title_mutation_lock(self.database, int(owner["title_id"])):
-            return self._rename_file_locked(file_id, source, target)
+        database_key = database_identity(self.database.path)
+        with title_mutation_lock(database_key, int(owner["title_id"])):
+            with root_mutation_lock(database_key, int(owner["root_id"])):
+                return self._rename_file_locked(file_id, source, target)
 
     def _rename_file_locked(
         self, file_id: int, source: Path, target: Path,
@@ -163,8 +147,20 @@ class SafeFileRenameService:
         target = Path(destination)
         if source == target:
             return source, target
-        with _title_mutation_lock(self.database, title_id):
-            return self._rename_folder_locked(title_id, source, target)
+
+        with self.database.connect() as conn:
+            owner = conn.execute(
+                "SELECT root_id FROM titles WHERE id=?", (title_id,),
+            ).fetchone()
+        if not owner:
+            raise SafeFileRenameError(
+                "The cataloged show no longer exists. Refresh and try again."
+            )
+
+        database_key = database_identity(self.database.path)
+        with title_mutation_lock(database_key, title_id):
+            with root_mutation_lock(database_key, int(owner["root_id"])):
+                return self._rename_folder_locked(title_id, source, target)
 
     def _rename_folder_locked(
         self, title_id: int, source: Path, target: Path,
@@ -199,7 +195,9 @@ class SafeFileRenameService:
             )
 
         relative_paths: list[tuple[int, str, Path]] = []
+        expected_membership: list[tuple[int, str]] = []
         for file_row in file_rows:
+            file_id = int(file_row["id"])
             original_path = str(file_row["path"])
             try:
                 relative = Path(original_path).relative_to(source)
@@ -207,7 +205,8 @@ class SafeFileRenameService:
                 raise SafeFileRenameError(
                     "A cataloged media file is no longer inside the show folder. Nothing was changed."
                 ) from exc
-            relative_paths.append((int(file_row["id"]), original_path, relative))
+            relative_paths.append((file_id, original_path, relative))
+            expected_membership.append((file_id, original_path))
 
         self._require_inside(source, root)
         self._require_inside(target, root)
@@ -231,6 +230,28 @@ class SafeFileRenameService:
 
         try:
             with self.database.connect() as conn:
+                # Hold SQLite's write reservation from complete-membership validation
+                # through the catalog rewrite. A writer that bypasses the in-process
+                # root lease therefore cannot insert an uncaptured row in this window.
+                conn.execute("BEGIN IMMEDIATE")
+                current_membership = [
+                    (int(row["id"]), str(row["path"]))
+                    for row in conn.execute(
+                        "SELECT id,path FROM files WHERE title_id=? ORDER BY id", (title_id,),
+                    ).fetchall()
+                ]
+                current_title = conn.execute(
+                    "SELECT folder_path FROM titles WHERE id=?", (title_id,),
+                ).fetchone()
+                if (
+                    current_title is None
+                    or current_title["folder_path"] != str(source)
+                    or current_membership != expected_membership
+                ):
+                    raise SafeFileRenameError(
+                        "The catalog membership changed while the show-folder rename was being applied."
+                    )
+
                 for file_id, original_path, relative in relative_paths:
                     cursor = conn.execute(
                         "UPDATE files SET path=? WHERE id=? AND path=?",

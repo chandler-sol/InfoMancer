@@ -141,7 +141,7 @@ class SafeFileRenameTests(unittest.TestCase):
         def controlled_connect():
             nonlocal calls
             calls += 1
-            if calls == 2:
+            if calls == 3:
                 self.assertTrue(target.is_dir())
                 self.assertFalse(self.show.exists())
                 raise sqlite3.OperationalError("synthetic catalog failure")
