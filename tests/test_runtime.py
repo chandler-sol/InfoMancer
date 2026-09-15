@@ -31,27 +31,44 @@ class RuntimeLeaseTests(unittest.TestCase):
         second.acquire()
         second.release()
 
-    def test_expired_lease_can_be_reclaimed(self):
-        first = RuntimeLease(self.database, owner="first", ttl_seconds=30)
-        first.acquire()
+    def test_expired_persisted_lease_without_kernel_owner_can_be_reclaimed(self):
         expired = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
         with self.database.connect() as conn:
-            conn.execute("UPDATE runtime_leases SET heartbeat_at=?", (expired,))
+            conn.execute(
+                "INSERT INTO runtime_leases(name,owner,heartbeat_at) VALUES (?,?,?)",
+                ("web-runtime", "stale-owner", expired),
+            )
         second = RuntimeLease(self.database, owner="second", ttl_seconds=30)
         second.acquire()
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT owner FROM runtime_leases WHERE name='web-runtime'"
+            ).fetchone()
+        self.assertEqual(row["owner"], "second")
         second.release()
 
-    def test_old_process_detects_ownership_loss_after_stale_reclaim(self):
+    def test_live_kernel_owner_cannot_be_reclaimed_from_stale_heartbeat(self):
         first = RuntimeLease(self.database, owner="first", ttl_seconds=30)
         second = RuntimeLease(self.database, owner="second", ttl_seconds=30)
         first.acquire()
         expired = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
         with self.database.connect() as conn:
             conn.execute("UPDATE runtime_leases SET heartbeat_at=?", (expired,))
-        second.acquire()
+        with self.assertRaises(RuntimeLeaseError):
+            second.acquire()
+        first.release()
+
+    def test_owner_detects_persisted_ownership_loss(self):
+        first = RuntimeLease(self.database, owner="first", ttl_seconds=30)
+        first.acquire()
+        with self.database.connect() as conn:
+            conn.execute(
+                "UPDATE runtime_leases SET owner=? WHERE name='web-runtime'",
+                ("unexpected-owner",),
+            )
         with self.assertRaises(RuntimeLeaseError):
             first.heartbeat()
-        second.release()
+        first.release()
 
     def test_dead_desktop_worker_can_be_reclaimed_without_waiting_for_ttl(self):
         host = socket.gethostname().replace(":", "_")
