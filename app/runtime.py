@@ -102,9 +102,10 @@ class RuntimeLease:
         self.on_lost = on_lost or self._terminate_after_lease_loss
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        database_path = Path(self.database.path).resolve(strict=False)
-        self._ownership_lock_path = database_path.with_name(
-            f".{database_path.name}.runtime.lock"
+        configured_database_path = Path(self.database.path)
+        database_parent = configured_database_path.parent.resolve(strict=False)
+        self._ownership_lock_path = database_parent / (
+            f".{configured_database_path.name}.runtime.lock"
         )
         self._ownership_lock_fd: int | None = None
         self._ownership_lock_guard = threading.Lock()
