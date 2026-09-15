@@ -468,6 +468,7 @@ class RecoveryPackageService:
         old_art_moved = False
         incoming_art_installed = False
         database_replaced = False
+        restore_committed = False
         preserve_recovery_artifacts = False
         safety_package: Path | None = None
         try:
@@ -496,16 +497,18 @@ class RecoveryPackageService:
             database_replaced = True
             validate_database_backup(self.database_path)
 
-            if rollback_art.exists():
-                shutil.rmtree(rollback_art)
-            rollback_database.unlink(missing_ok=True)
-            return {
+            result = {
                 **summary,
                 "safety_package": safety_package.name,
                 "restored_database": self.database_path.name,
                 "restored_artwork_files": summary["artwork_files"],
                 "authentication_reset": True,
             }
+            # Final live validation is the transaction commit point. From here on,
+            # rollback material is disposable cleanup state and must never cause
+            # a successfully installed recovery to re-enter rollback.
+            restore_committed = True
+            return result
         except (OSError, zipfile.BadZipFile, MaintenanceError, RecoveryPackageError) as exc:
             rollback_failures: list[str] = []
             if database_replaced:
@@ -551,6 +554,6 @@ class RecoveryPackageService:
             ) from exc
         finally:
             if not preserve_recovery_artifacts:
-                if rollback_art.exists() and not old_art_moved:
+                if rollback_art.exists() and (restore_committed or not old_art_moved):
                     shutil.rmtree(rollback_art, ignore_errors=True)
                 shutil.rmtree(staging_root, ignore_errors=True)
