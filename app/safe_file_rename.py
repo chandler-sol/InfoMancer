@@ -161,14 +161,14 @@ class SafeFileRenameService:
 
     def _validate_file_move(self, source: Path, destination: Path, root: Path) -> None:
         self._require_inside(source, root)
+        if os.path.lexists(destination) and not self._same_file(source, destination):
+            raise SafeFileRenameError(
+                f"Another file already exists at the rename destination: {destination}"
+            )
         self._require_inside(destination, root)
         if not source.is_file():
             raise SafeFileRenameError(
                 "The cataloged media file is no longer present at the expected path. Nothing was changed."
-            )
-        if os.path.lexists(destination) and not self._same_file(source, destination):
-            raise SafeFileRenameError(
-                f"Another file already exists at the rename destination: {destination}"
             )
         if not destination.parent.is_dir():
             raise SafeFileRenameError(
@@ -327,14 +327,14 @@ class SafeFileRenameService:
             )
         root = Path(title["root_path"])
         self._require_inside(source, root)
+        if os.path.lexists(target) and not self._same_file(source, target):
+            raise SafeFileRenameError(
+                f"Another folder already exists at the rename destination: {target}"
+            )
         self._require_inside(target, root)
         if not source.is_dir():
             raise SafeFileRenameError(
                 "The cataloged show folder is no longer present at the expected path. Nothing was changed."
-            )
-        if os.path.lexists(target) and not self._same_file(source, target):
-            raise SafeFileRenameError(
-                f"Another folder already exists at the rename destination: {target}"
             )
         if not target.parent.is_dir():
             raise SafeFileRenameError(
@@ -356,14 +356,14 @@ class SafeFileRenameService:
             expected_membership.append((file_id, original_path))
 
         self._require_inside(source, root)
+        if os.path.lexists(target) and not self._same_file(source, target):
+            raise SafeFileRenameError(
+                f"Another folder appeared at the rename destination: {target}"
+            )
         self._require_inside(target, root)
         if not source.is_dir():
             raise SafeFileRenameError(
                 "The show folder changed before the rename could begin. Nothing was changed."
-            )
-        if os.path.lexists(target) and not self._same_file(source, target):
-            raise SafeFileRenameError(
-                f"Another folder appeared at the rename destination: {target}"
             )
         if not target.parent.is_dir():
             raise SafeFileRenameError(
