@@ -87,7 +87,6 @@ def _strip_member_export_paths(rows: list[dict], *, is_librarian: bool) -> list[
     sanitized: list[dict] = []
     for row in rows:
         item = dict(row)
-        # Keep the export schema stable while withholding server topology from Members.
         item["source_path"] = ""
         item["file_path"] = ""
         sanitized.append(item)
@@ -136,7 +135,6 @@ def _safe_diagnostic_event(row) -> dict:
         "created_at": item.get("created_at"),
         "level": item.get("level"),
         "category": item.get("category"),
-        # Raw message/detail and account display names are deliberately omitted.
         "context": _safe_diagnostic_context(context),
     }
 
@@ -153,8 +151,6 @@ def _nonce(request) -> str:
 
 
 def _harden_template_source(template: str, source: str) -> str:
-    # Every inline block receives the same request-local nonce. External scripts/styles
-    # may also carry it harmlessly, which keeps the transform simple and future-proof.
     source = re.sub(
         r"<script(?![^>]*\bnonce=)(?=[\s>])",
         '<script nonce="{{ csp_nonce(request) }}"',
@@ -202,10 +198,10 @@ class HardenedTemplateLoader(BaseLoader):
 def _install_maintenance_admission_middleware(ctx: RouteContext) -> None:
     """Block ordinary requests while an exclusive data-maintenance operation runs.
 
-    The recovery apply request is the operation that acquires exclusive mode, so it
-    must pass through without registering itself as ordinary work. Authentication
-    and CSRF middleware still process that request normally. Static files and the
-    health probe are read-only and remain available while maintenance is active.
+    Recovery apply is admitted as ordinary work through authentication and CSRF, then
+    upgrades its sole request lease to exclusive mode inside the recovery handler.
+    Static files and the health probe are read-only and remain available while
+    maintenance is active.
     """
     app = ctx.get("app")
     if app is None or getattr(
@@ -216,10 +212,7 @@ def _install_maintenance_admission_middleware(ctx: RouteContext) -> None:
     @app.middleware("http")
     async def maintenance_admission(request: Request, call_next):
         path = request.url.path
-        recovery_apply = (
-            request.method.upper() == "POST" and path == "/settings/recovery/apply"
-        )
-        bypass = path == "/health" or path.startswith("/static/") or recovery_apply
+        bypass = path == "/health" or path.startswith("/static/")
         if bypass:
             return await call_next(request)
 
@@ -274,7 +267,6 @@ def build_router(ctx: RouteContext):
             def secure_library_export_rows(user_id: int):
                 rows = original_export(user_id)
                 if int(user_id or 0) <= 0:
-                    # Disabled-auth mode represents its trusted local Librarian as user 0.
                     return rows
                 with db.connect() as conn:
                     user = conn.execute(
@@ -293,7 +285,6 @@ def build_router(ctx: RouteContext):
         name="download_sanitized_diagnostics",
     )
     def download_sanitized_diagnostics(request: Request):
-        """Export support diagnostics without library, account, network, or secret data."""
         output = io.BytesIO()
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("summary.json", json.dumps({
