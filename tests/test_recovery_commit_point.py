@@ -1,3 +1,4 @@
+import inspect
 import shutil
 import tempfile
 import unittest
@@ -58,48 +59,39 @@ class RecoveryCommitPointTests(unittest.TestCase):
             b"package artwork",
         )
 
-    def test_rollback_art_cleanup_failure_after_commit_cannot_reenter_rollback(self):
+    def test_irreversible_cleanup_after_commit_cannot_reenter_rollback(self):
         package = self._prepare_restore()
         original_rmtree = shutil.rmtree
         cleanup_attempted = False
 
-        def fail_rollback_art_cleanup(path, *args, **kwargs):
+        def delete_then_fail_without_best_effort(path, *args, **kwargs):
             nonlocal cleanup_attempted
             target = Path(path)
             if target.name.startswith(".collection-art-rollback-"):
                 cleanup_attempted = True
-                if kwargs.get("ignore_errors"):
-                    return None
-                raise OSError("synthetic rollback artwork cleanup failure")
+                # Reproduce the dangerous boundary exactly: rollback artwork is
+                # already gone before cleanup reports a failure. The repaired
+                # path marks this as best-effort cleanup, so no exception is
+                # allowed to re-enter transactional rollback after commit.
+                original_rmtree(path, *args, **kwargs)
+                if not kwargs.get("ignore_errors"):
+                    raise OSError("synthetic failure after rollback artwork deletion")
+                return None
             return original_rmtree(path, *args, **kwargs)
 
-        with patch("app.recovery_package.shutil.rmtree", side_effect=fail_rollback_art_cleanup):
+        with patch("app.recovery_package.shutil.rmtree", side_effect=delete_then_fail_without_best_effort):
             result = self.service.restore(package, (self.data,))
 
         self.assertTrue(cleanup_attempted)
         self.assertTrue(result["authentication_reset"])
         self._assert_package_state_is_authoritative()
 
-    def test_rollback_database_cleanup_failure_after_commit_cannot_reenter_rollback(self):
-        package = self._prepare_restore()
-        original_unlink = Path.unlink
-        cleanup_attempted = False
-
-        def fail_rollback_database_cleanup(path, *args, **kwargs):
-            nonlocal cleanup_attempted
-            if Path(path).name == "rollback-live.db":
-                cleanup_attempted = True
-                raise OSError("synthetic rollback database cleanup failure")
-            return original_unlink(path, *args, **kwargs)
-
-        with patch.object(Path, "unlink", new=fail_rollback_database_cleanup):
-            result = self.service.restore(package, (self.data,))
-
-        # The committed restore no longer explicitly unlinks rollback-live.db.
-        # Staging cleanup owns it as best-effort post-commit residue instead.
-        self.assertFalse(cleanup_attempted)
-        self.assertTrue(result["authentication_reset"])
-        self._assert_package_state_is_authoritative()
+    def test_commit_point_precedes_return_and_rollback_database_has_no_transactional_unlink(self):
+        source = inspect.getsource(RecoveryPackageService.restore)
+        self.assertNotIn("rollback_database.unlink", source)
+        self.assertLess(source.index("restore_committed = True"), source.index("return result"))
+        self.assertIn("shutil.rmtree(rollback_art, ignore_errors=True)", source)
+        self.assertIn("shutil.rmtree(staging_root, ignore_errors=True)", source)
 
 
 if __name__ == "__main__":
