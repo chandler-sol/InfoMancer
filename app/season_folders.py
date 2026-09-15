@@ -243,6 +243,7 @@ class SeasonFolderService:
 
                 source_parent_identity = self._path_identity(source.parent)
                 destination_parent_identity = self._path_identity(destination.parent)
+                moved_identity = self._file_identity(source)
                 try:
                     source.rename(destination)
                 except OSError as exc:
@@ -250,8 +251,17 @@ class SeasonFolderService:
                 applied = dict(proposal)
                 applied["_source_parent_identity"] = source_parent_identity
                 applied["_destination_parent_identity"] = destination_parent_identity
-                applied["_moved_identity"] = self._file_identity(destination)
+                applied["_moved_identity"] = moved_identity
                 moved.append(applied)
+                try:
+                    if self._file_identity(destination) != moved_identity:
+                        raise SeasonFolderError(
+                            f"Stopped after moving {source.name} because the moved file identity changed before verification."
+                        )
+                except OSError as exc:
+                    raise SeasonFolderError(
+                        f"Stopped after moving {source.name} because the moved file could not be verified."
+                    ) from exc
 
             with self.database.connect() as conn:
                 for proposal in moved:

@@ -77,13 +77,18 @@ class DuplicateTrashService:
         boundaries = self._capture_move_boundaries(root, trash_root, source, destination)
         snapshot = {column: row[column] for column in FILE_COLUMNS}
         try:
+            moved_identity = self._file_identity(source)
             shutil.move(str(source), str(destination))
-            moved_identity = self._file_identity(destination)
         except OSError as exc:
             raise DuplicateTrashError(
                 "InfoMancer could not move the selected file into managed Trash. Check that the source is connected and writable. No catalog entry was changed."
             ) from exc
+
         try:
+            if self._file_identity(destination) != moved_identity:
+                raise DuplicateTrashError(
+                    "InfoMancer moved the file into managed Trash, but the moved file identity changed before verification."
+                )
             with self.database.connect() as conn:
                 cursor = conn.execute(
                     """INSERT INTO duplicate_trash(
@@ -105,10 +110,14 @@ class DuplicateTrashService:
                 boundaries=boundaries,
                 moved_identity=moved_identity,
                 failure_message=(
-                    "InfoMancer moved the file into managed Trash but could not finish the catalog update. "
+                    "InfoMancer moved the file into managed Trash but could not safely complete the operation. "
                     "The filesystem changed before rollback, so InfoMancer preserved both paths for manual recovery."
                 ),
             )
+            if isinstance(exc, DuplicateTrashError):
+                raise DuplicateTrashError(
+                    "InfoMancer moved the file into managed Trash but could not verify the moved file, so it was restored to its original location."
+                ) from exc
             raise DuplicateTrashError(
                 "InfoMancer could not finish the managed Trash catalog update, so the file was restored to its original location."
             ) from exc
@@ -276,14 +285,19 @@ class DuplicateTrashService:
                     "Restore stopped because the managed Trash file changed before the restore could begin. No file was changed."
                 )
             boundaries = self._capture_move_boundaries(root, trash_root, destination, source)
+            moved_identity = self._file_identity(source)
             shutil.move(str(source), str(destination))
-            moved_identity = self._file_identity(destination)
         except OSError as exc:
             raise DuplicateTrashError(
                 "InfoMancer could not restore this file because the source storage is unavailable or not writable. No catalog entry was changed."
             ) from exc
-        snapshot["path"] = str(destination)
+
         try:
+            if self._file_identity(destination) != moved_identity:
+                raise DuplicateTrashError(
+                    "InfoMancer restored the file, but the restored file identity changed before verification."
+                )
+            snapshot["path"] = str(destination)
             with self.database.connect() as conn:
                 columns = ",".join(FILE_COLUMNS)
                 placeholders = ",".join("?" for _ in FILE_COLUMNS)
@@ -304,10 +318,14 @@ class DuplicateTrashService:
                 boundaries=boundaries,
                 moved_identity=moved_identity,
                 failure_message=(
-                    "InfoMancer restored the file but could not finish the catalog update. "
+                    "InfoMancer restored the file but could not safely complete the operation. "
                     "The managed Trash path changed or became occupied before rollback, so InfoMancer preserved both paths for manual recovery."
                 ),
             )
+            if isinstance(exc, DuplicateTrashError):
+                raise DuplicateTrashError(
+                    "InfoMancer restored the file but could not verify it, so the file was returned to managed Trash."
+                ) from exc
             raise DuplicateTrashError(
                 "InfoMancer could not finish the restore catalog update, so the file was returned to managed Trash."
             ) from exc
