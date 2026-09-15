@@ -34,7 +34,6 @@ class MaintenanceGate:
 
     @contextmanager
     def operation_lease(self) -> Iterator[bool]:
-        """Hold ordinary-work admission until the caller's final state access."""
         admitted = self.try_enter_operation()
         try:
             yield admitted
@@ -46,6 +45,21 @@ class MaintenanceGate:
         normalized = str(reason or "maintenance").strip() or "maintenance"
         with self._lock:
             if self._exclusive_reason or self._active_operations:
+                return False
+            self._exclusive_reason = normalized
+            return True
+
+    def try_upgrade_sole_operation_to_exclusive(self, reason: str) -> bool:
+        """Let a restore request become exclusive while retaining its request lease.
+
+        This succeeds only when the caller is the sole admitted operation. The
+        request middleware still owns that operation count and will release it on
+        response completion; exclusive mode is independent and remains set until
+        the restore explicitly fails or the process restarts.
+        """
+        normalized = str(reason or "maintenance").strip() or "maintenance"
+        with self._lock:
+            if self._exclusive_reason or self._active_operations != 1:
                 return False
             self._exclusive_reason = normalized
             return True
