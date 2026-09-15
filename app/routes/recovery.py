@@ -342,7 +342,9 @@ def build_router(ctx: RouteContext):
                 runtime_lease.rebind_after_restore()
             except Exception as exc:
                 raise RecoveryPackageFatalError(
-                    "The restored database was installed, but this process could not rebind its runtime ownership. Normal service remains blocked until the installation state is reviewed and InfoMancer is restarted."
+                    "The restored database was installed, but this process could not rebind its runtime ownership. Normal service remains blocked until the installation state is reviewed and InfoMancer is restarted.",
+                    recovery_staging=Path(db.path).parent,
+                    safety_package=str(result.get("safety_package") or "unavailable"),
                 ) from exc
             restore_completed = True
         except RecoveryPackageFatalError as exc:
