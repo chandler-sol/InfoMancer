@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -60,26 +61,15 @@ class SeasonFolderService:
             status, reason = "blocked", str(exc)
         else:
             try:
-                same_path = (
-                    source.resolve(strict=False) == destination.resolve(strict=False)
-                )
+                same_path = source.resolve(strict=False) == destination.resolve(strict=False)
             except OSError:
                 same_path = source == destination
             if same_path:
-                status, reason = (
-                    "organized",
-                    "Already in the expected season folder",
-                )
+                status, reason = "organized", "Already in the expected season folder"
             elif not source.is_file():
-                status, reason = (
-                    "blocked",
-                    "The cataloged source file is not currently available",
-                )
-            elif destination.exists():
-                status, reason = (
-                    "blocked",
-                    "A file already exists at the proposed destination",
-                )
+                status, reason = "blocked", "The cataloged source file is not currently available"
+            elif os.path.lexists(destination):
+                status, reason = "blocked", "A file already exists at the proposed destination"
         return {
             "file_id": int(row["id"]),
             "filename": row["filename"],
@@ -108,9 +98,7 @@ class SeasonFolderService:
             "proposals": proposals,
             "ready": [item for item in proposals if item["status"] == "ready"],
             "blocked": [item for item in proposals if item["status"] == "blocked"],
-            "organized": [
-                item for item in proposals if item["status"] == "organized"
-            ],
+            "organized": [item for item in proposals if item["status"] == "organized"],
             "skipped_unparsed": skipped_unparsed,
         }
 
@@ -133,66 +121,86 @@ class SeasonFolderService:
     def _rollback_moves(
         self,
         moved: list[dict[str, Any]],
-        created_folders: set[Path],
+        created_folders: dict[Path, tuple[str, int, int]],
+        root: Path,
+        title_folder: Path,
+        root_identity: tuple[str, int, int],
+        title_identity: tuple[str, int, int],
     ) -> list[str]:
         errors: list[str] = []
+        try:
+            self._require_inside(title_folder, root, "The show folder")
+            if self._path_identity(root) != root_identity or self._path_identity(title_folder) != title_identity:
+                raise SeasonFolderError("the configured library or show-folder identity changed")
+        except (OSError, SeasonFolderError) as exc:
+            return [f"rollback boundary changed: {exc}"]
+
         for proposal in reversed(moved):
             source = Path(proposal["source"])
             destination = Path(proposal["destination"])
-            if not destination.exists():
-                errors.append(
-                    f"{destination.name} was no longer at the temporary destination"
-                )
-                continue
-            if source.exists():
-                errors.append(
-                    f"the original path for {source.name} became occupied during rollback"
-                )
-                continue
             try:
+                self._require_inside(source, root, "The rollback source")
+                self._require_inside(destination, title_folder, "The rollback destination")
+                if self._path_identity(source.parent) != proposal["_source_parent_identity"]:
+                    raise SeasonFolderError("the original parent directory changed")
+                if self._path_identity(destination.parent) != proposal["_destination_parent_identity"]:
+                    raise SeasonFolderError("the season directory changed")
+                if os.path.lexists(source):
+                    raise SeasonFolderError(
+                        f"the original path for {source.name} became occupied during rollback"
+                    )
+                if not destination.is_file() or self._file_identity(destination) != proposal["_moved_identity"]:
+                    raise SeasonFolderError(
+                        f"{destination.name} is no longer the file moved by this operation"
+                    )
                 destination.rename(source)
-            except OSError as exc:
-                errors.append(f"could not restore {source.name}: {exc}")
-        for folder in sorted(created_folders, key=lambda item: len(item.parts), reverse=True):
+            except (OSError, SeasonFolderError) as exc:
+                errors.append(f"could not safely restore {source.name}: {exc}")
+
+        for folder, expected_identity in sorted(
+            created_folders.items(), key=lambda item: len(item[0].parts), reverse=True
+        ):
             try:
+                self._require_inside(folder, title_folder, "The created season folder")
+                if self._path_identity(root) != root_identity or self._path_identity(title_folder) != title_identity:
+                    continue
+                if not folder.is_dir() or self._path_identity(folder) != expected_identity:
+                    continue
                 folder.rmdir()
-            except OSError:
-                # It is safe to leave a non-empty or otherwise non-removable
-                # season folder behind. Never delete contents during rollback.
+            except (OSError, SeasonFolderError):
                 pass
         return errors
 
     def apply(self, title_id: int, selected_file_ids: list[int]) -> list[dict[str, Any]]:
-        selected = list(
-            dict.fromkeys(
-                int(value) for value in selected_file_ids if int(value) > 0
-            )
-        )
+        selected = list(dict.fromkeys(int(value) for value in selected_file_ids if int(value) > 0))
         if not selected:
-            raise SeasonFolderError(
-                "Select at least one ready episode file to organize."
-            )
+            raise SeasonFolderError("Select at least one ready episode file to organize.")
         preview = self.preview(title_id)
         ready = {item["file_id"]: item for item in preview["ready"]}
         missing = set(selected) - ready.keys()
         if missing:
             raise SeasonFolderError(
-                "The preview changed before apply. Refresh the season-folder preview "
-                "and review it again."
+                "The preview changed before apply. Refresh the season-folder preview and review it again."
             )
         root = Path(preview["title"]["root_path"])
         title_folder = Path(preview["title"]["folder_path"])
+        self._require_inside(title_folder, root, "The show folder")
+        try:
+            root_identity = self._path_identity(root)
+            title_identity = self._path_identity(title_folder)
+        except OSError as exc:
+            raise SeasonFolderError(
+                "The configured source or show folder is unavailable. Nothing was changed."
+            ) from exc
 
         moved: list[dict[str, Any]] = []
-        created_folders: set[Path] = set()
+        created_folders: dict[Path, tuple[str, int, int]] = {}
         try:
             for file_id in selected:
                 proposal = ready[file_id]
                 source = Path(proposal["source"])
                 destination = Path(proposal["destination"])
 
-                # Revalidate this exact file immediately before mutation instead
-                # of rescanning every episode in the title for each selected row.
                 current = self._current_proposal(title_id, file_id)
                 if (
                     not current
@@ -201,85 +209,90 @@ class SeasonFolderService:
                     or current["destination"] != str(destination)
                 ):
                     raise SeasonFolderError(
-                        f"Stopped before moving {source.name} because its filesystem "
-                        "or catalog state changed. Nothing from this batch was kept."
+                        f"Stopped before moving {source.name} because its filesystem or catalog state changed. Nothing from this batch was kept."
+                    )
+
+                if self._path_identity(root) != root_identity or self._path_identity(title_folder) != title_identity:
+                    raise SeasonFolderError(
+                        "Stopped because the configured source or show folder changed during apply. Nothing from this batch was kept."
                     )
 
                 target_folder = destination.parent
                 if not target_folder.exists():
                     try:
                         target_folder.mkdir()
-                        created_folders.add(target_folder)
+                        created_folders[target_folder] = self._path_identity(target_folder)
                     except OSError as exc:
-                        raise SeasonFolderError(
-                            f"Could not create {target_folder.name}: {exc}"
-                        ) from exc
+                        raise SeasonFolderError(f"Could not create {target_folder.name}: {exc}") from exc
                 elif not target_folder.is_dir():
                     raise SeasonFolderError(
-                        f"Cannot organize {source.name} because {target_folder} is not "
-                        "a folder."
+                        f"Cannot organize {source.name} because {target_folder} is not a folder."
                     )
 
-                # Directory entries can change after the earlier proposal check.
-                # Resolve the live paths again after folder creation so a symlink,
-                # junction or replaced directory cannot redirect the move outside
-                # the configured source or show folder.
                 self._require_inside(title_folder, root, "The show folder")
                 self._require_inside(source, root, "The media file")
                 self._require_inside(destination, title_folder, "The season destination")
-
-                # Check again after directory creation and containment validation.
-                # This protects the normal collision case and narrows the race window
-                # immediately before the filesystem mutation.
-                if destination.exists():
+                if self._path_identity(root) != root_identity or self._path_identity(title_folder) != title_identity:
                     raise SeasonFolderError(
-                        f"Stopped before moving {source.name} because a file appeared "
-                        "at the proposed destination. Nothing from this batch was kept."
+                        "Stopped because the library boundary changed before the move. Nothing from this batch was kept."
                     )
+                if os.path.lexists(destination):
+                    raise SeasonFolderError(
+                        f"Stopped before moving {source.name} because a file appeared at the proposed destination. Nothing from this batch was kept."
+                    )
+
+                source_parent_identity = self._path_identity(source.parent)
+                destination_parent_identity = self._path_identity(destination.parent)
                 try:
                     source.rename(destination)
                 except OSError as exc:
-                    raise SeasonFolderError(
-                        f"Could not move {source.name}: {exc}"
-                    ) from exc
-                moved.append(proposal)
+                    raise SeasonFolderError(f"Could not move {source.name}: {exc}") from exc
+                applied = dict(proposal)
+                applied["_source_parent_identity"] = source_parent_identity
+                applied["_destination_parent_identity"] = destination_parent_identity
+                applied["_moved_identity"] = self._file_identity(destination)
+                moved.append(applied)
 
-            # Update all catalog paths in one transaction only after every
-            # filesystem move succeeds. Any DB failure rolls back as a unit.
             with self.database.connect() as conn:
                 for proposal in moved:
-                    row = conn.execute(
-                        "SELECT path FROM files WHERE id=? AND title_id=?",
-                        (proposal["file_id"], title_id),
-                    ).fetchone()
-                    if not row or row["path"] != proposal["source"]:
-                        raise SeasonFolderError(
-                            f"Stopped because the catalog entry for "
-                            f"{Path(proposal['source']).name} changed during apply."
-                        )
-                    destination = Path(proposal["destination"])
-                    conn.execute(
-                        "UPDATE files SET path=?,filename=? WHERE id=?",
+                    cursor = conn.execute(
+                        """UPDATE files SET path=?,filename=?
+                           WHERE id=? AND title_id=? AND path=?""",
                         (
-                            str(destination),
-                            destination.name,
+                            proposal["destination"],
+                            Path(proposal["destination"]).name,
                             proposal["file_id"],
+                            title_id,
+                            proposal["source"],
                         ),
                     )
+                    if cursor.rowcount != 1:
+                        raise SeasonFolderError(
+                            f"Stopped because the catalog entry for {Path(proposal['source']).name} changed during apply."
+                        )
         except Exception as exc:
-            rollback_errors = self._rollback_moves(moved, created_folders)
+            rollback_errors = self._rollback_moves(
+                moved,
+                created_folders,
+                root,
+                title_folder,
+                root_identity,
+                title_identity,
+            )
             if rollback_errors:
                 details = "; ".join(rollback_errors[:3])
                 raise SeasonFolderError(
-                    "Season-folder organization stopped, and automatic rollback was "
-                    f"incomplete: {details}. Review these paths before retrying."
+                    "Season-folder organization stopped, and automatic rollback was incomplete: "
+                    f"{details}. Review these paths before retrying."
                 ) from exc
             if isinstance(exc, SeasonFolderError):
                 raise
-            raise SeasonFolderError(
-                f"Season-folder organization stopped safely: {exc}"
-            ) from exc
+            raise SeasonFolderError(f"Season-folder organization stopped safely: {exc}") from exc
 
+        for proposal in moved:
+            proposal.pop("_source_parent_identity", None)
+            proposal.pop("_destination_parent_identity", None)
+            proposal.pop("_moved_identity", None)
         return moved
 
     @staticmethod
@@ -290,3 +303,14 @@ class SeasonFolderService:
             raise SeasonFolderError(
                 f"{label} is outside the configured library boundary. Nothing was changed."
             ) from exc
+
+    @staticmethod
+    def _path_identity(path: Path) -> tuple[str, int, int]:
+        resolved = path.resolve(strict=False)
+        stat = resolved.stat()
+        return (str(resolved), int(stat.st_dev), int(stat.st_ino))
+
+    @staticmethod
+    def _file_identity(path: Path) -> tuple[int, int, int, int]:
+        stat = path.stat()
+        return (int(stat.st_dev), int(stat.st_ino), int(stat.st_size), int(stat.st_mtime_ns))
