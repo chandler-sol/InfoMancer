@@ -5,6 +5,7 @@ from functools import wraps
 from .security_hardening import build_router as build_security_hardening_router
 from .resilience import build_router as build_resilience_router
 from .final_polish import build_router as build_final_polish_router
+from .worker_maintenance import build_router as build_worker_maintenance_router
 from .release_081_announcements import build_router as build_release_081_announcements_router
 from .release_081_stabilization import build_router as build_release_081_stabilization_router
 from .release_081_collection_undo import build_router as build_release_081_collection_undo_router
@@ -107,6 +108,9 @@ ROUTER_BUILDERS = (
     # Small release-polish hooks replace live helpers before the domain routes use
     # them, while keeping the existing public route contracts intact.
     build_final_polish_router,
+    # Every recovery-visible metadata worker keeps a maintenance operation lease
+    # through its complete database, cleanup, and structured-logging lifetime.
+    build_worker_maintenance_router,
     # Remove only the historical official announcements that older 0.8 builds baked
     # into every installation. Librarian-authored messages and future official keys
     # remain untouched.
