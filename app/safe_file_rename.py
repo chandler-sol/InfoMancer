@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from pathlib import Path
 
 from .catalog_mutation import database_identity, root_mutation_lock, title_mutation_lock
@@ -32,6 +33,131 @@ class SafeFileRenameService:
             return left.exists() and right.exists() and os.path.samefile(left, right)
         except OSError:
             return False
+
+    @staticmethod
+    def _path_identity(path: Path) -> tuple[str, int, int]:
+        """Identify the effective directory at a stable pathname."""
+        resolved = path.resolve(strict=True)
+        details = resolved.stat()
+        return (str(resolved), int(details.st_dev), int(details.st_ino))
+
+    @staticmethod
+    def _entry_identity(path: Path) -> tuple[int, int, int]:
+        """Identify the directory entry that rename() will move without following symlinks."""
+        details = path.lstat()
+        return (
+            int(details.st_dev),
+            int(details.st_ino),
+            int(stat.S_IFMT(details.st_mode)),
+        )
+
+    def _capture_move_identity(
+        self,
+        source: Path,
+        target: Path,
+        root: Path,
+        noun: str,
+    ) -> tuple[
+        tuple[str, int, int],
+        tuple[str, int, int],
+        tuple[str, int, int],
+        tuple[int, int, int],
+    ]:
+        try:
+            root_identity = self._path_identity(root)
+            source_parent_identity = self._path_identity(source.parent)
+            target_parent_identity = self._path_identity(target.parent)
+            moved_identity = self._entry_identity(source)
+        except OSError as exc:
+            raise SafeFileRenameError(
+                f"The {noun} or its library boundary changed before the rename could begin. Nothing was changed."
+            ) from exc
+        return (
+            root_identity,
+            source_parent_identity,
+            target_parent_identity,
+            moved_identity,
+        )
+
+    def _revalidate_before_move(
+        self,
+        source: Path,
+        target: Path,
+        root: Path,
+        root_identity: tuple[str, int, int],
+        source_parent_identity: tuple[str, int, int],
+        target_parent_identity: tuple[str, int, int],
+        moved_identity: tuple[int, int, int],
+        noun: str,
+    ) -> None:
+        try:
+            if self._path_identity(root) != root_identity:
+                raise SafeFileRenameError(
+                    f"The configured source changed before the {noun} rename could begin. Nothing was changed."
+                )
+            if self._path_identity(source.parent) != source_parent_identity:
+                raise SafeFileRenameError(
+                    f"The original parent changed before the {noun} rename could begin. Nothing was changed."
+                )
+            if self._path_identity(target.parent) != target_parent_identity:
+                raise SafeFileRenameError(
+                    f"The destination parent changed before the {noun} rename could begin. Nothing was changed."
+                )
+            if self._entry_identity(source) != moved_identity:
+                raise SafeFileRenameError(
+                    f"The {noun} changed before the rename could begin. Nothing was changed."
+                )
+        except OSError as exc:
+            raise SafeFileRenameError(
+                f"The {noun} or its library boundary became unavailable before the rename could begin. Nothing was changed."
+            ) from exc
+
+    def _validate_rollback_identity(
+        self,
+        source: Path,
+        target: Path,
+        root: Path,
+        root_identity: tuple[str, int, int],
+        source_parent_identity: tuple[str, int, int],
+        target_parent_identity: tuple[str, int, int],
+        moved_identity: tuple[int, int, int],
+        noun: str,
+        expect_directory: bool,
+    ) -> None:
+        """Fail closed unless rollback still targets the exact pre-move filesystem objects."""
+        try:
+            if self._path_identity(root) != root_identity:
+                raise SafeFileRenameError(
+                    f"The {noun} was renamed but the catalog update failed, and the configured source identity changed before rollback. InfoMancer refused to move anything automatically. Review both paths before retrying."
+                )
+            self._require_inside(target, root)
+            self._require_inside(source, root)
+            if self._path_identity(source.parent) != source_parent_identity:
+                raise SafeFileRenameError(
+                    f"The {noun} was renamed but the catalog update failed, and the original parent identity changed before rollback. InfoMancer refused to move anything automatically. Review both paths before retrying."
+                )
+            if self._path_identity(target.parent) != target_parent_identity:
+                raise SafeFileRenameError(
+                    f"The {noun} was renamed but the catalog update failed, and the destination parent identity changed before rollback. InfoMancer refused to move anything automatically. Review both paths before retrying."
+                )
+            if os.path.lexists(source):
+                raise SafeFileRenameError(
+                    f"The {noun} was renamed but the catalog update failed, and another entry appeared at the original path before rollback. InfoMancer refused to overwrite it. Review both paths before retrying."
+                )
+            if expect_directory:
+                target_has_expected_type = target.is_dir()
+            else:
+                target_has_expected_type = target.is_file()
+            if not target_has_expected_type or self._entry_identity(target) != moved_identity:
+                raise SafeFileRenameError(
+                    f"The {noun} was renamed but the catalog update failed, and the destination no longer contains the exact object moved by this operation. InfoMancer refused to move it automatically. Review both paths before retrying."
+                )
+        except SafeFileRenameError:
+            raise
+        except OSError as exc:
+            raise SafeFileRenameError(
+                f"The {noun} was renamed but the catalog update failed, and the filesystem identity could not be verified before rollback. InfoMancer refused to move anything automatically. Review both paths before retrying."
+            ) from exc
 
     def _validate_file_move(self, source: Path, destination: Path, root: Path) -> None:
         self._require_inside(source, root)
@@ -90,6 +216,22 @@ class SafeFileRenameService:
         root = Path(row["root_path"])
         self._validate_file_move(source, target, root)
         self._validate_file_move(source, target, root)
+        (
+            root_identity,
+            source_parent_identity,
+            target_parent_identity,
+            moved_identity,
+        ) = self._capture_move_identity(source, target, root, "file")
+        self._revalidate_before_move(
+            source,
+            target,
+            root,
+            root_identity,
+            source_parent_identity,
+            target_parent_identity,
+            moved_identity,
+            "file",
+        )
 
         try:
             source.rename(target)
@@ -97,6 +239,10 @@ class SafeFileRenameService:
             raise SafeFileRenameError(f"The media file could not be renamed: {exc}") from exc
 
         try:
+            if self._entry_identity(target) != moved_identity:
+                raise SafeFileRenameError(
+                    "The media file was renamed, but its filesystem identity changed before the catalog update."
+                )
             with self.database.connect() as conn:
                 cursor = conn.execute(
                     "UPDATE files SET path=?,filename=? WHERE id=? AND path=?",
@@ -118,16 +264,17 @@ class SafeFileRenameService:
                         )
         except Exception as exc:
             try:
-                self._require_inside(target, root)
-                self._require_inside(source, root)
-                if source.exists():
-                    raise SafeFileRenameError(
-                        "The file was renamed but the catalog update failed, and another entry appeared at the original path before rollback. InfoMancer refused to overwrite it. Review both paths before retrying."
-                    ) from exc
-                if not target.is_file() or not source.parent.is_dir():
-                    raise SafeFileRenameError(
-                        "The file was renamed but the catalog update failed, and the filesystem changed before rollback. InfoMancer stopped rather than risk moving the wrong file. Review both paths before retrying."
-                    ) from exc
+                self._validate_rollback_identity(
+                    source,
+                    target,
+                    root,
+                    root_identity,
+                    source_parent_identity,
+                    target_parent_identity,
+                    moved_identity,
+                    "file",
+                    False,
+                )
                 target.rename(source)
             except SafeFileRenameError:
                 raise
@@ -223,12 +370,33 @@ class SafeFileRenameService:
                 "The rename destination parent changed before the rename could begin. Nothing was changed."
             )
 
+        (
+            root_identity,
+            source_parent_identity,
+            target_parent_identity,
+            moved_identity,
+        ) = self._capture_move_identity(source, target, root, "folder")
+        self._revalidate_before_move(
+            source,
+            target,
+            root,
+            root_identity,
+            source_parent_identity,
+            target_parent_identity,
+            moved_identity,
+            "folder",
+        )
+
         try:
             source.rename(target)
         except OSError as exc:
             raise SafeFileRenameError(f"The show folder could not be renamed: {exc}") from exc
 
         try:
+            if self._entry_identity(target) != moved_identity:
+                raise SafeFileRenameError(
+                    "The show folder was renamed, but its filesystem identity changed before the catalog update."
+                )
             with self.database.connect() as conn:
                 # Hold SQLite's write reservation from complete-membership validation
                 # through the catalog rewrite. A writer that bypasses the in-process
@@ -272,16 +440,17 @@ class SafeFileRenameService:
                     )
         except Exception as exc:
             try:
-                self._require_inside(target, root)
-                self._require_inside(source, root)
-                if source.exists():
-                    raise SafeFileRenameError(
-                        "The folder was renamed but the catalog update failed, and another entry appeared at the original path before rollback. InfoMancer refused to overwrite it. Review both paths before retrying."
-                    ) from exc
-                if not target.is_dir() or not source.parent.is_dir():
-                    raise SafeFileRenameError(
-                        "The folder was renamed but the catalog update failed, and the filesystem changed before rollback. InfoMancer stopped rather than risk moving the wrong folder. Review both paths before retrying."
-                    ) from exc
+                self._validate_rollback_identity(
+                    source,
+                    target,
+                    root,
+                    root_identity,
+                    source_parent_identity,
+                    target_parent_identity,
+                    moved_identity,
+                    "folder",
+                    True,
+                )
                 target.rename(source)
             except SafeFileRenameError:
                 raise
