@@ -18,6 +18,7 @@ from app.engagement import EngagementService
 from app.event_log import EventLog
 from app.maintenance_gate import APPLICATION_MAINTENANCE_GATE
 from app.recovery_package import RecoveryPackageService
+from app.runtime import RuntimeLease
 
 
 class RecoveryRouteTests(unittest.TestCase):
@@ -41,7 +42,7 @@ class RecoveryRouteTests(unittest.TestCase):
         database.initialize()
         self.original = (
             main.db, main.settings, main.auth_service, main.app_settings,
-            main.engagement, main.event_log,
+            main.engagement, main.event_log, main.runtime_lease,
         )
         self.addCleanup(self._restore_globals)
         main.db, main.settings = database, settings
@@ -49,6 +50,10 @@ class RecoveryRouteTests(unittest.TestCase):
         main.app_settings = AppSettings(database, settings.search_url_template)
         main.engagement = EngagementService(database)
         main.event_log = EventLog(database)
+        main.runtime_lease = RuntimeLease(
+            database, owner="server:test-host:123:recovery-route-test",
+            on_lost=lambda: None,
+        )
         main.auth_service.create_user(
             "recovery-admin", "recovery@example.com", "Recovery Admin", "x", role="librarian",
         )
@@ -73,7 +78,7 @@ class RecoveryRouteTests(unittest.TestCase):
     def _restore_globals(self):
         (
             main.db, main.settings, main.auth_service, main.app_settings,
-            main.engagement, main.event_log,
+            main.engagement, main.event_log, main.runtime_lease,
         ) = self.original
 
     def csrf_token(self) -> str:
@@ -139,7 +144,7 @@ class RecoveryRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertIn("Request verification failed", response.text)
 
-    def test_restore_refuses_to_enter_exclusive_mode_while_request_work_is_active(self):
+    def test_restore_refuses_to_upgrade_while_another_operation_is_active(self):
         token = self.preview_token()
         self.assertTrue(APPLICATION_MAINTENANCE_GATE.try_enter_operation())
         try:
@@ -154,7 +159,7 @@ class RecoveryRouteTests(unittest.TestCase):
         self.assertIn("became+busy", response.headers.get("location", ""))
         self.assertFalse(APPLICATION_MAINTENANCE_GATE.exclusive_active())
 
-    def test_successful_restore_stays_exclusive_until_restart(self):
+    def test_successful_restore_stays_exclusive_and_rebinds_runtime_lease(self):
         token = self.preview_token()
         with patch.object(main, "restart_after_restore", return_value=None):
             response = self.client.post(
@@ -168,6 +173,27 @@ class RecoveryRouteTests(unittest.TestCase):
         self.assertEqual(
             APPLICATION_MAINTENANCE_GATE.status()["reason"], "portable recovery"
         )
+        with main.db.connect() as conn:
+            row = conn.execute(
+                "SELECT owner FROM runtime_leases WHERE name=?",
+                (main.runtime_lease.name,),
+            ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["owner"], main.runtime_lease.owner)
+
+    def test_runtime_rebind_failure_keeps_fatal_exclusive_mode(self):
+        token = self.preview_token()
+        with patch.object(
+            main.runtime_lease, "rebind_after_restore", side_effect=OSError("lease write failed")
+        ):
+            response = self.client.post(
+                "/settings/recovery/apply",
+                headers={"X-CSRF-Token": self.csrf_token()},
+                data={"staged_token": token, "confirm": "RESTORE"},
+            )
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("maintenance mode", response.text.casefold())
+        self.assertTrue(APPLICATION_MAINTENANCE_GATE.exclusive_active())
 
 
 if __name__ == "__main__":
