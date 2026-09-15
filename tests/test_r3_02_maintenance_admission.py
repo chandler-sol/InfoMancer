@@ -16,14 +16,25 @@ class R302MaintenanceAdmissionTests(unittest.TestCase):
         APPLICATION_MAINTENANCE_GATE.end_exclusive()
         self.addCleanup(APPLICATION_MAINTENANCE_GATE.end_exclusive)
 
-        saved_job = dict(main.media_info_job)
+        saved_jobs = {
+            "media": dict(main.media_info_job),
+            "movie": dict(main.movie_match_job),
+            "tv": dict(main.tv_match_job),
+            "imdb": dict(main.imdb_genre_job),
+        }
 
-        def restore_job():
-            with main.media_info_lock:
-                main.media_info_job.clear()
-                main.media_info_job.update(saved_job)
+        def restore_jobs():
+            for lock, job, saved in (
+                (main.media_info_lock, main.media_info_job, saved_jobs["media"]),
+                (main.movie_match_lock, main.movie_match_job, saved_jobs["movie"]),
+                (main.tv_match_lock, main.tv_match_job, saved_jobs["tv"]),
+                (main.imdb_genre_lock, main.imdb_genre_job, saved_jobs["imdb"]),
+            ):
+                with lock:
+                    job.clear()
+                    job.update(saved)
 
-        self.addCleanup(restore_job)
+        self.addCleanup(restore_jobs)
 
     def _capture_events(self, callback):
         observed: list[tuple[str, int]] = []
@@ -42,21 +53,33 @@ class R302MaintenanceAdmissionTests(unittest.TestCase):
             main.record_event = original
         return observed
 
-    def test_media_inspection_keeps_lease_through_completion_logging_tail(self):
-        observed = self._capture_events(
-            lambda: main.run_media_inspection([-987654321])
-        )
-        self.assertTrue(observed, "media inspection did not reach its logging tail")
+    def _assert_logged_under_admission(self, observed, expected: str) -> None:
+        self.assertTrue(observed, f"{expected} did not reach its logging tail")
         self.assertTrue(
             all(active > 0 for _message, active in observed),
-            f"media inspection logged outside maintenance admission: {observed}",
+            f"worker logged outside maintenance admission: {observed}",
         )
         self.assertTrue(
-            any("Media inspection finished" in message for message, _active in observed)
+            any(expected in message for message, _active in observed),
+            f"expected logging tail was not observed: {observed}",
         )
         self.assertEqual(
             APPLICATION_MAINTENANCE_GATE.status()["active_operations"], 0
         )
+
+    def test_media_inspection_keeps_lease_through_completion_logging_tail(self):
+        observed = self._capture_events(
+            lambda: main.run_media_inspection([-987654321])
+        )
+        self._assert_logged_under_admission(observed, "Media inspection finished")
+
+    def test_movie_match_keeps_lease_through_completion_logging_tail(self):
+        observed = self._capture_events(lambda: main.run_movie_match_analysis([]))
+        self._assert_logged_under_admission(observed, "Movie match lookup finished")
+
+    def test_tv_match_keeps_lease_through_completion_logging_tail(self):
+        observed = self._capture_events(lambda: main.run_tv_match_analysis([]))
+        self._assert_logged_under_admission(observed, "TV match lookup finished")
 
     def test_unexpected_media_inspection_error_is_logged_before_lease_release(self):
         observed = self._capture_events(
@@ -79,7 +102,7 @@ class R302MaintenanceAdmissionTests(unittest.TestCase):
             APPLICATION_MAINTENANCE_GATE.status()["active_operations"], 0
         )
 
-    def test_exclusive_maintenance_blocks_media_inspection_before_database_touch(self):
+    def test_exclusive_maintenance_blocks_recovery_visible_workers_before_database_touch(self):
         self.assertTrue(
             APPLICATION_MAINTENANCE_GATE.try_begin_exclusive("portable recovery")
         )
@@ -88,29 +111,51 @@ class R302MaintenanceAdmissionTests(unittest.TestCase):
         class ForbiddenDatabase:
             def connect(self):
                 raise AssertionError(
-                    "media inspection touched catalog state after exclusive maintenance began"
+                    "background worker touched catalog state after exclusive maintenance began"
                 )
 
         main.db = ForbiddenDatabase()
         try:
-            result = main.run_media_inspection([-987654321])
+            self.assertIsNone(main.run_media_inspection([-987654321]))
+            self.assertIsNone(main.run_movie_match_analysis([987654321]))
+            self.assertIsNone(main.run_tv_match_analysis([987654321]))
+            self.assertIsNone(main.run_imdb_genre_sync([987654321], None, "test"))
         finally:
             main.db = original_db
 
-        self.assertIsNone(result)
-        with main.media_info_lock:
-            job = dict(main.media_info_job)
-        self.assertEqual(job.get("status"), "paused")
-        self.assertIn("Exclusive maintenance", job.get("error", ""))
+        for lock, job in (
+            (main.media_info_lock, main.media_info_job),
+            (main.movie_match_lock, main.movie_match_job),
+            (main.tv_match_lock, main.tv_match_job),
+            (main.imdb_genre_lock, main.imdb_genre_job),
+        ):
+            with lock:
+                state = dict(job)
+            self.assertEqual(state.get("status"), "paused")
+            self.assertIn("Exclusive maintenance", state.get("error", ""))
+
         status = APPLICATION_MAINTENANCE_GATE.status()
         self.assertTrue(status["exclusive"])
         self.assertEqual(status["active_operations"], 0)
 
-    def test_media_inspection_starting_state_blocks_recovery_dispatch_gap(self):
-        with main.media_info_lock:
-            main.media_info_job.clear()
-            main.media_info_job.update({"status": "starting", "processed": 0})
-        self.assertTrue(main._other_background_work_running())
+    def test_starting_states_cover_recovery_dispatch_gaps(self):
+        for lock, job in (
+            (main.media_info_lock, main.media_info_job),
+            (main.movie_match_lock, main.movie_match_job),
+            (main.tv_match_lock, main.tv_match_job),
+        ):
+            with lock:
+                job.clear()
+                job.update({"status": "starting", "processed": 0})
+            self.assertTrue(main._other_background_work_running())
+            with lock:
+                job.clear()
+                job.update({"status": "idle"})
+
+        with main.imdb_genre_lock:
+            main.imdb_genre_job.clear()
+            main.imdb_genre_job.update({"status": "starting"})
+        self.assertEqual(main.imdb_genre_job.get("status"), "starting")
 
 
 if __name__ == "__main__":
