@@ -14,12 +14,11 @@ from app.provider_secrets import ProviderSecretError, ProviderSecretStore
 
 class ProviderSecretStoreTests(unittest.TestCase):
     @staticmethod
-    def _legacy_application_token(secret: str, values: dict[str, str]) -> bytes:
+    def _qualified_application_cipher(secret: str) -> Fernet:
         digest = hashlib.sha256(secret.encode("utf-8")).digest()
-        cipher = Fernet(base64.urlsafe_b64encode(digest))
-        return cipher.encrypt(json.dumps(values, sort_keys=True).encode("utf-8"))
+        return Fernet(base64.urlsafe_b64encode(digest))
 
-    def test_credentials_are_encrypted_and_round_trip_with_versioned_scrypt_envelope(self):
+    def test_credentials_are_encrypted_and_round_trip(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "providers.enc"
             store = ProviderSecretStore(path, "test-application-secret")
@@ -27,84 +26,60 @@ class ProviderSecretStoreTests(unittest.TestCase):
 
             raw = path.read_bytes()
             self.assertNotIn(b"secret-key", raw)
-            envelope = json.loads(raw.decode("utf-8"))
-            self.assertEqual(envelope["format"], "infomancer-provider-secrets")
-            self.assertEqual(envelope["version"], 2)
-            self.assertEqual(envelope["key_source"], "application_secret")
-            self.assertEqual(envelope["kdf"], "scrypt")
-            self.assertTrue(envelope["salt"])
-            self.assertTrue(envelope["token"])
             self.assertEqual(store.load()["tvdb_api_key"], "secret-key")
             self.assertEqual(store.load()["tvdb_pin"], "1234")
             if os.name != "nt":
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
                 self.assertEqual(list(Path(temporary).glob(f".{path.name}.*.tmp")), [])
 
+    def test_new_application_secret_write_is_readable_by_qualified_09_cipher(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "providers.enc"
+            secret = "downgrade-compatible-secret"
+            ProviderSecretStore(path, secret).update({"tvdb_api_key": "survives-downgrade"})
+
+            payload = self._qualified_application_cipher(secret).decrypt(path.read_bytes())
+            self.assertEqual(
+                json.loads(payload.decode("utf-8"))["tvdb_api_key"],
+                "survives-downgrade",
+            )
+
+    def test_existing_qualified_application_secret_ciphertext_remains_readable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "providers.enc"
+            secret = "qualified-application-secret"
+            path.write_bytes(
+                self._qualified_application_cipher(secret).encrypt(
+                    json.dumps({"tvdb_api_key": "qualified-key"}, sort_keys=True).encode("utf-8")
+                )
+            )
+            self.assertEqual(
+                ProviderSecretStore(path, secret).load()["tvdb_api_key"],
+                "qualified-key",
+            )
+
     def test_failed_encryption_does_not_leave_provider_secret_temp_file(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "providers.enc"
             store = ProviderSecretStore(path, "test-application-secret")
 
-            def fail_encrypt(_payload: bytes) -> bytes:
-                raise ProviderSecretError("synthetic encryption failure")
+            class FailingCipher:
+                def encrypt(self, _payload: bytes) -> bytes:
+                    raise ProviderSecretError("synthetic encryption failure")
 
-            store._encrypt = fail_encrypt
+            store._cipher = lambda **_kwargs: FailingCipher()
             with self.assertRaisesRegex(ProviderSecretError, "synthetic encryption failure"):
                 store.update({"tvdb_api_key": "secret-key"})
 
             self.assertFalse(path.exists())
             self.assertEqual(list(Path(temporary).glob(f".{path.name}.*.tmp")), [])
 
-    def test_wrong_application_secret_fails_closed_for_versioned_credentials(self):
+    def test_wrong_application_secret_fails_closed(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "providers.enc"
-            ProviderSecretStore(path, "correct-secret").update(
-                {"tvdb_api_key": "secret-key"}
-            )
-
+            ProviderSecretStore(path, "correct-secret").update({"tvdb_api_key": "secret-key"})
             with self.assertRaises(ProviderSecretError):
                 ProviderSecretStore(path, "wrong-secret").load()
-
-    def test_legacy_application_secret_ciphertext_is_read_and_migrated_on_write(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "providers.enc"
-            secret = "legacy-application-secret"
-            path.write_bytes(
-                self._legacy_application_token(secret, {"tvdb_api_key": "legacy-key"})
-            )
-
-            store = ProviderSecretStore(path, secret)
-            self.assertEqual(store.load()["tvdb_api_key"], "legacy-key")
-            store.update({"tvdb_pin": "1234"})
-
-            envelope = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(envelope["version"], 2)
-            self.assertEqual(envelope["key_source"], "application_secret")
-            self.assertEqual(envelope["kdf"], "scrypt")
-            self.assertEqual(store.load()["tvdb_pin"], "1234")
-
-    def test_legacy_local_key_ciphertext_survives_adding_application_secret(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "providers.enc"
-            key_path = Path(temporary) / "provider-secrets.key"
-            key = Fernet.generate_key()
-            key_path.write_bytes(key)
-            path.write_bytes(
-                Fernet(key).encrypt(
-                    json.dumps({"tvdb_api_key": "legacy-local-key"}).encode("utf-8")
-                )
-            )
-
-            store = ProviderSecretStore(path, "new-application-secret")
-            self.assertEqual(store.load()["tvdb_api_key"], "legacy-local-key")
-            original_key = key_path.read_bytes()
-            store.update({"tvdb_pin": "5678"})
-
-            envelope = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(envelope["key_source"], "application_secret")
-            self.assertEqual(envelope["kdf"], "scrypt")
-            self.assertEqual(key_path.read_bytes(), original_key)
-            self.assertEqual(store.load()["tvdb_pin"], "5678")
 
     def test_missing_application_secret_creates_restrictive_local_encryption_key(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -113,9 +88,6 @@ class ProviderSecretStoreTests(unittest.TestCase):
             store = ProviderSecretStore(path, "")
             store.update({"tvdb_api_key": "secret-key"})
             self.assertTrue(key_path.exists())
-            envelope = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(envelope["version"], 2)
-            self.assertEqual(envelope["key_source"], "local_key")
             self.assertEqual(store.load()["tvdb_api_key"], "secret-key")
             if os.name != "nt":
                 self.assertEqual(stat.S_IMODE(key_path.stat().st_mode), 0o600)
@@ -126,34 +98,25 @@ class ProviderSecretStoreTests(unittest.TestCase):
             self.assertEqual(key_path.read_bytes(), original_key)
             self.assertEqual(ProviderSecretStore(path, "").load()["tvdb_pin"], "1234")
 
-    def test_versioned_local_key_file_can_migrate_after_secret_is_added(self):
+    def test_new_local_key_write_is_readable_by_qualified_09_cipher(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "providers.enc"
-            local_store = ProviderSecretStore(path, "")
-            local_store.update({"tvdb_api_key": "local-key"})
-            local_envelope = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(local_envelope["key_source"], "local_key")
+            key_path = Path(temporary) / "provider-secrets.key"
+            ProviderSecretStore(path, "").update({"tvdb_api_key": "local-downgrade"})
+            payload = Fernet(key_path.read_bytes().strip()).decrypt(path.read_bytes())
+            self.assertEqual(
+                json.loads(payload.decode("utf-8"))["tvdb_api_key"],
+                "local-downgrade",
+            )
 
-            configured_store = ProviderSecretStore(path, "later-application-secret")
-            self.assertEqual(configured_store.load()["tvdb_api_key"], "local-key")
-            configured_store.update({"tvdb_pin": "9999"})
-
-            migrated = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(migrated["key_source"], "application_secret")
-            self.assertEqual(migrated["kdf"], "scrypt")
-            self.assertEqual(configured_store.load()["tvdb_pin"], "9999")
-
-    def test_unknown_versioned_format_fails_closed(self):
+    def test_missing_local_key_fails_closed_without_creating_replacement(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "providers.enc"
-            store = ProviderSecretStore(path, "test-secret")
-            store.update({"tvdb_api_key": "secret-key"})
-            envelope = json.loads(path.read_text(encoding="utf-8"))
-            envelope["version"] = 999
-            path.write_text(json.dumps(envelope), encoding="utf-8")
-
+            key_path = Path(temporary) / "provider-secrets.key"
+            path.write_bytes(b"not-a-valid-token")
             with self.assertRaises(ProviderSecretError):
-                store.load()
+                ProviderSecretStore(path, "").load()
+            self.assertFalse(key_path.exists())
 
 
 if __name__ == "__main__":
