@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import sqlite3
 import tempfile
+import threading
+import time
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import patch
 
 from app.db import Database
 from app.safe_file_rename import SafeFileRenameError, SafeFileRenameService
@@ -83,7 +86,7 @@ class SafeFileRenameTests(unittest.TestCase):
         def controlled_connect():
             nonlocal calls
             calls += 1
-            if calls == 2:
+            if calls == 3:
                 self.assertTrue(target.is_file())
                 self.assertFalse(self.source.exists())
                 raise sqlite3.OperationalError("synthetic catalog failure")
@@ -105,7 +108,7 @@ class SafeFileRenameTests(unittest.TestCase):
         def controlled_connect():
             nonlocal calls
             calls += 1
-            if calls == 2:
+            if calls == 3:
                 self.assertTrue(target.is_file())
                 self.source.write_bytes(b"new collision")
                 raise sqlite3.OperationalError("synthetic catalog failure")
@@ -150,6 +153,63 @@ class SafeFileRenameTests(unittest.TestCase):
             self.service.rename_folder(self.title_id, self.show, target)
         self.assertTrue(self.source.is_file())
         self.assertFalse(target.exists())
+
+    def test_folder_and_file_renames_serialize_across_service_instances(self):
+        folder_target = self.root / "Renamed Show"
+        file_target = self.show / "renamed-episode.mkv"
+        second = SafeFileRenameService(Database(self.database.path))
+        folder_moved = threading.Event()
+        release_folder = threading.Event()
+        folder_errors: list[BaseException] = []
+        file_errors: list[BaseException] = []
+        original_rename = Path.rename
+
+        def controlled_rename(path: Path, destination: Path | str):
+            result = original_rename(path, destination)
+            if path == self.show and Path(destination) == folder_target:
+                folder_moved.set()
+                if not release_folder.wait(5):
+                    raise RuntimeError("test timed out waiting to release folder rename")
+            return result
+
+        def rename_folder() -> None:
+            try:
+                self.service.rename_folder(self.title_id, self.show, folder_target)
+            except BaseException as exc:
+                folder_errors.append(exc)
+
+        def rename_file() -> None:
+            try:
+                second.rename_file(self.file_id, self.source, file_target)
+            except BaseException as exc:
+                file_errors.append(exc)
+
+        with patch.object(Path, "rename", controlled_rename):
+            folder_thread = threading.Thread(target=rename_folder)
+            file_thread = threading.Thread(target=rename_file)
+            folder_thread.start()
+            self.assertTrue(folder_moved.wait(5), "folder rename never reached the interleave point")
+            file_thread.start()
+            time.sleep(0.1)
+            self.assertTrue(file_thread.is_alive(), "file rename did not wait for the title mutation lock")
+            release_folder.set()
+            folder_thread.join(5)
+            file_thread.join(5)
+
+        self.assertFalse(folder_thread.is_alive())
+        self.assertFalse(file_thread.is_alive())
+        self.assertEqual(folder_errors, [])
+        self.assertEqual(len(file_errors), 1)
+        self.assertIsInstance(file_errors[0], SafeFileRenameError)
+        moved_file = folder_target / "old.mkv"
+        self.assertEqual(moved_file.read_bytes(), b"media")
+        self.assertFalse(file_target.exists())
+        with self.database.connect() as conn:
+            title = conn.execute("SELECT folder_path FROM titles WHERE id=?", (self.title_id,)).fetchone()
+            file_row = conn.execute("SELECT path,filename FROM files WHERE id=?", (self.file_id,)).fetchone()
+        self.assertEqual(title["folder_path"], str(folder_target))
+        self.assertEqual(file_row["path"], str(moved_file))
+        self.assertEqual(file_row["filename"], "old.mkv")
 
 
 class SafeRenameRouteContractTests(unittest.TestCase):
