@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends
 
 from ..access import require_librarian
+from ..maintenance_gate import APPLICATION_MAINTENANCE_GATE
 from ..path_reconciliation import (
     clear_missing_path_failures,
     missing_file_ids,
@@ -28,6 +29,7 @@ def build_router(ctx: RouteContext):
     base_redirect = ctx.get("redirect")
     base_run_media_inspection = ctx.get("run_media_inspection")
     base_run_scan = ctx.get("run_scan")
+    base_run_title_scan = ctx.get("run_title_scan")
     db = ctx.live("db")
     handle_import_hashing = ctx.live("handle_import_hashing")
     media_hash_cancel = ctx.live("media_hash_cancel")
@@ -39,11 +41,9 @@ def build_router(ctx: RouteContext):
     scan_all_lock = ctx.live("scan_all_lock")
     scan_jobs = ctx.live("scan_jobs")
     scan_lock = ctx.live("scan_lock")
+    title_scan_jobs = ctx.live("title_scan_jobs")
+    title_scan_lock = ctx.live("title_scan_lock")
 
-    # A degraded source can still be fully reachable. The base connection checker
-    # intentionally keeps a previously degraded source protected until a complete
-    # scan proves the full catalog is visible. Preserve that safety behavior while
-    # replacing the older generic banner that incorrectly sounded like an outage.
     source_check_state = threading.local()
 
     def tracked_check_source_health(root_id: int) -> dict:
@@ -54,9 +54,6 @@ def build_router(ctx: RouteContext):
     def source_aware_redirect(path: str, message: str = ""):
         result = getattr(source_check_state, "result", None)
         if result is not None:
-            # The connection route redirects immediately after the check. Clear
-            # thread-local state on that next redirect so worker-thread reuse can
-            # never leak a source result into a later request.
             source_check_state.result = None
             base_path = path.split("#", 1)[0].split("?", 1)[0]
             if base_path == "/sources" and message == _GENERIC_SOURCE_GUARD_MESSAGE:
@@ -86,83 +83,104 @@ def build_router(ctx: RouteContext):
         root_id: int, *, hash_after: bool = True, force_cleanup: bool = False,
     ) -> list[int]:
         """Reconcile confident path changes before the normal guarded scan."""
-        before_missing = set(missing_file_ids(db, root_id))
-        reconciliation = reconcile_root_paths(db, root_id) if before_missing else {
-            "available": True, "reconciled": 0, "hash_resolved": 0,
-        }
-        changed = base_run_scan(
-            root_id, hash_after=hash_after, force_cleanup=force_cleanup,
-        )
+        with APPLICATION_MAINTENANCE_GATE.operation_lease() as admitted:
+            if not admitted:
+                with scan_lock:
+                    scan_jobs[root_id] = {
+                        "status": "paused",
+                        "files": 0,
+                        "titles": 0,
+                        "error": "Exclusive maintenance started before the source scan could run.",
+                    }
+                return []
+            before_missing = set(missing_file_ids(db, root_id))
+            reconciliation = reconcile_root_paths(db, root_id) if before_missing else {
+                "available": True, "reconciled": 0, "hash_resolved": 0,
+            }
+            changed = base_run_scan(
+                root_id, hash_after=hash_after, force_cleanup=force_cleanup,
+            )
 
-        with scan_lock:
-            job = dict(scan_jobs.get(root_id, {}))
-        protected = (
-            job.get("status") == "error"
-            or job.get("source_status") == "degraded"
-            or reconciliation.get("available") is False
-        )
-        if protected:
-            cleared = clear_missing_path_failures(db, root_id)
-            if cleared:
-                record_event(
-                    "source-guard",
-                    f"Suppressed {cleared:,} per-file path alert{'s' if cleared != 1 else ''} while the source is unavailable.",
-                    level="warning",
-                    context={
-                        "root_id": root_id,
-                        "operation": "path_alert_suppression",
-                        "suppressed": cleared,
-                    },
+            with scan_lock:
+                job = dict(scan_jobs.get(root_id, {}))
+            protected = (
+                job.get("status") == "error"
+                or job.get("source_status") == "degraded"
+                or reconciliation.get("available") is False
+            )
+            if protected:
+                cleared = clear_missing_path_failures(db, root_id)
+                if cleared:
+                    record_event(
+                        "source-guard",
+                        f"Suppressed {cleared:,} per-file path alert{'s' if cleared != 1 else ''} while the source is unavailable.",
+                        level="warning",
+                        context={
+                            "root_id": root_id,
+                            "operation": "path_alert_suppression",
+                            "suppressed": cleared,
+                        },
+                    )
+                return changed
+
+            reconciled = int(reconciliation.get("reconciled") or 0)
+            hash_resolved = int(reconciliation.get("hash_resolved") or 0)
+            if reconciled:
+                detail = (
+                    f" {hash_resolved:,} ambiguous path change"
+                    f"{'s were' if hash_resolved != 1 else ' was'} confirmed by SHA-256."
+                    if hash_resolved else ""
                 )
-            return changed
-
-        reconciled = int(reconciliation.get("reconciled") or 0)
-        hash_resolved = int(reconciliation.get("hash_resolved") or 0)
-        if reconciled:
-            detail = (
-                f" {hash_resolved:,} ambiguous path change"
-                f"{'s were' if hash_resolved != 1 else ' was'} confirmed by SHA-256."
-                if hash_resolved else ""
-            )
-            record_event(
-                "scan",
-                f"Reconciled {reconciled:,} media path change{'s' if reconciled != 1 else ''} during the source scan.{detail}",
-                context={
-                    "root_id": root_id,
-                    "operation": "path_reconciliation",
-                    "reconciled": reconciled,
-                    "hash_resolved": hash_resolved,
-                },
-            )
-
-        if before_missing:
-            placeholders = ",".join("?" for _ in before_missing)
-            with db.connect() as conn:
-                remaining = {
-                    int(row["id"])
-                    for row in conn.execute(
-                        f"SELECT id FROM files WHERE id IN ({placeholders})",
-                        tuple(sorted(before_missing)),
-                    ).fetchall()
-                }
-            disappeared = len(before_missing - remaining)
-            if disappeared:
                 record_event(
                     "scan",
-                    f"{disappeared:,} cataloged media file{'s were' if disappeared != 1 else ' was'} no longer present after source reconciliation.",
-                    level="warning",
+                    f"Reconciled {reconciled:,} media path change{'s' if reconciled != 1 else ''} during the source scan.{detail}",
                     context={
                         "root_id": root_id,
-                        "operation": "media_disappeared",
-                        "missing_count": disappeared,
+                        "operation": "path_reconciliation",
+                        "reconciled": reconciled,
+                        "hash_resolved": hash_resolved,
                     },
                 )
-        return changed
 
-    # The composition root installs this replacement after the bundle returns, so
-    # manual scans, Scan All, scheduled work, and inspection preflight share the
-    # same rename-vs-missing distinction without route construction mutating main.py.
+            if before_missing:
+                placeholders = ",".join("?" for _ in before_missing)
+                with db.connect() as conn:
+                    remaining = {
+                        int(row["id"])
+                        for row in conn.execute(
+                            f"SELECT id FROM files WHERE id IN ({placeholders})",
+                            tuple(sorted(before_missing)),
+                        ).fetchall()
+                    }
+                disappeared = len(before_missing - remaining)
+                if disappeared:
+                    record_event(
+                        "scan",
+                        f"{disappeared:,} cataloged media file{'s were' if disappeared != 1 else ' was'} no longer present after source reconciliation.",
+                        level="warning",
+                        context={
+                            "root_id": root_id,
+                            "operation": "media_disappeared",
+                            "missing_count": disappeared,
+                        },
+                    )
+            return changed
+
     run_scan = ctx.live("run_scan")
+
+    def leased_run_title_scan(title_id: int) -> None:
+        """Keep the complete title-scan worker, including tail logging, under admission."""
+        with APPLICATION_MAINTENANCE_GATE.operation_lease() as admitted:
+            if not admitted:
+                with title_scan_lock:
+                    title_scan_jobs[title_id] = {
+                        "status": "paused",
+                        "files": 0,
+                        "label": "Series",
+                        "error": "Exclusive maintenance started before the series rescan could run.",
+                    }
+                return
+            base_run_title_scan(title_id)
 
     def _inspection_rows(file_ids: list[int] | None):
         with db.connect() as conn:
@@ -183,7 +201,6 @@ def build_router(ctx: RouteContext):
             ).fetchall()
 
     def reconciling_run_media_inspection(file_ids: list[int] | None = None):
-        """Resolve missing paths at source level before FFprobe sees them."""
         rows = _inspection_rows(file_ids)
         roots_to_reconcile: set[int] = set()
         for row in rows:
@@ -195,8 +212,6 @@ def build_router(ctx: RouteContext):
             if not available:
                 roots_to_reconcile.add(int(row["root_id"]))
 
-        # One source reconciliation replaces what used to become N identical
-        # missing-path FFprobe alerts during a bulk rename or storage outage.
         for root_id in sorted(roots_to_reconcile):
             reconciling_run_scan(root_id, hash_after=False)
 
@@ -209,89 +224,95 @@ def build_router(ctx: RouteContext):
             except OSError:
                 continue
 
-        # The original helper treats [] like "inspect everything". A sentinel id
-        # keeps an intentionally empty preflight empty while still letting the
-        # worker update its normal task state.
         return base_run_media_inspection(safe_ids or [-1])
 
     def cancellable_run_scan_all(roots: list[tuple[int, str]]) -> None:
-        """Run Scan All with cooperative cancellation between source roots.
-
-        A source scan is allowed to finish once it has started so Source Guard and
-        catalog transactions are never interrupted halfway through. A cancellation
-        request prevents the next source from starting. A request made while the
-        worker is still starting is preserved rather than cleared by thread startup.
-        """
-        total = len(roots)
-        with scan_all_lock:
-            scan_all_job.clear()
-            scan_all_job.update({
-                "status": "running", "total": total, "completed": 0,
-                "errors": 0, "protected": 0, "current_root_id": None,
-                "current_label": "", "files": 0, "titles": 0,
-            })
-
-        errors = 0
-        protected = 0
-        completed_count = 0
-        changed_files: list[int] = []
-        record_event("scan", f"Scan all started for {total:,} sources.")
-
-        try:
-            for root_id, label in roots:
-                if _SCAN_ALL_CANCEL.is_set():
-                    break
+        """Run Scan All under one maintenance lease with cancellation between roots."""
+        with APPLICATION_MAINTENANCE_GATE.operation_lease() as admitted:
+            if not admitted:
                 with scan_all_lock:
+                    scan_all_job.clear()
                     scan_all_job.update({
-                        "current_root_id": root_id, "current_label": label,
-                        "completed": completed_count, "files": 0, "titles": 0,
+                        "status": "paused",
+                        "total": len(roots),
+                        "completed": 0,
+                        "errors": 0,
+                        "protected": 0,
+                        "current_root_id": None,
+                        "current_label": "",
+                        "files": 0,
+                        "titles": 0,
+                        "error": "Exclusive maintenance started before Scan All could run.",
                     })
-                changed_files.extend(run_scan(root_id, hash_after=False))
-                completed_count += 1
-                with scan_lock:
-                    job = scan_jobs.get(root_id, {})
-                    if job.get("status") == "error":
-                        errors += 1
-                    elif job.get("source_status") == "degraded":
-                        protected += 1
-                with scan_all_lock:
-                    scan_all_job.update({
-                        "completed": completed_count, "errors": errors,
-                        "protected": protected,
-                    })
+                return
 
-            cancelled = _SCAN_ALL_CANCEL.is_set()
+            total = len(roots)
             with scan_all_lock:
+                scan_all_job.clear()
                 scan_all_job.update({
-                    "status": "cancelled" if cancelled else "complete",
-                    "completed": completed_count,
-                    "errors": errors,
-                    "current_root_id": None,
-                    "current_label": "",
+                    "status": "running", "total": total, "completed": 0,
+                    "errors": 0, "protected": 0, "current_root_id": None,
+                    "current_label": "", "files": 0, "titles": 0,
                 })
 
-            if changed_files:
-                handle_import_hashing(
-                    changed_files,
-                    "Fingerprinting new or changed media from all sources",
-                )
+            errors = 0
+            protected = 0
+            completed_count = 0
+            changed_files: list[int] = []
+            record_event("scan", f"Scan all started for {total:,} sources.")
 
-            if cancelled:
-                record_event(
-                    "scan",
-                    f"Scan all stopped after {completed_count:,} of {total:,} sources.",
-                    level="warning",
-                    context={
-                        "operation": "scan_all_cancel",
+            try:
+                for root_id, label in roots:
+                    if _SCAN_ALL_CANCEL.is_set():
+                        break
+                    with scan_all_lock:
+                        scan_all_job.update({
+                            "current_root_id": root_id, "current_label": label,
+                            "completed": completed_count, "files": 0, "titles": 0,
+                        })
+                    changed_files.extend(run_scan(root_id, hash_after=False))
+                    completed_count += 1
+                    with scan_lock:
+                        job = scan_jobs.get(root_id, {})
+                        if job.get("status") == "error":
+                            errors += 1
+                        elif job.get("source_status") == "degraded":
+                            protected += 1
+                    with scan_all_lock:
+                        scan_all_job.update({
+                            "completed": completed_count, "errors": errors,
+                            "protected": protected,
+                        })
+
+                cancelled = _SCAN_ALL_CANCEL.is_set()
+                with scan_all_lock:
+                    scan_all_job.update({
+                        "status": "cancelled" if cancelled else "complete",
                         "completed": completed_count,
-                        "total": total,
-                    },
-                )
-        finally:
-            # A completed worker owns and clears the request. This also allows a
-            # cancellation submitted during the 'starting' state to survive until
-            # the worker sees it for the first time.
-            _SCAN_ALL_CANCEL.clear()
+                        "errors": errors,
+                        "current_root_id": None,
+                        "current_label": "",
+                    })
+
+                if changed_files:
+                    handle_import_hashing(
+                        changed_files,
+                        "Fingerprinting new or changed media from all sources",
+                    )
+
+                if cancelled:
+                    record_event(
+                        "scan",
+                        f"Scan all stopped after {completed_count:,} of {total:,} sources.",
+                        level="warning",
+                        context={
+                            "operation": "scan_all_cancel",
+                            "completed": completed_count,
+                            "total": total,
+                        },
+                    )
+            finally:
+                _SCAN_ALL_CANCEL.clear()
 
     @router.post(
         "/api/tasks/{task_id}/cancel",
@@ -359,6 +380,7 @@ def build_router(ctx: RouteContext):
         "check_source_health": tracked_check_source_health,
         "redirect": source_aware_redirect,
         "run_scan": reconciling_run_scan,
+        "run_title_scan": leased_run_title_scan,
         "run_media_inspection": reconciling_run_media_inspection,
         "run_scan_all": cancellable_run_scan_all,
         "cancel_background_task": cancel_background_task,
