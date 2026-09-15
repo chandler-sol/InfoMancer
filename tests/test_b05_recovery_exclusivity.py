@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
 import unittest
+
+os.environ.setdefault("INFOMANCER_AUTH_MODE", "disabled")
 
 import app.main as main
 from app.maintenance_gate import APPLICATION_MAINTENANCE_GATE
