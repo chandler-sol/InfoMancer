@@ -78,6 +78,7 @@ def build_router(ctx: RouteContext):
     redirect = ctx.live("redirect")
     record_event = ctx.live("record_event")
     restart_after_restore = ctx.live("restart_after_restore")
+    runtime_lease = ctx.live("runtime_lease")
     other_background_work_running = ctx.live("_other_background_work_running")
     imdb_genre_job = ctx.live("imdb_genre_job")
     duplicate_verify_job = ctx.live("duplicate_verify_job")
@@ -315,7 +316,9 @@ def build_router(ctx: RouteContext):
                 raise RecoveryPackageError(
                     "Wait for active scans, metadata, fingerprint, duplicate, trash-cleanup, or maintenance work to finish before restoring."
                 )
-            if not APPLICATION_MAINTENANCE_GATE.try_begin_exclusive("portable recovery"):
+            if not APPLICATION_MAINTENANCE_GATE.try_upgrade_sole_operation_to_exclusive(
+                "portable recovery"
+            ):
                 raise RecoveryPackageError(
                     "InfoMancer became busy while recovery was preparing. Wait for active requests or maintenance work to finish, then try again."
                 )
@@ -335,6 +338,12 @@ def build_router(ctx: RouteContext):
                 Path(db.path), APP_VERSION, path_mappings, settings.media_browse_roots
             )
             result = package_service.restore(candidate, settings.media_browse_roots)
+            try:
+                runtime_lease.rebind_after_restore()
+            except Exception as exc:
+                raise RecoveryPackageFatalError(
+                    "The restored database was installed, but this process could not rebind its runtime ownership. Normal service remains blocked until the installation state is reviewed and InfoMancer is restarted."
+                ) from exc
             restore_completed = True
         except RecoveryPackageFatalError as exc:
             fatal_restore = True
