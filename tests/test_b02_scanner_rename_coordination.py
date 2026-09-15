@@ -125,12 +125,16 @@ class ScannerFolderRenameCoordinationTests(unittest.TestCase):
             nonlocal inserted
             if path == self.show and Path(destination) == target and not inserted:
                 inserted = True
-                with sqlite3.connect(self.database.path) as conn:
-                    conn.execute(
-                        """INSERT INTO files(title_id,path,filename,extension,size_bytes,seen_scan)
-                           VALUES (?,?,?,?,?,?)""",
-                        (self.title_id, str(second), second.name, ".mkv", second.stat().st_size, "interleave"),
-                    )
+                bypass = sqlite3.connect(self.database.path)
+                try:
+                    with bypass:
+                        bypass.execute(
+                            """INSERT INTO files(title_id,path,filename,extension,size_bytes,seen_scan)
+                               VALUES (?,?,?,?,?,?)""",
+                            (self.title_id, str(second), second.name, ".mkv", second.stat().st_size, "interleave"),
+                        )
+                finally:
+                    bypass.close()
             return original_rename(path, destination)
 
         with patch.object(Path, "rename", insert_after_snapshot_then_rename):
