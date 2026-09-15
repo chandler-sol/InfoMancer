@@ -306,6 +306,7 @@ def build_router(ctx: RouteContext):
         exclusive_acquired = False
         restore_completed = False
         fatal_restore = False
+        package_service = None
         try:
             candidate = staged_path(staged_token)
             if not candidate.is_file():
@@ -366,6 +367,23 @@ def build_router(ctx: RouteContext):
                 user_id=request.state.user.id,
             )
             return redirect("/settings/recovery", str(exc))
+        except Exception as exc:
+            # Once exclusive recovery has entered the restore service, an
+            # unclassified exception may have happened after live state was
+            # installed. Never infer that the old installation is still
+            # authoritative and reopen admission. Known pre-commit failures are
+            # converted to RecoveryPackageError by the service above.
+            if exclusive_acquired and package_service is not None:
+                fatal_restore = True
+                detail = html.escape(str(exc))
+                return HTMLResponse(
+                    "<h1>Recovery stopped in maintenance mode</h1>"
+                    "<p>Recovery encountered an unexpected error after exclusive restore work began. Normal service remains blocked because InfoMancer cannot prove which installation state is authoritative.</p>"
+                    f"<pre>{detail}</pre>"
+                    "<p>Review the installation state and restart InfoMancer before resuming service.</p>",
+                    status_code=500,
+                )
+            raise
         finally:
             if exclusive_acquired and not restore_completed and not fatal_restore:
                 APPLICATION_MAINTENANCE_GATE.end_exclusive()
