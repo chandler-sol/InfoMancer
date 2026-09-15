@@ -33,10 +33,7 @@ class MaintenanceTests(unittest.TestCase):
         while APPLICATION_MAINTENANCE_GATE.exclusive_active():
             APPLICATION_MAINTENANCE_GATE.end_exclusive()
         with self.database.connect() as connection:
-            connection.execute(
-                "INSERT INTO app_settings(key,value) VALUES (?,?)",
-                ("installation_name", "Before"),
-            )
+            connection.execute("INSERT INTO app_settings(key,value) VALUES (?,?)", ("installation_name", "Before"))
 
     def tearDown(self):
         if APPLICATION_MAINTENANCE_GATE.exclusive_active():
@@ -46,9 +43,7 @@ class MaintenanceTests(unittest.TestCase):
     def setting(self) -> str:
         connection = sqlite3.connect(self.path)
         try:
-            return connection.execute(
-                "SELECT value FROM app_settings WHERE key='installation_name'"
-            ).fetchone()[0]
+            return connection.execute("SELECT value FROM app_settings WHERE key='installation_name'").fetchone()[0]
         finally:
             connection.close()
 
@@ -63,10 +58,7 @@ class MaintenanceTests(unittest.TestCase):
             resolve_backup(self.path, "../infomancer.db")
 
     def test_backup_listing_fails_safe_when_backup_folder_is_unavailable(self):
-        with mock.patch(
-            "app.maintenance.backup_directory",
-            side_effect=MaintenanceError("backup folder unavailable"),
-        ):
+        with mock.patch("app.maintenance.backup_directory", side_effect=MaintenanceError("backup folder unavailable")):
             self.assertEqual(list_database_backups(self.path), [])
 
     def test_backup_listing_and_resolver_reject_symlinked_database(self):
@@ -94,11 +86,7 @@ class MaintenanceTests(unittest.TestCase):
             return real_exists(candidate)
 
         def fake_is_symlink(candidate: Path) -> bool:
-            if (
-                candidate.parent == directory
-                and candidate.name.startswith("infomancer-backup-")
-                and not candidate.name.endswith("-2.db")
-            ):
+            if candidate.parent == directory and candidate.name.startswith("infomancer-backup-") and not candidate.name.endswith("-2.db"):
                 collision_seen["value"] = True
                 return True
             return real_is_symlink(candidate)
@@ -120,28 +108,14 @@ class MaintenanceTests(unittest.TestCase):
 
     def test_raw_restore_invalidates_restored_sessions_and_unused_invitations(self):
         with self.database.connect() as connection:
-            user_id = int(connection.execute(
-                """INSERT INTO users(username,display_name,role,password_hash)
-                   VALUES ('restore-user','Restore User','member','test')"""
-            ).lastrowid)
-            connection.execute(
-                """INSERT INTO user_sessions(user_id,token_hash,csrf_token,expires_at)
-                   VALUES (?,?,?,datetime('now','+1 day'))""",
-                (user_id, "c" * 64, "csrf"),
-            )
-            connection.execute(
-                """INSERT INTO account_invitations(user_id,token_hash,expires_at)
-                   VALUES (?,?,datetime('now','+1 day'))""",
-                (user_id, "d" * 64),
-            )
+            user_id = int(connection.execute("INSERT INTO users(username,display_name,role,password_hash) VALUES ('restore-user','Restore User','member','test')").lastrowid)
+            connection.execute("INSERT INTO user_sessions(user_id,token_hash,csrf_token,expires_at) VALUES (?,?,?,datetime('now','+1 day'))", (user_id, "c" * 64, "csrf"))
+            connection.execute("INSERT INTO account_invitations(user_id,token_hash,expires_at) VALUES (?,?,datetime('now','+1 day'))", (user_id, "d" * 64))
         backup = create_database_backup(self.path)
         install_database_backup(self.path, backup)
         with self.database.connect() as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM user_sessions").fetchone()[0], 0)
-            self.assertEqual(connection.execute(
-                """SELECT COUNT(*) FROM account_invitations
-                   WHERE used_at IS NULL AND revoked_at IS NULL"""
-            ).fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM account_invitations WHERE used_at IS NULL AND revoked_at IS NULL").fetchone()[0], 0)
 
     def test_http_restore_upgrades_sole_operation_and_blocks_competing_work(self):
         backup = create_database_backup(self.path)
@@ -174,20 +148,9 @@ class MaintenanceTests(unittest.TestCase):
         title_folder = root / "Example"
         root.mkdir(parents=True)
         with self.database.connect() as connection:
-            root_id = connection.execute(
-                "INSERT INTO roots(path,kind,label) VALUES (?,'movie','Movies')",
-                (str(root),),
-            ).lastrowid
-            title_id = connection.execute(
-                """INSERT INTO titles(root_id,kind,title,folder_path)
-                   VALUES (?,'movie','Example',?)""",
-                (root_id, str(title_folder)),
-            ).lastrowid
-            connection.execute(
-                """INSERT INTO files(title_id,path,filename,extension,seen_scan)
-                   VALUES (?,?,?,?,?)""",
-                (title_id, str(title_folder / "movie.mkv"), "movie.mkv", ".mkv", "scan"),
-            )
+            root_id = connection.execute("INSERT INTO roots(path,kind,label) VALUES (?,'movie','Movies')", (str(root),)).lastrowid
+            title_id = connection.execute("INSERT INTO titles(root_id,kind,title,folder_path) VALUES (?,'movie','Example',?)", (root_id, str(title_folder))).lastrowid
+            connection.execute("INSERT INTO files(title_id,path,filename,extension,seen_scan) VALUES (?,?,?,?,?)", (title_id, str(title_folder / "movie.mkv"), "movie.mkv", ".mkv", "scan"))
         backup = create_database_backup(self.path)
         connection = sqlite3.connect(backup)
         try:
@@ -195,7 +158,7 @@ class MaintenanceTests(unittest.TestCase):
             connection.commit()
         finally:
             connection.close()
-        with self.assertRaisesRegex(MaintenanceError, "media-file path"):
+        with self.assertRaisesRegex(MaintenanceError, "restore could not be completed"):
             install_database_backup(self.path, backup, (media,))
 
     def test_non_infomancer_database_is_rejected(self):
@@ -211,17 +174,10 @@ class MaintenanceTests(unittest.TestCase):
 
     def test_update_request_preserves_qualified_identity_and_validates_tag(self):
         write_update_status(self.path, {
-            "status": "available",
-            "channel": "dev",
-            "latest_version": "0.9.0-dev.2410",
-            "server_tag": "v0.9.0-dev.2410",
-            "build_id": "qualified-2410",
-            "commit_sha": "a" * 40,
-            "qualification_status": "passed",
-            "qualification_workflow": "Tests",
-            "qualification_run_id": 2410,
-            "qualification_gates": ["python-linux", "browser-acceptance"],
-            "database_schema": {"current": 17},
+            "status": "available", "channel": "dev", "latest_version": "0.9.0-dev.2410",
+            "server_tag": "v0.9.0-dev.2410", "build_id": "qualified-2410", "commit_sha": "a" * 40,
+            "qualification_status": "passed", "qualification_workflow": "Tests", "qualification_run_id": 2410,
+            "qualification_gates": ["python-linux", "browser-acceptance"], "database_schema": {"current": 17},
             "message": "ignored in request identity",
         })
         request = write_update_request(self.path, "v0.9.0-dev.2410", "Librarian")
@@ -232,7 +188,6 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(payload["release"]["commit_sha"], "a" * 40)
         self.assertEqual(payload["release"]["qualification_run_id"], 2410)
         self.assertNotIn("message", payload["release"])
-
         with self.assertRaisesRegex(MaintenanceError, "not valid"):
             write_update_request(self.path, "main; rm -rf", "Librarian")
         for invalid in ("v1.2.3-", "v1.2", "v1.2.3/../../main", "v１.2.3"):
