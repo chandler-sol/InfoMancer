@@ -195,6 +195,36 @@ class RecoveryRouteTests(unittest.TestCase):
         self.assertIn("maintenance mode", response.text.casefold())
         self.assertTrue(APPLICATION_MAINTENANCE_GATE.exclusive_active())
 
+    def test_post_commit_cleanup_exception_cannot_reopen_admission(self):
+        token = self.preview_token()
+        original_exists = Path.exists
+        rollback_exists_calls = 0
+
+        def fail_cleanup_exists(path):
+            nonlocal rollback_exists_calls
+            if path.name.startswith(".collection-art-rollback-"):
+                rollback_exists_calls += 1
+                if rollback_exists_calls >= 2:
+                    raise PermissionError("synthetic post-commit cleanup lookup failure")
+            return original_exists(path)
+
+        with patch("app.recovery_package.Path.exists", side_effect=fail_cleanup_exists), patch.object(
+            main.runtime_lease, "rebind_after_restore", wraps=main.runtime_lease.rebind_after_restore
+        ) as rebind:
+            response = self.client.post(
+                "/settings/recovery/apply",
+                headers={"X-CSRF-Token": self.csrf_token()},
+                data={"staged_token": token, "confirm": "RESTORE"},
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("maintenance mode", response.text.casefold())
+        self.assertEqual(rebind.call_count, 0)
+        self.assertTrue(APPLICATION_MAINTENANCE_GATE.exclusive_active())
+        self.assertEqual(
+            APPLICATION_MAINTENANCE_GATE.status()["reason"], "portable recovery"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
