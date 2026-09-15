@@ -37,7 +37,7 @@ class SafeFileRenameService:
     @staticmethod
     def _path_identity(path: Path) -> tuple[str, int, int]:
         """Identify the effective directory at a stable pathname."""
-        resolved = path.resolve(strict=True)
+        resolved = path.resolve(strict=False)
         details = resolved.stat()
         return (str(resolved), int(details.st_dev), int(details.st_ino))
 
@@ -130,6 +130,10 @@ class SafeFileRenameService:
                 raise SafeFileRenameError(
                     f"The {noun} was renamed but the catalog update failed, and the configured source identity changed before rollback. InfoMancer refused to move anything automatically. Review both paths before retrying."
                 )
+            if os.path.lexists(source):
+                raise SafeFileRenameError(
+                    f"The {noun} was renamed but the catalog update failed, and another entry appeared at the original path before rollback. InfoMancer refused to overwrite it. Review both paths before retrying."
+                )
             self._require_inside(target, root)
             self._require_inside(source, root)
             if self._path_identity(source.parent) != source_parent_identity:
@@ -139,10 +143,6 @@ class SafeFileRenameService:
             if self._path_identity(target.parent) != target_parent_identity:
                 raise SafeFileRenameError(
                     f"The {noun} was renamed but the catalog update failed, and the destination parent identity changed before rollback. InfoMancer refused to move anything automatically. Review both paths before retrying."
-                )
-            if os.path.lexists(source):
-                raise SafeFileRenameError(
-                    f"The {noun} was renamed but the catalog update failed, and another entry appeared at the original path before rollback. InfoMancer refused to overwrite it. Review both paths before retrying."
                 )
             if expect_directory:
                 target_has_expected_type = target.is_dir()
@@ -166,7 +166,7 @@ class SafeFileRenameService:
             raise SafeFileRenameError(
                 "The cataloged media file is no longer present at the expected path. Nothing was changed."
             )
-        if destination.exists() and not self._same_file(source, destination):
+        if os.path.lexists(destination) and not self._same_file(source, destination):
             raise SafeFileRenameError(
                 f"Another file already exists at the rename destination: {destination}"
             )
@@ -332,7 +332,7 @@ class SafeFileRenameService:
             raise SafeFileRenameError(
                 "The cataloged show folder is no longer present at the expected path. Nothing was changed."
             )
-        if target.exists() and not self._same_file(source, target):
+        if os.path.lexists(target) and not self._same_file(source, target):
             raise SafeFileRenameError(
                 f"Another folder already exists at the rename destination: {target}"
             )
@@ -361,7 +361,7 @@ class SafeFileRenameService:
             raise SafeFileRenameError(
                 "The show folder changed before the rename could begin. Nothing was changed."
             )
-        if target.exists() and not self._same_file(source, target):
+        if os.path.lexists(target) and not self._same_file(source, target):
             raise SafeFileRenameError(
                 f"Another folder appeared at the rename destination: {target}"
             )
