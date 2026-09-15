@@ -1,19 +1,17 @@
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
+from typing import Iterator
 
 
 class MaintenanceGate:
     """Coordinate exclusive maintenance with normal application work.
 
-    The gate is intentionally process-local. InfoMancer's RuntimeLease already
-    prevents two application processes from owning the same installation data
-    directory, so the remaining race to solve is inside the active process.
-
-    Normal application requests and short background-job start transitions
-    register as active operations. Exclusive maintenance may begin only when
-    no other operation is active. Once exclusive mode begins, new operations
-    fail closed until maintenance is explicitly ended or the process restarts.
+    The gate is intentionally process-local. InfoMancer's RuntimeLease prevents
+    two application processes from owning the same installation data directory.
+    Every request or background worker that can touch installation state must hold
+    an operation lease for its complete lifetime, including logging and cleanup.
     """
 
     def __init__(self) -> None:
@@ -22,7 +20,6 @@ class MaintenanceGate:
         self._exclusive_reason = ""
 
     def try_enter_operation(self) -> bool:
-        """Register ordinary work unless exclusive maintenance is active."""
         with self._lock:
             if self._exclusive_reason:
                 return False
@@ -35,8 +32,17 @@ class MaintenanceGate:
                 raise RuntimeError("MaintenanceGate operation count underflow")
             self._active_operations -= 1
 
+    @contextmanager
+    def operation_lease(self) -> Iterator[bool]:
+        """Hold ordinary-work admission until the caller's final state access."""
+        admitted = self.try_enter_operation()
+        try:
+            yield admitted
+        finally:
+            if admitted:
+                self.leave_operation()
+
     def try_begin_exclusive(self, reason: str) -> bool:
-        """Atomically block new work if no ordinary work is still active."""
         normalized = str(reason or "maintenance").strip() or "maintenance"
         with self._lock:
             if self._exclusive_reason or self._active_operations:
@@ -61,7 +67,4 @@ class MaintenanceGate:
             }
 
 
-# One process-wide coordination point. RuntimeLease already guarantees a single
-# InfoMancer process per catalog, so request, scheduler, and recovery code can use
-# this object without adding another database-backed lock protocol.
 APPLICATION_MAINTENANCE_GATE = MaintenanceGate()
