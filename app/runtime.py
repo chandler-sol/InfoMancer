@@ -9,20 +9,21 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from .db import Database
+from .maintenance_gate import APPLICATION_MAINTENANCE_GATE
 
 
 class RuntimeLeaseError(RuntimeError):
     pass
 
 
-def _desktop_owner() -> str:
+def _runtime_owner(kind: str) -> str:
     host = socket.gethostname().replace(":", "_")
-    return f"desktop:{host}:{os.getpid()}:{secrets.token_urlsafe(12)}"
+    return f"{kind}:{host}:{os.getpid()}:{secrets.token_urlsafe(12)}"
 
 
-def _desktop_owner_pid(owner: str) -> int | None:
+def _local_owner_pid(owner: str) -> int | None:
     parts = str(owner or "").split(":", 3)
-    if len(parts) != 4 or parts[0] != "desktop":
+    if len(parts) != 4 or parts[0] not in {"desktop", "server"}:
         return None
     host = socket.gethostname().replace(":", "_")
     if parts[1] != host:
@@ -52,11 +53,8 @@ def _process_is_alive(pid: int) -> bool:
         close_handle = kernel32.CloseHandle
         close_handle.argtypes = [ctypes.c_void_p]
         close_handle.restype = ctypes.c_int
-
         handle = open_process(process_query_limited_information, 0, pid)
         if not handle:
-            # Access denied means the PID exists but is not queryable. Treat that
-            # conservatively as live so a lease is never stolen from a real process.
             return ctypes.get_last_error() == 5
         try:
             exit_code = ctypes.c_uint32()
@@ -92,12 +90,9 @@ class RuntimeLease:
         if owner:
             self.owner = owner
         elif os.getenv("INFOMANCER_RUNTIME_CONTEXT", "").strip().casefold() == "desktop":
-            # Desktop owns a local catalog through a short-lived bundled core. Put
-            # its PID in the lease so a dead one-file worker can be distinguished
-            # from a genuinely live second InfoMancer process after a restart.
-            self.owner = _desktop_owner()
+            self.owner = _runtime_owner("desktop")
         else:
-            self.owner = secrets.token_urlsafe(24)
+            self.owner = _runtime_owner("server")
         self.on_lost = on_lost or self._terminate_after_lease_loss
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -113,9 +108,6 @@ class RuntimeLease:
 
     @staticmethod
     def _terminate_after_lease_loss() -> None:
-        # Ownership loss means another live process has claimed this catalog.
-        # Immediate termination is safer than allowing two schedulers or
-        # filesystem-mutating workers to continue against the same database.
         os._exit(70)
 
     def acquire(self) -> None:
@@ -131,23 +123,18 @@ class RuntimeLease:
                 except (TypeError, ValueError):
                     fresh = False
 
-                # PyInstaller one-file Windows bundles have a bootloader parent and
-                # an application child. Killing only the bootloader can leave the
-                # child alive briefly. Desktop leases carry the worker PID so a
-                # restart can reclaim a fresh lease as soon as that PID is gone,
-                # instead of forcing the user to wait for the 90-second TTL.
-                desktop_pid = _desktop_owner_pid(str(row["owner"])) if fresh else None
-                if desktop_pid is not None:
+                local_pid = _local_owner_pid(str(row["owner"]))
+                if local_pid is not None:
                     for _ in range(10):
-                        if not _process_is_alive(desktop_pid):
+                        if not _process_is_alive(local_pid):
                             fresh = False
                             break
+                        fresh = True
                         time.sleep(0.05)
 
                 if fresh:
                     raise RuntimeLeaseError(
-                        "Another InfoMancer process is already using this database. "
-                        "Run exactly one application process/worker per catalog."
+                        "Another InfoMancer process is already using this database. Run exactly one application process/worker per catalog."
                     )
             conn.execute(
                 """INSERT INTO runtime_leases(name,owner,heartbeat_at) VALUES (?,?,?)
@@ -157,13 +144,30 @@ class RuntimeLease:
             )
 
     def heartbeat(self) -> None:
+        with APPLICATION_MAINTENANCE_GATE.operation_lease() as admitted:
+            if not admitted:
+                return
+            with self.database.connect() as conn:
+                updated = conn.execute(
+                    "UPDATE runtime_leases SET heartbeat_at=? WHERE name=? AND owner=?",
+                    (self._now().isoformat(), self.name, self.owner),
+                ).rowcount
+            if not updated:
+                raise RuntimeLeaseError("InfoMancer lost ownership of its runtime lease.")
+
+    def rebind_after_restore(self, *, fatal_maintenance: bool = False) -> None:
+        """Reassert this process as owner after an exclusive database replacement."""
+        heartbeat = self._now()
+        if fatal_maintenance:
+            heartbeat += timedelta(hours=24)
         with self.database.connect() as conn:
-            updated = conn.execute(
-                "UPDATE runtime_leases SET heartbeat_at=? WHERE name=? AND owner=?",
-                (self._now().isoformat(), self.name, self.owner),
-            ).rowcount
-        if not updated:
-            raise RuntimeLeaseError("InfoMancer lost ownership of its runtime lease.")
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """INSERT INTO runtime_leases(name,owner,heartbeat_at) VALUES (?,?,?)
+                   ON CONFLICT(name) DO UPDATE SET owner=excluded.owner,
+                     heartbeat_at=excluded.heartbeat_at""",
+                (self.name, self.owner, heartbeat.isoformat()),
+            )
 
     def start(self) -> None:
         self.acquire()
@@ -179,9 +183,6 @@ class RuntimeLease:
                     self.on_lost()
                     return
                 except Exception:
-                    # A transient SQLite/storage failure is not proof that
-                    # ownership changed. Retry on the next heartbeat instead of
-                    # killing a healthy single process.
                     continue
 
         self._thread = threading.Thread(
