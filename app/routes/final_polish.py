@@ -36,6 +36,8 @@ def build_router(ctx: RouteContext):
     media_hash_job = ctx.live("media_hash_job")
     media_hash_lock = ctx.live("media_hash_lock")
     media_hash_pause = ctx.live("media_hash_pause")
+    media_info_job = ctx.live("media_info_job")
+    media_info_lock = ctx.live("media_info_lock")
     record_event = ctx.live("record_event")
     scan_all_job = ctx.live("scan_all_job")
     scan_all_lock = ctx.live("scan_all_lock")
@@ -201,30 +203,63 @@ def build_router(ctx: RouteContext):
             ).fetchall()
 
     def reconciling_run_media_inspection(file_ids: list[int] | None = None):
-        rows = _inspection_rows(file_ids)
-        roots_to_reconcile: set[int] = set()
-        for row in rows:
+        """Keep media-inspection preflight, writes, cleanup, and logging under admission."""
+        with APPLICATION_MAINTENANCE_GATE.operation_lease() as admitted:
+            if not admitted:
+                with media_info_lock:
+                    media_info_job.clear()
+                    media_info_job.update({
+                        "status": "paused",
+                        "processed": 0,
+                        "total": len(file_ids) if file_ids is not None else 0,
+                        "updated": 0,
+                        "errors": 0,
+                        "current": "",
+                        "error": "Exclusive maintenance started before media inspection could run.",
+                    })
+                return None
+
             try:
-                path = Path(row["path"])
-                available = path.exists() and path.is_file()
-            except OSError:
-                available = False
-            if not available:
-                roots_to_reconcile.add(int(row["root_id"]))
+                rows = _inspection_rows(file_ids)
+                roots_to_reconcile: set[int] = set()
+                for row in rows:
+                    try:
+                        path = Path(row["path"])
+                        available = path.exists() and path.is_file()
+                    except OSError:
+                        available = False
+                    if not available:
+                        roots_to_reconcile.add(int(row["root_id"]))
 
-        for root_id in sorted(roots_to_reconcile):
-            reconciling_run_scan(root_id, hash_after=False)
+                for root_id in sorted(roots_to_reconcile):
+                    reconciling_run_scan(root_id, hash_after=False)
 
-        safe_ids: list[int] = []
-        for row in _inspection_rows(file_ids):
-            try:
-                path = Path(row["path"])
-                if path.exists() and path.is_file():
-                    safe_ids.append(int(row["id"]))
-            except OSError:
-                continue
+                safe_ids: list[int] = []
+                for row in _inspection_rows(file_ids):
+                    try:
+                        path = Path(row["path"])
+                        if path.exists() and path.is_file():
+                            safe_ids.append(int(row["id"]))
+                    except OSError:
+                        continue
 
-        return base_run_media_inspection(safe_ids or [-1])
+                return base_run_media_inspection(safe_ids or [-1])
+            except Exception as exc:
+                error = str(exc)[:1000]
+                with media_info_lock:
+                    media_info_job.update({
+                        "status": "error",
+                        "current": "",
+                        "error": error,
+                    })
+                record_event(
+                    "media",
+                    "Media inspection stopped because of an unexpected error. Open Logs for details.",
+                    level="error",
+                    detail=error,
+                    context={"operation": "media_inspection"},
+                )
+                return None
 
     def cancellable_run_scan_all(roots: list[tuple[int, str]]) -> None:
         """Run Scan All under one maintenance lease with cancellation between roots."""
