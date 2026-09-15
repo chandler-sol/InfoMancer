@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import unittest
 
 os.environ.setdefault("INFOMANCER_AUTH_MODE", "disabled")
@@ -156,6 +157,28 @@ class R302MaintenanceAdmissionTests(unittest.TestCase):
             main.imdb_genre_job.clear()
             main.imdb_genre_job.update({"status": "starting"})
         self.assertEqual(main.imdb_genre_job.get("status"), "starting")
+
+    def test_legacy_rename_refresh_thread_blocks_recovery_for_full_thread_lifetime(self):
+        release = threading.Event()
+        started = threading.Event()
+
+        def hold_worker():
+            started.set()
+            release.wait(timeout=5)
+
+        worker = threading.Thread(
+            target=hold_worker,
+            name="infomancer-rename-proposals",
+            daemon=True,
+        )
+        worker.start()
+        self.assertTrue(started.wait(timeout=2))
+        try:
+            self.assertTrue(main._other_background_work_running())
+        finally:
+            release.set()
+            worker.join(timeout=2)
+        self.assertFalse(worker.is_alive())
 
 
 if __name__ == "__main__":
