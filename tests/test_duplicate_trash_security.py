@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -111,6 +113,45 @@ class DuplicateTrashSecurityTests(unittest.TestCase):
                 "SELECT COUNT(*) count FROM files WHERE id=1"
             ).fetchone()["count"]
         self.assertEqual(trash_status, "trashed")
+        self.assertEqual(catalog_count, 0)
+
+    def test_restore_rollback_preserves_new_trash_collision(self):
+        original = self.root / "first.mkv"
+        original.write_bytes(b"first")
+        trash_id = self.trash.move(1, 30, None)
+        with self.database.connect() as conn:
+            trashed = Path(conn.execute(
+                "SELECT trash_path FROM duplicate_trash WHERE id=?", (trash_id,)
+            ).fetchone()["trash_path"])
+
+        real_connect = self.database.connect
+        calls = 0
+
+        @contextmanager
+        def controlled_connect():
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                self.assertEqual(original.read_bytes(), b"first")
+                self.assertFalse(os.path.lexists(trashed))
+                trashed.write_bytes(b"new collision")
+                raise sqlite3.OperationalError("synthetic restore catalog failure")
+            with real_connect() as conn:
+                yield conn
+
+        self.database.connect = controlled_connect
+        with self.assertRaisesRegex(DuplicateTrashError, "preserved both paths"):
+            self.trash.restore(trash_id)
+        self.assertEqual(original.read_bytes(), b"first")
+        self.assertEqual(trashed.read_bytes(), b"new collision")
+
+        self.database.connect = real_connect
+        with self.database.connect() as conn:
+            status = conn.execute(
+                "SELECT status FROM duplicate_trash WHERE id=?", (trash_id,)
+            ).fetchone()["status"]
+            catalog_count = conn.execute("SELECT COUNT(*) count FROM files WHERE id=1").fetchone()["count"]
+        self.assertEqual(status, "trashed")
         self.assertEqual(catalog_count, 0)
 
     def test_expired_purge_fails_closed_when_catalog_root_is_missing(self):
