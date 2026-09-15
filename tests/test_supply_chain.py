@@ -100,7 +100,8 @@ class SupplyChainTests(unittest.TestCase):
         self.assertLess(tests.index("      - desktop-rust-test\n", qualified), package)
         self.assertGreater(tests.index("      - desktop-rust-test\n", package), package)
 
-    def test_e2e_acceptance_has_a_locked_dependency_install(self):
+    def test_e2e_acceptance_consumes_committed_lock_before_any_npm_mutation(self):
+        tests = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
         package_path = ROOT / "e2e" / "package.json"
         lock_path = ROOT / "e2e" / "package-lock.json"
         self.assertTrue(lock_path.is_file(), "E2E dependencies must have an npm lockfile")
@@ -111,6 +112,35 @@ class SupplyChainTests(unittest.TestCase):
         self.assertEqual(
             lock["packages"][""]["devDependencies"],
             package["devDependencies"],
+        )
+        acceptance = tests[tests.index("  acceptance:"):tests.index("  qualified-dev-candidate:")]
+        self.assertIn("npm ci --ignore-scripts", acceptance)
+        self.assertNotIn("npm install", acceptance)
+        self.assertLess(
+            acceptance.index("npm ci --ignore-scripts"),
+            acceptance.index("npm audit --audit-level=high"),
+        )
+
+    def test_windows_package_smoke_and_signed_publisher_share_real_builder(self):
+        tests = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+        builder = (ROOT / "scripts" / "build_windows_sidecar.py").read_text(encoding="utf-8")
+        self.assertEqual(tests.count("python scripts/build_windows_sidecar.py"), 2)
+        self.assertIn("Build and self-check real Windows sidecar", tests)
+        self.assertIn("Build and self-check bundled InfoMancer core", tests)
+        self.assertIn('"desktop/sidecar.py"', builder)
+        self.assertIn('"--check-ffprobe"', builder)
+        self.assertIn('"build/ffprobe/ffprobe.exe', builder)
+        self.assertIn("FFPROBE_LICENSE.txt", builder)
+        self.assertIn("FFPROBE_NOTICE.txt", builder)
+        self.assertNotIn("app/__main__.py", tests)
+        self.assertNotIn("scripts/bootstrap_ffprobe.py", tests)
+        self.assertNotIn("app/ffprobe-assets.json", tests)
+        self.assertNotIn("app/build-info.json", tests)
+        package = tests[tests.index("  windows-dev-package:"):]
+        self.assertIn("name: Generate native icons", package)
+        self.assertLess(
+            package.index("name: Generate native icons"),
+            package.index("name: Build, sign, and publish immutable Windows Dev updater"),
         )
 
     def test_qualified_dev_publisher_keeps_immutable_and_rolling_feeds_connected(self):
