@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sqlite3
 import uuid
@@ -67,13 +68,17 @@ class DuplicateTrashService:
             raise DuplicateTrashError(
                 "InfoMancer could not create its managed Trash folder because this storage location is unavailable or not writable. No file was changed."
             ) from exc
-        # Re-resolve after creation so an existing or concurrently replaced symlink
-        # cannot redirect managed Trash outside the configured media root.
         trash_root = self._managed_trash_root(root)
         self._require_inside(destination, trash_root)
+        if os.path.lexists(destination):
+            raise DuplicateTrashError(
+                "InfoMancer stopped because the managed Trash destination is already occupied. No file was changed."
+            )
+        boundaries = self._capture_move_boundaries(root, trash_root, source, destination)
         snapshot = {column: row[column] for column in FILE_COLUMNS}
         try:
             shutil.move(str(source), str(destination))
+            moved_identity = self._file_identity(destination)
         except OSError as exc:
             raise DuplicateTrashError(
                 "InfoMancer could not move the selected file into managed Trash. Check that the source is connected and writable. No catalog entry was changed."
@@ -92,13 +97,18 @@ class DuplicateTrashService:
                 conn.execute("DELETE FROM files WHERE id=?", (file_id,))
                 return int(cursor.lastrowid)
         except Exception as exc:
-            try:
-                source.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(destination), str(source))
-            except OSError as rollback_exc:
-                raise DuplicateTrashError(
-                    "InfoMancer moved the file into managed Trash but could not finish the catalog update or restore the file automatically. Do not make additional changes until you review Logs and the managed Trash folder."
-                ) from rollback_exc
+            self._rollback_managed_move(
+                current=destination,
+                previous=source,
+                root=root,
+                trash_root=trash_root,
+                boundaries=boundaries,
+                moved_identity=moved_identity,
+                failure_message=(
+                    "InfoMancer moved the file into managed Trash but could not finish the catalog update. "
+                    "The filesystem changed before rollback, so InfoMancer preserved both paths for manual recovery."
+                ),
+            )
             raise DuplicateTrashError(
                 "InfoMancer could not finish the managed Trash catalog update, so the file was restored to its original location."
             ) from exc
@@ -234,9 +244,9 @@ class DuplicateTrashService:
         trash_root = self._managed_trash_root(root)
         self._require_inside(source, trash_root)
         self._require_inside(destination, root)
-        if destination.exists():
+        if os.path.lexists(destination):
             raise DuplicateTrashError(
-                f"Restore stopped because another file already exists at the original path: {destination}. Move that file elsewhere before restoring."
+                f"Restore stopped because another entry already exists at the original path: {destination}. Move that entry elsewhere before restoring."
             )
         if not source.is_file():
             with self.database.connect() as conn:
@@ -254,22 +264,20 @@ class DuplicateTrashService:
             ) from exc
         try:
             destination.parent.mkdir(parents=True, exist_ok=True)
-            # Re-resolve after parent creation. A concurrently created symlink or
-            # Windows junction must not be able to redirect a restore outside the
-            # configured media root, and managed Trash itself must still resolve
-            # inside that root immediately before the move.
             trash_root = self._managed_trash_root(root)
             self._require_inside(source, trash_root)
             self._require_inside(destination, root)
-            if destination.exists():
+            if os.path.lexists(destination):
                 raise DuplicateTrashError(
-                    f"Restore stopped because another file appeared at the original path: {destination}. No file was changed."
+                    f"Restore stopped because another entry appeared at the original path: {destination}. No file was changed."
                 )
             if not source.is_file():
                 raise DuplicateTrashError(
                     "Restore stopped because the managed Trash file changed before the restore could begin. No file was changed."
                 )
+            boundaries = self._capture_move_boundaries(root, trash_root, destination, source)
             shutil.move(str(source), str(destination))
+            moved_identity = self._file_identity(destination)
         except OSError as exc:
             raise DuplicateTrashError(
                 "InfoMancer could not restore this file because the source storage is unavailable or not writable. No catalog entry was changed."
@@ -288,13 +296,18 @@ class DuplicateTrashService:
                     (trash_id,),
                 )
         except Exception as exc:
-            try:
-                source.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(destination), str(source))
-            except OSError as rollback_exc:
-                raise DuplicateTrashError(
-                    "InfoMancer restored the file but could not finish the catalog update or return it to managed Trash automatically. Do not make additional changes until you review Logs."
-                ) from rollback_exc
+            self._rollback_managed_move(
+                current=destination,
+                previous=source,
+                root=root,
+                trash_root=trash_root,
+                boundaries=boundaries,
+                moved_identity=moved_identity,
+                failure_message=(
+                    "InfoMancer restored the file but could not finish the catalog update. "
+                    "The managed Trash path changed or became occupied before rollback, so InfoMancer preserved both paths for manual recovery."
+                ),
+            )
             raise DuplicateTrashError(
                 "InfoMancer could not finish the restore catalog update, so the file was returned to managed Trash."
             ) from exc
@@ -312,8 +325,6 @@ class DuplicateTrashService:
         purged = 0
         for row in rows:
             if not row["root_path"]:
-                # A stale or tampered catalog row must never become permission to
-                # delete an arbitrary path after its media root disappears.
                 continue
             path = Path(row["trash_path"])
             root = Path(row["root_path"])
@@ -365,6 +376,60 @@ class DuplicateTrashService:
             raise DuplicateTrashError(
                 "InfoMancer stopped because the selected path is outside its configured source. No file was changed."
             ) from exc
+
+    @staticmethod
+    def _file_identity(path: Path) -> tuple[int, int, int, int]:
+        stat = path.stat()
+        return (int(stat.st_dev), int(stat.st_ino), int(stat.st_size), int(stat.st_mtime_ns))
+
+    @staticmethod
+    def _path_identity(path: Path) -> tuple[str, int, int]:
+        resolved = path.resolve(strict=False)
+        stat = resolved.stat()
+        return (str(resolved), int(stat.st_dev), int(stat.st_ino))
+
+    def _capture_move_boundaries(
+        self, root: Path, trash_root: Path, media_path: Path, trash_path: Path,
+    ) -> tuple[tuple[str, int, int], tuple[str, int, int], tuple[str, int, int], tuple[str, int, int]]:
+        return (
+            self._path_identity(root),
+            self._path_identity(trash_root),
+            self._path_identity(media_path.parent),
+            self._path_identity(trash_path.parent),
+        )
+
+    def _rollback_managed_move(
+        self,
+        *,
+        current: Path,
+        previous: Path,
+        root: Path,
+        trash_root: Path,
+        boundaries: tuple[tuple[str, int, int], tuple[str, int, int], tuple[str, int, int], tuple[str, int, int]],
+        moved_identity: tuple[int, int, int, int],
+        failure_message: str,
+    ) -> None:
+        try:
+            current_trash_root = self._managed_trash_root(root)
+            self._require_inside(current, root)
+            self._require_inside(previous, root)
+            expected_root, expected_trash, expected_media_parent, expected_trash_parent = boundaries
+            if self._path_identity(root) != expected_root:
+                raise DuplicateTrashError(failure_message)
+            if self._path_identity(current_trash_root) != expected_trash:
+                raise DuplicateTrashError(failure_message)
+            parents = {self._path_identity(current.parent), self._path_identity(previous.parent)}
+            if parents != {expected_media_parent, expected_trash_parent}:
+                raise DuplicateTrashError(failure_message)
+            if os.path.lexists(previous):
+                raise DuplicateTrashError(failure_message)
+            if not current.is_file() or self._file_identity(current) != moved_identity:
+                raise DuplicateTrashError(failure_message)
+            shutil.move(str(current), str(previous))
+        except DuplicateTrashError:
+            raise
+        except OSError as rollback_exc:
+            raise DuplicateTrashError(failure_message) from rollback_exc
 
     @staticmethod
     def _purge_after(retention_days: int | None) -> str | None:
