@@ -23,6 +23,21 @@ class RecoveryPackageError(ValueError):
     pass
 
 
+class RecoveryPackageFatalError(RecoveryPackageError):
+    """Recovery changed live state and could not prove a complete rollback."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        recovery_staging: Path,
+        safety_package: str,
+    ) -> None:
+        super().__init__(message)
+        self.recovery_staging = Path(recovery_staging)
+        self.safety_package = safety_package
+
+
 class RecoveryPackageService:
     FORMAT = "infomancer-recovery"
     FORMAT_VERSION = 1
@@ -64,20 +79,10 @@ class RecoveryPackageService:
 
     @classmethod
     def _safe_member(cls, name: str) -> bool:
-        if (
-            not name
-            or len(name) > cls.MAX_MEMBER_PATH_LENGTH
-            or "\\" in name
-            or "\x00" in name
-        ):
+        if not name or len(name) > cls.MAX_MEMBER_PATH_LENGTH or "\\" in name or "\x00" in name:
             return False
         path = PurePosixPath(name)
-        if (
-            path.is_absolute()
-            or ".." in path.parts
-            or path.as_posix() != name
-            or len(path.parts) > cls.MAX_MEMBER_DEPTH
-        ):
+        if path.is_absolute() or ".." in path.parts or path.as_posix() != name or len(path.parts) > cls.MAX_MEMBER_DEPTH:
             return False
         for part in path.parts:
             if (
@@ -93,10 +98,7 @@ class RecoveryPackageService:
 
     @staticmethod
     def _portable_member_key(name: str) -> str:
-        return "/".join(
-            unicodedata.normalize("NFC", part).casefold()
-            for part in PurePosixPath(name).parts
-        )
+        return "/".join(unicodedata.normalize("NFC", part).casefold() for part in PurePosixPath(name).parts)
 
     @classmethod
     def _validate_zip_info(cls, info: zipfile.ZipInfo) -> None:
@@ -110,31 +112,23 @@ class RecoveryPackageService:
             if info.compress_size <= 0:
                 raise RecoveryPackageError("The recovery package contains an invalid compressed file.")
             if info.file_size > info.compress_size * cls.MAX_COMPRESSION_RATIO:
-                raise RecoveryPackageError(
-                    "The recovery package contains a file with an unsafe compression ratio."
-                )
+                raise RecoveryPackageError("The recovery package contains a file with an unsafe compression ratio.")
 
     @staticmethod
     def _manifest_size(record: dict, name: str) -> int:
         value = record.get("size")
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            raise RecoveryPackageError(
-                f"The recovery package has an invalid size value for {name}."
-            )
+            raise RecoveryPackageError(f"The recovery package has an invalid size value for {name}.")
         return value
 
     @staticmethod
     def _manifest_hash(record: dict, name: str) -> str:
         value = record.get("sha256")
         if not isinstance(value, str):
-            raise RecoveryPackageError(
-                f"The recovery package checksum is invalid for {name}."
-            )
+            raise RecoveryPackageError(f"The recovery package checksum is invalid for {name}.")
         value = value.casefold()
         if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
-            raise RecoveryPackageError(
-                f"The recovery package checksum is invalid for {name}."
-            )
+            raise RecoveryPackageError(f"The recovery package checksum is invalid for {name}.")
         return value
 
     @staticmethod
@@ -157,6 +151,34 @@ class RecoveryPackageService:
             raise RecoveryPackageError(
                 "InfoMancer could not create a verified database snapshot for the recovery package."
             ) from exc
+
+    @staticmethod
+    def _invalidate_restored_auth_state(database: Path) -> None:
+        """Never revive bearer sessions or unused one-time invitations from backup."""
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = sqlite3.connect(database)
+            tables = {
+                row[0] for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            with connection:
+                if "user_sessions" in tables:
+                    connection.execute("DELETE FROM user_sessions")
+                if "account_invitations" in tables:
+                    connection.execute(
+                        """UPDATE account_invitations
+                           SET revoked_at=COALESCE(revoked_at,CURRENT_TIMESTAMP)
+                           WHERE used_at IS NULL AND revoked_at IS NULL"""
+                    )
+        except sqlite3.Error as exc:
+            raise RecoveryPackageError(
+                "InfoMancer could not invalidate restored login credentials before recovery. The live installation was not changed."
+            ) from exc
+        finally:
+            if connection is not None:
+                connection.close()
 
     def _artwork_files(self) -> list[Path]:
         if not self.artwork_dir.is_dir():
@@ -191,9 +213,7 @@ class RecoveryPackageService:
                 temp_package = Path(handle.name)
 
             manifest_files: list[dict] = []
-            with zipfile.ZipFile(
-                temp_package, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6,
-            ) as archive:
+            with zipfile.ZipFile(temp_package, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
                 db_member = "database/infomancer.db"
                 archive.write(temp_database, db_member)
                 manifest_files.append({
@@ -231,10 +251,7 @@ class RecoveryPackageService:
                         "Provider credentials must be entered again after recovery."
                     ),
                 }
-                archive.writestr(
-                    "manifest.json",
-                    json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8"),
-                )
+                archive.writestr("manifest.json", json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8"))
             if temp_package.stat().st_size > self.MAX_PACKAGE_BYTES:
                 raise RecoveryPackageError("The recovery package exceeded the 4 GB safety limit.")
             self.verify(temp_package)
@@ -418,9 +435,7 @@ class RecoveryPackageService:
                     try:
                         destination.resolve(strict=False).relative_to(staging)
                     except ValueError as exc:
-                        raise RecoveryPackageError(
-                            "The recovery package contains an unsafe extraction destination."
-                        ) from exc
+                        raise RecoveryPackageError("The recovery package contains an unsafe extraction destination.") from exc
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     with archive.open(info, "r") as source, destination.open("wb") as target:
                         digest = hashlib.sha256()
@@ -428,9 +443,7 @@ class RecoveryPackageService:
                         while chunk := source.read(1024 * 1024):
                             written += len(chunk)
                             if written > expected_size:
-                                raise RecoveryPackageError(
-                                    f"The staged restore size check failed for {name}."
-                                )
+                                raise RecoveryPackageError(f"The staged restore size check failed for {name}.")
                             target.write(chunk)
                             digest.update(chunk)
                     if written != expected_size:
@@ -446,32 +459,26 @@ class RecoveryPackageService:
         return summary, database, artwork
 
     def restore(self, package_path: Path, media_browse_roots: Iterable[Path]) -> dict:
-        """Restore database + collection artwork as one rollback-protected operation.
-
-        The incoming archive is verified and fully staged before any live file is
-        touched. A fresh portable recovery package of the current installation is
-        also created before commit. Provider-secret storage is intentionally outside
-        this operation and is never read, replaced, or removed.
-        """
+        """Restore database + collection artwork as one rollback-protected operation."""
         package_path = Path(package_path)
         staging_root = Path(tempfile.mkdtemp(prefix="recovery-restore-", dir=self.database_path.parent))
         rollback_art = self.database_path.parent / f".collection-art-rollback-{staging_root.name}"
         rollback_database = staging_root / "rollback-live.db"
+        rollback_apply = staging_root / "rollback-apply.db"
         old_art_moved = False
         incoming_art_installed = False
         database_replaced = False
+        preserve_recovery_artifacts = False
         safety_package: Path | None = None
         try:
-            summary, staged_database, staged_artwork = self._extract_for_restore(
-                package_path, staging_root
-            )
+            summary, staged_database, staged_artwork = self._extract_for_restore(package_path, staging_root)
             try:
                 validate_database_paths(staged_database, media_browse_roots)
             except MaintenanceError as exc:
                 raise RecoveryPackageError(str(exc)) from exc
+            self._invalidate_restored_auth_state(staged_database)
+            validate_database_backup(staged_database)
 
-            # A complete, self-verified package of the current installation is a
-            # hard precondition. If this fails, restore stops before touching live state.
             safety_package = self.create()
             self._database_snapshot(rollback_database)
 
@@ -497,6 +504,7 @@ class RecoveryPackageService:
                 "safety_package": safety_package.name,
                 "restored_database": self.database_path.name,
                 "restored_artwork_files": summary["artwork_files"],
+                "authentication_reset": True,
             }
         except (OSError, zipfile.BadZipFile, MaintenanceError, RecoveryPackageError) as exc:
             rollback_failures: list[str] = []
@@ -505,9 +513,12 @@ class RecoveryPackageService:
                     for suffix in ("-wal", "-shm"):
                         Path(str(self.database_path) + suffix).unlink(missing_ok=True)
                     if rollback_database.exists():
-                        self._replace(rollback_database, self.database_path)
+                        shutil.copy2(rollback_database, rollback_apply)
+                        self._replace(rollback_apply, self.database_path)
                         validate_database_backup(self.database_path)
-                except Exception as rollback_exc:  # pragma: no cover - emergency path
+                    else:
+                        raise OSError("verified rollback database snapshot is missing")
+                except Exception as rollback_exc:
                     rollback_failures.append(f"database: {rollback_exc}")
             if incoming_art_installed or old_art_moved:
                 try:
@@ -518,13 +529,18 @@ class RecoveryPackageService:
                             self.artwork_dir.unlink()
                     if old_art_moved and rollback_art.exists():
                         self._replace(rollback_art, self.artwork_dir)
-                except Exception as rollback_exc:  # pragma: no cover - emergency path
+                except Exception as rollback_exc:
                     rollback_failures.append(f"collection artwork: {rollback_exc}")
             if rollback_failures:
+                preserve_recovery_artifacts = True
                 safety = safety_package.name if safety_package else "unavailable"
-                raise RecoveryPackageError(
+                raise RecoveryPackageFatalError(
                     "Portable recovery failed and automatic rollback was incomplete. "
-                    f"Safety package: {safety}. Rollback errors: {'; '.join(rollback_failures)}"
+                    "InfoMancer must remain in exclusive maintenance mode until the installation is reviewed or restarted. "
+                    f"Safety package: {safety}. Recovery staging: {staging_root}. "
+                    f"Rollback errors: {'; '.join(rollback_failures)}",
+                    recovery_staging=staging_root,
+                    safety_package=safety,
                 ) from exc
             if isinstance(exc, RecoveryPackageError):
                 raise RecoveryPackageError(
@@ -534,6 +550,7 @@ class RecoveryPackageService:
                 "Portable recovery could not be completed. The live installation was left unchanged or rolled back safely."
             ) from exc
         finally:
-            if rollback_art.exists() and not old_art_moved:
-                shutil.rmtree(rollback_art, ignore_errors=True)
-            shutil.rmtree(staging_root, ignore_errors=True)
+            if not preserve_recovery_artifacts:
+                if rollback_art.exists() and not old_art_moved:
+                    shutil.rmtree(rollback_art, ignore_errors=True)
+                shutil.rmtree(staging_root, ignore_errors=True)
