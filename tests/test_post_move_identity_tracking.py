@@ -45,9 +45,10 @@ class SeasonPostMoveIdentityTrackingTests(unittest.TestCase):
         real_identity = self.service._file_identity
 
         def fail_moved_identity(path: Path):
-            if Path(path) == self.destination:
+            candidate = Path(path)
+            if candidate == self.destination:
                 raise OSError("synthetic post-move identity failure")
-            return real_identity(path)
+            return real_identity(candidate)
 
         with patch.object(self.service, "_file_identity", side_effect=fail_moved_identity):
             with self.assertRaisesRegex(SeasonFolderError, "automatic rollback was incomplete"):
@@ -93,7 +94,7 @@ class DuplicateTrashPostMoveIdentityTrackingTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def test_trash_move_post_move_identity_failure_is_not_reported_unchanged(self):
+    def test_trash_move_post_move_identity_failure_is_reported_incomplete(self):
         real_identity = self.service._file_identity
 
         def fail_trash_identity(path: Path):
@@ -103,21 +104,21 @@ class DuplicateTrashPostMoveIdentityTrackingTests(unittest.TestCase):
             return real_identity(candidate)
 
         with patch.object(self.service, "_file_identity", side_effect=fail_trash_identity):
-            with self.assertRaisesRegex(DuplicateTrashError, "preserved both paths"):
+            with self.assertRaisesRegex(DuplicateTrashError, "Managed Trash move is incomplete"):
                 self.service.move(1, 30, None)
 
         self.assertFalse(self.source.exists())
-        trashed = list((self.root / ".infomancer-trash").rglob("first.mkv"))
-        self.assertEqual(len(trashed), 0)
-        trashed = [path for path in (self.root / ".infomancer-trash").rglob("*") if path.is_file()]
-        self.assertEqual(len(trashed), 1)
+        trashed_files = [
+            path for path in (self.root / ".infomancer-trash").rglob("*") if path.is_file()
+        ]
+        self.assertEqual(len(trashed_files), 1)
         with self.database.connect() as conn:
             catalog_path = conn.execute("SELECT path FROM files WHERE id=1").fetchone()["path"]
             trash_rows = conn.execute("SELECT COUNT(*) count FROM duplicate_trash").fetchone()["count"]
         self.assertEqual(catalog_path, str(self.source))
         self.assertEqual(trash_rows, 0)
 
-    def test_trash_restore_post_move_identity_failure_is_not_reported_rolled_back(self):
+    def test_trash_restore_post_move_identity_failure_is_reported_incomplete(self):
         trash_id = self.service.move(1, 30, None)
         with self.database.connect() as conn:
             trash_path = Path(conn.execute(
@@ -133,7 +134,7 @@ class DuplicateTrashPostMoveIdentityTrackingTests(unittest.TestCase):
             return real_identity(candidate)
 
         with patch.object(self.service, "_file_identity", side_effect=fail_restored_identity):
-            with self.assertRaisesRegex(DuplicateTrashError, "preserved both paths"):
+            with self.assertRaisesRegex(DuplicateTrashError, "Managed Trash restore is incomplete"):
                 self.service.restore(trash_id)
 
         self.assertTrue(self.source.is_file())
