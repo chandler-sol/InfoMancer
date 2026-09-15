@@ -29,6 +29,25 @@ class MaintenanceGateTests(unittest.TestCase):
         self.assertTrue(gate.try_enter_operation())
         gate.leave_operation()
 
+    def test_sole_operation_can_upgrade_to_exclusive(self):
+        gate = MaintenanceGate()
+        self.assertTrue(gate.try_enter_operation())
+        self.assertTrue(gate.try_upgrade_sole_operation_to_exclusive("restore"))
+        self.assertTrue(gate.exclusive_active())
+        self.assertFalse(gate.try_enter_operation())
+        gate.leave_operation()
+        self.assertEqual(gate.status()["active_operations"], 0)
+        self.assertTrue(gate.exclusive_active())
+        gate.end_exclusive()
+
+    def test_upgrade_refuses_when_another_operation_is_active(self):
+        gate = MaintenanceGate()
+        self.assertTrue(gate.try_enter_operation())
+        self.assertTrue(gate.try_enter_operation())
+        self.assertFalse(gate.try_upgrade_sole_operation_to_exclusive("restore"))
+        gate.leave_operation()
+        gate.leave_operation()
+
     def test_operation_underflow_fails_closed(self):
         gate = MaintenanceGate()
         with self.assertRaises(RuntimeError):
@@ -55,7 +74,8 @@ class MaintenanceAdmissionMiddlewareTests(unittest.TestCase):
 
         @self.app.post("/settings/recovery/apply")
         async def recovery_apply(request: Request):
-            return PlainTextResponse("restore admitted")
+            active = APPLICATION_MAINTENANCE_GATE.status()["active_operations"]
+            return PlainTextResponse(str(active))
 
         self.client = TestClient(self.app)
         self.addCleanup(self.client.close)
@@ -82,10 +102,13 @@ class MaintenanceAdmissionMiddlewareTests(unittest.TestCase):
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.text, "ok")
 
-    def test_recovery_apply_can_enter_to_acquire_exclusive_mode_itself(self):
+    def test_recovery_apply_is_counted_before_handler_runs(self):
         response = self.client.post("/settings/recovery/apply")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.text, "restore admitted")
+        self.assertEqual(response.text, "1")
+        self.assertEqual(
+            APPLICATION_MAINTENANCE_GATE.status()["active_operations"], 0
+        )
 
 
 if __name__ == "__main__":
