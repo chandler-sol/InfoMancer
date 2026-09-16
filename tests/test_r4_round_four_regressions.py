@@ -13,7 +13,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from fastapi import Form, Request
+from fastapi import FastAPI, Form, Request
+from fastapi.testclient import TestClient
 
 from app.config import get_settings
 from app.db import Database
@@ -21,11 +22,9 @@ from app.maintenance_gate import APPLICATION_MAINTENANCE_GATE
 from app.operation_history import OperationHistoryService
 from app.routes.context import RouteContext
 from app.routes.duplicate_verification_maintenance import build_router as build_duplicate_router
-from app.routes import (
-    ROUTER_BUILDERS,
-    build_resilience_router,
-    build_security_hardening_router,
-)
+from app.routes.resilience import build_router as build_resilience_router
+from app.routes.security_hardening import _install_maintenance_admission_middleware
+from app.routes import ROUTER_BUILDERS, build_security_hardening_router
 from app.runtime import RuntimeLease, RuntimeLeaseError
 from app.runtime_lock import RuntimeProcessLock
 from app.safe_file_rename import SafeFileRenameService
@@ -125,13 +124,35 @@ class R401DuplicateWorkerAdmissionTests(unittest.TestCase):
         self.assertEqual(status, "paused")
         self.assertFalse(called.is_set())
 
-    def test_structured_error_layer_is_inside_maintenance_admission(self):
-        # Starlette wraps later-added middleware around earlier-added middleware.
-        # Therefore resilience must be registered first and maintenance second.
-        self.assertLess(
-            ROUTER_BUILDERS.index(build_resilience_router),
-            ROUTER_BUILDERS.index(build_security_hardening_router),
+    def test_structured_error_logging_remains_inside_maintenance_admission(self):
+        self.assertIs(ROUTER_BUILDERS[0], build_security_hardening_router)
+        observed_events: list[int] = []
+        app = FastAPI()
+
+        def record_event(*_args, **_kwargs):
+            observed_events.append(
+                int(APPLICATION_MAINTENANCE_GATE.status()["active_operations"])
+            )
+
+        ctx = RouteContext({"app": app, "record_event": record_event})
+        _install_maintenance_admission_middleware(ctx, record_event)
+        build_resilience_router(ctx)
+
+        @app.get("/api/r4-boom")
+        async def boom():
+            raise RuntimeError("r4 injected api failure")
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get("/api/r4-boom")
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.json()["detail"],
+            "InfoMancer hit an unexpected error while handling that request. Do not assume "
+            "the action completed. Open Logs for details, then try again.",
         )
+        self.assertTrue(observed_events)
+        self.assertTrue(all(value > 0 for value in observed_events))
+        self.assertEqual(APPLICATION_MAINTENANCE_GATE.status()["active_operations"], 0)
 
 
 class R402StartupOwnershipTests(unittest.TestCase):
@@ -163,6 +184,18 @@ sys.exit(0)
         root = str(Path(__file__).resolve().parents[1])
         env["PYTHONPATH"] = root + os.pathsep + env.get("PYTHONPATH", "")
         return env
+
+    def test_runtime_process_lock_creates_missing_database_parent(self):
+        fresh = self.base / "new-install" / "nested" / "catalog.db"
+        self.assertFalse(fresh.parent.exists())
+        probe = RuntimeProcessLock(fresh)
+        probe.acquire()
+        try:
+            self.assertTrue(fresh.parent.is_dir())
+            self.assertTrue(probe.path.is_file())
+            self.assertFalse(fresh.exists())
+        finally:
+            probe.release()
 
     def test_competing_app_import_is_refused_before_announcement_write(self):
         with self.database.connect() as conn:

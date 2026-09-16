@@ -35,6 +35,11 @@ class RuntimeProcessLock:
             if self._fd is not None:
                 return False
             try:
+                # The runtime lock is deliberately claimed before Database.initialize(),
+                # so a brand-new installation may not have created its data directory yet.
+                # Creating only the configured parent here preserves the no-database-write
+                # startup boundary while still allowing the lock file to be opened.
+                self.path.parent.mkdir(parents=True, exist_ok=True)
                 fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
             except OSError as exc:
                 raise RuntimeLeaseError(

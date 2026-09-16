@@ -15,6 +15,7 @@ from jinja2 import BaseLoader
 from ..access import require_librarian
 from ..maintenance_gate import APPLICATION_MAINTENANCE_GATE
 from .context import RouteContext
+from .resilience import structured_api_failure_response
 
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -195,13 +196,14 @@ class HardenedTemplateLoader(BaseLoader):
         return self.wrapped.list_templates()
 
 
-def _install_maintenance_admission_middleware(ctx: RouteContext) -> None:
+def _install_maintenance_admission_middleware(ctx: RouteContext, record_event) -> None:
     """Block ordinary requests while an exclusive data-maintenance operation runs.
 
     Recovery apply is admitted as ordinary work through authentication and CSRF, then
     upgrades its sole request lease to exclusive mode inside the recovery handler.
     Static files and the health probe are read-only and remain available while
-    maintenance is active.
+    maintenance is active. Unexpected API error logging is completed before the
+    request lease is released so database-backed logging cannot outlive admission.
     """
     app = ctx.get("app")
     if app is None or getattr(
@@ -230,7 +232,12 @@ def _install_maintenance_admission_middleware(ctx: RouteContext) -> None:
                 },
             )
         try:
-            return await call_next(request)
+            try:
+                return await call_next(request)
+            except Exception as exc:
+                if not path.startswith("/api/"):
+                    raise
+                return structured_api_failure_response(request, exc, record_event)
         finally:
             APPLICATION_MAINTENANCE_GATE.leave_operation()
 
@@ -247,7 +254,7 @@ def build_router(ctx: RouteContext):
     list_database_backups = ctx.live("list_database_backups")
     record_event = ctx.live("record_event")
 
-    _install_maintenance_admission_middleware(ctx)
+    _install_maintenance_admission_middleware(ctx, record_event)
 
     templates.env.globals["csp_nonce"] = _nonce
     templates.env.globals["deployment_secret_warning"] = (

@@ -94,11 +94,11 @@ build_titles_router = _without_shadowed_routes(
 
 
 ROUTER_BUILDERS = (
-    # Starlette's most recently registered middleware is outermost. Register the
-    # structured exception layer first, then maintenance admission so exception
-    # logging remains inside the request operation lease through its complete tail.
-    build_resilience_router,
+    # Keep security hooks first as the canonical hardening owner. Its maintenance
+    # middleware now renders/logs admitted API failures before releasing admission;
+    # resilience remains the outer fallback for failures outside that boundary.
     build_security_hardening_router,
+    build_resilience_router,
     build_final_polish_router,
     build_worker_maintenance_router,
     # Duplicate verification is a database-writing background worker even though
