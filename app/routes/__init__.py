@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import wraps
 
+from .cycle1_intelligence_foundation import build_router as build_cycle1_intelligence_foundation_router
 from .security_hardening import build_router as build_security_hardening_router
 from .resilience import build_router as build_resilience_router
 from .final_polish import build_router as build_final_polish_router
@@ -94,9 +95,12 @@ build_titles_router = _without_shadowed_routes(
 
 
 ROUTER_BUILDERS = (
-    # Keep security hooks first as the canonical hardening owner. Its maintenance
-    # middleware now renders/logs admitted API failures before releasing admission;
-    # resilience remains the outer fallback for failures outside that boundary.
+    # Service-only Cycle 1 replacements are installed first so every later route
+    # builder sees the same MIE history engine and media-inspection worker.
+    build_cycle1_intelligence_foundation_router,
+    # Keep security hooks first among HTTP route owners as the canonical hardening
+    # boundary. Its maintenance middleware renders/logs admitted API failures before
+    # releasing admission; resilience remains the outer fallback for other failures.
     build_security_hardening_router,
     build_resilience_router,
     build_final_polish_router,
