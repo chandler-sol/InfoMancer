@@ -10,7 +10,12 @@ from typing import Callable
 
 from .db import Database
 from .maintenance_gate import APPLICATION_MAINTENANCE_GATE
-from .runtime_lock import RuntimeLeaseError, RuntimeProcessLock
+from .runtime_lock import (
+    RuntimeLeaseError,
+    RuntimeProcessLock,
+    runtime_lock_released,
+    take_runtime_startup_lock,
+)
 
 
 def _runtime_owner(kind: str) -> str:
@@ -75,9 +80,9 @@ def _process_is_alive(pid: int) -> bool:
 class RuntimeLease:
     """Fail closed when two InfoMancer processes try to own one catalog.
 
-    Kernel ownership is established before application database initialization and
-    transferred into this lease. The persisted SQLite row is then bound after schema
-    initialization without releasing the replacement-stable kernel descriptor.
+    Kernel ownership is established during settings resolution, before database
+    initialization, and transferred here without releasing the descriptor. The
+    SQLite row is the persisted ownership record and heartbeat after startup.
     """
 
     def __init__(
@@ -98,8 +103,8 @@ class RuntimeLease:
         self.on_lost = on_lost or self._terminate_after_lease_loss
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        take_startup_lock = getattr(self.database, "take_runtime_startup_lock", None)
-        startup_lock = take_startup_lock() if callable(take_startup_lock) else None
+        startup_lock = take_runtime_startup_lock(self.database.path)
+        self._adopted_startup_lock = startup_lock is not None
         self._ownership_lock = startup_lock or RuntimeProcessLock(self.database.path)
         self._ownership_lock_path = self._ownership_lock.path
 
@@ -120,7 +125,12 @@ class RuntimeLease:
         return self._ownership_lock.acquire()
 
     def _release_ownership_lock(self) -> None:
-        self._ownership_lock.release()
+        try:
+            self._ownership_lock.release()
+        finally:
+            if self._adopted_startup_lock:
+                runtime_lock_released(self.database.path)
+                self._adopted_startup_lock = False
 
     def acquire(self) -> None:
         self._acquire_ownership_lock()
@@ -158,8 +168,6 @@ class RuntimeLease:
                     (self.name, self.owner, now.isoformat()),
                 )
         except Exception:
-            # This includes an adopted startup lock. A process that cannot bind the
-            # persisted row must not continue holding installation ownership.
             self._release_ownership_lock()
             raise
 
