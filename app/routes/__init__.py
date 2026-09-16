@@ -100,15 +100,15 @@ ROUTER_BUILDERS = (
     # resilience remains the outer fallback for failures outside that boundary.
     build_security_hardening_router,
     build_resilience_router,
+    # Cycle 1 replaces the underlying media-inspection service implementation.
+    # Install it before final_polish so the already-qualified maintenance wrapper
+    # remains the public owner and keeps the full worker lifetime under admission.
+    build_cycle1_intelligence_foundation_router,
     build_final_polish_router,
     build_worker_maintenance_router,
     # Duplicate verification is a database-writing background worker even though
     # it does not mutate media. Own these routes before the broader Review bundle.
     build_duplicate_verification_maintenance_router,
-    # The Cycle 1 bundle owns no HTTP routes. Install its service replacements here
-    # before any intelligence/media routes are assembled, while preserving the
-    # established security and maintenance route ordering above.
-    build_cycle1_intelligence_foundation_router,
     build_release_081_announcements_router,
     build_release_081_stabilization_router,
     build_release_081_collection_undo_router,
