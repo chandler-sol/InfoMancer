@@ -9,6 +9,11 @@ class RuntimeLeaseError(RuntimeError):
     pass
 
 
+def runtime_lock_key(database_path: Path) -> tuple[str, str]:
+    configured = Path(database_path)
+    return (str(configured.parent.resolve(strict=False)), configured.name)
+
+
 class RuntimeProcessLock:
     """Replacement-stable kernel ownership for one configured database pathname."""
 
@@ -80,3 +85,36 @@ class RuntimeProcessLock:
                     fcntl.flock(fd, fcntl.LOCK_UN)
             finally:
                 os.close(fd)
+
+
+_STARTUP_GUARD = threading.Lock()
+_STARTUP_LOCKS: dict[tuple[str, str], RuntimeProcessLock] = {}
+_ADOPTED_KEYS: set[tuple[str, str]] = set()
+
+
+def claim_runtime_startup_lock(database_path: Path) -> None:
+    """Claim installation ownership before any database initialization can occur."""
+    key = runtime_lock_key(database_path)
+    with _STARTUP_GUARD:
+        if key in _ADOPTED_KEYS or key in _STARTUP_LOCKS:
+            return
+        lock = RuntimeProcessLock(database_path)
+        lock.acquire()
+        _STARTUP_LOCKS[key] = lock
+
+
+def take_runtime_startup_lock(database_path: Path) -> RuntimeProcessLock | None:
+    """Transfer the early startup descriptor into RuntimeLease without unlocking it."""
+    key = runtime_lock_key(database_path)
+    with _STARTUP_GUARD:
+        lock = _STARTUP_LOCKS.pop(key, None)
+        if lock is not None:
+            _ADOPTED_KEYS.add(key)
+        return lock
+
+
+def runtime_lock_released(database_path: Path) -> None:
+    """Allow a later runtime in this process to claim ownership after release/failure."""
+    key = runtime_lock_key(database_path)
+    with _STARTUP_GUARD:
+        _ADOPTED_KEYS.discard(key)
