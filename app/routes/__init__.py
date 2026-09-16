@@ -65,9 +65,6 @@ def _without_shadowed_routes(builder, *method_paths: tuple[str, str]):
     return build_without_shadowed_routes
 
 
-# Focused routers above are the canonical owners for these method/path pairs. Keep
-# the shadowed functions available as compatibility aliases, but never register a
-# second live HTTP route for the same operation.
 build_operations_router = _without_shadowed_routes(
     build_operations_router,
     ("POST", "/titles/{title_id}/imdb-refresh"),
@@ -101,44 +98,27 @@ build_titles_router = _without_shadowed_routes(
 
 
 ROUTER_BUILDERS = (
-    # Install cross-cutting security and error-shaping hooks before domain routers
-    # capture their live helpers or Jinja templates.
-    build_security_hardening_router,
+    # Starlette's most recently registered middleware is outermost. Register the
+    # structured exception layer first, then maintenance admission so exception
+    # logging remains inside the request operation lease through its complete tail.
     build_resilience_router,
+    build_security_hardening_router,
     # Small release-polish hooks replace live helpers before the domain routes use
     # them, while keeping the existing public route contracts intact.
     build_final_polish_router,
     # Every recovery-visible metadata worker keeps a maintenance operation lease
     # through its complete database, cleanup, and structured-logging lifetime.
     build_worker_maintenance_router,
-    # Remove only the historical official announcements that older 0.8 builds baked
-    # into every installation. Librarian-authored messages and future official keys
-    # remain untouched.
     build_release_081_announcements_router,
-    # Final RC stabilization owns mapped-drive-safe undo validation plus additive
-    # bulk collection and Smart Collection editing routes before domain routers are
-    # constructed.
     build_release_081_stabilization_router,
-    # Collection deletion needs to own its POST route before the broader Collections
-    # router so the release build can provide a real one-shot Undo snapshot.
     build_release_081_collection_undo_router,
-    # Library Health findings can carry both source and title ids. Install the UI
-    # destination policy before review/domain routes so title-specific actions do
-    # not fall through to the generic Sources destination.
     build_health_action_routing_router,
-    # The single-title metadata action must own its URL before any broader or
-    # legacy route bundle is registered. The Metadata maintenance UI expects this
-    # handler to finish the bounded TVDB refresh inside the request and return a
-    # final JSON result rather than enqueueing the old bulk IMDb worker.
     build_title_metadata_async_router,
     build_performance_router,
     build_system_router,
     build_operations_router,
     build_dashboard_router,
     build_bulk_match_progress_router,
-    # Own focused Bulk Match URLs before Review registers its legacy handlers.
-    # Apply handles full selected sets, while review renders the complete cached
-    # queue instead of exposing the old 50-row pagination boundary.
     build_bulk_match_apply_router,
     build_bulk_match_review_router,
     build_review_router,
@@ -146,12 +126,8 @@ ROUTER_BUILDERS = (
     build_inspector_media_router,
     build_recovery_router,
     build_scheduled_tasks_router,
-    # Source creation must be registered before the broader Settings bundle so
-    # POST /roots uses the same Windows/NFS-safe path validation as the browser.
     build_source_commit_router,
     build_source_health_router,
-    # 0.9 update-channel settings use dedicated URLs while the Beta 2 System page
-    # keeps its legacy release controls during the transition.
     build_update_channel_settings_router,
     build_settings_router,
     build_settings_quick_actions_router,
