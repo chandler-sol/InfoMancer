@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .db import Database
+from .safe_file_rename import SafeFileRenameError, SafeFileRenameService
 
 
 class OperationHistoryError(ValueError):
@@ -23,9 +24,9 @@ class OperationHistoryService:
 
     def __init__(self, database: Database) -> None:
         self.database = database
+        self.safe_rename = SafeFileRenameService(database)
 
     def _persisted_actor(self, actor_user_id: int | None) -> int | None:
-        """Return a real user id, or NULL for synthetic auth-disabled identities."""
         if not actor_user_id or actor_user_id <= 0:
             return None
         with self.database.connect() as conn:
@@ -218,6 +219,7 @@ class OperationHistoryService:
             if not claimed.rowcount:
                 raise OperationHistoryError("That operation is already being changed. Refresh and try again.")
             undo_kind = row["undo_kind"]
+
         try:
             if undo_kind == "rename_file":
                 message = self._undo_file_rename(payload)
@@ -225,7 +227,9 @@ class OperationHistoryService:
                 message = self._undo_folder_rename(payload)
             elif undo_kind == "managed_trash_restore":
                 if duplicate_trash is None:
-                    raise OperationHistoryError("Managed Trash is unavailable, so this operation cannot be undone right now.")
+                    raise OperationHistoryError(
+                        "Managed Trash is unavailable, so this operation cannot be undone right now."
+                    )
                 try:
                     restored = duplicate_trash.restore(int(payload["trash_id"]))
                 except (ValueError, OSError, sqlite3.Error) as exc:
@@ -243,6 +247,7 @@ class OperationHistoryService:
             if isinstance(exc, OperationHistoryError):
                 raise
             raise OperationHistoryError(error) from exc
+
         with self.database.connect() as conn:
             conn.execute(
                 """UPDATE operation_history SET status='undone',undone_at=CURRENT_TIMESTAMP,
@@ -257,7 +262,7 @@ class OperationHistoryService:
         destination = Path(str(payload.get("destination") or ""))
         with self.database.connect() as conn:
             row = conn.execute(
-                """SELECT f.path,f.title_id,t.root_id,t.folder_path,r.path root_path
+                """SELECT f.path,r.path root_path
                    FROM files f JOIN titles t ON t.id=f.title_id
                    JOIN roots r ON r.id=t.root_id WHERE f.id=?""",
                 (file_id,),
@@ -269,33 +274,10 @@ class OperationHistoryService:
         root = Path(row["root_path"])
         self._require_inside(source, root)
         self._require_inside(destination, root)
-        if source.exists():
-            raise OperationHistoryError(
-                f"Undo stopped because another file already exists at the original path: {source}"
-            )
-        if not destination.is_file():
-            raise OperationHistoryError(
-                "Undo stopped because the renamed file is no longer present at the expected path."
-            )
-        if not source.parent.is_dir():
-            raise OperationHistoryError(
-                "Undo stopped because the original parent folder no longer exists. Nothing was changed."
-            )
-        destination.rename(source)
         try:
-            with self.database.connect() as conn:
-                conn.execute(
-                    "UPDATE files SET path=?,filename=? WHERE id=?",
-                    (str(source), source.name, file_id),
-                )
-                if row["folder_path"] == str(destination):
-                    conn.execute(
-                        "UPDATE titles SET folder_path=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                        (str(source), row["title_id"]),
-                    )
-        except Exception:
-            source.rename(destination)
-            raise
+            self.safe_rename.rename_file(file_id, destination, source)
+        except SafeFileRenameError as exc:
+            raise OperationHistoryError(str(exc)) from exc
         return f"Restored the previous filename: {source.name}"
 
     def _undo_folder_rename(self, payload: dict[str, Any]) -> str:
@@ -303,62 +285,32 @@ class OperationHistoryService:
         source = Path(str(payload.get("source") or ""))
         destination = Path(str(payload.get("destination") or ""))
         with self.database.connect() as conn:
-            title = conn.execute(
-                """SELECT t.folder_path,t.root_id,r.path root_path
+            row = conn.execute(
+                """SELECT t.folder_path,r.path root_path
                    FROM titles t JOIN roots r ON r.id=t.root_id WHERE t.id=?""",
                 (title_id,),
             ).fetchone()
-            file_rows = conn.execute(
-                "SELECT id,path FROM files WHERE title_id=? ORDER BY id", (title_id,)
-            ).fetchall()
-        if not title or title["folder_path"] != str(destination):
+        if not row or row["folder_path"] != str(destination):
             raise OperationHistoryError(
                 "Undo stopped because the show folder has changed since this rename. Nothing was changed."
             )
-        root = Path(title["root_path"])
+        root = Path(row["root_path"])
         self._require_inside(source, root)
         self._require_inside(destination, root)
-        if source.exists():
-            raise OperationHistoryError(
-                f"Undo stopped because another folder already exists at the original path: {source}"
-            )
-        if not destination.is_dir():
-            raise OperationHistoryError(
-                "Undo stopped because the renamed show folder is no longer present at the expected path."
-            )
-        if not source.parent.is_dir():
-            raise OperationHistoryError(
-                "Undo stopped because the original parent folder no longer exists. Nothing was changed."
-            )
-        relative_paths: list[tuple[int, Path]] = []
-        for file_row in file_rows:
-            try:
-                relative = Path(file_row["path"]).relative_to(destination)
-            except ValueError as exc:
-                raise OperationHistoryError(
-                    "Undo stopped because a cataloged episode is no longer inside the renamed show folder."
-                ) from exc
-            relative_paths.append((file_row["id"], relative))
-        destination.rename(source)
         try:
-            with self.database.connect() as conn:
-                conn.execute(
-                    "UPDATE titles SET folder_path=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (str(source), title_id),
-                )
-                for file_id, relative in relative_paths:
-                    conn.execute(
-                        "UPDATE files SET path=? WHERE id=?", (str(source / relative), file_id)
-                    )
-        except Exception:
-            source.rename(destination)
-            raise
+            self.safe_rename.rename_folder(title_id, destination, source)
+        except SafeFileRenameError as exc:
+            raise OperationHistoryError(str(exc)) from exc
         return f"Restored the previous show folder name: {source.name}"
 
     @staticmethod
     def _require_inside(path: Path, parent: Path) -> None:
         try:
             path.resolve(strict=False).relative_to(parent.resolve(strict=False))
+        except OSError as exc:
+            raise OperationHistoryError(
+                "Undo stopped because the storage path is unavailable or unreadable. Nothing was changed."
+            ) from exc
         except ValueError as exc:
             raise OperationHistoryError(
                 "Undo stopped because the recorded path is outside its configured source. Nothing was changed."
@@ -379,5 +331,8 @@ class OperationHistoryService:
             "rename_folder": "Folder rename",
             "managed_trash_move": "Managed Trash",
             "managed_trash_restore": "Trash restore",
-        }.get(item.get("operation_type"), str(item.get("operation_type") or "Operation").replace("_", " ").title())
+        }.get(
+            item.get("operation_type"),
+            str(item.get("operation_type") or "Operation").replace("_", " ").title(),
+        )
         return item

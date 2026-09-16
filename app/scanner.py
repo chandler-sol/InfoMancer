@@ -6,8 +6,11 @@ import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 from typing import Callable
+
+from .catalog_mutation import connection_database_identity, root_mutation_lock
 
 
 VIDEO_EXTENSIONS = {
@@ -19,6 +22,24 @@ VIDEO_EXTENSIONS = {
 
 class SourceUnavailableError(ValueError):
     """The configured source could not be reached safely."""
+
+
+def _coordinated_root_transaction(root_id_key: str):
+    """Keep a scan's root mutation lease until its SQLite transaction is durable."""
+    def decorate(function):
+        @wraps(function)
+        def wrapped(conn: sqlite3.Connection, row: sqlite3.Row, *args, **kwargs):
+            database_key = connection_database_identity(conn)
+            with root_mutation_lock(database_key, int(row[root_id_key])):
+                try:
+                    result = function(conn, row, *args, **kwargs)
+                    conn.commit()
+                    return result
+                except BaseException:
+                    conn.rollback()
+                    raise
+        return wrapped
+    return decorate
 
 
 def _lexical_absolute(path: Path) -> Path:
@@ -272,6 +293,7 @@ def _is_movie_bucket(root: Path, folder: Path) -> bool:
     return bool(MOVIE_BUCKET_RE.fullmatch(folder.name))
 
 
+@_coordinated_root_transaction("id")
 def scan_root(
     conn: sqlite3.Connection,
     root_row: sqlite3.Row,
@@ -422,6 +444,7 @@ def scan_root(
     }
 
 
+@_coordinated_root_transaction("root_id")
 def scan_title(
     conn: sqlite3.Connection,
     title_row: sqlite3.Row,

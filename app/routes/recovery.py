@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
@@ -14,17 +15,19 @@ from fastapi import APIRouter, Depends, File, Request, UploadFile
 from fastapi.responses import HTMLResponse
 
 from ..access import require_librarian
+from ..maintenance_gate import APPLICATION_MAINTENANCE_GATE
 from ..recovery_inventory import (
     MAX_INVENTORY_PACKAGES,
     recommend_recovery_build,
     recovery_search_directories,
     scan_recovery_packages,
 )
-from ..recovery_package import RecoveryPackageError, RecoveryPackageService
-from ..recovery_path_mapping import (
-    MappedRecoveryPackageService,
-    inspect_recovery_roots,
+from ..recovery_package import (
+    RecoveryPackageError,
+    RecoveryPackageFatalError,
+    RecoveryPackageService,
 )
+from ..recovery_path_mapping import MappedRecoveryPackageService, inspect_recovery_roots
 from ..update_channels import (
     UPDATE_CHANNELS,
     channel_label,
@@ -44,6 +47,28 @@ _DEFAULT_MANIFEST_BASE_URL = (
 )
 
 
+def _credential_free_https(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+        return bool(
+            parsed.scheme.casefold() == "https"
+            and parsed.hostname
+            and parsed.username is None
+            and parsed.password is None
+        )
+    except ValueError:
+        return False
+
+
+class _HttpsOnlyRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not _credential_free_https(newurl):
+            raise urllib.error.URLError(
+                "Update metadata redirect refused because it was not credential-free HTTPS."
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def build_router(ctx: RouteContext):
     router = APIRouter()
     APP_VERSION = ctx.get("APP_VERSION")
@@ -53,6 +78,7 @@ def build_router(ctx: RouteContext):
     redirect = ctx.live("redirect")
     record_event = ctx.live("record_event")
     restart_after_restore = ctx.live("restart_after_restore")
+    runtime_lease = ctx.live("runtime_lease")
     other_background_work_running = ctx.live("_other_background_work_running")
     imdb_genre_job = ctx.live("imdb_genre_job")
     duplicate_verify_job = ctx.live("duplicate_verify_job")
@@ -61,8 +87,6 @@ def build_router(ctx: RouteContext):
     restore_lock = threading.Lock()
 
     def recovery_service() -> RecoveryPackageService:
-        # Resolve the live database path per request so test/runtime data-dir swaps
-        # do not leave this router pinned to the process-start path.
         return RecoveryPackageService(Path(db.path), APP_VERSION)
 
     def restore_work_running() -> bool:
@@ -70,12 +94,7 @@ def build_router(ctx: RouteContext):
             return True
         return any(
             job.get("status") in _ACTIVE_STATES
-            for job in (
-                imdb_genre_job,
-                duplicate_verify_job,
-                media_hash_job,
-                trash_cleanup_job,
-            )
+            for job in (imdb_genre_job, duplicate_verify_job, media_hash_job, trash_cleanup_job)
         )
 
     def librarian_get(path: str, **kwargs):
@@ -126,9 +145,8 @@ def build_router(ctx: RouteContext):
         return configured.rstrip("/")
 
     def fetch_json(url: str) -> object:
-        parsed = urlparse(url)
-        if parsed.scheme not in {"https", "http"} or not parsed.netloc:
-            raise ValueError("Update metadata URL must use HTTP or HTTPS.")
+        if not _credential_free_https(url):
+            raise ValueError("Update metadata URL must use credential-free HTTPS.")
         update_request = urllib.request.Request(
             url,
             headers={
@@ -136,7 +154,8 @@ def build_router(ctx: RouteContext):
                 "User-Agent": f"InfoMancer/{APP_VERSION}",
             },
         )
-        with urllib.request.urlopen(update_request, timeout=5) as response:
+        opener = urllib.request.build_opener(_HttpsOnlyRedirect())
+        with opener.open(update_request, timeout=5) as response:
             payload = response.read(_MAX_UPDATE_RESPONSE + 1)
         if len(payload) > _MAX_UPDATE_RESPONSE:
             raise ValueError("Update metadata response is unexpectedly large.")
@@ -145,22 +164,16 @@ def build_router(ctx: RouteContext):
     def qualified_recovery_manifests() -> tuple[list[dict], list[str]]:
         base = manifest_base_url()
         if not base:
-            return [], [
-                "Qualified update-channel metadata is disabled for this installation."
-            ]
+            return [], ["Qualified update-channel metadata is disabled for this installation."]
         manifests: list[dict] = []
         errors: list[str] = []
         for channel in UPDATE_CHANNELS:
             url = f"{base}/{channel}.json"
             try:
-                manifests.append(
-                    validate_channel_manifest(fetch_json(url), channel)
-                )
+                manifests.append(validate_channel_manifest(fetch_json(url), channel))
             except urllib.error.HTTPError as exc:
                 if exc.code != 404:
-                    errors.append(
-                        f"{channel_label(channel)} metadata could not be loaded."
-                    )
+                    errors.append(f"{channel_label(channel)} metadata could not be loaded.")
             except (
                 urllib.error.URLError,
                 TimeoutError,
@@ -168,9 +181,7 @@ def build_router(ctx: RouteContext):
                 json.JSONDecodeError,
                 OSError,
             ):
-                errors.append(
-                    f"{channel_label(channel)} metadata could not be validated."
-                )
+                errors.append(f"{channel_label(channel)} metadata could not be validated.")
         return manifests, errors
 
     def recovery_page_context(request: Request) -> dict:
@@ -181,14 +192,10 @@ def build_router(ctx: RouteContext):
         manifests: list[dict] = []
         selected_channel = read_update_channel(Path(db.path))
         if scan_requested:
-            inventory = scan_recovery_packages(
-                recovery_service(), directories, MAX_INVENTORY_PACKAGES
-            )
+            inventory = scan_recovery_packages(recovery_service(), directories, MAX_INVENTORY_PACKAGES)
             manifests, manifest_errors = qualified_recovery_manifests()
             for item in inventory:
-                item["recommendation"] = recommend_recovery_build(
-                    item, manifests, selected_channel
-                )
+                item["recommendation"] = recommend_recovery_build(item, manifests, selected_channel)
         return {
             "message": request.query_params.get("message", ""),
             "scan_requested": scan_requested,
@@ -205,16 +212,11 @@ def build_router(ctx: RouteContext):
     def recovery_page(request: Request):
         cleanup_staging()
         return templates.TemplateResponse(
-            request,
-            "recovery_restore.html",
-            recovery_page_context(request),
+            request, "recovery_restore.html", recovery_page_context(request)
         )
 
     @librarian_post("/settings/recovery/preview", response_class=HTMLResponse)
-    async def preview_recovery_package(
-        request: Request,
-        recovery_file: UploadFile = File(...),
-    ):
+    async def preview_recovery_package(request: Request, recovery_file: UploadFile = File(...)):
         cleanup_staging()
         package_service = recovery_service()
         token = __import__("secrets").token_urlsafe(32)
@@ -235,9 +237,7 @@ def build_router(ctx: RouteContext):
                 pass
             summary = package_service.verify(candidate)
             recovery_roots = inspect_recovery_roots(
-                package_service,
-                candidate,
-                settings.media_browse_roots,
+                package_service, candidate, settings.media_browse_roots
             )
         except (RecoveryPackageError, OSError) as exc:
             candidate.unlink(missing_ok=True)
@@ -248,10 +248,8 @@ def build_router(ctx: RouteContext):
                 detail=str(exc),
                 user_id=request.state.user.id,
             )
-            message = (
-                str(exc)
-                if isinstance(exc, RecoveryPackageError)
-                else "InfoMancer could not stage that recovery package. Check free disk space and application-data permissions."
+            message = str(exc) if isinstance(exc, RecoveryPackageError) else (
+                "InfoMancer could not stage that recovery package. Check free disk space and application-data permissions."
             )
             return redirect("/settings/recovery", message)
 
@@ -263,9 +261,7 @@ def build_router(ctx: RouteContext):
                 "artwork_files": summary["artwork_files"],
                 "database_size": summary["database_size"],
                 "media_roots": len(recovery_roots),
-                "path_reconciliation_needed": sum(
-                    1 for root in recovery_roots if not root["trusted_here"]
-                ),
+                "path_reconciliation_needed": sum(1 for root in recovery_roots if not root["trusted_here"]),
             },
             user_id=request.state.user.id,
         )
@@ -277,9 +273,7 @@ def build_router(ctx: RouteContext):
                 "staged_token": token,
                 "source_name": recovery_file.filename or "recovery package",
                 "recovery_roots": recovery_roots,
-                "trusted_media_roots": [
-                    str(Path(root)) for root in settings.media_browse_roots
-                ],
+                "trusted_media_roots": [str(Path(root)) for root in settings.media_browse_roots],
                 "message": "",
             },
         )
@@ -306,9 +300,13 @@ def build_router(ctx: RouteContext):
 
         if not restore_lock.acquire(blocking=False):
             return redirect(
-                "/settings/recovery",
-                "Another portable recovery is already in progress.",
+                "/settings/recovery", "Another portable recovery is already in progress."
             )
+
+        exclusive_acquired = False
+        restore_completed = False
+        fatal_restore = False
+        package_service = None
         try:
             candidate = staged_path(staged_token)
             if not candidate.is_file():
@@ -319,25 +317,47 @@ def build_router(ctx: RouteContext):
                 raise RecoveryPackageError(
                     "Wait for active scans, metadata, fingerprint, duplicate, trash-cleanup, or maintenance work to finish before restoring."
                 )
-            record_event(
-                "restore",
-                "Portable recovery restore started.",
-                context={"path_mappings": len(path_mappings)},
-                user_id=request.state.user.id,
-            )
-            # Check once more after the event write so a task that was already
-            # transitioning to running cannot overlap the live database swap.
+            if not APPLICATION_MAINTENANCE_GATE.try_upgrade_sole_operation_to_exclusive(
+                "portable recovery"
+            ):
+                raise RecoveryPackageError(
+                    "InfoMancer became busy while recovery was preparing. Wait for active requests or maintenance work to finish, then try again."
+                )
+            exclusive_acquired = True
             if restore_work_running():
                 raise RecoveryPackageError(
                     "Background work started while recovery was preparing. Wait for it to finish and try again."
                 )
+
+            record_event(
+                "restore",
+                "Portable recovery restore started under exclusive maintenance mode.",
+                context={"path_mappings": len(path_mappings)},
+                user_id=request.state.user.id,
+            )
             package_service = MappedRecoveryPackageService(
-                Path(db.path),
-                APP_VERSION,
-                path_mappings,
-                settings.media_browse_roots,
+                Path(db.path), APP_VERSION, path_mappings, settings.media_browse_roots
             )
             result = package_service.restore(candidate, settings.media_browse_roots)
+            try:
+                runtime_lease.rebind_after_restore()
+            except Exception as exc:
+                raise RecoveryPackageFatalError(
+                    "The restored database was installed, but this process could not rebind its runtime ownership. Normal service remains blocked until the installation state is reviewed and InfoMancer is restarted.",
+                    recovery_staging=Path(db.path).parent,
+                    safety_package=str(result.get("safety_package") or "unavailable"),
+                ) from exc
+            restore_completed = True
+        except RecoveryPackageFatalError as exc:
+            fatal_restore = True
+            detail = html.escape(str(exc))
+            return HTMLResponse(
+                "<h1>Recovery stopped in maintenance mode</h1>"
+                "<p>InfoMancer could not prove that rollback completed. Normal service remains blocked to protect the installation.</p>"
+                f"<pre>{detail}</pre>"
+                "<p>Preserve the recovery files shown above and restart only after reviewing the installation state.</p>",
+                status_code=500,
+            )
         except RecoveryPackageError as exc:
             record_event(
                 "restore",
@@ -347,23 +367,44 @@ def build_router(ctx: RouteContext):
                 user_id=request.state.user.id,
             )
             return redirect("/settings/recovery", str(exc))
+        except Exception as exc:
+            # Once exclusive recovery has entered the restore service, an
+            # unclassified exception may have happened after live state was
+            # installed. Never infer that the old installation is still
+            # authoritative and reopen admission. Known pre-commit failures are
+            # converted to RecoveryPackageError by the service above.
+            if exclusive_acquired and package_service is not None:
+                fatal_restore = True
+                detail = html.escape(str(exc))
+                return HTMLResponse(
+                    "<h1>Recovery stopped in maintenance mode</h1>"
+                    "<p>Recovery encountered an unexpected error after exclusive restore work began. Normal service remains blocked because InfoMancer cannot prove which installation state is authoritative.</p>"
+                    f"<pre>{detail}</pre>"
+                    "<p>Review the installation state and restart InfoMancer before resuming service.</p>",
+                    status_code=500,
+                )
+            raise
         finally:
+            if exclusive_acquired and not restore_completed and not fatal_restore:
+                APPLICATION_MAINTENANCE_GATE.end_exclusive()
             restore_lock.release()
-            try:
-                staged_path(staged_token).unlink(missing_ok=True)
-            except (RecoveryPackageError, OSError):
-                pass
+            if not fatal_restore:
+                try:
+                    staged_path(staged_token).unlink(missing_ok=True)
+                except (RecoveryPackageError, OSError):
+                    pass
 
         reconciliation = result.get("path_reconciliation") or {}
         record_event(
             "restore",
-            "Portable recovery restore completed.",
+            "Portable recovery restore completed. Existing sessions and unused invitations were invalidated.",
             context={
                 "source_version": result["app_version"],
                 "artwork_files": result["restored_artwork_files"],
                 "safety_package": result["safety_package"],
                 "mapped_roots": reconciliation.get("mapped_roots", 0),
                 "rewritten_paths": reconciliation.get("rewritten_paths", 0),
+                "authentication_reset": bool(result.get("authentication_reset")),
             },
         )
         threading.Thread(target=restart_after_restore, daemon=True).start()
@@ -376,7 +417,7 @@ def build_router(ctx: RouteContext):
                 "safety_package": result["safety_package"],
                 "mapped_roots": reconciliation.get("mapped_roots", 0),
                 "rewritten_paths": reconciliation.get("rewritten_paths", 0),
-                "message": "",
+                "message": "All previous login sessions and unused invitations were invalidated. Sign in again after restart.",
             },
         )
 

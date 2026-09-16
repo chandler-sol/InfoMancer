@@ -3,9 +3,15 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from app.db import Database
-from app.recovery_package import RecoveryPackageError, RecoveryPackageService
+from app.maintenance import MaintenanceError
+from app.recovery_package import (
+    RecoveryPackageError,
+    RecoveryPackageFatalError,
+    RecoveryPackageService,
+)
 
 
 class RecoveryPackageTests(unittest.TestCase):
@@ -69,9 +75,19 @@ class RecoveryPackageTests(unittest.TestCase):
 
     def test_restore_replaces_database_and_artwork_but_never_provider_secrets(self):
         with self.database.connect() as conn:
-            conn.execute(
+            package_user_id = int(conn.execute(
                 """INSERT INTO users(username,display_name,role,password_hash)
                    VALUES ('from-package','From Package','member','test')"""
+            ).lastrowid)
+            conn.execute(
+                """INSERT INTO user_sessions(user_id,token_hash,csrf_token,expires_at)
+                   VALUES (?,?,?,datetime('now','+1 day'))""",
+                (package_user_id, "a" * 64, "csrf"),
+            )
+            conn.execute(
+                """INSERT INTO account_invitations(user_id,token_hash,expires_at)
+                   VALUES (?,?,datetime('now','+1 day'))""",
+                (package_user_id, "b" * 64),
             )
         (self.data / "collection-art" / "collection-1.webp").write_bytes(b"package artwork")
         package = self.service.create()
@@ -95,8 +111,16 @@ class RecoveryPackageTests(unittest.TestCase):
             current_user = conn.execute(
                 "SELECT 1 FROM users WHERE username='current-only'"
             ).fetchone()
+            session_count = conn.execute("SELECT COUNT(*) FROM user_sessions").fetchone()[0]
+            active_invites = conn.execute(
+                """SELECT COUNT(*) FROM account_invitations
+                   WHERE used_at IS NULL AND revoked_at IS NULL"""
+            ).fetchone()[0]
         self.assertIsNotNone(package_user)
         self.assertIsNone(current_user)
+        self.assertEqual(session_count, 0)
+        self.assertEqual(active_invites, 0)
+        self.assertTrue(result["authentication_reset"])
         self.assertEqual(
             (self.data / "collection-art" / "collection-1.webp").read_bytes(),
             b"package artwork",
@@ -142,6 +166,51 @@ class RecoveryPackageTests(unittest.TestCase):
             (self.data / "collection-art" / "collection-1.webp").read_bytes(),
             b"current artwork",
         )
+
+    def test_incomplete_database_rollback_preserves_direct_snapshot(self):
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO users(username,display_name,role,password_hash)
+                   VALUES ('from-package','From Package','member','test')"""
+            )
+        package = self.service.create()
+        with self.database.connect() as conn:
+            conn.execute("DELETE FROM users WHERE username='from-package'")
+            conn.execute(
+                """INSERT INTO users(username,display_name,role,password_hash)
+                   VALUES ('current-only','Current Only','member','test')"""
+            )
+
+        original_replace = self.service._replace
+        original_validate = __import__("app.recovery_package", fromlist=["validate_database_backup"]).validate_database_backup
+
+        def fail_rollback_replace(source: Path, destination: Path) -> None:
+            if Path(source).name == "rollback-apply.db":
+                raise OSError("synthetic rollback storage failure")
+            original_replace(source, destination)
+
+        def fail_incoming_validation(path: Path) -> None:
+            if Path(path) == self.database.path:
+                with self.database.connect() as conn:
+                    incoming = conn.execute(
+                        "SELECT 1 FROM users WHERE username='from-package'"
+                    ).fetchone()
+                if incoming:
+                    raise MaintenanceError("synthetic post-install validation failure")
+            original_validate(path)
+
+        self.service._replace = fail_rollback_replace
+        with patch("app.recovery_package.validate_database_backup", side_effect=fail_incoming_validation):
+            with self.assertRaises(RecoveryPackageFatalError) as raised:
+                self.service.restore(package, (self.data,))
+
+        fatal = raised.exception
+        self.assertTrue(fatal.recovery_staging.is_dir())
+        self.assertTrue((fatal.recovery_staging / "rollback-live.db").is_file())
+        with self.database.connect() as conn:
+            self.assertIsNotNone(conn.execute(
+                "SELECT 1 FROM users WHERE username='from-package'"
+            ).fetchone())
 
     def test_invalid_restore_is_rejected_before_safety_package_is_created(self):
         bad = self.data / "invalid.infomancer-backup"

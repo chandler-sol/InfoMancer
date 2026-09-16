@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
+    "pretest": "npm ci --ignore-scripts",
     "test": "python run_visual.py headless",
     "test:local": "python run_visual.py headless",
     "test:watch": "python run_visual.py watch",

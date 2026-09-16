@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from functools import wraps
+
 from .security_hardening import build_router as build_security_hardening_router
 from .resilience import build_router as build_resilience_router
 from .final_polish import build_router as build_final_polish_router
+from .worker_maintenance import build_router as build_worker_maintenance_router
+from .duplicate_verification_maintenance import build_router as build_duplicate_verification_maintenance_router
 from .release_081_announcements import build_router as build_release_081_announcements_router
 from .release_081_stabilization import build_router as build_release_081_stabilization_router
 from .release_081_collection_undo import build_router as build_release_081_collection_undo_router
@@ -34,42 +38,82 @@ from .title_metadata_async import build_router as build_title_metadata_async_rou
 from .movie_manual_match import build_router as build_movie_manual_match_router
 from .titles import build_router as build_titles_router
 
+
+def _without_shadowed_routes(builder, *method_paths: tuple[str, str]):
+    """Keep legacy handler aliases while refusing duplicate route registration."""
+    shadowed = {(method.upper(), path) for method, path in method_paths}
+
+    @wraps(builder)
+    def build_without_shadowed_routes(ctx):
+        router, handlers = builder(ctx)
+        router.routes[:] = [
+            route
+            for route in router.routes
+            if not any(
+                (method.upper(), getattr(route, "path", "")) in shadowed
+                for method in (getattr(route, "methods", set()) or set())
+            )
+        ]
+        return router, handlers
+
+    return build_without_shadowed_routes
+
+
+build_operations_router = _without_shadowed_routes(
+    build_operations_router,
+    ("POST", "/titles/{title_id}/imdb-refresh"),
+)
+build_review_router = _without_shadowed_routes(
+    build_review_router,
+    ("GET", "/movies/bulk-match"),
+    ("POST", "/movies/bulk-match"),
+    ("GET", "/shows/bulk-match"),
+    ("POST", "/shows/bulk-match"),
+    ("POST", "/duplicates/bulk-action"),
+    ("POST", "/duplicates/{file_a_id}/{file_b_id}/verify"),
+)
+build_title_bulk_actions_router = _without_shadowed_routes(
+    build_title_bulk_actions_router,
+    ("POST", "/api/titles/{title_id}/favorite"),
+)
+build_settings_router = _without_shadowed_routes(
+    build_settings_router,
+    ("GET", "/maintenance/diagnostics"),
+    ("POST", "/roots"),
+)
+build_collections_router = _without_shadowed_routes(
+    build_collections_router,
+    ("POST", "/collections/{collection_id}/delete"),
+)
+build_titles_router = _without_shadowed_routes(
+    build_titles_router,
+    ("POST", "/titles/organize-bulk"),
+    ("POST", "/titles/{title_id}/media-info"),
+    ("POST", "/titles/{title_id}/movie/{movie_id}"),
+)
+
+
 ROUTER_BUILDERS = (
-    # Install cross-cutting security and error-shaping hooks before domain routers
-    # capture their live helpers or Jinja templates.
+    # Keep security hooks first as the canonical hardening owner. Its maintenance
+    # middleware now renders/logs admitted API failures before releasing admission;
+    # resilience remains the outer fallback for failures outside that boundary.
     build_security_hardening_router,
     build_resilience_router,
-    # Small release-polish hooks replace live helpers before the domain routes use
-    # them, while keeping the existing public route contracts intact.
     build_final_polish_router,
-    # Remove only the historical official announcements that older 0.8 builds baked
-    # into every installation. Librarian-authored messages and future official keys
-    # remain untouched.
+    build_worker_maintenance_router,
+    # Duplicate verification is a database-writing background worker even though
+    # it does not mutate media. Own these routes before the broader Review bundle.
+    build_duplicate_verification_maintenance_router,
     build_release_081_announcements_router,
-    # Final RC stabilization owns mapped-drive-safe undo validation plus additive
-    # bulk collection and Smart Collection editing routes before domain routers are
-    # constructed.
     build_release_081_stabilization_router,
-    # Collection deletion needs to own its POST route before the broader Collections
-    # router so the release build can provide a real one-shot Undo snapshot.
     build_release_081_collection_undo_router,
-    # Library Health findings can carry both source and title ids. Install the UI
-    # destination policy before review/domain routes so title-specific actions do
-    # not fall through to the generic Sources destination.
     build_health_action_routing_router,
-    # The single-title metadata action must own its URL before any broader or
-    # legacy route bundle is registered. The Metadata maintenance UI expects this
-    # handler to finish the bounded TVDB refresh inside the request and return a
-    # final JSON result rather than enqueueing the old bulk IMDb worker.
     build_title_metadata_async_router,
     build_performance_router,
     build_system_router,
     build_operations_router,
     build_dashboard_router,
     build_bulk_match_progress_router,
-    # Own focused Bulk Match URLs before Review registers its legacy handlers.
-    # Apply handles full selected sets, while review renders the complete cached
-    # queue instead of exposing the old 50-row pagination boundary.
     build_bulk_match_apply_router,
     build_bulk_match_review_router,
     build_review_router,
@@ -77,12 +121,8 @@ ROUTER_BUILDERS = (
     build_inspector_media_router,
     build_recovery_router,
     build_scheduled_tasks_router,
-    # Source creation must be registered before the broader Settings bundle so
-    # POST /roots uses the same Windows/NFS-safe path validation as the browser.
     build_source_commit_router,
     build_source_health_router,
-    # 0.9 update-channel settings use dedicated URLs while the Beta 2 System page
-    # keeps its legacy release controls during the transition.
     build_update_channel_settings_router,
     build_settings_router,
     build_settings_quick_actions_router,

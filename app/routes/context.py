@@ -72,12 +72,14 @@ class LiveRef:
 
 
 class RouteContext:
-    """Live view of application services/helpers used while routers are assembled.
+    """Read-through view of application services/helpers used by route builders.
 
     W1.5 keeps construction in main.py while route behavior moves into domain modules.
     Framework/type symbols are bound directly for FastAPI signature evaluation, while
     runtime services/helpers use LiveRef so tests and runtime swaps made on main stay
-    visible after router registration.
+    visible after router registration. Route builders may read dependencies from this
+    view, but application-level replacements must be returned explicitly to the
+    composition root through the route-bundle handler contract.
     """
 
     def __init__(self, namespace: MutableMapping[str, Any]) -> None:
@@ -88,7 +90,3 @@ class RouteContext:
 
     def live(self, name: str) -> LiveRef:
         return LiveRef(self._namespace, name)
-
-    def set(self, name: str, value: Any) -> None:
-        """Replace one live service while preserving existing LiveRef consumers."""
-        self._namespace[name] = value

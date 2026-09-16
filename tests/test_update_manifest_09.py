@@ -72,12 +72,69 @@ class UpdateManifest09Tests(unittest.TestCase):
             self.assertNotEqual(completed.returncode, 0)
             self.assertFalse(output.exists())
 
-    def test_manifest_schema_requires_passed_qualification_and_database_contract(self):
+    def test_builder_refuses_plain_http_artifact_url(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = root / "candidate.bin"
+            artifact.write_bytes(b"candidate\n")
+            output = root / "bad-http.json"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--channel", "dev",
+                    "--version", "0.9.0-dev.186",
+                    "--build-id", "dev-186-feedbeef",
+                    "--commit-sha", "0123456789abcdef0123456789abcdef01234567",
+                    "--run-id", "186",
+                    "--artifact", f"windows=tauri-updater,http://example.invalid/InfoMancer.exe,{artifact}",
+                    "--output", str(output),
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertFalse(output.exists())
+            self.assertIn("HTTPS", completed.stdout + completed.stderr)
+
+    def test_builder_refuses_plain_http_qualification_and_release_notes_urls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for option in ("--run-url", "--release-notes-url"):
+                output = root / f"bad-{option.removeprefix('--')}.json"
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        str(SCRIPT),
+                        "--channel", "dev",
+                        "--version", "0.9.0-dev.187",
+                        "--build-id", "dev-187-cafebabe",
+                        "--commit-sha", "0123456789abcdef0123456789abcdef01234567",
+                        "--run-id", "187",
+                        option, "http://example.invalid/metadata",
+                        "--output", str(output),
+                    ],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertFalse(output.exists())
+                self.assertIn("HTTPS", completed.stdout + completed.stderr)
+
+    def test_manifest_schema_requires_passed_qualification_database_contract_and_https_urls(self):
         schema = json.loads(
             (ROOT / "docs" / "update-channel-manifest.schema.json").read_text(encoding="utf-8")
         )
         qualification = schema["properties"]["qualification"]
         self.assertEqual(qualification["properties"]["status"]["const"], "passed")
+        self.assertEqual(qualification["properties"]["run_url"]["pattern"], "^https://")
+        self.assertEqual(schema["properties"]["release_notes_url"]["pattern"], "^https://")
+        artifact_url = schema["properties"]["artifacts"]["additionalProperties"]["properties"]["url"]
+        self.assertEqual(artifact_url["pattern"], "^https://")
         self.assertIn("artifacts", schema["required"])
         self.assertIn("database_schema", schema["required"])
         database_schema = schema["properties"]["database_schema"]

@@ -45,6 +45,9 @@ jobs:
           # Both classes were manually reviewed during the 0.8 alpha security pass.
           bandit -r app scripts desktop -x app/templates,app/static,desktop/ui -ll -ii -s B608,B310
 
+      - name: Verify Rust lockfile is synchronized
+        run: cargo metadata --manifest-path desktop/src-tauri/Cargo.toml --locked --format-version 1 --no-deps > /dev/null
+
       - name: Audit Rust desktop dependencies
         run: |
           cargo install cargo-audit --version 0.22.2 --locked
@@ -91,6 +94,44 @@ jobs:
       - name: Compile application
         run: python -m compileall -q app
 
+  desktop-rust-test:
+    name: Rust desktop tests on Windows
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install packaging dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller==6.21.0
+
+      - name: Generate native test icons
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run icon
+
+      - name: Build and self-check real Windows sidecar
+        run: python scripts/build_windows_sidecar.py
+
+      - name: Run Rust desktop tests
+        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked
+
   acceptance:
     name: Browser acceptance
     runs-on: ubuntu-latest
@@ -114,7 +155,7 @@ jobs:
       - name: Install and audit Playwright
         working-directory: e2e
         run: |
-          npm install --ignore-scripts
+          npm ci --ignore-scripts
           npm audit --audit-level=high
           # GitHub's hosted image already carries Chromium runtime libraries. Avoid
           # --with-deps here because it mutates runner apt sources and can fail on an
@@ -145,6 +186,7 @@ jobs:
     needs:
       - audit
       - test
+      - desktop-rust-test
       - acceptance
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -199,6 +241,7 @@ jobs:
     needs:
       - audit
       - test
+      - desktop-rust-test
       - acceptance
     permissions:
       contents: write
@@ -256,17 +299,9 @@ jobs:
         if: steps.signing.outputs.configured == 'true'
         run: python scripts/stamp_build_version.py "${{ steps.identity.outputs.version }}"
 
-      - name: Build bundled InfoMancer core
+      - name: Build and self-check bundled InfoMancer core
         if: steps.signing.outputs.configured == 'true'
-        shell: pwsh
-        run: |
-          python scripts/stage_ffprobe.py
-          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
-          & .\dist\infomancer-core.exe --check-ffprobe
-          if ($LASTEXITCODE -ne 0) { throw "Bundled FFprobe self-check failed: $LASTEXITCODE" }
-          $triple = (rustc --print host-tuple).Trim()
-          New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
-          Copy-Item dist/infomancer-core.exe "desktop/src-tauri/binaries/infomancer-core-$triple.exe"
+        run: python scripts/build_windows_sidecar.py
 
       - name: Install and audit desktop dependencies
         if: steps.signing.outputs.configured == 'true'
@@ -292,9 +327,12 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           INFOMANCER_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+          INFOMANCER_BUILD_COMMIT: ${{ github.sha }}
+          INFOMANCER_BUILD_ID: ${{ steps.identity.outputs.build_id }}
         with:
           projectPath: desktop
           tagName: ${{ steps.identity.outputs.tag }}
+          releaseCommitish: ${{ github.sha }}
           releaseName: InfoMancer ${{ steps.identity.outputs.version }}
           releaseBody: Qualified InfoMancer Dev build from Tests run ${{ github.run_number }} at commit ${{ github.sha }}.
           releaseDraft: false
@@ -303,7 +341,7 @@ jobs:
           updaterJsonPreferNsis: true
           includeUpdaterJson: true
 
-      - name: Resolve published updater assets
+      - name: Resolve and verify published updater assets
         if: steps.signing.outputs.configured == 'true'
         id: assets
         shell: pwsh
@@ -311,17 +349,36 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEV_TAG: ${{ steps.identity.outputs.tag }}
         run: |
+          $ErrorActionPreference = 'Stop'
           $published = Join-Path $env:RUNNER_TEMP 'published-dev'
           New-Item -ItemType Directory -Force $published | Out-Null
-          gh release download $env:DEV_TAG --pattern 'latest.json' --dir $published
+          gh release download $env:DEV_TAG --pattern latest.json --dir $published
           $release = gh release view $env:DEV_TAG --json assets | ConvertFrom-Json
-          $installer = $release.assets | Where-Object { $_.name -like '*.exe' } | Select-Object -First 1
+          $installer = $release.assets | Where-Object { $_.name -like '*.exe' -and $_.name -notlike '*.sig' } | Select-Object -First 1
           if ($null -eq $installer) { throw 'The signed Dev release did not contain a Windows installer asset.' }
+          $signatureName = "$($installer.name).sig"
+          $signatureAsset = $release.assets | Where-Object { $_.name -eq $signatureName } | Select-Object -First 1
+          if ($null -eq $signatureAsset) { throw 'The signed Dev release did not contain the matching updater signature.' }
           gh release download $env:DEV_TAG --pattern $installer.name --dir $published
+          gh release download $env:DEV_TAG --pattern $signatureAsset.name --dir $published
           $installerPath = Join-Path $published $installer.name
+          $signaturePath = Join-Path $published $signatureAsset.name
+          $latestPath = Join-Path $published 'latest.json'
+          $latest = Get-Content $latestPath -Raw | ConvertFrom-Json
+          $platform = $latest.platforms.PSObject.Properties | Where-Object { $_.Name -like 'windows-*' } | Select-Object -First 1
+          if ($null -eq $platform) { throw 'The immutable Dev latest.json has no Windows updater platform.' }
+          $publishedSignature = (Get-Content $signaturePath -Raw).Trim()
+          if ([string]::IsNullOrWhiteSpace($publishedSignature) -or ([string]$platform.Value.signature).Trim() -ne $publishedSignature) {
+            throw 'The immutable Dev latest.json signature does not match the published updater signature.'
+          }
+          $expectedPrefix = "https://github.com/${{ github.repository }}/releases/download/$env:DEV_TAG/"
+          if (-not ([string]$platform.Value.url).StartsWith($expectedPrefix)) {
+            throw 'The immutable Dev latest.json does not point at its immutable qualified release.'
+          }
           "published_dir=$published" >> $env:GITHUB_OUTPUT
           "installer_path=$installerPath" >> $env:GITHUB_OUTPUT
           "installer_url=$($installer.url)" >> $env:GITHUB_OUTPUT
+          "signature_path=$signaturePath" >> $env:GITHUB_OUTPUT
 
       - name: Build installable Dev channel manifest
         if: steps.signing.outputs.configured == 'true'
@@ -330,6 +387,8 @@ jobs:
           QUALIFICATION_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           New-Item -ItemType Directory -Force build/update-channel | Out-Null
+          $signature = (Get-Content '${{ steps.assets.outputs.signature_path }}' -Raw).Trim()
+          $artifactSpec = "windows=tauri-updater,${{ steps.assets.outputs.installer_url }},${{ steps.assets.outputs.installer_path }},$signature"
           python scripts/build_update_channel_manifest.py `
             --channel dev `
             --version "${{ steps.identity.outputs.version }}" `
@@ -338,7 +397,7 @@ jobs:
             --workflow Tests `
             --run-id "${{ github.run_id }}" `
             --run-url "$env:QUALIFICATION_RUN_URL" `
-            --artifact "windows=tauri-updater,${{ steps.assets.outputs.installer_url }},${{ steps.assets.outputs.installer_path }}" `
+            --artifact $artifactSpec `
             --output build/update-channel/dev.json
           Get-Content build/update-channel/dev.json
 
@@ -349,14 +408,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PUBLISHED_DIR: ${{ steps.assets.outputs.published_dir }}
         run: |
-          gh release view desktop-dev 2>$null
+          gh release view desktop-dev --repo $env:GITHUB_REPOSITORY 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create desktop-dev --target $env:GITHUB_SHA --title 'InfoMancer Desktop Dev Update Channel' --notes 'Rolling signed Tauri updater manifest. Only qualified 0.9 development builds advance this pointer.' --prerelease
+            gh release create desktop-dev --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title 'InfoMancer Desktop Dev Update Channel' --notes 'Rolling signed Tauri updater manifest. Only qualified 0.9 development builds advance this pointer.' --prerelease
           }
-          gh release upload desktop-dev (Join-Path $env:PUBLISHED_DIR 'latest.json') --clobber
+          gh release upload desktop-dev --repo $env:GITHUB_REPOSITORY (Join-Path $env:PUBLISHED_DIR 'latest.json') --clobber
 
-          gh release view update-channels 2>$null
+          gh release view update-channels --repo $env:GITHUB_REPOSITORY 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create update-channels --target $env:GITHUB_SHA --title 'InfoMancer Qualified Update Channels' --notes 'Rolling channel manifests for qualified InfoMancer builds.' --prerelease
+            gh release create update-channels --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title 'InfoMancer Qualified Update Channels' --notes 'Rolling channel manifests for qualified InfoMancer builds.' --prerelease
           }
-          gh release upload update-channels build/update-channel/dev.json --clobber
+          gh release upload update-channels --repo $env:GITHUB_REPOSITORY build/update-channel/dev.json --clobber

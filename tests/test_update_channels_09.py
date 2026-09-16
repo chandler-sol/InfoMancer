@@ -118,6 +118,12 @@ class UpdateChannel09Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "artifact metadata"):
             validate_channel_manifest(manifest, "dev")
 
+    def test_manifest_with_plain_http_artifact_is_rejected(self):
+        manifest = qualified_manifest()
+        manifest["artifacts"]["windows"]["url"] = "http://example.invalid/InfoMancer.exe"
+        with self.assertRaisesRegex(ValueError, "artifact metadata"):
+            validate_channel_manifest(manifest, "dev")
+
     def test_manifest_without_schema_contract_is_rejected(self):
         manifest = qualified_manifest()
         del manifest["database_schema"]

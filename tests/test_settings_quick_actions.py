@@ -33,7 +33,7 @@ class SettingsQuickActionTests(unittest.TestCase):
         self.original_stored_provider_secrets = main.stored_provider_secrets
         self.original_provider_secret_error = main.provider_secret_error
         main.db = self.database
-        main.tvdb = TVDBClient("old-project-key", "old-pin")
+        main.tvdb = TVDBClient("old-project-key", "old-pin", _token="old-token")
         main.provider_secrets = FakeProviderSecrets()
         main.stored_provider_secrets = {}
         main.provider_secret_error = ""
@@ -58,6 +58,7 @@ class SettingsQuickActionTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_tvdb_credentials_save_in_settings_without_echoing_secrets(self):
+        live_client = main.tvdb
         with patch(
             "app.routes.settings_quick_actions.TVDBClient.test_connection",
             return_value=None,
@@ -74,8 +75,12 @@ class SettingsQuickActionTests(unittest.TestCase):
         self.assertTrue(payload["pin_configured"])
         self.assertNotIn("new-secret-project-key", response.text)
         self.assertNotIn("new-pin", response.text)
+        self.assertIs(main.tvdb, live_client)
         self.assertEqual(main.tvdb.api_key, "new-secret-project-key")
         self.assertEqual(main.tvdb.pin, "new-pin")
+        self.assertEqual(main.tvdb._token, "")
+        self.assertEqual(main.stored_provider_secrets, {})
+        self.assertEqual(main.provider_secret_error, "")
         self.assertEqual(
             main.provider_secrets.values,
             {"tvdb_api_key": "new-secret-project-key", "tvdb_pin": "new-pin"},

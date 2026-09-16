@@ -28,11 +28,7 @@ class WindowsDesktopContractTests(unittest.TestCase):
         self.assertEqual(nsis["installerHooks"], "./windows/hooks.nsh")
         self.assertEqual(nsis["customLanguageFiles"]["English"], "./windows/English.nsh")
         hooks = (ROOT / "desktop/src-tauri/windows/hooks.nsh").read_text(encoding="utf-8")
-        for path in (
-            r'$APPDATA\cloud.arsenik.infomancer',
-            r'$LOCALAPPDATA\cloud.arsenik.infomancer',
-            r'$TEMP\InfoMancer',
-        ):
+        for path in (r'$APPDATA\cloud.arsenik.infomancer', r'$LOCALAPPDATA\cloud.arsenik.infomancer', r'$TEMP\InfoMancer'):
             self.assertIn(path, hooks)
         self.assertIn("$DeleteAppDataCheckboxState != 1", hooks)
         self.assertIn("$UpdateMode == 1", hooks)
@@ -70,8 +66,8 @@ class WindowsDesktopContractTests(unittest.TestCase):
         self.assertIn("_start_onefile_parent_watchdog()", sidecar)
         self.assertIn("os.getppid()", sidecar)
         self.assertIn('os.environ["INFOMANCER_RUNTIME_CONTEXT"] = "desktop"', sidecar)
-        self.assertIn('f"desktop:{host}:{os.getpid()}', runtime)
-        self.assertIn("_desktop_owner_pid", runtime)
+        self.assertIn('_runtime_owner("desktop")', runtime)
+        self.assertIn("_local_owner_pid", runtime)
         self.assertIn("_process_is_alive", runtime)
 
     def test_windows_core_log_survives_tauri_stream_capture(self):

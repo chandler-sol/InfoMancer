@@ -23,11 +23,9 @@ class SourceCommitRegressionTests(unittest.TestCase):
                 str(child.resolve()),
             )
 
-    def test_safe_source_commit_route_precedes_legacy_settings_route(self) -> None:
+    def test_safe_source_commit_route_is_registered_and_validated(self) -> None:
         init = (ROUTES / "__init__.py").read_text(encoding="utf-8")
-        safe_index = init.index("build_source_commit_router,")
-        settings_index = init.index("build_settings_router,")
-        self.assertLess(safe_index, settings_index)
+        self.assertIn("build_source_commit_router", init)
 
         source_commit = (ROUTES / "source_commit.py").read_text(encoding="utf-8")
         self.assertIn('@router.post("/roots"', source_commit)

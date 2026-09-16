@@ -13,7 +13,9 @@ from fastapi.responses import Response
 from jinja2 import BaseLoader
 
 from ..access import require_librarian
+from ..maintenance_gate import APPLICATION_MAINTENANCE_GATE
 from .context import RouteContext
+from .resilience import structured_api_failure_response
 
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -86,7 +88,6 @@ def _strip_member_export_paths(rows: list[dict], *, is_librarian: bool) -> list[
     sanitized: list[dict] = []
     for row in rows:
         item = dict(row)
-        # Keep the export schema stable while withholding server topology from Members.
         item["source_path"] = ""
         item["file_path"] = ""
         sanitized.append(item)
@@ -135,7 +136,6 @@ def _safe_diagnostic_event(row) -> dict:
         "created_at": item.get("created_at"),
         "level": item.get("level"),
         "category": item.get("category"),
-        # Raw message/detail and account display names are deliberately omitted.
         "context": _safe_diagnostic_context(context),
     }
 
@@ -152,8 +152,6 @@ def _nonce(request) -> str:
 
 
 def _harden_template_source(template: str, source: str) -> str:
-    # Every inline block receives the same request-local nonce. External scripts/styles
-    # may also carry it harmlessly, which keeps the transform simple and future-proof.
     source = re.sub(
         r"<script(?![^>]*\bnonce=)(?=[\s>])",
         '<script nonce="{{ csp_nonce(request) }}"',
@@ -198,6 +196,61 @@ class HardenedTemplateLoader(BaseLoader):
         return self.wrapped.list_templates()
 
 
+def _install_maintenance_admission_middleware(
+    ctx: RouteContext, record_event=None,
+) -> None:
+    """Block ordinary requests while an exclusive data-maintenance operation runs.
+
+    Recovery apply is admitted as ordinary work through authentication and CSRF, then
+    upgrades its sole request lease to exclusive mode inside the recovery handler.
+    Static files and the health probe are read-only and remain available while
+    maintenance is active. Unexpected API error logging is completed before the
+    request lease is released so database-backed logging cannot outlive admission.
+    """
+    app = ctx.get("app")
+    if app is None or getattr(
+        app.state, "infomancer_maintenance_admission_installed", False
+    ):
+        return
+    if record_event is None:
+        record_event = ctx.get("record_event")
+    if record_event is None:
+        def record_event(*_args, **_kwargs):
+            return None
+
+    @app.middleware("http")
+    async def maintenance_admission(request: Request, call_next):
+        path = request.url.path
+        bypass = path == "/health" or path.startswith("/static/")
+        if bypass:
+            return await call_next(request)
+
+        if not APPLICATION_MAINTENANCE_GATE.try_enter_operation():
+            return Response(
+                "InfoMancer is completing exclusive maintenance. Try again after the application restarts.",
+                status_code=503,
+                media_type="text/plain",
+                headers={
+                    "Retry-After": "5",
+                    "Cache-Control": "no-store",
+                    "X-Content-Type-Options": "nosniff",
+                    "X-Frame-Options": "DENY",
+                    "Referrer-Policy": "same-origin",
+                },
+            )
+        try:
+            try:
+                return await call_next(request)
+            except Exception as exc:
+                if not path.startswith("/api/"):
+                    raise
+                return structured_api_failure_response(request, exc, record_event)
+        finally:
+            APPLICATION_MAINTENANCE_GATE.leave_operation()
+
+    app.state.infomancer_maintenance_admission_installed = True
+
+
 def build_router(ctx: RouteContext):
     router = APIRouter()
     templates = ctx.live("templates")
@@ -207,6 +260,8 @@ def build_router(ctx: RouteContext):
     mie = ctx.live("mie")
     list_database_backups = ctx.live("list_database_backups")
     record_event = ctx.live("record_event")
+
+    _install_maintenance_admission_middleware(ctx, record_event)
 
     templates.env.globals["csp_nonce"] = _nonce
     templates.env.globals["deployment_secret_warning"] = (
@@ -218,23 +273,25 @@ def build_router(ctx: RouteContext):
         templates.env.loader = HardenedTemplateLoader(templates.env.loader)
 
     original_export = ctx.get("library_export_rows")
-    if original_export and not getattr(original_export, "_infomancer_security_wrapped", False):
-        def secure_library_export_rows(user_id: int):
-            rows = original_export(user_id)
-            if int(user_id or 0) <= 0:
-                # Disabled-auth mode represents its trusted local Librarian as user 0.
-                return rows
-            with db.connect() as conn:
-                user = conn.execute(
-                    "SELECT role FROM users WHERE id=?", (user_id,)
-                ).fetchone()
-            return _strip_member_export_paths(
-                rows,
-                is_librarian=bool(user and user["role"] == "librarian"),
-            )
+    secure_library_export_rows = None
+    if original_export:
+        if getattr(original_export, "_infomancer_security_wrapped", False):
+            secure_library_export_rows = original_export
+        else:
+            def secure_library_export_rows(user_id: int):
+                rows = original_export(user_id)
+                if int(user_id or 0) <= 0:
+                    return rows
+                with db.connect() as conn:
+                    user = conn.execute(
+                        "SELECT role FROM users WHERE id=?", (user_id,)
+                    ).fetchone()
+                return _strip_member_export_paths(
+                    rows,
+                    is_librarian=bool(user and user["role"] == "librarian"),
+                )
 
-        secure_library_export_rows._infomancer_security_wrapped = True
-        ctx.set("library_export_rows", secure_library_export_rows)
+            secure_library_export_rows._infomancer_security_wrapped = True
 
     @router.get(
         "/maintenance/diagnostics",
@@ -242,7 +299,6 @@ def build_router(ctx: RouteContext):
         name="download_sanitized_diagnostics",
     )
     def download_sanitized_diagnostics(request: Request):
-        """Export support diagnostics without library, account, network, or secret data."""
         output = io.BytesIO()
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("summary.json", json.dumps({
@@ -283,6 +339,9 @@ def build_router(ctx: RouteContext):
             },
         )
 
-    return router, {
+    handlers = {
         "download_sanitized_diagnostics": download_sanitized_diagnostics,
     }
+    if secure_library_export_rows is not None:
+        handlers["library_export_rows"] = secure_library_export_rows
+    return router, handlers

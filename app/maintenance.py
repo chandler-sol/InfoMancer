@@ -7,6 +7,8 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .maintenance_gate import APPLICATION_MAINTENANCE_GATE
+
 
 class MaintenanceError(RuntimeError):
     pass
@@ -18,21 +20,10 @@ SAFE_BACKUP_NAME = re.compile(
 )
 SAFE_ARTWORK_NAME = re.compile(r"^[0-9a-f]{40}\.(?:jpg|png|webp)$")
 UPDATE_RELEASE_FIELDS = (
-    "channel",
-    "latest_version",
-    "server_tag",
-    "build_id",
-    "commit_sha",
-    "qualified_at",
-    "qualification_status",
-    "qualification_workflow",
-    "qualification_run_id",
-    "qualification_run_url",
-    "qualification_gates",
-    "database_schema",
-    "schema_assessment",
-    "metadata_source",
-    "manifest_url",
+    "channel", "latest_version", "server_tag", "build_id", "commit_sha",
+    "qualified_at", "qualification_status", "qualification_workflow",
+    "qualification_run_id", "qualification_run_url", "qualification_gates",
+    "database_schema", "schema_assessment", "metadata_source", "manifest_url",
     "release_notes_url",
 )
 MAX_UPDATE_RELEASE_METADATA_BYTES = 64 * 1024
@@ -50,7 +41,6 @@ def backup_directory(database_path: Path) -> Path:
 
 
 def _safe_backup_file(directory: Path, candidate: Path) -> Path | None:
-    """Return a contained regular backup file without following directory symlinks."""
     try:
         directory_resolved = directory.resolve(strict=True)
         if candidate.is_symlink():
@@ -94,8 +84,7 @@ def create_database_backup(database_path: Path, suffix: str = "") -> Path:
         except OSError:
             pass
         raise MaintenanceError(
-            "InfoMancer could not create a readable database backup. "
-            "The live database was not changed."
+            "InfoMancer could not create a readable database backup. The live database was not changed."
         ) from exc
     finally:
         if source is not None:
@@ -117,26 +106,48 @@ def validate_database_backup(path: Path) -> None:
             )
         }
     except sqlite3.Error as exc:
-        raise MaintenanceError(
-            "The selected file is not a readable SQLite database."
-        ) from exc
+        raise MaintenanceError("The selected file is not a readable SQLite database.") from exc
     finally:
         if connection is not None:
             connection.close()
     if not integrity or integrity[0] != "ok":
-        raise MaintenanceError(
-            "The selected database did not pass SQLite's integrity check."
-        )
+        raise MaintenanceError("The selected database did not pass SQLite's integrity check.")
     if foreign_key_error:
-        raise MaintenanceError(
-            "The selected database contains broken catalog relationships."
-        )
+        raise MaintenanceError("The selected database contains broken catalog relationships.")
     missing = REQUIRED_TABLES - tables
     if missing:
         raise MaintenanceError(
             "The selected database is not an InfoMancer backup. "
             f"It is missing required data tables: {', '.join(sorted(missing))}."
         )
+
+
+def invalidate_restored_auth_state(path: Path) -> None:
+    """Prevent a backup from reviving bearer sessions or unused invitations."""
+    connection = None
+    try:
+        connection = sqlite3.connect(path)
+        tables = {
+            row[0] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        with connection:
+            if "user_sessions" in tables:
+                connection.execute("DELETE FROM user_sessions")
+            if "account_invitations" in tables:
+                connection.execute(
+                    """UPDATE account_invitations
+                       SET revoked_at=COALESCE(revoked_at,CURRENT_TIMESTAMP)
+                       WHERE used_at IS NULL AND revoked_at IS NULL"""
+                )
+    except sqlite3.Error as exc:
+        raise MaintenanceError(
+            "InfoMancer could not invalidate restored login credentials. The live database was not changed."
+        ) from exc
+    finally:
+        if connection is not None:
+            connection.close()
 
 
 def _resolved(path: Path) -> Path:
@@ -160,10 +171,7 @@ def _database_roots(database_path: Path) -> tuple[Path, ...]:
     connection = None
     try:
         connection = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True)
-        return tuple(
-            Path(row[0]) for row in connection.execute("SELECT path FROM roots")
-            if row[0]
-        )
+        return tuple(Path(row[0]) for row in connection.execute("SELECT path FROM roots") if row[0])
     except sqlite3.Error:
         return ()
     finally:
@@ -172,10 +180,8 @@ def _database_roots(database_path: Path) -> tuple[Path, ...]:
 
 
 def validate_database_paths(
-    path: Path, media_browse_roots: tuple[Path, ...],
-    existing_roots: tuple[Path, ...] = (),
+    path: Path, media_browse_roots: tuple[Path, ...], existing_roots: tuple[Path, ...] = (),
 ) -> None:
-    """Reject restored catalog paths that escape already-trusted storage."""
     allowed_parents = tuple(_resolved(root) for root in media_browse_roots)
     grandfathered = {_resolved(root) for root in existing_roots}
     connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
@@ -208,7 +214,7 @@ def validate_database_paths(
                 )
 
         for row in connection.execute(
-            """SELECT f.path,t.root_id FROM files f JOIN titles t ON t.id=f.title_id"""
+            "SELECT f.path,t.root_id FROM files f JOIN titles t ON t.id=f.title_id"
         ):
             root = roots.get(int(row["root_id"]))
             candidate = Path(row["path"] or "")
@@ -250,19 +256,10 @@ def validate_database_paths(
 
 
 def list_database_backups(database_path: Path) -> list[dict]:
-    """Return readable backups without letting an unavailable backup folder break callers.
-
-    Backup listing is informational on Settings, verification, and diagnostics
-    surfaces. If the application-data backup folder itself cannot be opened,
-    report no readable backups rather than turning those otherwise-safe routes
-    into a server error. Operations that create, resolve, restore, or download a
-    specific backup remain strict and continue to raise MaintenanceError.
-    """
     rows = []
     try:
         directory = backup_directory(database_path)
-        candidates = directory.glob("infomancer-backup-*.db")
-        for path in candidates:
+        for path in directory.glob("infomancer-backup-*.db"):
             if not SAFE_BACKUP_NAME.fullmatch(path.name):
                 continue
             safe_path = _safe_backup_file(directory, path)
@@ -275,9 +272,7 @@ def list_database_backups(database_path: Path) -> list[dict]:
             rows.append({
                 "name": path.name,
                 "size": stat.st_size,
-                "modified_at": datetime.fromtimestamp(
-                    stat.st_mtime, timezone.utc
-                ).isoformat(),
+                "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
             })
     except (MaintenanceError, OSError):
         return []
@@ -299,16 +294,27 @@ def install_database_backup(
     database_path: Path, candidate: Path,
     media_browse_roots: tuple[Path, ...] | None = None,
 ) -> Path:
-    validate_database_backup(candidate)
-    existing_roots: tuple[Path, ...] = ()
-    if media_browse_roots is not None:
-        existing_roots = _database_roots(database_path)
-        validate_database_paths(candidate, media_browse_roots, existing_roots)
-    safety_backup = create_database_backup(database_path, "before-restore")
+    gate_status = APPLICATION_MAINTENANCE_GATE.status()
+    exclusive_acquired = False
+    if int(gate_status["active_operations"]) > 0:
+        if not APPLICATION_MAINTENANCE_GATE.try_upgrade_sole_operation_to_exclusive(
+            "database restore"
+        ):
+            raise MaintenanceError(
+                "InfoMancer is busy. Wait for active requests and background work to finish before restoring the database."
+            )
+        exclusive_acquired = True
+
     staged = database_path.with_suffix(".restore.db")
     source = None
     target = None
     try:
+        validate_database_backup(candidate)
+        existing_roots: tuple[Path, ...] = ()
+        if media_browse_roots is not None:
+            existing_roots = _database_roots(database_path)
+            validate_database_paths(candidate, media_browse_roots, existing_roots)
+        safety_backup = create_database_backup(database_path, "before-restore")
         source = sqlite3.connect(candidate)
         target = sqlite3.connect(staged)
         with target:
@@ -320,24 +326,29 @@ def install_database_backup(
         validate_database_backup(staged)
         if media_browse_roots is not None:
             validate_database_paths(staged, media_browse_roots, existing_roots)
+        invalidate_restored_auth_state(staged)
+        validate_database_backup(staged)
         for suffix in ("-wal", "-shm"):
             Path(f"{database_path}{suffix}").unlink(missing_ok=True)
         os.replace(staged, database_path)
+        return safety_backup
     except (sqlite3.Error, OSError, MaintenanceError) as exc:
         try:
             staged.unlink(missing_ok=True)
         except OSError:
             pass
+        if exclusive_acquired:
+            APPLICATION_MAINTENANCE_GATE.end_exclusive()
+        if isinstance(exc, MaintenanceError) and str(exc).startswith("InfoMancer is busy"):
+            raise
         raise MaintenanceError(
-            "The restore could not be completed. A safety backup of the "
-            "current database was retained and the uploaded file was not used."
+            "The restore could not be completed. A safety backup of the current database was retained and the uploaded file was not used."
         ) from exc
     finally:
         if source is not None:
             source.close()
         if target is not None:
             target.close()
-    return safety_backup
 
 
 def update_request_path(database_path: Path) -> Path:
@@ -356,10 +367,7 @@ def read_update_status(database_path: Path) -> dict:
         value = json.loads(path.read_text(encoding="utf-8"))
         return value if isinstance(value, dict) else {"status": "idle"}
     except (OSError, json.JSONDecodeError):
-        return {
-            "status": "error",
-            "message": "The updater status file could not be read.",
-        }
+        return {"status": "error", "message": "The updater status file could not be read."}
 
 
 def _write_json_atomically(path: Path, value: dict, error_message: str) -> Path:
@@ -378,8 +386,7 @@ def _write_json_atomically(path: Path, value: dict, error_message: str) -> Path:
 
 def write_update_status(database_path: Path, value: dict) -> Path:
     return _write_json_atomically(
-        update_status_path(database_path),
-        value,
+        update_status_path(database_path), value,
         "InfoMancer could not write the updater status file. Check application-data permissions and free disk space.",
     )
 

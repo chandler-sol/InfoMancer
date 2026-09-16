@@ -1,8 +1,10 @@
 import os
+import re
 import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -14,13 +16,20 @@ from app.auth import AuthService, SESSION_COOKIE
 from app.db import Database
 from app.engagement import EngagementService
 from app.event_log import EventLog
+from app.maintenance_gate import APPLICATION_MAINTENANCE_GATE
 from app.recovery_package import RecoveryPackageService
+from app.runtime import RuntimeLease
 
 
 class RecoveryRouteTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
+        self.assertEqual(
+            APPLICATION_MAINTENANCE_GATE.status()["active_operations"], 0
+        )
+        APPLICATION_MAINTENANCE_GATE.end_exclusive()
+        self.addCleanup(APPLICATION_MAINTENANCE_GATE.end_exclusive)
         settings = replace(
             main.settings,
             database=Path(self.temporary.name) / "recovery-route.db",
@@ -33,7 +42,7 @@ class RecoveryRouteTests(unittest.TestCase):
         database.initialize()
         self.original = (
             main.db, main.settings, main.auth_service, main.app_settings,
-            main.engagement, main.event_log,
+            main.engagement, main.event_log, main.runtime_lease,
         )
         self.addCleanup(self._restore_globals)
         main.db, main.settings = database, settings
@@ -41,6 +50,10 @@ class RecoveryRouteTests(unittest.TestCase):
         main.app_settings = AppSettings(database, settings.search_url_template)
         main.engagement = EngagementService(database)
         main.event_log = EventLog(database)
+        main.runtime_lease = RuntimeLease(
+            database, owner="server:test-host:123:recovery-route-test",
+            on_lost=lambda: None,
+        )
         main.auth_service.create_user(
             "recovery-admin", "recovery@example.com", "Recovery Admin", "x", role="librarian",
         )
@@ -53,7 +66,6 @@ class RecoveryRouteTests(unittest.TestCase):
         self.client = TestClient(main.app, follow_redirects=False)
         self.addCleanup(self.client.close)
         login = self.client.get("/login")
-        import re
         preauth = re.search(r'name="preauth_token" value="([^"]+)', login.text).group(1)
         signed_in = self.client.post("/login", data={
             "preauth_token": preauth,
@@ -66,7 +78,7 @@ class RecoveryRouteTests(unittest.TestCase):
     def _restore_globals(self):
         (
             main.db, main.settings, main.auth_service, main.app_settings,
-            main.engagement, main.event_log,
+            main.engagement, main.event_log, main.runtime_lease,
         ) = self.original
 
     def csrf_token(self) -> str:
@@ -75,6 +87,23 @@ class RecoveryRouteTests(unittest.TestCase):
         session = main.auth_service.session_from_token(raw)
         self.assertIsNotNone(session)
         return session.csrf_token
+
+    def preview_token(self) -> str:
+        response = self.client.post(
+            "/settings/recovery/preview",
+            headers={"X-CSRF-Token": self.csrf_token()},
+            files={
+                "recovery_file": (
+                    self.package.name,
+                    self.package.read_bytes(),
+                    "application/octet-stream",
+                )
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        match = re.search(r'name="staged_token" value="([^"]+)', response.text)
+        self.assertIsNotNone(match)
+        return match.group(1)
 
     def test_recovery_page_is_librarian_accessible(self):
         response = self.client.get("/settings/recovery")
@@ -114,6 +143,87 @@ class RecoveryRouteTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
         self.assertIn("Request verification failed", response.text)
+
+    def test_restore_refuses_to_upgrade_while_another_operation_is_active(self):
+        token = self.preview_token()
+        self.assertTrue(APPLICATION_MAINTENANCE_GATE.try_enter_operation())
+        try:
+            response = self.client.post(
+                "/settings/recovery/apply",
+                headers={"X-CSRF-Token": self.csrf_token()},
+                data={"staged_token": token, "confirm": "RESTORE"},
+            )
+        finally:
+            APPLICATION_MAINTENANCE_GATE.leave_operation()
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("became+busy", response.headers.get("location", ""))
+        self.assertFalse(APPLICATION_MAINTENANCE_GATE.exclusive_active())
+
+    def test_successful_restore_stays_exclusive_and_rebinds_runtime_lease(self):
+        token = self.preview_token()
+        with patch.object(main, "restart_after_restore", return_value=None):
+            response = self.client.post(
+                "/settings/recovery/apply",
+                headers={"X-CSRF-Token": self.csrf_token()},
+                data={"staged_token": token, "confirm": "RESTORE"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("recovery", response.text.casefold())
+        self.assertTrue(APPLICATION_MAINTENANCE_GATE.exclusive_active())
+        self.assertEqual(
+            APPLICATION_MAINTENANCE_GATE.status()["reason"], "portable recovery"
+        )
+        with main.db.connect() as conn:
+            row = conn.execute(
+                "SELECT owner FROM runtime_leases WHERE name=?",
+                (main.runtime_lease.name,),
+            ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["owner"], main.runtime_lease.owner)
+
+    def test_runtime_rebind_failure_keeps_fatal_exclusive_mode(self):
+        token = self.preview_token()
+        with patch.object(
+            main.runtime_lease, "rebind_after_restore", side_effect=OSError("lease write failed")
+        ):
+            response = self.client.post(
+                "/settings/recovery/apply",
+                headers={"X-CSRF-Token": self.csrf_token()},
+                data={"staged_token": token, "confirm": "RESTORE"},
+            )
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("maintenance mode", response.text.casefold())
+        self.assertTrue(APPLICATION_MAINTENANCE_GATE.exclusive_active())
+
+    def test_post_commit_cleanup_exception_cannot_reopen_admission(self):
+        token = self.preview_token()
+        original_exists = Path.exists
+        rollback_exists_calls = 0
+
+        def fail_cleanup_exists(path):
+            nonlocal rollback_exists_calls
+            if path.name.startswith(".collection-art-rollback-"):
+                rollback_exists_calls += 1
+                if rollback_exists_calls >= 2:
+                    raise PermissionError("synthetic post-commit cleanup lookup failure")
+            return original_exists(path)
+
+        with patch("app.recovery_package.Path.exists", side_effect=fail_cleanup_exists), patch.object(
+            main.runtime_lease, "rebind_after_restore", wraps=main.runtime_lease.rebind_after_restore
+        ) as rebind:
+            response = self.client.post(
+                "/settings/recovery/apply",
+                headers={"X-CSRF-Token": self.csrf_token()},
+                data={"staged_token": token, "confirm": "RESTORE"},
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("maintenance mode", response.text.casefold())
+        self.assertEqual(rebind.call_count, 0)
+        self.assertTrue(APPLICATION_MAINTENANCE_GATE.exclusive_active())
+        self.assertEqual(
+            APPLICATION_MAINTENANCE_GATE.status()["reason"], "portable recovery"
+        )
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import unittest
 from pathlib import Path
@@ -28,10 +29,6 @@ class SupplyChainTests(unittest.TestCase):
         installation = (ROOT / "docs" / "INSTALLATION.md").read_text(encoding="utf-8")
         self.assertIn("cap_drop:\n      - ALL", compose)
         self.assertIn("no-new-privileges:true", compose)
-        # Missing configuration must fail back to host-only. The distributed
-        # Server example deliberately opts into LAN access for a normal home
-        # deployment, with the install guide explicitly forbidding public
-        # port-forwarding.
         self.assertIn('"${INFOMANCER_BIND_ADDRESS:-127.0.0.1}:8787:8787"', compose)
         self.assertIn("INFOMANCER_BIND_ADDRESS=0.0.0.0", env_example)
         self.assertIn("Do not port-forward port 8787", installation)
@@ -76,6 +73,93 @@ class SupplyChainTests(unittest.TestCase):
         self.assertIn("cargo audit --file desktop/src-tauri/Cargo.lock", tests)
         self.assertIn("npm audit --audit-level=high", windows)
         self.assertIn("npm audit --audit-level=high", release)
+
+    def test_rust_audit_rejects_a_stale_lockfile_before_scanning(self):
+        tests = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+        sync_check = (
+            "cargo metadata --manifest-path desktop/src-tauri/Cargo.toml "
+            "--locked --format-version 1 --no-deps > /dev/null"
+        )
+        self.assertIn(sync_check, tests)
+        self.assertLess(
+            tests.index(sync_check),
+            tests.index("cargo audit --file desktop/src-tauri/Cargo.lock"),
+        )
+
+    def test_rust_desktop_tests_are_required_for_dev_qualification(self):
+        tests = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+        self.assertIn("desktop-rust-test:", tests)
+        self.assertIn("name: Rust desktop tests on Windows", tests)
+        self.assertIn(
+            "cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked",
+            tests,
+        )
+        self.assertEqual(tests.count("      - desktop-rust-test\n"), 2)
+        qualified = tests.index("  qualified-dev-candidate:")
+        package = tests.index("  windows-dev-package:")
+        self.assertLess(tests.index("      - desktop-rust-test\n", qualified), package)
+        self.assertGreater(tests.index("      - desktop-rust-test\n", package), package)
+
+    def test_e2e_acceptance_consumes_committed_lock_before_any_npm_mutation(self):
+        tests = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+        package_path = ROOT / "e2e" / "package.json"
+        lock_path = ROOT / "e2e" / "package-lock.json"
+        self.assertTrue(lock_path.is_file(), "E2E dependencies must have an npm lockfile")
+        package = json.loads(package_path.read_text(encoding="utf-8"))
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        self.assertEqual(package["scripts"].get("pretest"), "npm ci --ignore-scripts")
+        self.assertEqual(lock.get("lockfileVersion"), 3)
+        self.assertEqual(
+            lock["packages"][""]["devDependencies"],
+            package["devDependencies"],
+        )
+        acceptance = tests[tests.index("  acceptance:"):tests.index("  qualified-dev-candidate:")]
+        self.assertIn("npm ci --ignore-scripts", acceptance)
+        self.assertNotIn("npm install", acceptance)
+        self.assertLess(
+            acceptance.index("npm ci --ignore-scripts"),
+            acceptance.index("npm audit --audit-level=high"),
+        )
+
+    def test_windows_package_smoke_and_signed_publisher_share_real_builder(self):
+        tests = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+        builder = (ROOT / "scripts" / "build_windows_sidecar.py").read_text(encoding="utf-8")
+        self.assertEqual(tests.count("python scripts/build_windows_sidecar.py"), 2)
+        self.assertIn("Build and self-check real Windows sidecar", tests)
+        self.assertIn("Build and self-check bundled InfoMancer core", tests)
+        self.assertIn('"desktop/sidecar.py"', builder)
+        self.assertIn('"--check-ffprobe"', builder)
+        self.assertIn('"build/ffprobe/ffprobe.exe', builder)
+        self.assertIn("FFPROBE_LICENSE.txt", builder)
+        self.assertIn("FFPROBE_NOTICE.txt", builder)
+        self.assertNotIn("app/__main__.py", tests)
+        self.assertNotIn("scripts/bootstrap_ffprobe.py", tests)
+        self.assertNotIn("app/ffprobe-assets.json", tests)
+        self.assertNotIn("app/build-info.json", tests)
+        package = tests[tests.index("  windows-dev-package:"):]
+        self.assertIn("name: Generate native icons", package)
+        self.assertLess(
+            package.index("name: Generate native icons"),
+            package.index("name: Build, sign, and publish immutable Windows Dev updater"),
+        )
+
+    def test_qualified_dev_publisher_keeps_immutable_and_rolling_feeds_connected(self):
+        tests = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5",
+            tests,
+        )
+        self.assertIn("releaseCommitish: ${{ github.sha }}", tests)
+        self.assertIn("includeUpdaterJson: true", tests)
+        self.assertIn("gh release download $env:DEV_TAG --pattern latest.json", tests)
+        self.assertIn("gh release upload desktop-dev", tests)
+        self.assertIn("gh release upload update-channels", tests)
+        self.assertIn(
+            '$artifactSpec = "windows=tauri-updater,${{ steps.assets.outputs.installer_url }},${{ steps.assets.outputs.installer_path }},$signature"',
+            tests,
+        )
+        self.assertNotIn("--artifact-digest-source", tests)
+        self.assertNotIn("windows-x86_64=$archiveUrl=$archivePath=$signature", tests)
 
 
 if __name__ == "__main__":

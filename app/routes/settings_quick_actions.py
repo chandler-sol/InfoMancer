@@ -81,15 +81,20 @@ def build_router(ctx: RouteContext):
                 "tvdb_api_key": candidate_key,
                 "tvdb_pin": candidate_pin,
             })
-            stored = provider_secrets.load()
+            # Keep the existing post-write decrypt check. Credential rotation is not
+            # activated in memory unless encrypted persistence can be read back.
+            provider_secrets.load()
         except ProviderSecretError as exc:
             return credential_response(request, str(exc), status_code=500)
 
-        # Replace the live provider object only after both verification and encrypted
-        # persistence succeed. Every existing LiveRef consumer sees the new client.
-        ctx.set("tvdb", candidate)
-        ctx.set("stored_provider_secrets", stored)
-        ctx.set("provider_secret_error", "")
+        # Rotate the existing live service only after verification and encrypted
+        # persistence both succeed. Keeping the service identity stable means every
+        # existing LiveRef consumer immediately observes the new credentials without
+        # replacing application globals from inside a request handler.
+        active_tvdb = tvdb._value()
+        active_tvdb.api_key = candidate_key
+        active_tvdb.pin = candidate_pin
+        active_tvdb._token = ""
         record_event(
             "settings",
             "TVDB credentials verified and updated from Metadata Settings.",

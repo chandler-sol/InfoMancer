@@ -5,6 +5,7 @@ import os
 import re
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import urlparse
 
 
 UPDATE_CHANNELS = ("standard", "beta", "dev")
@@ -266,8 +267,14 @@ def validate_channel_manifest(value: object, expected_channel: str) -> dict:
             raise ValueError("Update channel manifest contains an invalid platform artifact.")
         kind = str(artifact.get("kind") or "").strip()
         url = str(artifact.get("url") or "").strip()
+        parsed_url = urlparse(url)
         digest = str(artifact.get("sha256") or "").strip()
-        if not kind or not url.startswith(("https://", "http://")) or not SHA256_PATTERN.fullmatch(digest):
+        if (
+            not kind
+            or parsed_url.scheme.casefold() != "https"
+            or not parsed_url.netloc
+            or not SHA256_PATTERN.fullmatch(digest)
+        ):
             raise ValueError("Update channel manifest contains invalid artifact metadata.")
 
     normalized = dict(value)
