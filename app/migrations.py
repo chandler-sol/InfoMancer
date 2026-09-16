@@ -318,6 +318,66 @@ def _announcement_onboarding_receipts(conn: sqlite3.Connection) -> None:
     )
 
 
+def _intelligence_09(conn: sqlite3.Connection) -> None:
+    """Add the additive storage model for 0.9 media intelligence."""
+    _add_columns(conn, "mie_analysis_runs", {
+        "opened_findings": "INTEGER NOT NULL DEFAULT 0",
+        "resolved_findings": "INTEGER NOT NULL DEFAULT 0",
+    })
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS media_streams (
+             file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+             stream_index INTEGER NOT NULL,
+             stream_type TEXT NOT NULL,
+             codec TEXT NOT NULL DEFAULT '',
+             language TEXT NOT NULL DEFAULT 'und',
+             title TEXT NOT NULL DEFAULT '',
+             channels INTEGER,
+             channel_layout TEXT NOT NULL DEFAULT '',
+             sample_rate INTEGER,
+             default_flag INTEGER NOT NULL DEFAULT 0,
+             forced_flag INTEGER NOT NULL DEFAULT 0,
+             hearing_impaired INTEGER NOT NULL DEFAULT 0,
+             visual_impaired INTEGER NOT NULL DEFAULT 0,
+             commentary INTEGER NOT NULL DEFAULT 0,
+             disposition_json TEXT NOT NULL DEFAULT '{}',
+             PRIMARY KEY(file_id,stream_index)
+           )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_media_streams_file_type ON media_streams(file_id,stream_type,language)"
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS media_integrity_results (
+             file_id INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
+             status TEXT NOT NULL CHECK(status IN ('passed','warning','failed','error')),
+             mode TEXT NOT NULL CHECK(mode IN ('sample','full')),
+             checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+             checked_modified_at REAL,
+             checked_size_bytes INTEGER NOT NULL DEFAULT 0,
+             issue_count INTEGER NOT NULL DEFAULT 0,
+             details_json TEXT NOT NULL DEFAULT '{}'
+           )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_media_integrity_status ON media_integrity_results(status,checked_at DESC)"
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS mie_title_health_snapshots (
+             run_id INTEGER NOT NULL REFERENCES mie_analysis_runs(id) ON DELETE CASCADE,
+             title_id INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
+             score INTEGER NOT NULL DEFAULT 100,
+             critical_count INTEGER NOT NULL DEFAULT 0,
+             warning_count INTEGER NOT NULL DEFAULT 0,
+             information_count INTEGER NOT NULL DEFAULT 0,
+             PRIMARY KEY(run_id,title_id)
+           )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_mie_title_health_title ON mie_title_health_snapshots(title_id,run_id DESC)"
+    )
+
+
 MIGRATIONS = (
     additive_migration(1, "title metadata columns", _titles),
     additive_migration(2, "source health columns", _roots),
@@ -336,6 +396,7 @@ MIGRATIONS = (
     additive_migration(15, "library read-path indexes", _library_read_indexes),
     additive_migration(16, "shared chrome read indexes", _shared_chrome_indexes),
     behavioral_migration(17, "historical announcement onboarding receipts", _announcement_onboarding_receipts),
+    additive_migration(18, "0.9 intelligence foundation", _intelligence_09),
 )
 
 CURRENT_SCHEMA_VERSION = max(migration.version for migration in MIGRATIONS)
