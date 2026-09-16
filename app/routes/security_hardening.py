@@ -196,7 +196,9 @@ class HardenedTemplateLoader(BaseLoader):
         return self.wrapped.list_templates()
 
 
-def _install_maintenance_admission_middleware(ctx: RouteContext, record_event) -> None:
+def _install_maintenance_admission_middleware(
+    ctx: RouteContext, record_event=None,
+) -> None:
     """Block ordinary requests while an exclusive data-maintenance operation runs.
 
     Recovery apply is admitted as ordinary work through authentication and CSRF, then
@@ -210,6 +212,11 @@ def _install_maintenance_admission_middleware(ctx: RouteContext, record_event) -
         app.state, "infomancer_maintenance_admission_installed", False
     ):
         return
+    if record_event is None:
+        record_event = ctx.get("record_event")
+    if record_event is None:
+        def record_event(*_args, **_kwargs):
+            return None
 
     @app.middleware("http")
     async def maintenance_admission(request: Request, call_next):
