@@ -6,6 +6,7 @@ from .security_hardening import build_router as build_security_hardening_router
 from .resilience import build_router as build_resilience_router
 from .final_polish import build_router as build_final_polish_router
 from .worker_maintenance import build_router as build_worker_maintenance_router
+from .duplicate_verification_maintenance import build_router as build_duplicate_verification_maintenance_router
 from .release_081_announcements import build_router as build_release_081_announcements_router
 from .release_081_stabilization import build_router as build_release_081_stabilization_router
 from .release_081_collection_undo import build_router as build_release_081_collection_undo_router
@@ -39,14 +40,7 @@ from .titles import build_router as build_titles_router
 
 
 def _without_shadowed_routes(builder, *method_paths: tuple[str, str]):
-    """Keep legacy handler aliases while refusing duplicate route registration.
-
-    Several focused hardening/polish routers intentionally replaced broader legacy
-    handlers during 0.8. Route order previously decided which implementation won.
-    Cycle 0D makes that ownership explicit: the legacy builder still constructs and
-    returns its compatibility handlers, but its shadowed FastAPI routes are removed
-    before the router is attached to the application.
-    """
+    """Keep legacy handler aliases while refusing duplicate route registration."""
     shadowed = {(method.upper(), path) for method, path in method_paths}
 
     @wraps(builder)
@@ -75,6 +69,8 @@ build_review_router = _without_shadowed_routes(
     ("POST", "/movies/bulk-match"),
     ("GET", "/shows/bulk-match"),
     ("POST", "/shows/bulk-match"),
+    ("POST", "/duplicates/bulk-action"),
+    ("POST", "/duplicates/{file_a_id}/{file_b_id}/verify"),
 )
 build_title_bulk_actions_router = _without_shadowed_routes(
     build_title_bulk_actions_router,
@@ -103,12 +99,11 @@ ROUTER_BUILDERS = (
     # logging remains inside the request operation lease through its complete tail.
     build_resilience_router,
     build_security_hardening_router,
-    # Small release-polish hooks replace live helpers before the domain routes use
-    # them, while keeping the existing public route contracts intact.
     build_final_polish_router,
-    # Every recovery-visible metadata worker keeps a maintenance operation lease
-    # through its complete database, cleanup, and structured-logging lifetime.
     build_worker_maintenance_router,
+    # Duplicate verification is a database-writing background worker even though
+    # it does not mutate media. Own these routes before the broader Review bundle.
+    build_duplicate_verification_maintenance_router,
     build_release_081_announcements_router,
     build_release_081_stabilization_router,
     build_release_081_collection_undo_router,
