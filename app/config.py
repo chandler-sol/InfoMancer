@@ -6,6 +6,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .runtime_lock import claim_runtime_startup_lock
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env", override=False)
@@ -43,6 +45,10 @@ def get_settings() -> Settings:
     db = Path(os.getenv("INFOMANCER_DATABASE", "data/infomancer.db"))
     if not db.is_absolute():
         db = BASE_DIR / db
+    # Runtime ownership is intentionally claimed before Database.initialize(),
+    # migrations, announcement seeding, or any other composition-time database
+    # access. RuntimeLease later adopts the same descriptor without an unlock gap.
+    claim_runtime_startup_lock(db)
     browse_values = os.getenv("MEDIA_BROWSE_ROOTS", "/media")
     browse_roots = tuple(
         Path(value.strip()) for value in browse_values.split(",") if value.strip()
