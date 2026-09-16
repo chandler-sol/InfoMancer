@@ -132,6 +132,29 @@ class Cycle1MIEHistoryTests(unittest.TestCase):
         self.assertEqual(history[0]["opened_findings"], 1)
         self.assertEqual(history[1]["resolved_findings"], 3)
 
+    def test_attention_uses_latest_complete_snapshot_run(self) -> None:
+        self.mie.analyze()
+        complete_snapshot = self.latest_snapshot()
+        self.assertEqual(complete_snapshot["score"], 64)
+
+        # A schema-17 writer can legally add an analysis run after a safe downgrade,
+        # but it cannot know about Migration 18 title snapshots. Re-upgrading must not
+        # make the attention query appear empty until the next 0.9 analysis finishes.
+        with self.database.connect() as conn:
+            cursor = conn.execute(
+                """INSERT INTO mie_analysis_runs(
+                     analyzed_at,active_findings,suppressed_findings,overall_score
+                   ) VALUES (CURRENT_TIMESTAMP,3,0,64)"""
+            )
+            bare_run_id = int(cursor.lastrowid)
+        self.assertGreater(bare_run_id, int(complete_snapshot["run_id"]))
+
+        attention = self.mie.titles_needing_attention()
+        self.assertEqual(len(attention), 1)
+        self.assertEqual(attention[0]["title_id"], 1)
+        self.assertEqual(attention[0]["run_id"], complete_snapshot["run_id"])
+        self.assertEqual(attention[0]["score"], 64)
+
     def test_snapshot_retention_follows_analysis_run_retention(self) -> None:
         for _ in range(55):
             self.mie.analyze()

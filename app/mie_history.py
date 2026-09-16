@@ -117,14 +117,14 @@ class MediaIntelligenceHistoryEngine(MediaIntelligenceEngine):
             return candidate_count
 
     def titles_needing_attention(self, limit: int = 12) -> list[dict[str, Any]]:
-        """Return the lowest-health titles from the latest completed analysis run."""
+        """Return the lowest-health titles from the latest run with health snapshots."""
         normalized_limit = max(1, min(int(limit), 100))
         with self.database.connect() as conn:
             rows = conn.execute(
                 """SELECT h.*,COALESCE(t.metadata_title,t.title) title_name,t.kind
                    FROM mie_title_health_snapshots h
                    JOIN titles t ON t.id=h.title_id
-                   WHERE h.run_id=(SELECT MAX(id) FROM mie_analysis_runs)
+                   WHERE h.run_id=(SELECT MAX(run_id) FROM mie_title_health_snapshots)
                      AND (h.critical_count+h.warning_count+h.information_count)>0
                    ORDER BY h.score ASC,h.critical_count DESC,
                             h.warning_count DESC,title_name COLLATE NOCASE
