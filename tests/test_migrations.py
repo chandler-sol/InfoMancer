@@ -39,6 +39,7 @@ class MigrationTests(unittest.TestCase):
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=12").fetchone())
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=13").fetchone())
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=14").fetchone())
+                self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=18").fetchone())
                 rename_columns = {row["name"] for row in upgraded.execute("PRAGMA table_info(rename_proposals)")}
                 self.assertTrue({"file_id", "source_path", "destination_path", "source_size", "source_mtime_ns", "status"}.issubset(rename_columns))
                 operation_columns = {
@@ -57,14 +58,20 @@ class MigrationTests(unittest.TestCase):
                     lockout_columns,
                 )
 
-    def test_migration_17_records_behavioral_semantics_without_blocking_safe_downgrade(self):
-        migration = next(item for item in MIGRATIONS if item.version == 17)
-        self.assertEqual(migration.compatibility, "behavioral")
-        self.assertEqual(migration.minimum_reader_schema, 1)
-        self.assertEqual(migration.minimum_writer_schema, 1)
-        self.assertEqual(migration.downgrade_policy, "compatible")
+    def test_migrations_17_and_18_preserve_safe_downgrade_semantics(self):
+        migration_17 = next(item for item in MIGRATIONS if item.version == 17)
+        self.assertEqual(migration_17.compatibility, "behavioral")
+        self.assertEqual(migration_17.minimum_reader_schema, 1)
+        self.assertEqual(migration_17.minimum_writer_schema, 1)
+        self.assertEqual(migration_17.downgrade_policy, "compatible")
+
+        migration_18 = next(item for item in MIGRATIONS if item.version == 18)
+        self.assertEqual(migration_18.compatibility, "additive")
+        self.assertEqual(migration_18.minimum_reader_schema, 1)
+        self.assertEqual(migration_18.minimum_writer_schema, 1)
+        self.assertEqual(migration_18.downgrade_policy, "compatible")
         self.assertEqual(schema_contract(), {
-            "current": 17,
+            "current": 18,
             "minimum_reader_schema": 1,
             "minimum_writer_schema": 1,
             "downgrade_policy": "compatible",
@@ -74,16 +81,20 @@ class MigrationTests(unittest.TestCase):
             database = Database(Path(temporary) / "catalog.db")
             database.initialize()
             with database.connect() as conn:
-                row = conn.execute(
-                    """SELECT compatibility,minimum_reader_schema,
-                              minimum_writer_schema,downgrade_policy
-                       FROM schema_compatibility WHERE migration_version=17"""
-                ).fetchone()
-            self.assertIsNotNone(row)
-            self.assertEqual(row["compatibility"], "behavioral")
-            self.assertEqual(row["minimum_reader_schema"], 1)
-            self.assertEqual(row["minimum_writer_schema"], 1)
-            self.assertEqual(row["downgrade_policy"], "compatible")
+                rows = {
+                    int(row["migration_version"]): row
+                    for row in conn.execute(
+                        """SELECT migration_version,compatibility,minimum_reader_schema,
+                                  minimum_writer_schema,downgrade_policy
+                           FROM schema_compatibility
+                           WHERE migration_version IN (17,18)"""
+                    )
+                }
+            self.assertEqual(rows[17]["compatibility"], "behavioral")
+            self.assertEqual(rows[18]["compatibility"], "additive")
+            self.assertEqual(rows[18]["minimum_reader_schema"], 1)
+            self.assertEqual(rows[18]["minimum_writer_schema"], 1)
+            self.assertEqual(rows[18]["downgrade_policy"], "compatible")
 
     def test_existing_compatibility_snapshot_is_not_silently_rewritten(self):
         with tempfile.TemporaryDirectory() as temporary:
