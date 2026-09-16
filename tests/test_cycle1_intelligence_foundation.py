@@ -151,6 +151,10 @@ class Cycle1IntelligenceFoundationTests(unittest.TestCase):
         self.assertEqual(result["issue_count"], 0)
         self.assertEqual(result["details"]["samples"][0]["returncode"], 0)
         self.assertEqual(integrity.pending_files(), [])
+        self.assertEqual(integrity.pending_files([]), [])
+        current_summary = integrity.summary()
+        self.assertEqual(current_summary["passed"], 1)
+        self.assertEqual(current_summary["unchecked_or_stale"], 0)
 
         with self.database.connect() as conn:
             conn.execute("UPDATE files SET size_bytes=1001 WHERE id=1")
@@ -159,7 +163,9 @@ class Cycle1IntelligenceFoundationTests(unittest.TestCase):
         self.assertIsNotNone(stale)
         self.assertTrue(stale["stale"])
         self.assertEqual([row["id"] for row in integrity.pending_files()], [1])
-        self.assertEqual(integrity.summary()["unchecked_or_stale"], 1)
+        stale_summary = integrity.summary()
+        self.assertEqual(stale_summary["unchecked_or_stale"], 1)
+        self.assertEqual(stale_summary["passed"], 0)
 
     def test_stream_and_integrity_rows_follow_file_cascade(self) -> None:
         streams = MediaStreamService(self.database)

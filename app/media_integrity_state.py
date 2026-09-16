@@ -106,7 +106,9 @@ class MediaIntegrityResultService:
     def pending_files(self, file_ids: list[int] | None = None) -> list[dict[str, Any]]:
         params: list[Any] = []
         clause = ""
-        if file_ids:
+        if file_ids is not None:
+            if not file_ids:
+                return []
             placeholders = ",".join("?" for _ in file_ids)
             clause = f"AND f.id IN ({placeholders})"
             params.extend(int(file_id) for file_id in file_ids)
@@ -132,7 +134,12 @@ class MediaIntegrityResultService:
             counts = {
                 str(row["status"]): int(row["count"])
                 for row in conn.execute(
-                    "SELECT status,COUNT(*) count FROM media_integrity_results GROUP BY status"
+                    """SELECT i.status,COUNT(*) count
+                       FROM media_integrity_results i
+                       JOIN files f ON f.id=i.file_id
+                       WHERE COALESCE(i.checked_modified_at,-1)=COALESCE(f.modified_at,-1)
+                         AND i.checked_size_bytes=f.size_bytes
+                       GROUP BY i.status"""
                 )
             }
             stale = int(conn.execute(
