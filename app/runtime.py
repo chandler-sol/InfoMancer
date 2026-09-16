@@ -6,15 +6,11 @@ import socket
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Callable
 
 from .db import Database
 from .maintenance_gate import APPLICATION_MAINTENANCE_GATE
-
-
-class RuntimeLeaseError(RuntimeError):
-    pass
+from .runtime_lock import RuntimeLeaseError, RuntimeProcessLock
 
 
 def _runtime_owner(kind: str) -> str:
@@ -79,9 +75,9 @@ def _process_is_alive(pid: int) -> bool:
 class RuntimeLease:
     """Fail closed when two InfoMancer processes try to own one catalog.
 
-    The SQLite lease records ownership inside the catalog. A second process-lifetime
-    kernel lock lives beside the database so ownership remains continuous even while
-    recovery atomically replaces the SQLite file itself.
+    Kernel ownership is established before application database initialization and
+    transferred into this lease. The persisted SQLite row is then bound after schema
+    initialization without releasing the replacement-stable kernel descriptor.
     """
 
     def __init__(
@@ -102,13 +98,10 @@ class RuntimeLease:
         self.on_lost = on_lost or self._terminate_after_lease_loss
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        configured_database_path = Path(self.database.path)
-        database_parent = configured_database_path.parent.resolve(strict=False)
-        self._ownership_lock_path = database_parent / (
-            f".{configured_database_path.name}.runtime.lock"
-        )
-        self._ownership_lock_fd: int | None = None
-        self._ownership_lock_guard = threading.Lock()
+        take_startup_lock = getattr(self.database, "take_runtime_startup_lock", None)
+        startup_lock = take_startup_lock() if callable(take_startup_lock) else None
+        self._ownership_lock = startup_lock or RuntimeProcessLock(self.database.path)
+        self._ownership_lock_path = self._ownership_lock.path
 
     @staticmethod
     def _now() -> datetime:
@@ -124,72 +117,13 @@ class RuntimeLease:
         os._exit(70)
 
     def _acquire_ownership_lock(self) -> bool:
-        """Acquire the replacement-stable process lock.
-
-        Returns True only when this call acquired a new descriptor. Keeping the file
-        itself after release avoids delete/recreate races; kernel lock ownership is
-        tied to the open descriptor and is released automatically if the process dies.
-        """
-        with self._ownership_lock_guard:
-            if self._ownership_lock_fd is not None:
-                return False
-            try:
-                fd = os.open(
-                    self._ownership_lock_path,
-                    os.O_RDWR | os.O_CREAT,
-                    0o600,
-                )
-            except OSError as exc:
-                raise RuntimeLeaseError(
-                    "InfoMancer could not secure runtime ownership beside the database. Check application-data permissions."
-                ) from exc
-
-            try:
-                try:
-                    os.chmod(self._ownership_lock_path, 0o600)
-                except OSError:
-                    pass
-                if os.name == "nt":
-                    import msvcrt
-
-                    if os.fstat(fd).st_size < 1:
-                        os.lseek(fd, 0, os.SEEK_SET)
-                        os.write(fd, b"\0")
-                    os.lseek(fd, 0, os.SEEK_SET)
-                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-                else:
-                    import fcntl
-
-                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError as exc:
-                os.close(fd)
-                raise RuntimeLeaseError(
-                    "Another InfoMancer process is already using this database. Run exactly one application process/worker per catalog."
-                ) from exc
-            self._ownership_lock_fd = fd
-            return True
+        return self._ownership_lock.acquire()
 
     def _release_ownership_lock(self) -> None:
-        with self._ownership_lock_guard:
-            fd = self._ownership_lock_fd
-            if fd is None:
-                return
-            self._ownership_lock_fd = None
-            try:
-                if os.name == "nt":
-                    import msvcrt
-
-                    os.lseek(fd, 0, os.SEEK_SET)
-                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
-                else:
-                    import fcntl
-
-                    fcntl.flock(fd, fcntl.LOCK_UN)
-            finally:
-                os.close(fd)
+        self._ownership_lock.release()
 
     def acquire(self) -> None:
-        acquired_file_lock = self._acquire_ownership_lock()
+        self._acquire_ownership_lock()
         try:
             now = self._now()
             with self.database.connect() as conn:
@@ -214,7 +148,8 @@ class RuntimeLease:
 
                     if fresh:
                         raise RuntimeLeaseError(
-                            "Another InfoMancer process is already using this database. Run exactly one application process/worker per catalog."
+                            "Another InfoMancer process is already using this database. "
+                            "Run exactly one application process/worker per catalog."
                         )
                 conn.execute(
                     """INSERT INTO runtime_leases(name,owner,heartbeat_at) VALUES (?,?,?)
@@ -223,8 +158,9 @@ class RuntimeLease:
                     (self.name, self.owner, now.isoformat()),
                 )
         except Exception:
-            if acquired_file_lock:
-                self._release_ownership_lock()
+            # This includes an adopted startup lock. A process that cannot bind the
+            # persisted row must not continue holding installation ownership.
+            self._release_ownership_lock()
             raise
 
     def heartbeat(self) -> None:
@@ -240,12 +176,7 @@ class RuntimeLease:
                 raise RuntimeLeaseError("InfoMancer lost ownership of its runtime lease.")
 
     def rebind_after_restore(self, *, fatal_maintenance: bool = False) -> None:
-        """Reassert the persisted lease after an exclusive database replacement.
-
-        The process-lifetime ownership lock remains held continuously while the SQLite
-        file is replaced, so this write repairs the new catalog's persisted lease
-        without creating a competing-process acquisition window.
-        """
+        """Reassert the persisted lease after an exclusive database replacement."""
         heartbeat = self._now()
         if fatal_maintenance:
             heartbeat += timedelta(hours=24)
