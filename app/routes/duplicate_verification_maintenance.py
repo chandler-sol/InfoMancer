@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from ..access import require_librarian
 from ..maintenance_gate import APPLICATION_MAINTENANCE_GATE
@@ -10,7 +10,6 @@ from .context import RouteContext
 def build_router(ctx: RouteContext):
     router = APIRouter()
     Form = ctx.get("Form")
-    Request = ctx.get("Request")
     duplicate_verify_job = ctx.live("duplicate_verify_job")
     duplicate_verify_lock = ctx.live("duplicate_verify_lock")
     duplicates = ctx.live("duplicates")
