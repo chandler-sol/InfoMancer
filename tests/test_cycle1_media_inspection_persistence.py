@@ -122,6 +122,21 @@ class Cycle1MediaInspectionPersistenceTests(unittest.TestCase):
         self.assertEqual(collected["context"]["stream_count"], 3)
         self.assertNotIn("streams", collected["context"])
 
+    def test_empty_selection_does_not_expand_to_pending_files(self) -> None:
+        self.run_media_inspection([])
+
+        with self.database.connect() as conn:
+            file_row = conn.execute(
+                "SELECT video_codec,media_info_at FROM files WHERE id=1"
+            ).fetchone()
+        self.assertEqual(file_row["video_codec"], "OLDVIDEO")
+        self.assertIsNone(file_row["media_info_at"])
+        self.assertEqual(self.media_streams.file_streams(1), [])
+        self.assertEqual(self.job["status"], "complete")
+        self.assertEqual(self.job["total"], 0)
+        self.assertEqual(self.job["updated"], 0)
+        self.assertEqual(self.job["errors"], 0)
+
     def test_stream_failure_rolls_back_summary_and_previous_inventory(self) -> None:
         self.run_media_inspection([1])
         original_streams = self.media_streams.file_streams(1)
