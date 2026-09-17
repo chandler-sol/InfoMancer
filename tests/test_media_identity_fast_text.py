@@ -3,8 +3,14 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from app.media_identity.text import read_sidecar_text, sidecar_identity
+from app.media_identity.text import (
+    MAX_SIDECAR_COUNT,
+    discover_sidecar_subtitles,
+    read_sidecar_text,
+    sidecar_identity,
+)
 
 
 class FastSidecarFreshnessTests(unittest.TestCase):
@@ -35,6 +41,28 @@ class FastSidecarFreshnessTests(unittest.TestCase):
             self.assertIsNotNone(refreshed)
             assert refreshed is not None
             self.assertIn("changed dialogue", refreshed.normalized_text)
+
+
+    def test_sidecar_discovery_caps_matching_file_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            media = root / "Episode.mkv"
+            media.write_bytes(b"media")
+            for index in range(MAX_SIDECAR_COUNT + 6):
+                (root / f"Episode.lang{index:02d}.srt").write_bytes(b"subtitle")
+            found = discover_sidecar_subtitles(media)
+            self.assertEqual(len(found), MAX_SIDECAR_COUNT)
+
+    def test_sidecar_discovery_caps_cumulative_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            media = root / "Episode.mkv"
+            media.write_bytes(b"media")
+            for index in range(4):
+                (root / f"Episode.lang{index:02d}.srt").write_bytes(b"x" * 40)
+            with patch("app.media_identity.text.MAX_TOTAL_SIDECAR_BYTES", 80):
+                found = discover_sidecar_subtitles(media)
+            self.assertEqual(len(found), 2)
 
 
 if __name__ == "__main__":
