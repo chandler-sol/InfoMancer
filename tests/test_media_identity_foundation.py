@@ -64,6 +64,9 @@ class _ExternalSource:
     def subtitles(self, media):
         return ()
 
+    def read_subtitle(self, subtitle):
+        return b""
+
     def media_metadata(self, media):
         return {"path": media.path}
 
