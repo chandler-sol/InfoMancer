@@ -28,7 +28,6 @@ def apply_provider_episode_cache(conn: sqlite3.Connection) -> None:
              name TEXT NOT NULL DEFAULT '',
              overview TEXT NOT NULL DEFAULT '',
              aired TEXT NOT NULL DEFAULT '',
-             absolute_number INTEGER,
              metadata_json TEXT NOT NULL DEFAULT '{}',
              PRIMARY KEY(provider,provider_series_id,provider_episode_id,language),
              FOREIGN KEY(provider,provider_series_id,language)
