@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+from app.db import Database
+from app.mie_history import MediaIntelligenceHistoryEngine
 
 
 class Cycle1MIEReviewTemplateTests(unittest.TestCase):
@@ -77,6 +81,53 @@ class Cycle1MIEReviewTemplateTests(unittest.TestCase):
         })
 
         self.assertNotIn("Titles needing attention", html)
+
+
+class Cycle1MIEReviewSnapshotStateTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.database = Database(Path(self.temporary.name) / "catalog.db")
+        self.database.initialize()
+        self.mie = MediaIntelligenceHistoryEngine(self.database)
+        with self.database.connect() as conn:
+            conn.execute(
+                "INSERT INTO roots(id,path,kind,label) VALUES (1,'/media','movie','Movies')"
+            )
+            conn.execute(
+                """INSERT INTO titles(id,root_id,kind,title,folder_path)
+                   VALUES (1,1,'movie','Example','/media/Example')"""
+            )
+            conn.execute(
+                """INSERT INTO mie_analysis_state(id,last_analyzed_at,finding_count)
+                   VALUES (1,CURRENT_TIMESTAMP,0)"""
+            )
+            cursor = conn.execute(
+                """INSERT INTO mie_analysis_runs(
+                     analyzed_at,active_findings,suppressed_findings,overall_score
+                   ) VALUES (CURRENT_TIMESTAMP,0,0,100)"""
+            )
+            self.run_id = int(cursor.lastrowid)
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def test_summary_distinguishes_legacy_analysis_from_title_snapshot(self) -> None:
+        before = self.mie.summary()
+        self.assertTrue(before["last_analyzed_at"])
+        self.assertIsNone(before["attention_snapshot_run_id"])
+        self.assertEqual(before["attention_titles"], [])
+
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO mie_title_health_snapshots(
+                     run_id,title_id,score,critical_count,warning_count,information_count
+                   ) VALUES (?,?,100,0,0,0)""",
+                (self.run_id, 1),
+            )
+
+        after = self.mie.summary()
+        self.assertEqual(after["attention_snapshot_run_id"], self.run_id)
+        self.assertEqual(after["attention_titles"], [])
 
 
 if __name__ == "__main__":
