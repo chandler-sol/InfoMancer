@@ -2,18 +2,33 @@ from __future__ import annotations
 
 import threading
 from collections import Counter, defaultdict
+from contextlib import contextmanager
 from typing import Any
 
 from .mie import DEFAULT_CALIBRATION, MediaIntelligenceEngine
+
+
+class _TransactionalDatabase:
+    """Expose one existing connection through the Database.connect contract."""
+
+    def __init__(self, database, connection) -> None:
+        self._database = database
+        self._connection = connection
+
+    @contextmanager
+    def connect(self):
+        yield self._connection
+
+    def __getattr__(self, name: str):
+        return getattr(self._database, name)
 
 
 class MediaIntelligenceHistoryEngine(MediaIntelligenceEngine):
     """Add deterministic 0.9 lifecycle/history persistence to the existing MIE.
 
     The underlying analyzer remains the source of truth for finding generation. This
-    wrapper serializes analysis runs within the single InfoMancer runtime, captures the
-    active-finding set on either side of that analysis, then stores transition counts
-    and per-title snapshots for the run that was just committed.
+    wrapper serializes analysis runs within the single InfoMancer runtime and executes
+    the base analysis plus lifecycle/history finalization in one database transaction.
     """
 
     def __init__(self, database):
@@ -30,9 +45,11 @@ class MediaIntelligenceHistoryEngine(MediaIntelligenceEngine):
                     )
                 }
 
-            candidate_count = super().analyze()
+                transactional_engine = MediaIntelligenceEngine(
+                    _TransactionalDatabase(self.database, conn)
+                )
+                candidate_count = transactional_engine.analyze()
 
-            with self.database.connect() as conn:
                 run = conn.execute(
                     "SELECT id FROM mie_analysis_runs ORDER BY id DESC LIMIT 1"
                 ).fetchone()
