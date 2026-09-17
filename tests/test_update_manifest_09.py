@@ -75,7 +75,7 @@ class UpdateManifest09Tests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
             manifest = json.loads(output.read_text(encoding="utf-8"))
-            self.assertEqual(manifest["database_schema"]["current"], 19)
+            self.assertEqual(manifest["database_schema"]["current"], 20)
             self.assertEqual(manifest["database_schema"]["downgrade_policy"], "compatible")
 
     def test_builder_refuses_failed_qualification(self):
