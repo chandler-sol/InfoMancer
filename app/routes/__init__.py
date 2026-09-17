@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import wraps
 
+from .cycle1_intelligence_foundation import build_router as build_cycle1_intelligence_foundation_router
 from .security_hardening import build_router as build_security_hardening_router
 from .resilience import build_router as build_resilience_router
 from .final_polish import build_router as build_final_polish_router
@@ -99,6 +100,10 @@ ROUTER_BUILDERS = (
     # resilience remains the outer fallback for failures outside that boundary.
     build_security_hardening_router,
     build_resilience_router,
+    # Cycle 1 replaces the underlying media-inspection service implementation.
+    # Install it before final_polish so the already-qualified maintenance wrapper
+    # remains the public owner and keeps the full worker lifetime under admission.
+    build_cycle1_intelligence_foundation_router,
     build_final_polish_router,
     build_worker_maintenance_router,
     # Duplicate verification is a database-writing background worker even though

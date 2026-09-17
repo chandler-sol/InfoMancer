@@ -20,14 +20,33 @@ class MediaInfoTests(unittest.TestCase):
                     },
                     "streams": [
                         {
+                            "index": 0,
                             "codec_type": "video", "codec_name": "hevc",
                             "width": 3840, "height": 2160,
                             "color_transfer": "smpte2084",
                             "color_primaries": "bt2020",
+                            "disposition": {"default": 1},
                         },
                         {
+                            "index": 1,
                             "codec_type": "audio", "codec_name": "eac3",
-                            "channels": 6,
+                            "channels": 6, "channel_layout": "5.1(side)",
+                            "sample_rate": "48000",
+                            "tags": {"language": "eng", "title": "Main Audio"},
+                            "disposition": {"default": 1, "comment": 0},
+                        },
+                        {
+                            "index": 2,
+                            "codec_type": "audio", "codec_name": "aac",
+                            "channels": 2,
+                            "tags": {"language": "eng", "title": "Director Commentary"},
+                            "disposition": {"default": 0, "comment": 0},
+                        },
+                        {
+                            "index": 3,
+                            "codec_type": "subtitle", "codec_name": "subrip",
+                            "tags": {"language": "spa", "title": "Forced Spanish"},
+                            "disposition": {"forced": 1, "hearing_impaired": 1},
                         },
                     ],
                 }),
@@ -38,8 +57,18 @@ class MediaInfoTests(unittest.TestCase):
         self.assertEqual((result["width"], result["height"]), (3840, 2160))
         self.assertEqual(result["video_codec"], "HEVC")
         self.assertEqual(result["audio_codec"], "EAC3")
+        self.assertEqual(result["audio_channels"], 6)
         self.assertEqual(result["dynamic_range"], "HDR10")
         self.assertEqual(result["container"], "MATROSKA")
+        self.assertEqual(len(result["streams"]), 4)
+        self.assertEqual(result["streams"][1]["language"], "eng")
+        self.assertEqual(result["streams"][1]["channel_layout"], "5.1(side)")
+        self.assertEqual(result["streams"][1]["sample_rate"], 48000)
+        self.assertTrue(result["streams"][2]["commentary"])
+        self.assertEqual(result["streams"][3]["type"], "subtitle")
+        self.assertEqual(result["streams"][3]["language"], "spa")
+        self.assertTrue(result["streams"][3]["forced"])
+        self.assertTrue(result["streams"][3]["hearing_impaired"])
 
     def test_missing_file_has_plain_language_error(self):
         with self.assertRaisesRegex(MediaInspectionError, "no longer available"):

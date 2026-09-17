@@ -185,8 +185,10 @@ def build_router(ctx: RouteContext):
             base_run_title_scan(title_id)
 
     def _inspection_rows(file_ids: list[int] | None):
+        if file_ids is not None and not file_ids:
+            return []
         with db.connect() as conn:
-            if file_ids:
+            if file_ids is not None:
                 placeholders = ",".join("?" for _ in file_ids)
                 return conn.execute(
                     f"""SELECT f.id, f.path, t.root_id
