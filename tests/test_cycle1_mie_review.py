@@ -28,6 +28,7 @@ class Cycle1MIEReviewTemplateTests(unittest.TestCase):
         html = self.render({
             "last_analyzed_at": "2026-09-17 00:00:00",
             "attention_snapshot_run_id": 9,
+            "attention_snapshot_current": True,
             "attention_titles": [{
                 "title_id": 42,
                 "title_name": "Example Movie",
@@ -45,15 +46,39 @@ class Cycle1MIEReviewTemplateTests(unittest.TestCase):
         self.assertIn("Titles needing attention", html)
         self.assertIn("Example Movie", html)
         self.assertIn("Movie · 1 critical · 1 warning · 0 information", html)
-        self.assertIn("Down 8 points since the previous analysis", html)
+        self.assertIn("Down 8 points since the previous title snapshot", html)
         self.assertIn("Recent scores: 88 → 80 → 72", html)
         self.assertIn('href="/titles/42"', html)
         self.assertIn("does not change your media files", html)
+        self.assertNotIn("newer analysis exists", html)
+
+    def test_attention_panel_labels_stale_title_scores(self) -> None:
+        html = self.render({
+            "last_analyzed_at": "2026-09-17 01:00:00",
+            "attention_snapshot_run_id": 9,
+            "attention_snapshot_current": False,
+            "attention_titles": [{
+                "title_id": 42,
+                "title_name": "Example Movie",
+                "kind": "movie",
+                "score": 80,
+                "critical_count": 1,
+                "warning_count": 0,
+                "information_count": 0,
+                "trend": "stable",
+                "score_delta": 0,
+                "recent_scores": [80, 80],
+            }],
+        })
+
+        self.assertIn("A newer analysis exists than these title snapshots", html)
+        self.assertIn("Refresh analysis before treating these title scores as current", html)
 
     def test_attention_panel_has_clear_empty_state_after_snapshot_analysis(self) -> None:
         html = self.render({
             "last_analyzed_at": "2026-09-17 00:00:00",
             "attention_snapshot_run_id": 9,
+            "attention_snapshot_current": True,
             "attention_titles": [],
         })
 
@@ -61,10 +86,23 @@ class Cycle1MIEReviewTemplateTests(unittest.TestCase):
         self.assertIn("No title-level findings currently reduce a title health score", html)
         self.assertNotIn("has not been recorded yet", html)
 
+    def test_attention_panel_asks_for_refresh_when_snapshot_is_stale(self) -> None:
+        html = self.render({
+            "last_analyzed_at": "2026-09-17 01:00:00",
+            "attention_snapshot_run_id": 9,
+            "attention_snapshot_current": False,
+            "attention_titles": [],
+        })
+
+        self.assertIn("Title-level health history is from an earlier analysis", html)
+        self.assertIn("Refresh analysis", html)
+        self.assertNotIn("No title-level findings currently reduce", html)
+
     def test_attention_panel_asks_for_refresh_when_history_is_not_recorded(self) -> None:
         html = self.render({
             "last_analyzed_at": "2026-09-16 23:00:00",
             "attention_snapshot_run_id": None,
+            "attention_snapshot_current": False,
             "attention_titles": [],
         })
 
@@ -77,6 +115,7 @@ class Cycle1MIEReviewTemplateTests(unittest.TestCase):
         html = self.render({
             "last_analyzed_at": None,
             "attention_snapshot_run_id": None,
+            "attention_snapshot_current": False,
             "attention_titles": [],
         })
 
@@ -111,10 +150,11 @@ class Cycle1MIEReviewSnapshotStateTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def test_summary_distinguishes_legacy_analysis_from_title_snapshot(self) -> None:
+    def test_summary_distinguishes_missing_current_and_stale_title_snapshots(self) -> None:
         before = self.mie.summary()
         self.assertTrue(before["last_analyzed_at"])
         self.assertIsNone(before["attention_snapshot_run_id"])
+        self.assertFalse(before["attention_snapshot_current"])
         self.assertEqual(before["attention_titles"], [])
 
         with self.database.connect() as conn:
@@ -125,9 +165,24 @@ class Cycle1MIEReviewSnapshotStateTests(unittest.TestCase):
                 (self.run_id, 1),
             )
 
-        after = self.mie.summary()
-        self.assertEqual(after["attention_snapshot_run_id"], self.run_id)
-        self.assertEqual(after["attention_titles"], [])
+        current = self.mie.summary()
+        self.assertEqual(current["attention_snapshot_run_id"], self.run_id)
+        self.assertTrue(current["attention_snapshot_current"])
+        self.assertEqual(current["attention_titles"], [])
+
+        with self.database.connect() as conn:
+            cursor = conn.execute(
+                """INSERT INTO mie_analysis_runs(
+                     analyzed_at,active_findings,suppressed_findings,overall_score
+                   ) VALUES (CURRENT_TIMESTAMP,0,0,100)"""
+            )
+            newer_run_id = int(cursor.lastrowid)
+        self.assertGreater(newer_run_id, self.run_id)
+
+        stale = self.mie.summary()
+        self.assertEqual(stale["attention_snapshot_run_id"], self.run_id)
+        self.assertFalse(stale["attention_snapshot_current"])
+        self.assertEqual(stale["attention_titles"], [])
 
 
 if __name__ == "__main__":
