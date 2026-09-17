@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
-from typing import Any, Iterable
+from typing import Any
 
 from ..db import Database
-from ..tvdb import TVDBClient
+from .tvdb_orders import TVDBOrderTransport, episode_orders, episodes_for_order
 
 
 @dataclass(frozen=True)
@@ -68,12 +68,12 @@ class ProviderEpisodeCache:
         }
 
     def refresh_tvdb_series(
-        self, series_id: int, client: TVDBClient, language: str = "eng",
+        self, series_id: int, client: TVDBOrderTransport, language: str = "eng",
     ) -> ProviderEpisodeRefresh:
         """Fetch a complete TVDB order snapshot before atomically replacing cache rows."""
         provider_series_id = str(int(series_id))
         language = _clean_text(language).casefold() or "eng"
-        order_info = client.episode_orders(series_id)
+        order_info = episode_orders(client, series_id)
         orders = list(order_info.get("orders") or [])
         if not orders:
             orders = [{"namespace": "default", "name": "Default", "default": True}]
@@ -88,8 +88,8 @@ class ProviderEpisodeCache:
             if not namespace:
                 continue
             order_name = _clean_text(order.get("name")) or namespace
-            episodes = client.episodes_for_order(
-                series_id, namespace, language=language,
+            episodes = episodes_for_order(
+                client, series_id, namespace, language=language,
             )
             order_summaries.append({
                 "namespace": namespace,
