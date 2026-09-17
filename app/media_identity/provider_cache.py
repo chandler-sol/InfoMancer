@@ -9,6 +9,10 @@ from ..db import Database
 from .tvdb_orders import TVDBOrderTransport, episode_orders, episodes_for_order
 
 
+class ProviderEpisodeRefreshError(RuntimeError):
+    """Raised when a provider refresh is not safe to commit as a complete snapshot."""
+
+
 @dataclass(frozen=True)
 class ProviderEpisodeRefresh:
     provider: str
@@ -190,6 +194,15 @@ class ProviderEpisodeCache:
         ).hexdigest()
 
         with self.database.connect() as conn:
+            previous = conn.execute(
+                """SELECT episode_count FROM provider_episode_series_cache
+                   WHERE provider='tvdb' AND provider_series_id=? AND language=?""",
+                (provider_series_id, language),
+            ).fetchone()
+            if not normalized_identities and previous and int(previous["episode_count"] or 0) > 0:
+                raise ProviderEpisodeRefreshError(
+                    "TVDB returned an empty series snapshot; preserving the previous non-empty cache."
+                )
             conn.execute(
                 """DELETE FROM provider_episode_series_cache
                    WHERE provider='tvdb' AND provider_series_id=? AND language=?""",
