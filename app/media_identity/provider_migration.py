@@ -7,11 +7,11 @@ def apply_provider_episode_cache(conn: sqlite3.Connection) -> None:
     """Add additive provider episode identity and order-mapping persistence."""
     conn.execute(
         """CREATE TABLE IF NOT EXISTS provider_episode_series_cache (
-             provider TEXT NOT NULL,
-             provider_series_id TEXT NOT NULL,
-             language TEXT NOT NULL DEFAULT 'eng',
+             provider TEXT NOT NULL CHECK(provider!=''),
+             provider_series_id TEXT NOT NULL CHECK(provider_series_id!=''),
+             language TEXT NOT NULL DEFAULT 'eng' CHECK(language!=''),
              provider_updated_at TEXT NOT NULL DEFAULT '',
-             source_signature TEXT NOT NULL,
+             source_signature TEXT NOT NULL CHECK(source_signature!=''),
              refreshed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
              episode_count INTEGER NOT NULL DEFAULT 0 CHECK(episode_count>=0),
              mapping_count INTEGER NOT NULL DEFAULT 0 CHECK(mapping_count>=0),
@@ -21,10 +21,10 @@ def apply_provider_episode_cache(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """CREATE TABLE IF NOT EXISTS provider_episode_identities (
-             provider TEXT NOT NULL,
-             provider_series_id TEXT NOT NULL,
-             provider_episode_id TEXT NOT NULL,
-             language TEXT NOT NULL DEFAULT 'eng',
+             provider TEXT NOT NULL CHECK(provider!=''),
+             provider_series_id TEXT NOT NULL CHECK(provider_series_id!=''),
+             provider_episode_id TEXT NOT NULL CHECK(provider_episode_id!=''),
+             language TEXT NOT NULL DEFAULT 'eng' CHECK(language!=''),
              name TEXT NOT NULL DEFAULT '',
              overview TEXT NOT NULL DEFAULT '',
              aired TEXT NOT NULL DEFAULT '',
@@ -43,17 +43,18 @@ def apply_provider_episode_cache(conn: sqlite3.Connection) -> None:
     conn.execute(
         """CREATE TABLE IF NOT EXISTS provider_episode_mappings (
              id INTEGER PRIMARY KEY,
-             provider TEXT NOT NULL,
-             provider_series_id TEXT NOT NULL,
-             provider_episode_id TEXT NOT NULL,
-             language TEXT NOT NULL DEFAULT 'eng',
-             order_namespace TEXT NOT NULL,
+             provider TEXT NOT NULL CHECK(provider!=''),
+             provider_series_id TEXT NOT NULL CHECK(provider_series_id!=''),
+             provider_episode_id TEXT NOT NULL CHECK(provider_episode_id!=''),
+             language TEXT NOT NULL DEFAULT 'eng' CHECK(language!=''),
+             order_namespace TEXT NOT NULL CHECK(order_namespace!=''),
              order_name TEXT NOT NULL DEFAULT '',
              season INTEGER,
              episode INTEGER,
              absolute_number INTEGER,
-             coordinate_key TEXT NOT NULL,
+             coordinate_key TEXT NOT NULL CHECK(coordinate_key!=''),
              details_json TEXT NOT NULL DEFAULT '{}',
+             CHECK(season IS NOT NULL OR episode IS NOT NULL OR absolute_number IS NOT NULL),
              FOREIGN KEY(provider,provider_series_id,provider_episode_id,language)
                REFERENCES provider_episode_identities(
                  provider,provider_series_id,provider_episode_id,language
