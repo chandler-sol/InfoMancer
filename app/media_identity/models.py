@@ -82,7 +82,7 @@ class MediaIdentityFile:
 
 @dataclass(frozen=True)
 class IdentityReference:
-    """Provider-independent reference to a claimed or candidate media identity."""
+    """Provider-independent reference to one content identity and one optional mapping."""
 
     identity_kind: str
     provider: str = ""
@@ -94,22 +94,35 @@ class IdentityReference:
     display_name: str = ""
 
     @property
-    def stable_key(self) -> str:
+    def content_key(self) -> str:
+        """Identify the underlying content independently of episode numbering/order."""
         provider_key = self.provider_item_id or (
             str(self.expected_episode_id) if self.expected_episode_id is not None else ""
         )
+        return "|".join((
+            self.identity_kind.strip().casefold(),
+            self.provider.strip().casefold(),
+            provider_key,
+        ))
+
+    @property
+    def mapping_key(self) -> str:
+        """Identify one numbering/order mapping for the same underlying content."""
         coordinate = (
             f"{self.season}:{self.episode}"
             if self.season is not None and self.episode is not None
             else ""
         )
         return "|".join((
-            self.identity_kind.strip().casefold(),
-            self.provider.strip().casefold(),
-            provider_key,
+            self.content_key,
             self.order_namespace.strip().casefold(),
             coordinate,
         ))
+
+    @property
+    def stable_key(self) -> str:
+        """Compatibility alias for the content identity key used by candidates."""
+        return self.content_key
 
 
 @dataclass(frozen=True)
@@ -124,7 +137,7 @@ class IdentityCandidate:
 
     @property
     def key(self) -> str:
-        return self.identity.stable_key
+        return self.identity.content_key
 
 
 @dataclass(frozen=True)
