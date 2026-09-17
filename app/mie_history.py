@@ -170,12 +170,32 @@ class MediaIntelligenceHistoryEngine(MediaIntelligenceEngine):
         self, limit: int = 12, history_limit: int = 5,
     ) -> list[dict[str, Any]]:
         """Return attention titles enriched with a compact, explainable score trend."""
+        titles = self.titles_needing_attention(limit)
+        if not titles:
+            return []
+
+        normalized_history_limit = max(1, min(int(history_limit), 50))
+        title_ids = [int(title["title_id"]) for title in titles]
+        placeholders = ",".join("?" for _ in title_ids)
+        histories: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                f"""SELECT h.*,r.analyzed_at,r.opened_findings,r.resolved_findings
+                    FROM mie_title_health_snapshots h
+                    JOIN mie_analysis_runs r ON r.id=h.run_id
+                    WHERE h.title_id IN ({placeholders})
+                    ORDER BY h.title_id,h.run_id DESC""",
+                title_ids,
+            ).fetchall()
+        for row in rows:
+            title_id = int(row["title_id"])
+            if len(histories[title_id]) < normalized_history_limit:
+                histories[title_id].append(dict(row))
+
         overview: list[dict[str, Any]] = []
-        for title in self.titles_needing_attention(limit):
+        for title in titles:
             item = dict(title)
-            history = self.title_health_history(
-                int(item["title_id"]), limit=history_limit,
-            )
+            history = histories[int(item["title_id"])]
             current_score = int(item["score"])
             previous_score = (
                 int(history[1]["score"]) if len(history) > 1 else None
