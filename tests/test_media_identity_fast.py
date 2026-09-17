@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -378,6 +379,32 @@ class FastEpisodeIdentityTests(unittest.TestCase):
                 "SELECT path FROM files WHERE id=?", (file_id,)
             ).fetchone()["path"])
         path.write_bytes(path.read_bytes() + b"changed")
+
+        with self.assertRaises(FastIdentityStaleError):
+            self.service.scan_file(file_id)
+        with self.database.connect() as conn:
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM media_identity_scans WHERE file_id=?",
+                    (file_id,),
+                ).fetchone()[0],
+                0,
+            )
+
+    def test_submillisecond_same_size_media_rewrite_is_rejected(self) -> None:
+        file_id = self._add_file(4, actual_episode=4, add_hash=True)
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT path,size_bytes FROM files WHERE id=?", (file_id,)
+            ).fetchone()
+        media_path = Path(row["path"])
+        original_stat = media_path.stat()
+        original_size = int(row["size_bytes"])
+        media_path.write_bytes(b"X" * original_size)
+        os.utime(
+            media_path,
+            ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns + 500_000),
+        )
 
         with self.assertRaises(FastIdentityStaleError):
             self.service.scan_file(file_id)
