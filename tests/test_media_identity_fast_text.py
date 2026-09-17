@@ -53,6 +53,28 @@ class FastSidecarFreshnessTests(unittest.TestCase):
             found = discover_sidecar_subtitles(media)
             self.assertEqual(len(found), MAX_SIDECAR_COUNT)
 
+    def test_sidecar_discovery_sorts_bounded_pool_before_applying_caps(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            media = root / "Episode.mkv"
+            media.write_bytes(b"media")
+            zulu = root / "Episode.z.srt"
+            alpha = root / "Episode.a.srt"
+            middle = root / "Episode.m.srt"
+            for sidecar in (zulu, alpha, middle):
+                sidecar.write_bytes(b"subtitle")
+
+            scrambled = iter([zulu, middle, alpha, media])
+            with patch.object(Path, "iterdir", return_value=scrambled), patch(
+                "app.media_identity.text.MAX_SIDECAR_COUNT", 2
+            ):
+                found = discover_sidecar_subtitles(media)
+
+            self.assertEqual(
+                [path.name for path in found],
+                ["Episode.a.srt", "Episode.m.srt"],
+            )
+
     def test_sidecar_discovery_caps_cumulative_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
