@@ -133,15 +133,32 @@ class MediaIntelligenceHistoryEngine(MediaIntelligenceEngine):
 
             return candidate_count
 
-    def latest_title_health_run_id(self) -> int | None:
-        """Return the latest analysis run that has complete title-health snapshots."""
+    def title_health_snapshot_state(self) -> dict[str, Any]:
+        """Describe whether title-health snapshots represent the latest analysis run."""
         with self.database.connect() as conn:
             row = conn.execute(
-                "SELECT MAX(run_id) latest_run_id FROM mie_title_health_snapshots"
+                """SELECT
+                     (SELECT MAX(id) FROM mie_analysis_runs) latest_analysis_run_id,
+                     (SELECT MAX(run_id) FROM mie_title_health_snapshots) latest_snapshot_run_id"""
             ).fetchone()
-        if not row or row["latest_run_id"] is None:
-            return None
-        return int(row["latest_run_id"])
+        latest_analysis_run_id = (
+            int(row["latest_analysis_run_id"])
+            if row and row["latest_analysis_run_id"] is not None
+            else None
+        )
+        latest_snapshot_run_id = (
+            int(row["latest_snapshot_run_id"])
+            if row and row["latest_snapshot_run_id"] is not None
+            else None
+        )
+        return {
+            "latest_analysis_run_id": latest_analysis_run_id,
+            "latest_snapshot_run_id": latest_snapshot_run_id,
+            "current": (
+                latest_analysis_run_id is not None
+                and latest_snapshot_run_id == latest_analysis_run_id
+            ),
+        }
 
     def titles_needing_attention(self, limit: int = 12) -> list[dict[str, Any]]:
         """Return the lowest-health titles from the latest run with health snapshots."""
@@ -236,6 +253,8 @@ class MediaIntelligenceHistoryEngine(MediaIntelligenceEngine):
     def summary(self) -> dict[str, Any]:
         """Extend the existing Library Health summary with title-level review context."""
         summary = super().summary()
+        snapshot_state = self.title_health_snapshot_state()
         summary["attention_titles"] = self.attention_overview()
-        summary["attention_snapshot_run_id"] = self.latest_title_health_run_id()
+        summary["attention_snapshot_run_id"] = snapshot_state["latest_snapshot_run_id"]
+        summary["attention_snapshot_current"] = snapshot_state["current"]
         return summary
