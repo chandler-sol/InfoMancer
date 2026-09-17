@@ -82,7 +82,7 @@ class MediaIdentityDomainTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             IdentityProfile.parse("maximum")
 
-    def test_identity_reference_key_preserves_provider_order_context(self):
+    def test_content_identity_is_stable_across_alternate_order_mappings(self):
         official = IdentityReference(
             "episode", "tvdb", "123", order_namespace="official",
             season=4, episode=31,
@@ -91,7 +91,10 @@ class MediaIdentityDomainTests(unittest.TestCase):
             "episode", "tvdb", "123", order_namespace="production",
             season=4, episode=34,
         )
-        self.assertNotEqual(official.stable_key, production.stable_key)
+        self.assertEqual(official.content_key, production.content_key)
+        self.assertEqual(official.stable_key, production.stable_key)
+        self.assertNotEqual(official.mapping_key, production.mapping_key)
+        self.assertEqual(IdentityCandidate(official).key, IdentityCandidate(production).key)
 
     def test_evidence_requires_explainable_provenance_fields(self):
         evidence = IdentityEvidence(
@@ -123,9 +126,9 @@ class MediaIdentityDomainTests(unittest.TestCase):
         candidate = IdentityCandidate(claimed)
         self.assertTrue(_Analyzer().available(context))
         self.assertEqual(_Analyzer().analyze(context, [candidate]), AnalyzerResult())
-        self.assertEqual(_ExternalSource().media_metadata(
-            _ExternalSource().resolve_media(context)
-        )["path"], media.path)
+        resolved = _ExternalSource().resolve_media(context)
+        self.assertIsNotNone(resolved)
+        self.assertEqual(_ExternalSource().media_metadata(resolved)["path"], media.path)
 
 
 class MediaIdentityPersistenceTests(unittest.TestCase):
@@ -179,13 +182,14 @@ class MediaIdentityPersistenceTests(unittest.TestCase):
                    ) VALUES (1,'fast','{}',100,10.0,'running','subtitle_text')"""
             )
             scan_id = int(cursor.lastrowid)
+            candidate_key = "episode|tvdb|1001"
             conn.execute(
                 """INSERT INTO media_identity_candidates(
                      scan_id,candidate_key,identity_kind,provider,provider_item_id,
                      expected_episode_id,order_namespace,season,episode,display_name,rank
                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                (scan_id, "episode|tvdb|1001|official|1:1", "episode", "tvdb",
-                 "1001", 1, "official", 1, 1, "Pilot", 1),
+                (scan_id, candidate_key, "episode", "tvdb", "1001", 1,
+                 "official", 1, 1, "Pilot", 1),
             )
             conn.execute(
                 """INSERT INTO media_identity_evidence(
@@ -193,9 +197,9 @@ class MediaIdentityPersistenceTests(unittest.TestCase):
                      evidence_category,correlation_group,relation,strength,
                      source_kind,value_text,profile
                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                (scan_id, "episode|tvdb|1001|official|1:1", "subtitle-text", "1",
-                 "subtitle_text", "dialogue:0-120000", "supports", 0.8,
-                 "embedded_subtitle", "distinctive phrase", "fast"),
+                (scan_id, candidate_key, "subtitle-text", "1", "subtitle_text",
+                 "dialogue:0-120000", "supports", 0.8, "embedded_subtitle",
+                 "distinctive phrase", "fast"),
             )
             conn.execute(
                 """INSERT INTO media_identity_artifacts(
