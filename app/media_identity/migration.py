@@ -115,7 +115,7 @@ def apply_media_identity_foundation(conn: sqlite3.Connection) -> None:
              artifact_type TEXT NOT NULL,
              analyzer_key TEXT NOT NULL,
              analyzer_version TEXT NOT NULL,
-             cache_key TEXT NOT NULL UNIQUE,
+             cache_key TEXT NOT NULL DEFAULT '',
              status TEXT NOT NULL DEFAULT 'complete'
                CHECK(status IN ('complete','error')),
              profile TEXT NOT NULL CHECK(profile IN ('fast','normal','deep')),
@@ -139,6 +139,12 @@ def apply_media_identity_foundation(conn: sqlite3.Connection) -> None:
     conn.execute(
         """CREATE INDEX IF NOT EXISTS idx_media_identity_artifacts_file
            ON media_identity_artifacts(file_id,artifact_type,analyzer_key)"""
+    )
+    conn.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS idx_media_identity_artifacts_cache_identity
+           ON media_identity_artifacts(
+             file_id,artifact_type,analyzer_key,analyzer_version,cache_key
+           ) WHERE cache_key!=''"""
     )
     conn.execute(
         """CREATE INDEX IF NOT EXISTS idx_media_identity_artifacts_source
