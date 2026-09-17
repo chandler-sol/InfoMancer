@@ -329,6 +329,34 @@ class FastEpisodeIdentityTests(unittest.TestCase):
         self.assertEqual(first_artifacts, 1)
         self.assertEqual(second_artifacts, 1)
 
+    def test_unchanged_sidecar_artifact_reuses_after_media_replacement_rescan(self) -> None:
+        file_id = self._add_file(2, actual_episode=2)
+        first = self.service.scan_file(file_id)
+        self.assertEqual(first.reused_artifact_count, 0)
+
+        with self.database.connect() as conn:
+            media_path = Path(conn.execute(
+                "SELECT path FROM files WHERE id=?", (file_id,)
+            ).fetchone()["path"])
+        media_path.write_bytes(media_path.read_bytes() + b"-replacement-media")
+        stat = media_path.stat()
+        with self.database.connect() as conn:
+            conn.execute(
+                "UPDATE files SET size_bytes=?,modified_at=? WHERE id=?",
+                (stat.st_size, stat.st_mtime, file_id),
+            )
+
+        second = self.service.scan_file(file_id)
+        self.assertEqual(second.reused_artifact_count, 1)
+        with self.database.connect() as conn:
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM media_identity_artifacts WHERE file_id=?",
+                    (file_id,),
+                ).fetchone()[0],
+                1,
+            )
+
     def test_missing_subtitles_are_neutral_not_mismatch_evidence(self) -> None:
         file_id = self._add_file(3)
         result = self.service.scan_file(file_id)
@@ -423,6 +451,46 @@ class FastEpisodeIdentityTests(unittest.TestCase):
         details = self.service.scan_details(result.scan_id)
         assert details is not None
         self.assertIsNone(details["result_state"])
+
+    def test_long_season_special_expansion_accepts_capped_replacement_set(self) -> None:
+        identities = []
+        mappings = []
+        for episode in range(13, 91):
+            provider_id = str(1000 + episode)
+            identities.append((
+                "tvdb", "4242", provider_id, "eng",
+                f"Episode {episode} Long Season",
+                f"regular season filler episode {episode} ordinary daytime dialogue",
+                f"2026-03-{((episode - 1) % 28) + 1:02d}",
+                json.dumps({"runtime": 24}),
+            ))
+            mappings.append((
+                "tvdb", "4242", provider_id, "eng", "default", "Default",
+                1, episode, episode, json.dumps([1, episode, episode]), "{}",
+            ))
+        with self.database.connect() as conn:
+            conn.executemany(
+                """INSERT INTO provider_episode_identities(
+                     provider,provider_series_id,provider_episode_id,language,
+                     name,overview,aired,metadata_json
+                   ) VALUES (?,?,?,?,?,?,?,?)""",
+                identities,
+            )
+            conn.executemany(
+                """INSERT INTO provider_episode_mappings(
+                     provider,provider_series_id,provider_episode_id,language,
+                     order_namespace,order_name,season,episode,absolute_number,
+                     coordinate_key,details_json
+                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                mappings,
+            )
+
+        file_id = self._add_file(6, actual_special=1)
+        result = self.service.scan_file(file_id)
+        self.assertTrue(result.expanded_specials)
+        self.assertEqual(result.candidate_count, 80)
+        provider_ids = self._candidate_provider_ids(result.scan_id)
+        self.assertIn("2001", provider_ids)
 
     def test_adjacent_similar_synopses_remain_evidence_not_a_final_decision(self) -> None:
         file_id = self._add_file(7, actual_episode=7)
