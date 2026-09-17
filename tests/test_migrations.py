@@ -41,6 +41,7 @@ class MigrationTests(unittest.TestCase):
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=14").fetchone())
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=18").fetchone())
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=19").fetchone())
+                self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=20").fetchone())
                 rename_columns = {row["name"] for row in upgraded.execute("PRAGMA table_info(rename_proposals)")}
                 self.assertTrue({"file_id", "source_path", "destination_path", "source_size", "source_mtime_ns", "status"}.issubset(rename_columns))
                 operation_columns = {
@@ -58,27 +59,28 @@ class MigrationTests(unittest.TestCase):
                     {"scope", "lock_key", "locked_until", "created_at"},
                     lockout_columns,
                 )
+                self.assertIsNotNone(
+                    upgraded.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='provider_episode_series_cache'"
+                    ).fetchone()
+                )
 
-    def test_migrations_17_18_and_19_preserve_safe_downgrade_semantics(self):
+    def test_migrations_17_through_20_preserve_safe_downgrade_semantics(self):
         migration_17 = next(item for item in MIGRATIONS if item.version == 17)
         self.assertEqual(migration_17.compatibility, "behavioral")
         self.assertEqual(migration_17.minimum_reader_schema, 1)
         self.assertEqual(migration_17.minimum_writer_schema, 1)
         self.assertEqual(migration_17.downgrade_policy, "compatible")
 
-        migration_18 = next(item for item in MIGRATIONS if item.version == 18)
-        self.assertEqual(migration_18.compatibility, "additive")
-        self.assertEqual(migration_18.minimum_reader_schema, 1)
-        self.assertEqual(migration_18.minimum_writer_schema, 1)
-        self.assertEqual(migration_18.downgrade_policy, "compatible")
+        for version in (18, 19, 20):
+            migration = next(item for item in MIGRATIONS if item.version == version)
+            self.assertEqual(migration.compatibility, "additive")
+            self.assertEqual(migration.minimum_reader_schema, 1)
+            self.assertEqual(migration.minimum_writer_schema, 1)
+            self.assertEqual(migration.downgrade_policy, "compatible")
 
-        migration_19 = next(item for item in MIGRATIONS if item.version == 19)
-        self.assertEqual(migration_19.compatibility, "additive")
-        self.assertEqual(migration_19.minimum_reader_schema, 1)
-        self.assertEqual(migration_19.minimum_writer_schema, 1)
-        self.assertEqual(migration_19.downgrade_policy, "compatible")
         self.assertEqual(schema_contract(), {
-            "current": 19,
+            "current": 20,
             "minimum_reader_schema": 1,
             "minimum_writer_schema": 1,
             "downgrade_policy": "compatible",
@@ -94,15 +96,15 @@ class MigrationTests(unittest.TestCase):
                         """SELECT migration_version,compatibility,minimum_reader_schema,
                                   minimum_writer_schema,downgrade_policy
                            FROM schema_compatibility
-                           WHERE migration_version IN (17,18,19)"""
+                           WHERE migration_version IN (17,18,19,20)"""
                     )
                 }
             self.assertEqual(rows[17]["compatibility"], "behavioral")
-            self.assertEqual(rows[18]["compatibility"], "additive")
-            self.assertEqual(rows[19]["compatibility"], "additive")
-            self.assertEqual(rows[19]["minimum_reader_schema"], 1)
-            self.assertEqual(rows[19]["minimum_writer_schema"], 1)
-            self.assertEqual(rows[19]["downgrade_policy"], "compatible")
+            for version in (18, 19, 20):
+                self.assertEqual(rows[version]["compatibility"], "additive")
+                self.assertEqual(rows[version]["minimum_reader_schema"], 1)
+                self.assertEqual(rows[version]["minimum_writer_schema"], 1)
+                self.assertEqual(rows[version]["downgrade_policy"], "compatible")
 
     def test_existing_compatibility_snapshot_is_not_silently_rewritten(self):
         with tempfile.TemporaryDirectory() as temporary:
