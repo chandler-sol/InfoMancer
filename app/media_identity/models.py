@@ -93,17 +93,47 @@ class IdentityReference:
     episode: int | None = None
     display_name: str = ""
 
+    def __post_init__(self) -> None:
+        if not self.identity_kind.strip():
+            raise ValueError("Identity reference must identify its media kind.")
+        if self.provider_item_id.strip() and not self.provider.strip():
+            raise ValueError("Provider item identities must identify their provider.")
+        has_coordinate = self.season is not None and self.episode is not None
+        if not (
+            self.provider_item_id.strip()
+            or self.expected_episode_id is not None
+            or has_coordinate
+            or self.display_name.strip()
+        ):
+            raise ValueError("Identity reference must include an id, coordinate, or display name.")
+
     @property
     def content_key(self) -> str:
-        """Identify the underlying content independently of episode numbering/order."""
-        provider_key = self.provider_item_id or (
-            str(self.expected_episode_id) if self.expected_episode_id is not None else ""
+        """Identify underlying content, ignoring numbering when a stable id exists."""
+        kind = self.identity_kind.strip().casefold()
+        provider = self.provider.strip().casefold()
+        provider_item_id = self.provider_item_id.strip()
+        if provider_item_id:
+            return "|".join((kind, provider, "id", provider_item_id))
+        if self.expected_episode_id is not None:
+            return "|".join((kind, "infomancer", "expected", str(self.expected_episode_id)))
+
+        coordinate = (
+            f"{self.season}:{self.episode}"
+            if self.season is not None and self.episode is not None
+            else ""
         )
-        return "|".join((
-            self.identity_kind.strip().casefold(),
-            self.provider.strip().casefold(),
-            provider_key,
-        ))
+        if coordinate:
+            return "|".join((
+                kind,
+                provider,
+                "mapping",
+                self.order_namespace.strip().casefold(),
+                coordinate,
+            ))
+
+        label = " ".join(self.display_name.strip().casefold().split())
+        return "|".join((kind, provider, "label", label))
 
     @property
     def mapping_key(self) -> str:
