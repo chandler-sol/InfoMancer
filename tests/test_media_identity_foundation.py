@@ -98,6 +98,19 @@ class MediaIdentityDomainTests(unittest.TestCase):
         self.assertNotEqual(official.mapping_key, production.mapping_key)
         self.assertEqual(IdentityCandidate(official).key, IdentityCandidate(production).key)
 
+    def test_coordinate_only_identity_keys_do_not_collapse(self):
+        first = IdentityReference(
+            "episode", order_namespace="official", season=1, episode=1
+        )
+        second = IdentityReference(
+            "episode", order_namespace="official", season=1, episode=2
+        )
+        self.assertNotEqual(first.content_key, second.content_key)
+        with self.assertRaises(ValueError):
+            IdentityReference("episode", provider_item_id="123")
+        with self.assertRaises(ValueError):
+            IdentityReference("episode")
+
     def test_evidence_requires_explainable_provenance_fields(self):
         evidence = IdentityEvidence(
             analyzer_key="subtitle-text",
@@ -184,7 +197,10 @@ class MediaIdentityPersistenceTests(unittest.TestCase):
                    ) VALUES (1,'deep','{}',100,10.0,'running','subtitle_text')"""
             )
             scan_id = int(cursor.lastrowid)
-            candidate_key = "episode|tvdb|1001"
+            candidate_key = IdentityReference(
+                "episode", "tvdb", "1001", order_namespace="official",
+                season=1, episode=1,
+            ).content_key
             conn.execute(
                 """INSERT INTO media_identity_candidates(
                      scan_id,candidate_key,identity_kind,provider,provider_item_id,
@@ -206,9 +222,9 @@ class MediaIdentityPersistenceTests(unittest.TestCase):
             conn.execute(
                 """INSERT INTO media_identity_artifacts(
                      file_id,artifact_type,analyzer_key,analyzer_version,cache_key,
-                     source_kind,source_ref,source_signature,file_size_bytes,
+                     profile,source_kind,source_ref,source_signature,file_size_bytes,
                      file_modified_at,text_value
-                   ) VALUES (1,'subtitle_text','subtitle-text','1','artifact:1',
+                   ) VALUES (1,'subtitle_text','subtitle-text','1','artifact:1','fast',
                              'embedded_subtitle','stream:2','streamsig',100,10.0,
                              'cached subtitle text')"""
             )
