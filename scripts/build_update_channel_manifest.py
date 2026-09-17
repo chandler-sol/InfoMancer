@@ -18,6 +18,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 def load_module(name: str, path: Path):
@@ -34,7 +36,7 @@ _update_channels = load_module(
     "infomancer_update_channels", ROOT / "app" / "update_channels.py"
 )
 _migrations = load_module(
-    "infomancer_migrations", ROOT / "app" / "migrations.py"
+    "app.migrations", ROOT / "app" / "migrations.py"
 )
 normalize_channel = _update_channels.normalize_channel
 version_key = _update_channels.version_key
