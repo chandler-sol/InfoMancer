@@ -79,7 +79,7 @@ def _signature(value: Any) -> str:
 def _same_modified_at(first: Any, second: Any) -> bool:
     if first is None or second is None:
         return first is None and second is None
-    return abs(float(first) - float(second)) <= 0.001
+    return float(first) == float(second)
 
 
 def _optional_float(value: Any) -> float | None:
