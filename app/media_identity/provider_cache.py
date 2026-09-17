@@ -315,12 +315,16 @@ class ProviderEpisodeCache:
 
     def resolve_coordinate(
         self, provider: str, provider_series_id: str, order_namespace: str,
-        season: int | None, episode: int | None, language: str = "eng",
+        season: int | None, episode: int | None, language: str = "eng", *,
+        absolute_number: int | None = None,
     ) -> dict[str, Any]:
-        """Return every identity at a coordinate; never guess through provider ambiguity."""
-        with self.database.connect() as conn:
-            rows = conn.execute(
-                """SELECT i.provider_episode_id,i.name,i.overview,i.aired,
+        """Return every identity at one full coordinate; never guess through ambiguity."""
+        if season is None and episode is None and absolute_number is None:
+            raise ValueError(
+                "Provider coordinate lookup requires season/episode or an absolute number."
+            )
+
+        query = """SELECT i.provider_episode_id,i.name,i.overview,i.aired,
                           m.order_name,m.season,m.episode,
                           m.absolute_number mapping_absolute_number,m.coordinate_key
                    FROM provider_episode_mappings m
@@ -330,13 +334,18 @@ class ProviderEpisodeCache:
                     AND i.provider_episode_id=m.provider_episode_id
                     AND i.language=m.language
                    WHERE m.provider=? AND m.provider_series_id=? AND m.language=?
-                     AND m.order_namespace=? AND m.season IS ? AND m.episode IS ?
-                   ORDER BY i.provider_episode_id,m.id""",
-                (
-                    provider.casefold(), str(provider_series_id), language.casefold(),
-                    order_namespace.casefold(), season, episode,
-                ),
-            ).fetchall()
+                     AND m.order_namespace=? AND m.season IS ? AND m.episode IS ?"""
+        parameters: list[Any] = [
+            provider.casefold(), str(provider_series_id), language.casefold(),
+            order_namespace.casefold(), season, episode,
+        ]
+        if absolute_number is not None:
+            query += " AND m.absolute_number IS ?"
+            parameters.append(absolute_number)
+        query += " ORDER BY i.provider_episode_id,m.id"
+
+        with self.database.connect() as conn:
+            rows = conn.execute(query, parameters).fetchall()
         candidates_by_id: dict[str, dict[str, Any]] = {}
         mapping_variants: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
