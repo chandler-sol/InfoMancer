@@ -133,6 +133,18 @@ class Cycle1MIEHistoryTests(unittest.TestCase):
         self.assertEqual(history[0]["opened_findings"], 1)
         self.assertEqual(history[1]["resolved_findings"], 3)
 
+        overview = self.mie.attention_overview()
+        self.assertEqual(len(overview), 1)
+        self.assertEqual(overview[0]["title_name"], "Example")
+        self.assertEqual(overview[0]["previous_score"], 100)
+        self.assertEqual(overview[0]["score_delta"], -20)
+        self.assertEqual(overview[0]["trend"], "worsening")
+        self.assertEqual(overview[0]["recent_scores"], [64, 64, 100, 80])
+
+        summary = self.mie.summary()
+        self.assertEqual(summary["attention_titles"][0]["title_id"], 1)
+        self.assertEqual(summary["attention_titles"][0]["trend"], "worsening")
+
     def test_history_finalization_failure_rolls_back_the_analysis_run(self) -> None:
         with self.database.connect() as conn:
             conn.execute(
