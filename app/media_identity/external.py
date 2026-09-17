@@ -91,6 +91,10 @@ class ExternalAnalysisSource(Protocol):
         """Enumerate subtitle evidence already available from the source."""
         ...
 
+    def read_subtitle(self, subtitle: ExternalSubtitleRef) -> bytes:
+        """Read one subtitle asset while keeping source auth/layout inside the adapter."""
+        ...
+
     def media_metadata(self, media: ExternalMediaRef) -> Mapping[str, Any]:
         """Return useful read-only metadata already known by the source."""
         ...
