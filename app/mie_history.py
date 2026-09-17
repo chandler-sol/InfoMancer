@@ -165,3 +165,46 @@ class MediaIntelligenceHistoryEngine(MediaIntelligenceEngine):
                 (int(title_id), normalized_limit),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def attention_overview(
+        self, limit: int = 12, history_limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Return attention titles enriched with a compact, explainable score trend."""
+        overview: list[dict[str, Any]] = []
+        for title in self.titles_needing_attention(limit):
+            item = dict(title)
+            history = self.title_health_history(
+                int(item["title_id"]), limit=history_limit,
+            )
+            current_score = int(item["score"])
+            previous_score = (
+                int(history[1]["score"]) if len(history) > 1 else None
+            )
+            score_delta = (
+                current_score - previous_score if previous_score is not None else None
+            )
+            if score_delta is None:
+                trend = "new"
+            elif score_delta > 0:
+                trend = "improving"
+            elif score_delta < 0:
+                trend = "worsening"
+            else:
+                trend = "stable"
+            item.update({
+                "history": history,
+                "recent_scores": [
+                    int(row["score"]) for row in reversed(history)
+                ],
+                "previous_score": previous_score,
+                "score_delta": score_delta,
+                "trend": trend,
+            })
+            overview.append(item)
+        return overview
+
+    def summary(self) -> dict[str, Any]:
+        """Extend the existing Library Health summary with title-level review context."""
+        summary = super().summary()
+        summary["attention_titles"] = self.attention_overview()
+        return summary
