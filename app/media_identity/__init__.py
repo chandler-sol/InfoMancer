@@ -2,12 +2,6 @@
 
 from .analyzers import IdentityAnalyzer
 from .external import ExternalAnalysisSource
-from .fast import (
-    FastIdentityScanError,
-    FastIdentityService,
-    FastIdentityStaleError,
-    FastScanResult,
-)
 from .models import (
     AnalyzerContext,
     AnalyzerResult,
@@ -27,10 +21,6 @@ __all__ = [
     "EvidenceCategory",
     "EvidenceRelation",
     "ExternalAnalysisSource",
-    "FastIdentityScanError",
-    "FastIdentityService",
-    "FastIdentityStaleError",
-    "FastScanResult",
     "IdentityAnalyzer",
     "IdentityCandidate",
     "IdentityEvidence",
