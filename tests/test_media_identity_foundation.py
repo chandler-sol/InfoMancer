@@ -261,6 +261,20 @@ class MediaIdentityPersistenceTests(unittest.TestCase):
             self.assertEqual(scan["status"], "paused")
             self.assertEqual(scan["stage"], "subtitle_text")
 
+            conn.execute("DELETE FROM files WHERE id=1")
+            for table in (
+                "media_identity_scans",
+                "media_identity_candidates",
+                "media_identity_evidence",
+                "media_identity_artifacts",
+                "media_identity_confirmations",
+            ):
+                self.assertEqual(
+                    conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0],
+                    0,
+                    table,
+                )
+
     def test_result_state_enum_and_database_constraint_stay_in_sync(self) -> None:
         with self.database.connect() as conn:
             cursor = conn.execute(
@@ -303,6 +317,20 @@ class MediaIdentityPersistenceTests(unittest.TestCase):
                     """UPDATE media_identity_scans
                        SET completed_profile='heavy' WHERE id=?""",
                     (scan_id,),
+                )
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    """INSERT INTO media_identity_candidates(
+                         scan_id,candidate_key,identity_kind,support_strength
+                       ) VALUES (?,?,?,?)""",
+                    (scan_id, "bad-support", "episode", 1.1),
+                )
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    """INSERT INTO media_identity_candidates(
+                         scan_id,candidate_key,identity_kind,rank
+                       ) VALUES (?,?,?,?)""",
+                    (scan_id, "bad-rank", "episode", 0),
                 )
             with self.assertRaises(sqlite3.IntegrityError):
                 conn.execute(
