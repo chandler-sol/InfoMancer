@@ -65,8 +65,10 @@ class FastSidecarFreshnessTests(unittest.TestCase):
                 sidecar.write_bytes(b"subtitle")
 
             scrambled = iter([zulu, middle, alpha, media])
-            with patch.object(Path, "iterdir", return_value=scrambled), patch(
-                "app.media_identity.text.MAX_SIDECAR_COUNT", 2
+            with (
+                patch.object(Path, "iterdir", return_value=scrambled),
+                patch("app.media_identity.text.MAX_SIDECAR_COUNT", 2),
+                patch("app.media_identity.text.MAX_SIDECAR_SELECTION_POOL", 2),
             ):
                 found = discover_sidecar_subtitles(media)
 
