@@ -185,5 +185,31 @@ class Cycle1MIEReviewSnapshotStateTests(unittest.TestCase):
         self.assertEqual(stale["attention_titles"], [])
 
 
+class Cycle1MIEReviewEmptyLibraryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.database = Database(Path(self.temporary.name) / "catalog.db")
+        self.database.initialize()
+        self.mie = MediaIntelligenceHistoryEngine(self.database)
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def test_successful_empty_library_analysis_is_current(self) -> None:
+        self.assertEqual(self.mie.analyze(), 0)
+
+        summary = self.mie.summary()
+        self.assertTrue(summary["last_analyzed_at"])
+        self.assertIsNotNone(summary["attention_snapshot_run_id"])
+        self.assertTrue(summary["attention_snapshot_current"])
+        self.assertEqual(summary["attention_titles"], [])
+
+        with self.database.connect() as conn:
+            snapshot_count = int(conn.execute(
+                "SELECT COUNT(*) FROM mie_title_health_snapshots"
+            ).fetchone()[0])
+        self.assertEqual(snapshot_count, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
