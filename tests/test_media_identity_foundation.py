@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,7 @@ from app.media_identity import (
     IdentityEvidence,
     IdentityProfile,
     IdentityReference,
+    IdentityResultState,
     MediaIdentityFile,
 )
 from app.media_identity.external import (
@@ -229,15 +231,39 @@ class MediaIdentityPersistenceTests(unittest.TestCase):
             )
             self.assertEqual(
                 conn.execute(
-                    "SELECT profile,stage FROM media_identity_scans WHERE id=?",
+                    "SELECT stage FROM media_identity_scans WHERE id=?",
                     (scan_id,),
                 ).fetchone()["stage"],
                 "subtitle_text",
             )
 
+    def test_result_state_enum_and_database_constraint_stay_in_sync(self) -> None:
+        with self.database.connect() as conn:
+            cursor = conn.execute(
+                "INSERT INTO media_identity_scans(file_id,profile) VALUES (1,'fast')"
+            )
+            scan_id = int(cursor.lastrowid)
+            for state in IdentityResultState:
+                conn.execute(
+                    "UPDATE media_identity_scans SET result_state=? WHERE id=?",
+                    (state.value, scan_id),
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT result_state FROM media_identity_scans WHERE id=?",
+                        (scan_id,),
+                    ).fetchone()["result_state"],
+                    state.value,
+                )
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    "UPDATE media_identity_scans SET result_state='certainly_wrong' WHERE id=?",
+                    (scan_id,),
+                )
+
     def test_identity_storage_rejects_invalid_profile_relation_and_strength(self) -> None:
         with self.database.connect() as conn:
-            with self.assertRaises(Exception):
+            with self.assertRaises(sqlite3.IntegrityError):
                 conn.execute(
                     "INSERT INTO media_identity_scans(file_id,profile) VALUES (1,'heavy')"
                 )
@@ -245,7 +271,7 @@ class MediaIdentityPersistenceTests(unittest.TestCase):
                 "INSERT INTO media_identity_scans(file_id,profile) VALUES (1,'deep')"
             )
             scan_id = int(cursor.lastrowid)
-            with self.assertRaises(Exception):
+            with self.assertRaises(sqlite3.IntegrityError):
                 conn.execute(
                     """INSERT INTO media_identity_evidence(
                          scan_id,analyzer_key,analyzer_version,evidence_category,
@@ -253,7 +279,7 @@ class MediaIdentityPersistenceTests(unittest.TestCase):
                        ) VALUES (?,?,?,?,?,?,?,?)""",
                     (scan_id, "x", "1", "subtitle_text", "g", "supports", 1.5, "deep"),
                 )
-            with self.assertRaises(Exception):
+            with self.assertRaises(sqlite3.IntegrityError):
                 conn.execute(
                     """INSERT INTO media_identity_evidence(
                          scan_id,analyzer_key,analyzer_version,evidence_category,
