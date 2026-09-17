@@ -5,6 +5,8 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Callable
 
+from .media_identity.migration import apply_media_identity_foundation
+
 
 COMPATIBILITY_LEVELS = {"additive", "behavioral", "breaking"}
 DOWNGRADE_POLICIES = {"compatible", "read_only", "restore_required"}
@@ -397,6 +399,7 @@ MIGRATIONS = (
     additive_migration(16, "shared chrome read indexes", _shared_chrome_indexes),
     behavioral_migration(17, "historical announcement onboarding receipts", _announcement_onboarding_receipts),
     additive_migration(18, "0.9 intelligence foundation", _intelligence_09),
+    additive_migration(19, "0.9 media identity foundation", apply_media_identity_foundation),
 )
 
 CURRENT_SCHEMA_VERSION = max(migration.version for migration in MIGRATIONS)

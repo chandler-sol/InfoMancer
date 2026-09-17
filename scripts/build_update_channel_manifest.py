@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.machinery
 import importlib.util
 import json
 import sys
+import types
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -30,11 +32,31 @@ def load_module(name: str, path: Path):
     return module
 
 
+def install_package_shell(name: str, path: Path) -> None:
+    """Expose a package path without executing its application initializer."""
+    if name in sys.modules:
+        return
+    package = types.ModuleType(name)
+    package.__file__ = str(path / "__init__.py")
+    package.__package__ = name
+    package.__path__ = [str(path)]
+    spec = importlib.machinery.ModuleSpec(name, loader=None, is_package=True)
+    spec.submodule_search_locations = [str(path)]
+    package.__spec__ = spec
+    sys.modules[name] = package
+
+
 _update_channels = load_module(
     "infomancer_update_channels", ROOT / "app" / "update_channels.py"
 )
+# The qualification manifest job intentionally does not install application
+# dependencies. Provide only the package namespace needed by migrations.py so
+# its relative Migration 19 import resolves without executing app/__init__.py
+# or app/media_identity/__init__.py.
+install_package_shell("app", ROOT / "app")
+install_package_shell("app.media_identity", ROOT / "app" / "media_identity")
 _migrations = load_module(
-    "infomancer_migrations", ROOT / "app" / "migrations.py"
+    "app.migrations", ROOT / "app" / "migrations.py"
 )
 normalize_channel = _update_channels.normalize_channel
 version_key = _update_channels.version_key

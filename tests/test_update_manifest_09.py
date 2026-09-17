@@ -49,6 +49,35 @@ class UpdateManifest09Tests(unittest.TestCase):
                 manifest["database_schema"]["current"],
             )
 
+    def test_builder_runs_without_site_packages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = root / "candidate.bin"
+            artifact.write_bytes(b"dependency-free manifest candidate\n")
+            output = root / "isolated.json"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-S",
+                    str(SCRIPT),
+                    "--channel", "dev",
+                    "--version", "0.9.0-dev.184",
+                    "--build-id", "dev-184-01234567",
+                    "--commit-sha", "0123456789abcdef0123456789abcdef01234567",
+                    "--run-id", "184",
+                    "--artifact", f"windows=tauri-updater,https://example.invalid/InfoMancer.exe,{artifact}",
+                    "--output", str(output),
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            manifest = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["database_schema"]["current"], 19)
+            self.assertEqual(manifest["database_schema"]["downgrade_policy"], "compatible")
+
     def test_builder_refuses_failed_qualification(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "bad.json"
