@@ -37,6 +37,13 @@ def _canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def _first_present(record: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in record and record[key] is not None:
+            return record[key]
+    return None
+
+
 class ProviderEpisodeCache:
     """Store provider episode identity separately from numbering/order mappings."""
 
@@ -54,8 +61,8 @@ class ProviderEpisodeCache:
         return {
             "runtime": record.get("runtime"),
             "year": record.get("year"),
-            "finale_type": record.get("finaleType") or record.get("finale_type"),
-            "season_name": record.get("seasonName") or record.get("season_name"),
+            "finale_type": _first_present(record, "finaleType", "finale_type"),
+            "season_name": _first_present(record, "seasonName", "season_name"),
         }
 
     @staticmethod
@@ -63,9 +70,23 @@ class ProviderEpisodeCache:
         return {
             "aired": _clean_text(record.get("aired")),
             "season_name": _clean_text(
-                record.get("seasonName") or record.get("season_name")
+                _first_present(record, "seasonName", "season_name")
             ),
         }
+
+    def refresh_tvdb_title(
+        self, title_id: int, client: TVDBOrderTransport, language: str = "eng",
+    ) -> ProviderEpisodeRefresh:
+        """Refresh the provider cache for one already-matched local TV title."""
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT kind,tvdb_id FROM titles WHERE id=?", (int(title_id),)
+            ).fetchone()
+        if not row or row["kind"] != "tv":
+            raise ValueError("Episode identity provider cache requires a TV title.")
+        if row["tvdb_id"] is None:
+            raise ValueError("Match this TV title to TVDB before refreshing episode identity data.")
+        return self.refresh_tvdb_series(int(row["tvdb_id"]), client, language)
 
     def refresh_tvdb_series(
         self, series_id: int, client: TVDBOrderTransport, language: str = "eng",
@@ -101,15 +122,16 @@ class ProviderEpisodeCache:
                 provider_episode_id = _clean_text(record.get("id"))
                 if not provider_episode_id:
                     continue
+                absolute_number = _optional_int(
+                    _first_present(record, "absoluteNumber", "absolute_number")
+                )
                 existing = identities.get(provider_episode_id)
                 current = {
                     "provider_episode_id": provider_episode_id,
                     "name": _clean_text(record.get("name")),
                     "overview": _clean_text(record.get("overview")),
                     "aired": _clean_text(record.get("aired")),
-                    "absolute_number": _optional_int(
-                        record.get("absoluteNumber") or record.get("absolute_number")
-                    ),
+                    "absolute_number": absolute_number,
                     "metadata": self._identity_metadata(record),
                 }
                 if existing is None:
@@ -123,14 +145,9 @@ class ProviderEpisodeCache:
                             existing["metadata"][key] = value
 
                 season = _optional_int(
-                    record.get("seasonNumber")
-                    if record.get("seasonNumber") is not None
-                    else record.get("season_number")
+                    _first_present(record, "seasonNumber", "season_number")
                 )
                 episode = _optional_int(record.get("number"))
-                absolute_number = _optional_int(
-                    record.get("absoluteNumber") or record.get("absolute_number")
-                )
                 if season is None and episode is None and absolute_number is None:
                     continue
                 coordinate_key = self._coordinate_key(season, episode, absolute_number)
@@ -278,13 +295,12 @@ class ProviderEpisodeCache:
                     str(provider_episode_id), language.casefold(),
                 ),
             ).fetchall()
-        return [
-            {
-                **dict(row),
-                "details": json.loads(row["details_json"] or "{}"),
-            }
-            for row in rows
-        ]
+        mappings = []
+        for row in rows:
+            item = dict(row)
+            item["details"] = json.loads(item.pop("details_json") or "{}")
+            mappings.append(item)
+        return mappings
 
     def resolve_coordinate(
         self, provider: str, provider_series_id: str, order_namespace: str,
