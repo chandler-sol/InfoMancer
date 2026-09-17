@@ -7,7 +7,10 @@ import unittest
 from pathlib import Path
 
 from app.db import Database
-from app.media_identity.provider_cache import ProviderEpisodeCache
+from app.media_identity.provider_cache import (
+    ProviderEpisodeCache,
+    ProviderEpisodeRefreshError,
+)
 from app.media_identity.tvdb_orders import episode_orders, episodes_for_order
 from app.tvdb import TVDBClient, TVDBError
 
@@ -252,6 +255,21 @@ class ProviderEpisodeCacheTests(unittest.TestCase):
             self.cache.refresh_tvdb_series(9001, failing)
         status = self.cache.cache_status("tvdb", "9001")
         self.assertEqual(status["source_signature"], baseline.source_signature)
+        self.assertEqual(status["provider_updated_at"], "2026-09-17T12:00:00Z")
+
+    def test_empty_provider_snapshot_cannot_replace_previous_non_empty_cache(self) -> None:
+        baseline = self.cache.refresh_tvdb_series(9001, self.rich_transport())
+        empty = FakeTVDBTransport(
+            pages={
+                ("/series/9001/episodes/default/eng", 0): payload([]),
+            },
+            last_updated="2026-09-19T00:00:00Z",
+        )
+        with self.assertRaises(ProviderEpisodeRefreshError):
+            self.cache.refresh_tvdb_series(9001, empty)
+        status = self.cache.cache_status("tvdb", "9001")
+        self.assertEqual(status["source_signature"], baseline.source_signature)
+        self.assertEqual(status["episode_count"], baseline.episode_count)
         self.assertEqual(status["provider_updated_at"], "2026-09-17T12:00:00Z")
 
     def test_database_failure_rolls_back_replacement_and_preserves_old_cache(self) -> None:
