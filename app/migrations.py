@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .media_identity.migration import apply_media_identity_foundation
+from .media_identity.provider_migration import apply_provider_episode_cache
 
 
 COMPATIBILITY_LEVELS = {"additive", "behavioral", "breaking"}
@@ -400,6 +401,7 @@ MIGRATIONS = (
     behavioral_migration(17, "historical announcement onboarding receipts", _announcement_onboarding_receipts),
     additive_migration(18, "0.9 intelligence foundation", _intelligence_09),
     additive_migration(19, "0.9 media identity foundation", apply_media_identity_foundation),
+    additive_migration(20, "0.9 provider episode identity cache", apply_provider_episode_cache),
 )
 
 CURRENT_SCHEMA_VERSION = max(migration.version for migration in MIGRATIONS)
