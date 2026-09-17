@@ -167,6 +167,23 @@ class Cycle1IntelligenceFoundationTests(unittest.TestCase):
         self.assertEqual(stale_summary["unchecked_or_stale"], 1)
         self.assertEqual(stale_summary["passed"], 0)
 
+    def test_integrity_details_use_the_normalized_issue_list(self) -> None:
+        integrity = MediaIntegrityResultService(self.database)
+        integrity.record(
+            1,
+            status="warning",
+            mode="sample",
+            checked_modified_at=123.5,
+            checked_size_bytes=1000,
+            issues=["decode warning"],
+            details={"issues": ["stale caller value"], "sample_count": 3},
+        )
+        result = integrity.result(1)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["issue_count"], 1)
+        self.assertEqual(result["details"]["issues"], ["decode warning"])
+        self.assertEqual(result["details"]["sample_count"], 3)
+
     def test_stream_and_integrity_rows_follow_file_cascade(self) -> None:
         streams = MediaStreamService(self.database)
         integrity = MediaIntegrityResultService(self.database)
