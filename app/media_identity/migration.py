@@ -23,7 +23,7 @@ def apply_media_identity_foundation(conn: sqlite3.Connection) -> None:
                CHECK(status IN ('queued','running','paused','complete','error','cancelled')),
              stage TEXT NOT NULL DEFAULT '',
              claimed_identity_json TEXT NOT NULL DEFAULT '{{}}',
-             file_size_bytes INTEGER NOT NULL DEFAULT 0,
+             file_size_bytes INTEGER NOT NULL DEFAULT 0 CHECK(file_size_bytes>=0),
              file_modified_at REAL,
              file_sha256 TEXT,
              metadata_signature TEXT NOT NULL DEFAULT '',
@@ -57,11 +57,14 @@ def apply_media_identity_foundation(conn: sqlite3.Connection) -> None:
              season INTEGER,
              episode INTEGER,
              display_name TEXT NOT NULL DEFAULT '',
-             rank INTEGER,
+             rank INTEGER CHECK(rank IS NULL OR rank>=1),
              score REAL NOT NULL DEFAULT 0,
-             support_strength REAL NOT NULL DEFAULT 0,
-             conflict_strength REAL NOT NULL DEFAULT 0,
-             independent_categories INTEGER NOT NULL DEFAULT 0,
+             support_strength REAL NOT NULL DEFAULT 0
+               CHECK(support_strength>=0 AND support_strength<=1),
+             conflict_strength REAL NOT NULL DEFAULT 0
+               CHECK(conflict_strength>=0 AND conflict_strength<=1),
+             independent_categories INTEGER NOT NULL DEFAULT 0
+               CHECK(independent_categories>=0),
              details_json TEXT NOT NULL DEFAULT '{}',
              PRIMARY KEY(scan_id,candidate_key)
            )"""
@@ -88,7 +91,7 @@ def apply_media_identity_foundation(conn: sqlite3.Connection) -> None:
              strength REAL NOT NULL DEFAULT 0 CHECK(strength>=0 AND strength<=1),
              source_kind TEXT NOT NULL DEFAULT '',
              source_ref TEXT NOT NULL DEFAULT '',
-             timestamp_ms INTEGER,
+             timestamp_ms INTEGER CHECK(timestamp_ms IS NULL OR timestamp_ms>=0),
              value_text TEXT NOT NULL DEFAULT '',
              details_json TEXT NOT NULL DEFAULT '{}',
              cache_key TEXT NOT NULL DEFAULT '',
@@ -119,17 +122,18 @@ def apply_media_identity_foundation(conn: sqlite3.Connection) -> None:
              source_kind TEXT NOT NULL DEFAULT '',
              source_ref TEXT NOT NULL DEFAULT '',
              source_signature TEXT NOT NULL DEFAULT '',
-             file_size_bytes INTEGER NOT NULL DEFAULT 0,
+             file_size_bytes INTEGER NOT NULL DEFAULT 0 CHECK(file_size_bytes>=0),
              file_modified_at REAL,
-             start_ms INTEGER,
-             end_ms INTEGER,
+             start_ms INTEGER CHECK(start_ms IS NULL OR start_ms>=0),
+             end_ms INTEGER CHECK(end_ms IS NULL OR end_ms>=0),
              text_value TEXT NOT NULL DEFAULT '',
              cache_path TEXT NOT NULL DEFAULT '',
              payload_json TEXT NOT NULL DEFAULT '{}',
              error TEXT NOT NULL DEFAULT '',
              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-             last_used_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+             last_used_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+             CHECK(start_ms IS NULL OR end_ms IS NULL OR end_ms>=start_ms)
            )"""
     )
     conn.execute(
@@ -153,7 +157,7 @@ def apply_media_identity_foundation(conn: sqlite3.Connection) -> None:
              episode INTEGER,
              display_name TEXT NOT NULL DEFAULT '',
              source_scan_id INTEGER REFERENCES media_identity_scans(id) ON DELETE SET NULL,
-             confirmed_size_bytes INTEGER NOT NULL DEFAULT 0,
+             confirmed_size_bytes INTEGER NOT NULL DEFAULT 0 CHECK(confirmed_size_bytes>=0),
              confirmed_modified_at REAL,
              confirmed_sha256 TEXT,
              confirmed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
