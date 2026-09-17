@@ -179,9 +179,9 @@ class MediaIdentityPersistenceTests(unittest.TestCase):
 
             cursor = conn.execute(
                 """INSERT INTO media_identity_scans(
-                     file_id,profile,claimed_identity_json,file_size_bytes,
+                     file_id,requested_profile,claimed_identity_json,file_size_bytes,
                      file_modified_at,status,stage
-                   ) VALUES (1,'fast','{}',100,10.0,'running','subtitle_text')"""
+                   ) VALUES (1,'deep','{}',100,10.0,'running','subtitle_text')"""
             )
             scan_id = int(cursor.lastrowid)
             candidate_key = "episode|tvdb|1001"
@@ -221,6 +221,12 @@ class MediaIdentityPersistenceTests(unittest.TestCase):
                              ?,100,10.0)""",
                 (scan_id,),
             )
+            conn.execute(
+                """UPDATE media_identity_scans
+                   SET status='paused', completed_profile='fast'
+                   WHERE id=?""",
+                (scan_id,),
+            )
 
             self.assertEqual(
                 conn.execute(
@@ -229,18 +235,21 @@ class MediaIdentityPersistenceTests(unittest.TestCase):
                 ).fetchone()[0],
                 1,
             )
-            self.assertEqual(
-                conn.execute(
-                    "SELECT stage FROM media_identity_scans WHERE id=?",
-                    (scan_id,),
-                ).fetchone()["stage"],
-                "subtitle_text",
-            )
+            scan = conn.execute(
+                """SELECT requested_profile,completed_profile,status,stage
+                   FROM media_identity_scans WHERE id=?""",
+                (scan_id,),
+            ).fetchone()
+            self.assertEqual(scan["requested_profile"], "deep")
+            self.assertEqual(scan["completed_profile"], "fast")
+            self.assertEqual(scan["status"], "paused")
+            self.assertEqual(scan["stage"], "subtitle_text")
 
     def test_result_state_enum_and_database_constraint_stay_in_sync(self) -> None:
         with self.database.connect() as conn:
             cursor = conn.execute(
-                "INSERT INTO media_identity_scans(file_id,profile) VALUES (1,'fast')"
+                """INSERT INTO media_identity_scans(file_id,requested_profile)
+                   VALUES (1,'fast')"""
             )
             scan_id = int(cursor.lastrowid)
             for state in IdentityResultState:
@@ -265,12 +274,20 @@ class MediaIdentityPersistenceTests(unittest.TestCase):
         with self.database.connect() as conn:
             with self.assertRaises(sqlite3.IntegrityError):
                 conn.execute(
-                    "INSERT INTO media_identity_scans(file_id,profile) VALUES (1,'heavy')"
+                    """INSERT INTO media_identity_scans(file_id,requested_profile)
+                       VALUES (1,'heavy')"""
                 )
             cursor = conn.execute(
-                "INSERT INTO media_identity_scans(file_id,profile) VALUES (1,'deep')"
+                """INSERT INTO media_identity_scans(file_id,requested_profile)
+                   VALUES (1,'deep')"""
             )
             scan_id = int(cursor.lastrowid)
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    """UPDATE media_identity_scans
+                       SET completed_profile='heavy' WHERE id=?""",
+                    (scan_id,),
+                )
             with self.assertRaises(sqlite3.IntegrityError):
                 conn.execute(
                     """INSERT INTO media_identity_evidence(
