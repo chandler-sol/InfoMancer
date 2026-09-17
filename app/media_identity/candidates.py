@@ -210,8 +210,25 @@ def _fallback_candidates(
         """SELECT id,tvdb_episode_id,season,episode,name,aired
            FROM expected_episodes
            WHERE title_id=? AND season=?
-           ORDER BY episode,id LIMIT ?""",
-        (title_id, season, MAX_FAST_CANDIDATES),
+           ORDER BY
+             CASE
+               WHEN episode BETWEEN ? AND ? THEN 0
+               WHEN MIN(ABS(episode-?),ABS(episode-?))<=2 THEN 1
+               ELSE 2
+             END,
+             MIN(ABS(episode-?),ABS(episode-?)),episode,id
+           LIMIT ?""",
+        (
+            title_id,
+            season,
+            episode_start,
+            episode_end,
+            episode_start,
+            episode_end,
+            episode_start,
+            episode_end,
+            MAX_FAST_CANDIDATES,
+        ),
     ).fetchall()
     prepared: list[tuple[int, int, sqlite3.Row]] = []
     for row in rows:
