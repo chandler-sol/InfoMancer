@@ -1,0 +1,64 @@
+{% set attention_titles = summary.attention_titles|default([]) %}
+{% set attention_snapshot_run_id = summary.attention_snapshot_run_id|default(none) %}
+{% set attention_snapshot_current = summary.attention_snapshot_current|default(false) %}
+{% if attention_titles %}
+<section id="titles-needing-attention" class="panel mie-score-panel" aria-labelledby="titles-needing-attention-title">
+  <header>
+    <div>
+      <p class="eyebrow">TITLE-LEVEL REVIEW</p>
+      <h2 id="titles-needing-attention-title">Titles needing attention</h2>
+    </div>
+    <p>These are the lowest title health scores from the latest complete title snapshot. Start here when you want the shortest path to the titles with the most significant recorded findings.</p>
+  </header>
+  {% if not attention_snapshot_current %}<p class="mie-score-note">A newer analysis exists than these title snapshots. Refresh analysis before treating these title scores as current.</p>{% endif %}
+  <div class="mie-score-grid">
+    {% for item in attention_titles %}
+    <article>
+      <strong>{{ item.score }}</strong>
+      <h3>{{ item.title_name }}</h3>
+      <p>{{ 'TV' if item.kind == 'tv' else 'Movie' }} · {{ item.critical_count }} critical · {{ item.warning_count }} warning · {{ item.information_count }} information</p>
+      <p>
+        {% if item.trend == 'improving' %}Improving by {{ item.score_delta }} points since the previous title snapshot.
+        {% elif item.trend == 'worsening' %}Down {{ item.score_delta|abs }} points since the previous title snapshot.
+        {% elif item.trend == 'stable' %}Unchanged since the previous title snapshot.
+        {% else %}First title-health snapshot recorded.
+        {% endif %}
+      </p>
+      {% if item.recent_scores %}<p class="muted">Recent scores: {{ item.recent_scores|join(' → ') }}</p>{% endif %}
+      <a class="button" href="/titles/{{ item.title_id }}">Review title</a>
+    </article>
+    {% endfor %}
+  </div>
+  <p class="mie-score-note">This is a review queue, not an automatic repair system. Opening or refreshing Library Health does not change your media files.</p>
+</section>
+{% elif attention_snapshot_run_id and attention_snapshot_current %}
+<section id="titles-needing-attention" class="panel mie-score-panel" aria-labelledby="titles-needing-attention-title">
+  <header>
+    <div>
+      <p class="eyebrow">TITLE-LEVEL REVIEW</p>
+      <h2 id="titles-needing-attention-title">Titles needing attention</h2>
+    </div>
+    <p>No title-level findings currently reduce a title health score. Source-level or library-wide findings may still appear below.</p>
+  </header>
+</section>
+{% elif attention_snapshot_run_id %}
+<section id="titles-needing-attention" class="panel mie-score-panel" aria-labelledby="titles-needing-attention-title">
+  <header>
+    <div>
+      <p class="eyebrow">TITLE-LEVEL REVIEW</p>
+      <h2 id="titles-needing-attention-title">Titles needing attention</h2>
+    </div>
+    <p>Title-level health history is from an earlier analysis. Refresh analysis to bring title scores up to date; no media files will be changed.</p>
+  </header>
+</section>
+{% elif summary.last_analyzed_at %}
+<section id="titles-needing-attention" class="panel mie-score-panel" aria-labelledby="titles-needing-attention-title">
+  <header>
+    <div>
+      <p class="eyebrow">TITLE-LEVEL REVIEW</p>
+      <h2 id="titles-needing-attention-title">Titles needing attention</h2>
+    </div>
+    <p>Title-level health history has not been recorded yet. Refresh the analysis to build the first title snapshots; no media files will be changed.</p>
+  </header>
+</section>
+{% endif %}

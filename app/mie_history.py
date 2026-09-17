@@ -133,6 +133,42 @@ class MediaIntelligenceHistoryEngine(MediaIntelligenceEngine):
 
             return candidate_count
 
+    def title_health_snapshot_state(self) -> dict[str, Any]:
+        """Describe whether title-health snapshots represent the latest analysis run.
+
+        An analyzed library with zero titles has no per-title rows to persist. In that
+        case the latest analysis itself is a complete, current empty title-health
+        snapshot until a title is added and another analysis is required.
+        """
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT
+                     (SELECT MAX(id) FROM mie_analysis_runs) latest_analysis_run_id,
+                     (SELECT MAX(run_id) FROM mie_title_health_snapshots) latest_snapshot_run_id,
+                     (SELECT COUNT(*) FROM titles) title_count"""
+            ).fetchone()
+        latest_analysis_run_id = (
+            int(row["latest_analysis_run_id"])
+            if row and row["latest_analysis_run_id"] is not None
+            else None
+        )
+        latest_snapshot_run_id = (
+            int(row["latest_snapshot_run_id"])
+            if row and row["latest_snapshot_run_id"] is not None
+            else None
+        )
+        title_count = int(row["title_count"]) if row else 0
+        if title_count == 0 and latest_analysis_run_id is not None:
+            latest_snapshot_run_id = latest_analysis_run_id
+        return {
+            "latest_analysis_run_id": latest_analysis_run_id,
+            "latest_snapshot_run_id": latest_snapshot_run_id,
+            "current": (
+                latest_analysis_run_id is not None
+                and latest_snapshot_run_id == latest_analysis_run_id
+            ),
+        }
+
     def titles_needing_attention(self, limit: int = 12) -> list[dict[str, Any]]:
         """Return the lowest-health titles from the latest run with health snapshots."""
         normalized_limit = max(1, min(int(limit), 100))
@@ -165,3 +201,69 @@ class MediaIntelligenceHistoryEngine(MediaIntelligenceEngine):
                 (int(title_id), normalized_limit),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def attention_overview(
+        self, limit: int = 12, history_limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Return attention titles enriched with a compact, explainable score trend."""
+        titles = self.titles_needing_attention(limit)
+        if not titles:
+            return []
+
+        normalized_history_limit = max(1, min(int(history_limit), 50))
+        title_ids = [int(title["title_id"]) for title in titles]
+        placeholders = ",".join("?" for _ in title_ids)
+        histories: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                f"""SELECT h.*,r.analyzed_at,r.opened_findings,r.resolved_findings
+                    FROM mie_title_health_snapshots h
+                    JOIN mie_analysis_runs r ON r.id=h.run_id
+                    WHERE h.title_id IN ({placeholders})
+                    ORDER BY h.title_id,h.run_id DESC""",
+                title_ids,
+            ).fetchall()
+        for row in rows:
+            title_id = int(row["title_id"])
+            if len(histories[title_id]) < normalized_history_limit:
+                histories[title_id].append(dict(row))
+
+        overview: list[dict[str, Any]] = []
+        for title in titles:
+            item = dict(title)
+            history = histories[int(item["title_id"])]
+            current_score = int(item["score"])
+            previous_score = (
+                int(history[1]["score"]) if len(history) > 1 else None
+            )
+            score_delta = (
+                current_score - previous_score if previous_score is not None else None
+            )
+            if score_delta is None:
+                trend = "new"
+            elif score_delta > 0:
+                trend = "improving"
+            elif score_delta < 0:
+                trend = "worsening"
+            else:
+                trend = "stable"
+            item.update({
+                "history": history,
+                "recent_scores": [
+                    int(row["score"]) for row in reversed(history)
+                ],
+                "previous_score": previous_score,
+                "score_delta": score_delta,
+                "trend": trend,
+            })
+            overview.append(item)
+        return overview
+
+    def summary(self) -> dict[str, Any]:
+        """Extend the existing Library Health summary with title-level review context."""
+        summary = super().summary()
+        snapshot_state = self.title_health_snapshot_state()
+        summary["attention_titles"] = self.attention_overview()
+        summary["attention_snapshot_run_id"] = snapshot_state["latest_snapshot_run_id"]
+        summary["attention_snapshot_current"] = snapshot_state["current"]
+        return summary
