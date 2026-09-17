@@ -37,7 +37,7 @@ class MediaIntegrityResultService:
             raise ValueError("Integrity mode must be sample or full.")
         normalized_issues = [str(item) for item in (issues or [])]
         payload = dict(details or {})
-        payload.setdefault("issues", normalized_issues)
+        payload["issues"] = normalized_issues
 
         if conn is None:
             with self.database.connect() as connection:
