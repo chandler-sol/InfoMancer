@@ -131,13 +131,12 @@ class ProviderEpisodeCache:
                     "name": _clean_text(record.get("name")),
                     "overview": _clean_text(record.get("overview")),
                     "aired": _clean_text(record.get("aired")),
-                    "absolute_number": absolute_number,
                     "metadata": self._identity_metadata(record),
                 }
                 if existing is None:
                     identities[provider_episode_id] = current
                 else:
-                    for field in ("name", "overview", "aired", "absolute_number"):
+                    for field in ("name", "overview", "aired"):
                         if existing.get(field) in {None, ""} and current.get(field) not in {None, ""}:
                             existing[field] = current[field]
                     for key, value in current["metadata"].items():
@@ -214,8 +213,8 @@ class ProviderEpisodeCache:
             conn.executemany(
                 """INSERT INTO provider_episode_identities(
                      provider,provider_series_id,provider_episode_id,language,
-                     name,overview,aired,absolute_number,metadata_json
-                   ) VALUES ('tvdb',?,?,?,?,?,?,?,?)""",
+                     name,overview,aired,metadata_json
+                   ) VALUES ('tvdb',?,?,?,?,?,?,?)""",
                 [
                     (
                         provider_series_id,
@@ -224,7 +223,6 @@ class ProviderEpisodeCache:
                         identity["name"],
                         identity["overview"],
                         identity["aired"],
-                        identity["absolute_number"],
                         _canonical_json(identity["metadata"]),
                     )
                     for identity in normalized_identities
@@ -310,7 +308,7 @@ class ProviderEpisodeCache:
         with self.database.connect() as conn:
             rows = conn.execute(
                 """SELECT i.provider_episode_id,i.name,i.overview,i.aired,
-                          i.absolute_number,m.order_name,m.season,m.episode,
+                          m.order_name,m.season,m.episode,
                           m.absolute_number mapping_absolute_number,m.coordinate_key
                    FROM provider_episode_mappings m
                    JOIN provider_episode_identities i
@@ -320,11 +318,34 @@ class ProviderEpisodeCache:
                     AND i.language=m.language
                    WHERE m.provider=? AND m.provider_series_id=? AND m.language=?
                      AND m.order_namespace=? AND m.season IS ? AND m.episode IS ?
-                   ORDER BY i.provider_episode_id""",
+                   ORDER BY i.provider_episode_id,m.id""",
                 (
                     provider.casefold(), str(provider_series_id), language.casefold(),
                     order_namespace.casefold(), season, episode,
                 ),
             ).fetchall()
-        candidates = [dict(row) for row in rows]
+        candidates_by_id: dict[str, dict[str, Any]] = {}
+        mapping_variants: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            item = dict(row)
+            provider_episode_id = item["provider_episode_id"]
+            mapping_variant = {
+                "order_name": item["order_name"],
+                "season": item["season"],
+                "episode": item["episode"],
+                "absolute_number": item["mapping_absolute_number"],
+                "coordinate_key": item["coordinate_key"],
+            }
+            mapping_variants.setdefault(provider_episode_id, []).append(mapping_variant)
+            if provider_episode_id not in candidates_by_id:
+                candidates_by_id[provider_episode_id] = {
+                    "provider_episode_id": provider_episode_id,
+                    "name": item["name"],
+                    "overview": item["overview"],
+                    "aired": item["aired"],
+                }
+        candidates = []
+        for provider_episode_id, candidate in candidates_by_id.items():
+            candidate["mapping_variants"] = mapping_variants[provider_episode_id]
+            candidates.append(candidate)
         return {"candidates": candidates, "ambiguous": len(candidates) > 1}
