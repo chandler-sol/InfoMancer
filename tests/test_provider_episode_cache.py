@@ -198,6 +198,24 @@ class ProviderEpisodeCacheTests(unittest.TestCase):
             ["101", "102"],
         )
 
+    def test_multiple_mapping_variants_for_one_identity_are_not_false_ambiguity(self) -> None:
+        transport = FakeTVDBTransport(
+            pages={
+                ("/series/9001/episodes/default/eng", 0): payload([
+                    episode(101, 1, 1, "Pilot", absolute=1),
+                    episode(101, 1, 1, "Pilot", absolute=99),
+                ])
+            }
+        )
+        self.cache.refresh_tvdb_series(9001, transport)
+        resolved = self.cache.resolve_coordinate("tvdb", "9001", "default", 1, 1)
+        self.assertFalse(resolved["ambiguous"])
+        self.assertEqual(len(resolved["candidates"]), 1)
+        self.assertEqual(
+            [variant["absolute_number"] for variant in resolved["candidates"][0]["mapping_variants"]],
+            [1, 99],
+        )
+
     def test_provider_refresh_never_changes_expected_episodes(self) -> None:
         with self.database.connect() as conn:
             before = [tuple(row) for row in conn.execute(
