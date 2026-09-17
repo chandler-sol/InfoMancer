@@ -12,7 +12,7 @@ SIDECAR_EXTENSIONS = {".srt", ".vtt", ".ass", ".ssa"}
 MAX_SIDECAR_BYTES = 10 * 1024 * 1024
 MAX_SIDECAR_COUNT = 16
 MAX_TOTAL_SIDECAR_BYTES = 32 * 1024 * 1024
-MAX_SIDECAR_DIRECTORY_ENTRIES = 4096
+MAX_SIDECAR_SELECTION_POOL = 64
 NORMALIZER_VERSION = "subtitle-normalizer-v1"
 
 _TIMESTAMP = re.compile(
@@ -96,34 +96,40 @@ def discover_sidecar_subtitles(media_path: str | Path) -> list[Path]:
     media = Path(media_path)
     parent = media.parent
     prefix = media.stem.casefold()
-    eligible: list[tuple[str, Path, int]] = []
+    pool: list[tuple[tuple[str, str], Path]] = []
     try:
-        entries = parent.iterdir()
-        for entry_number, candidate in enumerate(entries, start=1):
-            if entry_number > MAX_SIDECAR_DIRECTORY_ENTRIES:
-                break
+        for candidate in parent.iterdir():
             suffix = candidate.suffix.casefold()
             if suffix not in SIDECAR_EXTENSIONS:
                 continue
-            name = candidate.name.casefold()
-            if not (name == f"{prefix}{suffix}" or name.startswith(prefix + ".")):
+            folded_name = candidate.name.casefold()
+            if not (
+                folded_name == f"{prefix}{suffix}"
+                or folded_name.startswith(prefix + ".")
+            ):
                 continue
-            try:
-                if candidate.is_symlink() or not candidate.is_file():
-                    continue
-                size_bytes = int(candidate.stat().st_size)
-            except OSError:
+            sort_key = (folded_name, candidate.name)
+            if len(pool) < MAX_SIDECAR_SELECTION_POOL:
+                pool.append((sort_key, candidate))
+                pool.sort(key=lambda item: item[0])
                 continue
-            if size_bytes > MAX_SIDECAR_BYTES:
-                continue
-            eligible.append((name, candidate, size_bytes))
+            if sort_key < pool[-1][0]:
+                pool[-1] = (sort_key, candidate)
+                pool.sort(key=lambda item: item[0])
     except OSError:
         return []
 
-    eligible.sort(key=lambda item: item[0])
     found: list[Path] = []
     total_bytes = 0
-    for _, candidate, size_bytes in eligible:
+    for _, candidate in pool:
+        try:
+            if candidate.is_symlink() or not candidate.is_file():
+                continue
+            size_bytes = int(candidate.stat().st_size)
+        except OSError:
+            continue
+        if size_bytes > MAX_SIDECAR_BYTES:
+            continue
         if len(found) >= MAX_SIDECAR_COUNT:
             break
         if total_bytes + size_bytes > MAX_TOTAL_SIDECAR_BYTES:
