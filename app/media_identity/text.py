@@ -96,8 +96,7 @@ def discover_sidecar_subtitles(media_path: str | Path) -> list[Path]:
     media = Path(media_path)
     parent = media.parent
     prefix = media.stem.casefold()
-    found: list[Path] = []
-    total_bytes = 0
+    eligible: list[tuple[str, Path, int]] = []
     try:
         entries = parent.iterdir()
         for entry_number, candidate in enumerate(entries, start=1):
@@ -117,15 +116,21 @@ def discover_sidecar_subtitles(media_path: str | Path) -> list[Path]:
                 continue
             if size_bytes > MAX_SIDECAR_BYTES:
                 continue
-            if len(found) >= MAX_SIDECAR_COUNT:
-                break
-            if total_bytes + size_bytes > MAX_TOTAL_SIDECAR_BYTES:
-                continue
-            found.append(candidate)
-            total_bytes += size_bytes
+            eligible.append((name, candidate, size_bytes))
     except OSError:
         return []
-    return sorted(found, key=lambda value: value.name.casefold())
+
+    eligible.sort(key=lambda item: item[0])
+    found: list[Path] = []
+    total_bytes = 0
+    for _, candidate, size_bytes in eligible:
+        if len(found) >= MAX_SIDECAR_COUNT:
+            break
+        if total_bytes + size_bytes > MAX_TOTAL_SIDECAR_BYTES:
+            continue
+        found.append(candidate)
+        total_bytes += size_bytes
+    return found
 
 
 def sidecar_identity(path: Path) -> SidecarIdentity | None:
