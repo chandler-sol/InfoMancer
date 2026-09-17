@@ -114,6 +114,26 @@ class MediaIdentityDomainTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             IdentityReference("episode")
 
+    def test_identity_keys_are_unambiguous_when_components_contain_delimiters(self):
+        provider_delimiter = IdentityReference("episode", "tvdb|id", "42")
+        item_delimiter = IdentityReference("episode", "tvdb", "id|42")
+        self.assertNotEqual(provider_delimiter.content_key, item_delimiter.content_key)
+        self.assertNotEqual(
+            IdentityCandidate(provider_delimiter).key,
+            IdentityCandidate(item_delimiter).key,
+        )
+
+        first_mapping = IdentityReference(
+            "episode", "tvdb", "42", order_namespace="dvd|absolute",
+            season=2, episode=7,
+        )
+        second_mapping = IdentityReference(
+            "episode", "tvdb", "42", order_namespace="dvd",
+            season=2, episode=7,
+        )
+        self.assertEqual(first_mapping.content_key, second_mapping.content_key)
+        self.assertNotEqual(first_mapping.mapping_key, second_mapping.mapping_key)
+
     def test_evidence_requires_explainable_provenance_fields(self):
         evidence = IdentityEvidence(
             analyzer_key="subtitle-text",
@@ -276,6 +296,40 @@ class MediaIdentityPersistenceTests(unittest.TestCase):
                     conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0],
                     0,
                     table,
+                )
+
+    def test_artifact_cache_keys_are_scoped_to_their_producer(self) -> None:
+        with self.database.connect() as conn:
+            insert_sql = """INSERT INTO media_identity_artifacts(
+                file_id,artifact_type,analyzer_key,analyzer_version,cache_key,profile
+              ) VALUES (1,?,?,?,?, 'fast')"""
+            conn.execute(
+                insert_sql,
+                ("subtitle_text", "subtitle-text", "1", "shared-cache-key"),
+            )
+            conn.execute(
+                insert_sql,
+                ("subtitle_text", "visual-text", "1", "shared-cache-key"),
+            )
+            conn.execute(
+                insert_sql,
+                ("subtitle_text", "subtitle-text", "2", "shared-cache-key"),
+            )
+            conn.execute(
+                insert_sql,
+                ("visual_text", "subtitle-text", "1", "shared-cache-key"),
+            )
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute(
+                    insert_sql,
+                    ("subtitle_text", "subtitle-text", "1", "shared-cache-key"),
+                )
+
+            for _ in range(2):
+                conn.execute(
+                    """INSERT INTO media_identity_artifacts(
+                         file_id,artifact_type,analyzer_key,analyzer_version,cache_key,profile
+                       ) VALUES (1,'subtitle_text','subtitle-text','1','','fast')"""
                 )
 
     def test_result_state_enum_and_database_constraint_stay_in_sync(self) -> None:
