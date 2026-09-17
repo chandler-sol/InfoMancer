@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -131,6 +132,33 @@ class Cycle1MIEHistoryTests(unittest.TestCase):
         self.assertEqual([row["score"] for row in history[:4]], [80, 100, 64, 64])
         self.assertEqual(history[0]["opened_findings"], 1)
         self.assertEqual(history[1]["resolved_findings"], 3)
+
+    def test_history_finalization_failure_rolls_back_the_analysis_run(self) -> None:
+        with self.database.connect() as conn:
+            conn.execute(
+                """CREATE TRIGGER fail_cycle1_snapshot
+                   BEFORE INSERT ON mie_title_health_snapshots
+                   BEGIN
+                     SELECT RAISE(ABORT, 'snapshot failed');
+                   END"""
+            )
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.mie.analyze()
+
+        with self.database.connect() as conn:
+            run_count = int(conn.execute(
+                "SELECT COUNT(*) FROM mie_analysis_runs"
+            ).fetchone()[0])
+            finding_count = int(conn.execute(
+                "SELECT COUNT(*) FROM mie_findings"
+            ).fetchone()[0])
+            state_count = int(conn.execute(
+                "SELECT COUNT(*) FROM mie_analysis_state"
+            ).fetchone()[0])
+        self.assertEqual(run_count, 0)
+        self.assertEqual(finding_count, 0)
+        self.assertEqual(state_count, 0)
 
     def test_attention_uses_latest_complete_snapshot_run(self) -> None:
         self.mie.analyze()
