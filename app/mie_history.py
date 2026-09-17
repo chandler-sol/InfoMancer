@@ -134,12 +134,18 @@ class MediaIntelligenceHistoryEngine(MediaIntelligenceEngine):
             return candidate_count
 
     def title_health_snapshot_state(self) -> dict[str, Any]:
-        """Describe whether title-health snapshots represent the latest analysis run."""
+        """Describe whether title-health snapshots represent the latest analysis run.
+
+        An analyzed library with zero titles has no per-title rows to persist. In that
+        case the latest analysis itself is a complete, current empty title-health
+        snapshot until a title is added and another analysis is required.
+        """
         with self.database.connect() as conn:
             row = conn.execute(
                 """SELECT
                      (SELECT MAX(id) FROM mie_analysis_runs) latest_analysis_run_id,
-                     (SELECT MAX(run_id) FROM mie_title_health_snapshots) latest_snapshot_run_id"""
+                     (SELECT MAX(run_id) FROM mie_title_health_snapshots) latest_snapshot_run_id,
+                     (SELECT COUNT(*) FROM titles) title_count"""
             ).fetchone()
         latest_analysis_run_id = (
             int(row["latest_analysis_run_id"])
@@ -151,6 +157,9 @@ class MediaIntelligenceHistoryEngine(MediaIntelligenceEngine):
             if row and row["latest_snapshot_run_id"] is not None
             else None
         )
+        title_count = int(row["title_count"]) if row else 0
+        if title_count == 0 and latest_analysis_run_id is not None:
+            latest_snapshot_run_id = latest_analysis_run_id
         return {
             "latest_analysis_run_id": latest_analysis_run_id,
             "latest_snapshot_run_id": latest_snapshot_run_id,
