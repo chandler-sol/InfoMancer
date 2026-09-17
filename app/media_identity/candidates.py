@@ -42,6 +42,14 @@ def _origin_priority(origins: set[str]) -> int:
     return 9
 
 
+def _json_object(value: Any) -> dict[str, Any]:
+    try:
+        loaded = json.loads(str(value or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
 def _provider_candidates(
     conn: sqlite3.Connection,
     *,
@@ -62,7 +70,7 @@ def _provider_candidates(
         return CandidateSet((), provider_series_id, "", False)
 
     rows = conn.execute(
-        """SELECT i.provider_episode_id,i.name,i.overview,i.aired,
+        """SELECT i.provider_episode_id,i.name,i.overview,i.aired,i.metadata_json,
                   m.order_namespace,m.order_name,m.season,m.episode,m.absolute_number,
                   m.coordinate_key,e.id expected_episode_id
            FROM provider_episode_identities i
@@ -86,6 +94,7 @@ def _provider_candidates(
             "name": row["name"] or "",
             "overview": row["overview"] or "",
             "aired": row["aired"] or "",
+            "metadata": _json_object(row["metadata_json"]),
             "expected_episode_id": row["expected_episode_id"],
             "mappings": [],
             "origins": set(),
@@ -135,11 +144,16 @@ def _provider_candidates(
         item["provider_episode_id"],
     ))
 
-    if include_specials:
-        regular = [item for item in selected if "special" not in item["origins"] or len(item["origins"]) > 1]
+    if include_specials and season != 0:
+        regular = [
+            item for item in selected
+            if "special" not in item["origins"] or len(item["origins"]) > 1
+        ]
         specials = [item for item in selected if item not in regular][:MAX_FAST_SPECIALS]
-        selected = regular + specials
-    selected = selected[:MAX_FAST_CANDIDATES]
+        regular_limit = max(0, MAX_FAST_CANDIDATES - len(specials))
+        selected = regular[:regular_limit] + specials
+    else:
+        selected = selected[:MAX_FAST_CANDIDATES]
 
     candidates: list[IdentityCandidate] = []
     for rank, item in enumerate(selected, start=1):
@@ -172,6 +186,7 @@ def _provider_candidates(
                 "mappings": mappings,
                 "overview": item["overview"],
                 "aired": item["aired"],
+                "metadata": item["metadata"],
             },
         ))
 
@@ -198,13 +213,24 @@ def _fallback_candidates(
            ORDER BY episode,id LIMIT ?""",
         (title_id, season, MAX_FAST_CANDIDATES),
     ).fetchall()
+    prepared: list[tuple[int, int, sqlite3.Row]] = []
+    for row in rows:
+        episode = int(row["episode"])
+        claimed = episode_start <= episode <= episode_end
+        distance = min(abs(episode - episode_start), abs(episode - episode_end))
+        priority = 0 if claimed else (1 if distance <= 2 else 2)
+        prepared.append((priority, distance, row))
+    prepared.sort(key=lambda item: (item[0], item[1], int(item[2]["episode"]), int(item[2]["id"])))
+
     candidates: list[IdentityCandidate] = []
-    for rank, row in enumerate(rows, start=1):
-        origin = (
-            "claimed_coordinate"
-            if episode_start <= int(row["episode"]) <= episode_end
-            else "same_season"
-        )
+    for rank, (_, distance, row) in enumerate(prepared, start=1):
+        episode = int(row["episode"])
+        if episode_start <= episode <= episode_end:
+            origins = ["claimed_coordinate", "same_season"]
+        elif distance <= 2:
+            origins = ["nearby_same_season", "same_season"]
+        else:
+            origins = ["same_season"]
         candidates.append(IdentityCandidate(
             identity=IdentityReference(
                 identity_kind="episode",
@@ -213,11 +239,17 @@ def _fallback_candidates(
                 expected_episode_id=int(row["id"]),
                 order_namespace="default",
                 season=int(row["season"]),
-                episode=int(row["episode"]),
+                episode=episode,
                 display_name=row["name"] or "",
             ),
             rank=rank,
-            details={"origins": [origin], "mappings": [], "overview": "", "aired": row["aired"] or ""},
+            details={
+                "origins": origins,
+                "mappings": [],
+                "overview": "",
+                "aired": row["aired"] or "",
+                "metadata": {},
+            },
         ))
     return CandidateSet(tuple(candidates), "", "", False)
 
