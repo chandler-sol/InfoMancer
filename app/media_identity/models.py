@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import json
 from typing import Any, Mapping, Sequence
+
+
+def _canonical_key(*parts: object) -> str:
+    """Serialize opaque identity-key components without delimiter ambiguity."""
+    return json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
 
 
 class IdentityProfile(str, Enum):
@@ -114,40 +120,36 @@ class IdentityReference:
         provider = self.provider.strip().casefold()
         provider_item_id = self.provider_item_id.strip()
         if provider_item_id:
-            return "|".join((kind, provider, "id", provider_item_id))
+            return _canonical_key("content", kind, "provider", provider, provider_item_id)
         if self.expected_episode_id is not None:
-            return "|".join((kind, "infomancer", "expected", str(self.expected_episode_id)))
+            return _canonical_key(
+                "content", kind, "infomancer", "expected", self.expected_episode_id
+            )
 
-        coordinate = (
-            f"{self.season}:{self.episode}"
-            if self.season is not None and self.episode is not None
-            else ""
-        )
-        if coordinate:
-            return "|".join((
+        if self.season is not None and self.episode is not None:
+            return _canonical_key(
+                "content",
                 kind,
-                provider,
                 "mapping",
+                provider,
                 self.order_namespace.strip().casefold(),
-                coordinate,
-            ))
+                self.season,
+                self.episode,
+            )
 
         label = " ".join(self.display_name.strip().casefold().split())
-        return "|".join((kind, provider, "label", label))
+        return _canonical_key("content", kind, "label", provider, label)
 
     @property
     def mapping_key(self) -> str:
         """Identify one numbering/order mapping for the same underlying content."""
-        coordinate = (
-            f"{self.season}:{self.episode}"
-            if self.season is not None and self.episode is not None
-            else ""
-        )
-        return "|".join((
+        return _canonical_key(
+            "mapping",
             self.content_key,
             self.order_namespace.strip().casefold(),
-            coordinate,
-        ))
+            self.season,
+            self.episode,
+        )
 
     @property
     def stable_key(self) -> str:
