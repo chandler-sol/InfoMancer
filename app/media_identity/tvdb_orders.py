@@ -80,7 +80,9 @@ def episodes_for_order(
         elif isinstance(data, list):
             episodes.extend(data)
         links = payload.get("links") or {}
-        if links.get("next") is None:
+        if not links.get("next"):
             break
         page += 1
+        if page > 10_000:
+            raise RuntimeError("TVDB episode pagination exceeded its safety bound")
     return episodes
