@@ -190,16 +190,13 @@ class FastIdentityService:
                FROM media_identity_artifacts
                WHERE file_id=? AND artifact_type='subtitle_text'
                  AND analyzer_key=? AND analyzer_version=? AND cache_key=?
-                 AND status='complete' AND file_size_bytes=?
-                 AND COALESCE(file_modified_at,-1)=COALESCE(?,-1)
+                 AND status='complete'
                ORDER BY id DESC LIMIT 1""",
             (
                 int(file_row["id"]),
                 SIDECAR_ANALYZER_KEY,
                 SIDECAR_ANALYZER_VERSION,
                 identity.cache_key,
-                int(file_row["size_bytes"] or 0),
-                file_row["modified_at"],
             ),
         ).fetchone()
         if not row or str(row["source_signature"] or "") != identity.source_signature:
@@ -307,7 +304,16 @@ class FastIdentityService:
                         include_specials=True,
                         language=language,
                     )
-                    if len(expanded.candidates) > len(candidate_set.candidates):
+                    original_keys = {
+                        candidate.key for candidate in candidate_set.candidates
+                    }
+                    added_specials = [
+                        candidate
+                        for candidate in expanded.candidates
+                        if candidate.key not in original_keys
+                        and "special" in set(candidate.details.get("origins") or [])
+                    ]
+                    if added_specials:
                         candidate_set = expanded
                         expanded_specials = True
         return candidate_set, expanded_specials, corpora
