@@ -32,14 +32,17 @@ def build_router(ctx: RouteContext):
                 "updated": 0, "errors": 0, "current": "",
             })
         with db.connect() as conn:
-            if file_ids:
-                placeholders = ",".join("?" for _ in file_ids)
-                rows = conn.execute(
-                    f"""SELECT f.id,f.path,f.filename,t.metadata_title,t.title
-                        FROM files f JOIN titles t ON t.id=f.title_id
-                        WHERE f.id IN ({placeholders}) ORDER BY f.id""",
-                    tuple(file_ids),
-                ).fetchall()
+            if file_ids is not None:
+                if file_ids:
+                    placeholders = ",".join("?" for _ in file_ids)
+                    rows = conn.execute(
+                        f"""SELECT f.id,f.path,f.filename,t.metadata_title,t.title
+                            FROM files f JOIN titles t ON t.id=f.title_id
+                            WHERE f.id IN ({placeholders}) ORDER BY f.id""",
+                        tuple(file_ids),
+                    ).fetchall()
+                else:
+                    rows = []
             else:
                 rows = conn.execute(
                     """SELECT f.id,f.path,f.filename,t.metadata_title,t.title
