@@ -133,6 +133,16 @@ class MediaIntelligenceHistoryEngine(MediaIntelligenceEngine):
 
             return candidate_count
 
+    def latest_title_health_run_id(self) -> int | None:
+        """Return the latest analysis run that has complete title-health snapshots."""
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT MAX(run_id) latest_run_id FROM mie_title_health_snapshots"
+            ).fetchone()
+        if not row or row["latest_run_id"] is None:
+            return None
+        return int(row["latest_run_id"])
+
     def titles_needing_attention(self, limit: int = 12) -> list[dict[str, Any]]:
         """Return the lowest-health titles from the latest run with health snapshots."""
         normalized_limit = max(1, min(int(limit), 100))
@@ -227,4 +237,5 @@ class MediaIntelligenceHistoryEngine(MediaIntelligenceEngine):
         """Extend the existing Library Health summary with title-level review context."""
         summary = super().summary()
         summary["attention_titles"] = self.attention_overview()
+        summary["attention_snapshot_run_id"] = self.latest_title_health_run_id()
         return summary
