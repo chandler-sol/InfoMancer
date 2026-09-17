@@ -8,8 +8,8 @@ import unittest
 from pathlib import Path
 
 from app.db import Database
-from app.media_identity import FastIdentityService, FastIdentityStaleError
 from app.media_identity.candidates import generate_episode_candidates
+from app.media_identity.fast import FastIdentityService, FastIdentityStaleError
 from app.media_identity.text import normalize_subtitle_text
 
 
@@ -166,7 +166,7 @@ class FastEpisodeIdentityTests(unittest.TestCase):
                      season,episode_start,episode_end,parsed_title,runtime_seconds,
                      width,height,video_codec,audio_codec,audio_channels,bitrate,
                      container,dynamic_range,media_info_at,media_info_error,seen_scan
-                   ) VALUES (1 * ?,1,?,?,?,?,?,1,?,?,?,1440,1920,1080,
+                   ) VALUES (?,1,?,?,?,?,?,1,?,?,?,1440,1920,1080,
                              'H264','AAC',2,5000000,'MKV','SDR','2026-09-17T12:00:00','',
                              'fixture-scan')""",
                 (
@@ -280,10 +280,10 @@ class FastEpisodeIdentityTests(unittest.TestCase):
 
     def test_fast_scan_persists_explainable_evidence_without_final_verdict(self) -> None:
         file_id = self._add_file(1, actual_episode=1, add_hash=True)
-        media_path = Path(self.service._file_row(
-            self.database.connect().__enter__(), file_id
-        )["path"])
-        # Do not rely on the connection used above; this assertion simply snapshots bytes.
+        with self.database.connect() as conn:
+            media_path = Path(conn.execute(
+                "SELECT path FROM files WHERE id=?", (file_id,)
+            ).fetchone()["path"])
         before = media_path.read_bytes()
 
         result = self.service.scan_file(file_id)
