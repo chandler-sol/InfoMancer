@@ -10,6 +10,9 @@ from typing import Iterable, Mapping
 
 SIDECAR_EXTENSIONS = {".srt", ".vtt", ".ass", ".ssa"}
 MAX_SIDECAR_BYTES = 10 * 1024 * 1024
+MAX_SIDECAR_COUNT = 16
+MAX_TOTAL_SIDECAR_BYTES = 32 * 1024 * 1024
+MAX_SIDECAR_DIRECTORY_ENTRIES = 4096
 NORMALIZER_VERSION = "subtitle-normalizer-v1"
 
 _TIMESTAMP = re.compile(
@@ -92,27 +95,36 @@ def discover_sidecar_subtitles(media_path: str | Path) -> list[Path]:
     """Return bounded, same-basename subtitle sidecars without following symlinks."""
     media = Path(media_path)
     parent = media.parent
-    try:
-        entries = list(parent.iterdir())
-    except OSError:
-        return []
     prefix = media.stem.casefold()
     found: list[Path] = []
-    for candidate in entries:
-        suffix = candidate.suffix.casefold()
-        if suffix not in SIDECAR_EXTENSIONS:
-            continue
-        name = candidate.name.casefold()
-        if not (name == f"{prefix}{suffix}" or name.startswith(prefix + ".")):
-            continue
-        try:
-            if candidate.is_symlink() or not candidate.is_file():
+    total_bytes = 0
+    try:
+        entries = parent.iterdir()
+        for entry_number, candidate in enumerate(entries, start=1):
+            if entry_number > MAX_SIDECAR_DIRECTORY_ENTRIES:
+                break
+            suffix = candidate.suffix.casefold()
+            if suffix not in SIDECAR_EXTENSIONS:
                 continue
-            if candidate.stat().st_size > MAX_SIDECAR_BYTES:
+            name = candidate.name.casefold()
+            if not (name == f"{prefix}{suffix}" or name.startswith(prefix + ".")):
                 continue
-        except OSError:
-            continue
-        found.append(candidate)
+            try:
+                if candidate.is_symlink() or not candidate.is_file():
+                    continue
+                size_bytes = int(candidate.stat().st_size)
+            except OSError:
+                continue
+            if size_bytes > MAX_SIDECAR_BYTES:
+                continue
+            if len(found) >= MAX_SIDECAR_COUNT:
+                break
+            if total_bytes + size_bytes > MAX_TOTAL_SIDECAR_BYTES:
+                continue
+            found.append(candidate)
+            total_bytes += size_bytes
+    except OSError:
+        return []
     return sorted(found, key=lambda value: value.name.casefold())
 
 
