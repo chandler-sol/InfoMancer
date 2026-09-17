@@ -15,9 +15,12 @@ def apply_media_identity_foundation(conn: sqlite3.Connection) -> None:
              id INTEGER PRIMARY KEY,
              file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
              identity_kind TEXT NOT NULL DEFAULT 'episode',
-             profile TEXT NOT NULL CHECK(profile IN ('fast','normal','deep')),
+             requested_profile TEXT NOT NULL
+               CHECK(requested_profile IN ('fast','normal','deep')),
+             completed_profile TEXT
+               CHECK(completed_profile IN ('fast','normal','deep')),
              status TEXT NOT NULL DEFAULT 'queued'
-               CHECK(status IN ('queued','running','complete','error','cancelled')),
+               CHECK(status IN ('queued','running','paused','complete','error','cancelled')),
              stage TEXT NOT NULL DEFAULT '',
              claimed_identity_json TEXT NOT NULL DEFAULT '{{}}',
              file_size_bytes INTEGER NOT NULL DEFAULT 0,
@@ -39,7 +42,7 @@ def apply_media_identity_foundation(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """CREATE INDEX IF NOT EXISTS idx_media_identity_scans_work
-           ON media_identity_scans(status,profile,requested_at,id)"""
+           ON media_identity_scans(status,requested_profile,requested_at,id)"""
     )
 
     conn.execute(
@@ -112,6 +115,7 @@ def apply_media_identity_foundation(conn: sqlite3.Connection) -> None:
              cache_key TEXT NOT NULL UNIQUE,
              status TEXT NOT NULL DEFAULT 'complete'
                CHECK(status IN ('complete','error')),
+             profile TEXT NOT NULL CHECK(profile IN ('fast','normal','deep')),
              source_kind TEXT NOT NULL DEFAULT '',
              source_ref TEXT NOT NULL DEFAULT '',
              source_signature TEXT NOT NULL DEFAULT '',
