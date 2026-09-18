@@ -85,6 +85,34 @@ class EpisodeIdentityReviewAdapterTests(unittest.TestCase):
             for row in item["evidence_rows"]
         ))
 
+    def test_episode_identity_feedback_scope_is_forced_server_side(self) -> None:
+        engine = MediaIntelligenceEngine(self.database)
+
+        self.assertTrue(
+            engine.dismiss(1, None, reason="expected", scope="title")
+        )
+        with self.database.connect() as conn:
+            first = conn.execute(
+                """SELECT scope FROM mie_feedback
+                   WHERE finding_fingerprint='episode-identity:file:1:fixture'
+                     AND active=1
+                   ORDER BY id DESC LIMIT 1"""
+            ).fetchone()
+        self.assertEqual(first["scope"], "finding")
+
+        self.assertTrue(engine.restore(1))
+        self.assertTrue(
+            engine.dismiss(1, None, reason="incorrect", scope="source")
+        )
+        with self.database.connect() as conn:
+            second = conn.execute(
+                """SELECT scope FROM mie_feedback
+                   WHERE finding_fingerprint='episode-identity:file:1:fixture'
+                     AND active=1
+                   ORDER BY id DESC LIMIT 1"""
+            ).fetchone()
+        self.assertEqual(second["scope"], "finding")
+
     def test_health_action_routes_identity_finding_to_exact_scan(self) -> None:
         self.assertEqual(
             health_finding_href({
@@ -111,6 +139,12 @@ class EpisodeIdentityReviewContractTests(unittest.TestCase):
         rename = (
             ROOT / "app" / "templates" / "episode_identity_rename_preview.html"
         ).read_text(encoding="utf-8")
+        identity = (
+            ROOT / "app" / "templates" / "episode_identity.html"
+        ).read_text(encoding="utf-8")
+        health = (
+            ROOT / "app" / "templates" / "library_health.html"
+        ).read_text(encoding="utf-8")
 
         self.assertIn('/files/{file_id}/episode-identity/fast', routes)
         self.assertIn('/episode-identity/scans/{scan_id}', routes)
@@ -122,6 +156,9 @@ class EpisodeIdentityReviewContractTests(unittest.TestCase):
         self.assertIn("Preview rename suggestion", drawer)
         self.assertIn("Verify Episode Identity", detail)
         self.assertIn("read-only", rename.casefold())
+        self.assertIn("identity.snapshot_current", identity)
+        self.assertIn("finding.rule_key == 'episode-identity-review'", health)
+        self.assertIn('name="scope" value="finding"', health)
         self.assertNotIn("source.rename(", routes)
         self.assertNotIn("destination.rename(", routes)
 
