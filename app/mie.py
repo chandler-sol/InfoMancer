@@ -8,6 +8,7 @@ from typing import Any
 
 from .db import Database
 from .duplicates import DuplicateService
+from .media_identity.service import MediaIdentityDecisionService
 
 
 SEVERITIES = {"critical", "warning", "information"}
@@ -94,10 +95,12 @@ class MediaIntelligenceEngine:
     def __init__(self, database: Database):
         self.database = database
         self.duplicates = DuplicateService(database)
+        self.identity_decisions = MediaIdentityDecisionService(database)
 
     def analyze(self) -> int:
         analyzed_at = _utc_now()
-        candidates: list[dict[str, Any]] = []
+        self.identity_decisions.resolve_pending()
+        candidates: list[dict[str, Any]] = self.identity_decisions.mie_findings()
         with self.database.connect() as conn:
             calibration_row = conn.execute(
                 "SELECT * FROM mie_calibration WHERE id=1"
@@ -1237,6 +1240,7 @@ class MediaIntelligenceEngine:
                 "metadata-stale": "Refresh metadata",
                 "metadata-identifiers-missing": "Review provider match",
                 "media-identity-unreviewed": "Review editions and versions",
+                "episode-identity-review": "Review episode identity",
             }.get(finding["rule_key"], "Review affected media")
             findings.append(finding)
         return findings
@@ -1256,6 +1260,10 @@ class MediaIntelligenceEngine:
             return "/duplicates"
         if finding.get("file_id") and finding.get("title_id"):
             return f"/titles/{finding['title_id']}"
+        if finding["rule_key"] == "episode-identity-review":
+            scan_id = (finding.get("evidence") or {}).get("scan_id")
+            if scan_id:
+                return f"/episode-identity/scans/{int(scan_id)}"
         if finding["rule_key"] == "technical-details-missing":
             return "/settings/system#media-information"
         if finding.get("root_id"):
