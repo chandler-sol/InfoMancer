@@ -257,7 +257,7 @@ class DecisionServiceTests(unittest.TestCase):
                 """INSERT INTO files(
                      id,title_id,path,filename,extension,size_bytes,modified_at,
                      season,episode_start,episode_end,parsed_title,seen_scan
-                   ) VALUES (1,1,?,?,?,?,1,1,1,'Example Show','scan')""",
+                   ) VALUES (1,1,?,?,?,?,?,1,1,1,'Example Show','scan')""",
                 (
                     str(self.media),
                     self.media.name,
