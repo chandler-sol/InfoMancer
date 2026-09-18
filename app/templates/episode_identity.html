@@ -14,6 +14,9 @@
 </section>
 
 {% if message %}<div class="success-banner">{{ message }}</div>{% endif %}
+{% if not identity.snapshot_current %}
+<div class="notice"><strong>This verification snapshot is stale.</strong> The media file changed or can no longer be proven to match the file that was analyzed. Run Episode Identity again before confirming or renaming anything.</div>
+{% endif %}
 
 <section class="panel">
   <header>
@@ -59,6 +62,7 @@
 {% if current_user.is_librarian %}
 <section class="panel">
   <header><div><p class="eyebrow">HUMAN DECISION</p><h2>Confirm or inspect</h2><p>Confirmation records your decision for this exact file snapshot. It does not rename or rewrite the catalog claim.</p></div></header>
+  {% if identity.snapshot_current %}
   <div class="button-row">
     {% if identity.claimed_candidate_keys|length == 1 %}
     <form method="post" action="/episode-identity/scans/{{ identity.id }}/confirm-current">
@@ -77,6 +81,9 @@
     {% endif %}
   </div>
   <p class="legal-note">A rename preview is advisory only. Episode Identity never applies a filesystem change automatically.</p>
+  {% else %}
+  <p>Run verification again for the current media file before recording a human decision.</p>
+  {% endif %}
 </section>
 {% endif %}
 
