@@ -229,13 +229,31 @@ class FastIdentityService:
         return prepared
 
     @staticmethod
-    def _verify_sidecars(prepared: Iterable[PreparedSidecar]) -> None:
-        for item in prepared:
-            current = sidecar_identity(item.identity.path)
-            if current is None or current.cache_key != item.identity.cache_key:
+    def _verify_sidecars(
+        file_row: dict[str, Any],
+        prepared: Iterable[PreparedSidecar],
+    ) -> None:
+        prepared_items = list(prepared)
+        expected = [
+            (str(item.identity.path), item.identity.cache_key)
+            for item in prepared_items
+        ]
+
+        current: list[tuple[str, str]] = []
+        for path in discover_sidecar_subtitles(str(file_row["path"])):
+            identity = sidecar_identity(path)
+            if identity is None:
                 raise FastIdentityStaleError(
-                    "A subtitle sidecar changed during the Fast scan. Retry the scan."
+                    "The selected subtitle sidecar set changed during the Fast scan. "
+                    "Retry the scan."
                 )
+            current.append((str(identity.path), identity.cache_key))
+
+        if current != expected:
+            raise FastIdentityStaleError(
+                "The selected subtitle sidecar set changed during the Fast scan. "
+                "Retry the scan."
+            )
 
     @staticmethod
     def _candidate_score(
@@ -737,7 +755,7 @@ class FastIdentityService:
         )
 
         self._verify_media_snapshot(file_row)
-        self._verify_sidecars(sidecars)
+        self._verify_sidecars(file_row, sidecars)
 
         with self.database.connect() as conn:
             current = self._file_row(conn, int(file_id))
