@@ -144,6 +144,33 @@ class ConservativeResolverTests(unittest.TestCase):
         self.assertEqual(resolution.state, IdentityResultState.STRONG_MATCH_OTHER)
         self.assertEqual(resolution.best_candidate_key, "other")
 
+    def test_alternate_order_without_content_evidence_stays_inconclusive(self) -> None:
+        candidate = _candidate(
+            "same-content",
+            claimed=True,
+            episode=1,
+            mappings=[
+                {
+                    "order_namespace": "production",
+                    "order_name": "Production",
+                    "season": 1,
+                    "episode": 1,
+                },
+                {
+                    "order_namespace": "default",
+                    "order_name": "Default",
+                    "season": 1,
+                    "episode": 4,
+                },
+            ],
+        )
+        resolution = resolve_identity(
+            [candidate],
+            [_evidence("same-content", "claimed_identity", 0.35, "claim")],
+            self.CLAIM,
+        )
+        self.assertEqual(resolution.state, IdentityResultState.INCONCLUSIVE)
+
     def test_alternate_order_is_not_content_mismatch(self) -> None:
         candidate = _candidate(
             "same-content",
