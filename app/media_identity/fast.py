@@ -95,6 +95,45 @@ def _filename_text(value: str) -> str:
     return " ".join(re.sub(r"[^\w]+", " ", value.casefold()).split())
 
 
+_CATALOG_SNAPSHOT_FIELDS = (
+    "id",
+    "title_id",
+    "title_kind",
+    "tvdb_id",
+    "path",
+    "filename",
+    "size_bytes",
+    "modified_at",
+    "season",
+    "episode_start",
+    "episode_end",
+    "runtime_seconds",
+    "width",
+    "height",
+    "video_codec",
+    "audio_codec",
+    "audio_channels",
+    "bitrate",
+    "container",
+    "dynamic_range",
+    "media_info_at",
+    "media_info_error",
+)
+
+
+def _catalog_snapshot_signature(
+    file_row: dict[str, Any],
+    streams: Iterable[dict[str, Any]],
+) -> str:
+    return _signature({
+        "file": {
+            field: file_row.get(field)
+            for field in _CATALOG_SNAPSHOT_FIELDS
+        },
+        "streams": list(streams),
+    })
+
+
 class FastIdentityService:
     """Gather and persist cheap, read-only Episode Identity evidence.
 
@@ -737,6 +776,9 @@ class FastIdentityService:
             file_row = self._file_row(conn, int(file_id))
             streams = self._stream_rows(conn, int(file_id))
             file_sha256 = self._current_sha256(conn, file_row)
+            catalog_snapshot_signature = _catalog_snapshot_signature(
+                file_row, streams
+            )
 
         self._verify_media_snapshot(file_row)
         sidecars = self._prepare_sidecars(file_row)
@@ -758,17 +800,16 @@ class FastIdentityService:
         self._verify_sidecars(file_row, sidecars)
 
         with self.database.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             current = self._file_row(conn, int(file_id))
+            current_streams = self._stream_rows(conn, int(file_id))
             if (
-                int(current["size_bytes"] or 0) != int(file_row["size_bytes"] or 0)
-                or not _same_modified_at(current["modified_at"], file_row["modified_at"])
-                or int(current["season"]) != int(file_row["season"])
-                or int(current["episode_start"]) != int(file_row["episode_start"])
-                or int(current["episode_end"] or current["episode_start"])
-                    != int(file_row["episode_end"] or file_row["episode_start"])
+                _catalog_snapshot_signature(current, current_streams)
+                != catalog_snapshot_signature
             ):
                 raise FastIdentityStaleError(
-                    "The catalog claim changed during the Fast scan. Retry the scan."
+                    "Catalog data used by the Fast scan changed before persistence. "
+                    "Retry the scan."
                 )
 
             claimed_identity = {
