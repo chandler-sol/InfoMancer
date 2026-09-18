@@ -577,6 +577,54 @@ class FastEpisodeIdentityTests(unittest.TestCase):
                 0,
             )
 
+    def test_provider_cache_refresh_before_persistence_aborts_atomically(self) -> None:
+        file_id = self._add_file(10, actual_episode=10)
+        original_candidate_set = self.service._candidate_set
+
+        def refresh_provider_after_analysis(file_row, sidecars, language):
+            result = original_candidate_set(file_row, sidecars, language)
+            with self.database.connect() as conn:
+                conn.execute(
+                    """UPDATE provider_episode_series_cache
+                       SET source_signature='provider-v2'
+                       WHERE provider='tvdb'
+                         AND provider_series_id='4242'
+                         AND language='eng'"""
+                )
+                conn.execute(
+                    """UPDATE provider_episode_identities
+                       SET overview='provider overview changed during Fast'
+                       WHERE provider='tvdb'
+                         AND provider_series_id='4242'
+                         AND provider_episode_id='1010'
+                         AND language='eng'"""
+                )
+            return result
+
+        with patch.object(
+            self.service,
+            "_candidate_set",
+            side_effect=refresh_provider_after_analysis,
+        ):
+            with self.assertRaises(FastIdentityStaleError):
+                self.service.scan_file(file_id)
+
+        with self.database.connect() as conn:
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM media_identity_scans WHERE file_id=?",
+                    (file_id,),
+                ).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM media_identity_artifacts WHERE file_id=?",
+                    (file_id,),
+                ).fetchone()[0],
+                0,
+            )
+
     def test_persistence_failure_rolls_back_scan_candidates_evidence_and_artifact(self) -> None:
         file_id = self._add_file(5, actual_episode=5)
         with self.database.connect() as conn:
