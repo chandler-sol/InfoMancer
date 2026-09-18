@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import html
+import os
 from pathlib import Path
 import re
+import stat
 from typing import Iterable, Mapping
 
 
@@ -164,27 +166,113 @@ def sidecar_identity(path: Path) -> SidecarIdentity | None:
     )
 
 
+def _same_descriptor_identity(
+    descriptor_stat: os.stat_result,
+    identity: SidecarIdentity,
+) -> bool:
+    return (
+        stat.S_ISREG(descriptor_stat.st_mode)
+        and int(descriptor_stat.st_size) == identity.size_bytes
+        and int(descriptor_stat.st_mtime_ns) == identity.modified_ns
+    )
+
+
+def _open_sidecar_descriptor(path: Path) -> int | None:
+    """Open a sidecar for reading without following symlinks where supported."""
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+
+    try:
+        path_stat = os.lstat(path)
+        if stat.S_ISLNK(path_stat.st_mode):
+            return None
+        descriptor = os.open(path, flags | nofollow)
+    except OSError:
+        return None
+
+    if nofollow:
+        return descriptor
+
+    # Windows does not expose O_NOFOLLOW through Python. Verify that the opened
+    # object is the same non-symlink directory entry observed immediately before
+    # os.open(), using device/inode when the platform supplies meaningful values.
+    try:
+        descriptor_stat = os.fstat(descriptor)
+        current_path_stat = os.lstat(path)
+        if stat.S_ISLNK(current_path_stat.st_mode):
+            os.close(descriptor)
+            return None
+        for field in ("st_dev", "st_ino"):
+            expected = getattr(current_path_stat, field, None)
+            actual = getattr(descriptor_stat, field, None)
+            if expected not in (None, 0) and actual not in (None, 0) and expected != actual:
+                os.close(descriptor)
+                return None
+    except OSError:
+        os.close(descriptor)
+        return None
+
+    return descriptor
+
+
+def _read_sidecar_bounded(
+    path: Path,
+    identity: SidecarIdentity,
+) -> bytes | None:
+    descriptor = _open_sidecar_descriptor(path)
+    if descriptor is None:
+        return None
+
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not _same_descriptor_identity(before, identity)
+            or int(before.st_size) > MAX_SIDECAR_BYTES
+        ):
+            return None
+
+        chunks: list[bytes] = []
+        remaining = MAX_SIDECAR_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+
+        data = b"".join(chunks)
+        after = os.fstat(descriptor)
+    except OSError:
+        return None
+    finally:
+        os.close(descriptor)
+
+    if (
+        len(data) > MAX_SIDECAR_BYTES
+        or len(data) != identity.size_bytes
+        or not _same_descriptor_identity(after, identity)
+        or int(after.st_size) != int(before.st_size)
+        or int(after.st_mtime_ns) != int(before.st_mtime_ns)
+    ):
+        return None
+    return data
+
+
 def read_sidecar_text(
     path: Path,
     identity: SidecarIdentity | None = None,
 ) -> SidecarText | None:
-    """Read one sidecar only if the stat-based cache identity stays stable."""
+    """Read one sidecar only if its bounded descriptor identity stays stable."""
     identity = identity or sidecar_identity(path)
     if identity is None:
         return None
-    try:
-        data = path.read_bytes()
-        after = path.stat()
-        if path.is_symlink():
-            return None
-    except OSError:
+
+    data = _read_sidecar_bounded(path, identity)
+    if data is None:
         return None
-    if (
-        int(after.st_size) != identity.size_bytes
-        or int(after.st_mtime_ns) != identity.modified_ns
-        or len(data) != identity.size_bytes
-    ):
-        return None
+
     normalized = normalize_subtitle_text(_decode_subtitle(data), path.suffix)
     return SidecarText(
         path=path,
