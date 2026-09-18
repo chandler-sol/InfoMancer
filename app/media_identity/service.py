@@ -277,7 +277,7 @@ class MediaIdentityDecisionService:
             current_hash = MediaIdentityDecisionService._current_hash(
                 conn, int(file_id), int(size_bytes), modified_at
             )
-            if current_hash is not None and current_hash != sha256:
+            if current_hash != sha256:
                 return False, current
         return True, current
 
@@ -440,6 +440,13 @@ class MediaIdentityDecisionService:
                    WHERE f.id=?""",
                 (int(scan["file_id"]),),
             ).fetchone()
+            snapshot_current, _ = self._snapshot_is_current(
+                conn,
+                int(scan["file_id"]),
+                size_bytes=int(scan["file_size_bytes"] or 0),
+                modified_at=scan["file_modified_at"],
+                sha256=scan["file_sha256"],
+            )
         claimed = self._claimed_identity(scan)
         resolution = self._resolve_snapshot(scan, candidates, evidence)
         candidate_by_key = {
@@ -467,7 +474,11 @@ class MediaIdentityDecisionService:
         result["margin"] = resolution.margin
         result["resolution_explanation"] = resolution.explanation
         result["confirmation"] = confirmation
-        result["actionable"] = str(result.get("result_state") or "") in ACTIONABLE_STATES
+        result["snapshot_current"] = snapshot_current
+        result["actionable"] = (
+            snapshot_current
+            and str(result.get("result_state") or "") in ACTIONABLE_STATES
+        )
         return result
 
     def latest_scan_for_file(
@@ -520,6 +531,11 @@ class MediaIdentityDecisionService:
         findings: list[dict[str, Any]] = []
         for scan_id in scan_ids:
             detail = self.scan_detail(scan_id)
+            if not detail.get("snapshot_current"):
+                # A scan describes a frozen media snapshot. Once the file changes,
+                # its old conclusion must not be presented as evidence about the
+                # replacement contents.
+                continue
             state = str(detail.get("result_state") or "")
             if state not in ACTIONABLE_STATES:
                 continue
