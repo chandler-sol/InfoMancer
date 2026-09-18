@@ -429,6 +429,20 @@ class DecisionServiceTests(unittest.TestCase):
         self.service.confirm_current(self.scan_id, None)
         self.assertEqual(self.service.mie_findings(), [])
 
+    def test_confirm_best_rejects_an_inconclusive_result(self) -> None:
+        self.service.resolve_scan(self.scan_id)
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE media_identity_scans
+                   SET result_state='inconclusive'
+                   WHERE id=?""",
+                (self.scan_id,),
+            )
+        with self.assertRaisesRegex(
+            ValueError, "not strong enough to confirm an alternate episode"
+        ):
+            self.service.confirm_best(self.scan_id, None)
+
     def test_confirm_best_keeps_reviewable_filename_disagreement(self) -> None:
         self.service.resolve_scan(self.scan_id)
         confirmation = self.service.confirm_best(self.scan_id, None)
