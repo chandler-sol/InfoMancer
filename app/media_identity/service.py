@@ -33,6 +33,34 @@ def _json_object(value: Any) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
+def _strength_label(value: Any) -> str:
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return "No meaningful support"
+    if score >= 0.75:
+        return "Strong"
+    if score >= 0.55:
+        return "Moderate"
+    if score >= 0.30:
+        return "Limited"
+    return "Weak or none"
+
+
+def _separation_label(value: Any) -> str:
+    try:
+        margin = float(value)
+    except (TypeError, ValueError):
+        return "Not established"
+    if margin >= 0.24:
+        return "Clear"
+    if margin >= 0.14:
+        return "Meaningful"
+    if margin >= 0.10:
+        return "Narrow"
+    return "Too close to call"
+
+
 def _candidate_view(row: sqlite3.Row | Mapping[str, Any]) -> dict[str, Any]:
     result = dict(row)
     result["details"] = _json_object(result.pop("details_json", "{}"))
@@ -412,6 +440,15 @@ class MediaIdentityDecisionService:
         result["claimed_identity"] = claimed
         result.pop("claimed_identity_json", None)
         result["candidates"] = candidates
+        for item in evidence:
+            item["strength_label"] = _strength_label(item.get("strength"))
+        for candidate in candidates:
+            candidate["support_label"] = _strength_label(
+                candidate.get("support_strength")
+            )
+            candidate["conflict_label"] = _strength_label(
+                candidate.get("conflict_strength")
+            )
         result["evidence"] = evidence
         result["file"] = dict(file_row) if file_row else None
         result["best_candidate"] = best
@@ -555,10 +592,14 @@ class MediaIdentityDecisionService:
                     "best_candidate": (
                         f"{coordinate} {label}".strip() if best else "No candidate"
                     ),
-                    "support_strength": best.get("support_strength") if best else None,
-                    "conflict_strength": best.get("conflict_strength") if best else None,
+                    "best_candidate_support": (
+                        _strength_label(best.get("support_strength")) if best else "None"
+                    ),
+                    "conflicting_evidence": (
+                        _strength_label(best.get("conflict_strength")) if best else "None"
+                    ),
                     "independent_categories": best.get("independent_categories") if best else 0,
-                    "candidate_margin": detail.get("margin"),
+                    "candidate_separation": _separation_label(detail.get("margin")),
                     "support_categories": best_resolution.get("support_categories", []),
                     "confirmation": (
                         confirmation.get("freshness") if confirmation else "none"
