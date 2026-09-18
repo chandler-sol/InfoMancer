@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Episode Identity Rename Preview · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">EPISODE IDENTITY · READ-ONLY RENAME PREVIEW</p>
+    <h1>Preview suggested filename</h1>
+    <p>This page calculates what the best-supported identity would look like under InfoMancer naming rules. It cannot apply the rename.</p>
+  </div>
+  <a class="button" href="/episode-identity/scans/{{ identity.id }}">Back to identity evidence</a>
+</section>
+
+<section class="panel remediation-preview">
+  <header><div><h2>{{ preview.status|replace('_', ' ')|title }}</h2><p>{{ preview.reason }}</p></div></header>
+  {% if preview.source %}
+  <dl>
+    <div><dt>Current path</dt><dd>{{ preview.source }}</dd></div>
+    <div><dt>Suggested path</dt><dd>{{ preview.destination }}</dd></div>
+    <div><dt>Suggested episode</dt><dd>S{{ '%02d'|format(preview.target_season) }}E{{ '%02d'|format(preview.target_episode) }} · {{ preview.target_name or 'Untitled episode' }}</dd></div>
+  </dl>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <p><strong>No file or catalog record was changed.</strong> If the suggested content identity is correct, confirm it first. A later correction workflow can update the catalog claim and then use InfoMancer's existing validated rename proposal system, which rechecks the source snapshot, source boundary, and destination collision before any filesystem write.</p>
+  <div class="button-row">
+    <a class="button primary" href="/episode-identity/scans/{{ identity.id }}">Review identity decision</a>
+    {% if identity.file %}<a class="button" href="/titles/{{ identity.file.title_id }}/rename-episodes">Open existing episode rename preview</a>{% endif %}
+  </div>
+</section>
+{% endblock %}
