@@ -812,6 +812,12 @@ class FastIdentityService:
                     "Retry the scan."
                 )
 
+            # The database write lock can take time to acquire. Revalidate filesystem
+            # inputs after it succeeds so persistence cannot rely solely on checks made
+            # before waiting for another catalog writer.
+            self._verify_media_snapshot(file_row)
+            self._verify_sidecars(file_row, sidecars)
+
             claimed_identity = {
                 "identity_kind": "episode",
                 "source": "catalog_filename",
