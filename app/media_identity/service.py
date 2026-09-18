@@ -11,10 +11,13 @@ from .models import IdentityResultState
 from .scoring import IdentityResolution, resolve_identity
 
 
-ACTIONABLE_STATES = {
+SUGGESTED_CONFIRM_STATES = {
     IdentityResultState.POSSIBLE_MISMATCH.value,
     IdentityResultState.LIKELY_MISMATCH.value,
     IdentityResultState.STRONG_MATCH_OTHER.value,
+}
+
+ACTIONABLE_STATES = SUGGESTED_CONFIRM_STATES | {
     IdentityResultState.EPISODE_ORDER_CONFLICT.value,
 }
 
@@ -396,10 +399,16 @@ class MediaIdentityDecisionService:
 
     def confirm_best(self, scan_id: int, user_id: int | None) -> dict[str, Any]:
         detail = self.scan_detail(int(scan_id), resolve_if_needed=True)
-        candidate_key = str(detail.get("best_candidate_key") or "")
-        if not candidate_key:
+        if str(detail.get("result_state") or "") not in SUGGESTED_CONFIRM_STATES:
             raise MediaIdentityDecisionError(
-                "This scan has no best candidate to confirm."
+                "This scan is not strong enough to confirm an alternate episode."
+            )
+        candidate_key = str(detail.get("best_candidate_key") or "")
+        if not candidate_key or candidate_key in set(
+            detail.get("claimed_candidate_keys") or []
+        ):
+            raise MediaIdentityDecisionError(
+                "This scan has no distinct alternate episode to confirm."
             )
         return self._confirm(int(scan_id), candidate_key, user_id)
 
