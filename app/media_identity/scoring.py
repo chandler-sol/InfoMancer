@@ -225,11 +225,19 @@ def resolve_identity(
             "Fast resolution remains inconclusive for a multi-episode file because "
             "one candidate identity cannot prove the complete episode range."
         )
-    elif best_is_claimed and _alternate_order_conflict(best_row, claimed_identity):
+    elif (
+        best_is_claimed
+        and _alternate_order_conflict(best_row, claimed_identity)
+        and best.content_support
+        and best.support_groups >= 2
+        and best.support_strength >= 0.55
+        and best.conflict_strength <= 0.25
+    ):
         state = IdentityResultState.EPISODE_ORDER_CONFLICT
         explanation = (
-            "The strongest content identity matches the claimed coordinate in an "
-            "alternate order, while its default order uses a different coordinate."
+            "Independent content evidence supports this episode identity, but the "
+            "claimed coordinate belongs to an alternate order while its default "
+            "order uses a different coordinate."
         )
     elif best_is_claimed:
         if (
