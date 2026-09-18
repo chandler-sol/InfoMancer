@@ -25,7 +25,7 @@
   <p><strong>No file or catalog record was changed.</strong> If the suggested content identity is correct, confirm it first. A later correction workflow can update the catalog claim and then use InfoMancer's existing validated rename proposal system, which rechecks the source snapshot, source boundary, and destination collision before any filesystem write.</p>
   <div class="button-row">
     <a class="button primary" href="/episode-identity/scans/{{ identity.id }}">Review identity decision</a>
-    {% if identity.file %}<a class="button" href="/titles/{{ identity.file.title_id }}/rename-episodes">Open existing episode rename preview</a>{% endif %}
+    {% if identity.file %}<a class="button" href="/titles/{{ identity.file.title_id }}">Back to title</a>{% endif %}
   </div>
 </section>
 {% endblock %}
