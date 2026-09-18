@@ -1258,12 +1258,12 @@ class MediaIntelligenceEngine:
             "duplicate-candidates", "duplicate-storage-recovery",
         }:
             return "/duplicates"
-        if finding.get("file_id") and finding.get("title_id"):
-            return f"/titles/{finding['title_id']}"
         if finding["rule_key"] == "episode-identity-review":
             scan_id = (finding.get("evidence") or {}).get("scan_id")
             if scan_id:
                 return f"/episode-identity/scans/{int(scan_id)}"
+        if finding.get("file_id") and finding.get("title_id"):
+            return f"/titles/{finding['title_id']}"
         if finding["rule_key"] == "technical-details-missing":
             return "/settings/system#media-information"
         if finding.get("root_id"):
