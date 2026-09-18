@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -42,6 +43,56 @@ class FastSidecarFreshnessTests(unittest.TestCase):
             assert refreshed is not None
             self.assertIn("changed dialogue", refreshed.normalized_text)
 
+
+    def test_sidecar_read_is_hard_bounded_if_file_grows_during_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            sidecar = Path(temporary) / "Episode.en.srt"
+            sidecar.write_bytes(b"short subtitle")
+            identity = sidecar_identity(sidecar)
+            self.assertIsNotNone(identity)
+            assert identity is not None
+
+            read_sizes: list[int] = []
+            real_read = os.read
+
+            def simulate_growth(descriptor: int, count: int) -> bytes:
+                read_sizes.append(count)
+                return b"x" * count
+
+            with (
+                patch("app.media_identity.text.MAX_SIDECAR_BYTES", 64),
+                patch("app.media_identity.text.os.read", side_effect=simulate_growth),
+            ):
+                result = read_sidecar_text(sidecar, identity)
+
+            self.assertIsNone(result)
+            self.assertTrue(read_sizes)
+            self.assertLessEqual(max(read_sizes), 65)
+            self.assertIsNotNone(real_read)
+
+    def test_oversized_replacement_before_descriptor_read_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            sidecar = Path(temporary) / "Episode.en.srt"
+            sidecar.write_bytes(b"original")
+            identity = sidecar_identity(sidecar)
+            self.assertIsNotNone(identity)
+            assert identity is not None
+
+            real_open = os.open
+
+            def replace_then_open(path, flags, *args, **kwargs):
+                sidecar.write_bytes(b"x" * 128)
+                return real_open(path, flags, *args, **kwargs)
+
+            with (
+                patch("app.media_identity.text.MAX_SIDECAR_BYTES", 64),
+                patch("app.media_identity.text.os.open", side_effect=replace_then_open),
+                patch("app.media_identity.text.os.read") as mocked_read,
+            ):
+                result = read_sidecar_text(sidecar, identity)
+
+            self.assertIsNone(result)
+            mocked_read.assert_not_called()
 
     def test_sidecar_discovery_caps_matching_file_count(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
