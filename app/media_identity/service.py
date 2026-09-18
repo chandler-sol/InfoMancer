@@ -130,7 +130,8 @@ class MediaIdentityDecisionService:
 
     def resolve_scan(self, scan_id: int) -> IdentityResolution:
         with self.database.connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
             scan, candidates, evidence = self._scan_snapshot(conn, int(scan_id))
             if scan["status"] != "complete":
                 raise MediaIdentityDecisionError(
@@ -321,7 +322,8 @@ class MediaIdentityDecisionService:
         user_id: int | None,
     ) -> dict[str, Any]:
         with self.database.connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
             scan, candidates, _ = self._scan_snapshot(conn, int(scan_id))
             if scan["status"] != "complete":
                 raise MediaIdentityDecisionError(
