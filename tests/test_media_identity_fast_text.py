@@ -94,6 +94,47 @@ class FastSidecarFreshnessTests(unittest.TestCase):
             self.assertIsNone(result)
             mocked_read.assert_not_called()
 
+    def test_same_size_same_mtime_atomic_replacement_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sidecar = root / "Episode.en.srt"
+            sidecar.write_bytes(b"old text")
+            original_stat = sidecar.stat()
+            identity = sidecar_identity(sidecar)
+            self.assertIsNotNone(identity)
+            assert identity is not None
+            if identity.inode_id is None:
+                self.skipTest("filesystem does not expose a meaningful inode")
+
+            replacement = root / "replacement.tmp"
+            replacement.write_bytes(b"new text")
+            os.utime(
+                replacement,
+                ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+            )
+            real_open = os.open
+            replaced = False
+
+            def replace_then_open(path, flags, *args, **kwargs):
+                nonlocal replaced
+                if not replaced:
+                    os.replace(replacement, sidecar)
+                    replaced = True
+                return real_open(path, flags, *args, **kwargs)
+
+            with patch(
+                "app.media_identity.text.os.open",
+                side_effect=replace_then_open,
+            ):
+                result = read_sidecar_text(sidecar, identity)
+
+            self.assertIsNone(result)
+            refreshed = sidecar_identity(sidecar)
+            self.assertIsNotNone(refreshed)
+            assert refreshed is not None
+            self.assertNotEqual(refreshed.inode_id, identity.inode_id)
+            self.assertNotEqual(refreshed.cache_key, identity.cache_key)
+
     def test_sidecar_discovery_caps_matching_file_count(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
