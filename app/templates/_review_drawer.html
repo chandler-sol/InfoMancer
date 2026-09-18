@@ -51,7 +51,7 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="button">Mark current filename correct</button>
       </form>
-      {% if item.identity_state != 'episode_order_conflict' %}
+      {% if item.identity_state in ['possible_mismatch', 'likely_mismatch', 'strong_match_other'] %}
       <form method="post" action="/episode-identity/scans/{{ item.identity_scan_id }}/confirm-best">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="button primary">Confirm suggested content</button>
