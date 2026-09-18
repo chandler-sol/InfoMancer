@@ -7,6 +7,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app.db import Database
 from app.media_identity.candidates import generate_episode_candidates
@@ -412,6 +413,46 @@ class FastEpisodeIdentityTests(unittest.TestCase):
             self.assertEqual(
                 conn.execute(
                     "SELECT COUNT(*) FROM media_identity_scans WHERE file_id=?",
+                    (file_id,),
+                ).fetchone()[0],
+                0,
+            )
+
+    def test_sidecar_selection_change_before_persistence_aborts_atomically(self) -> None:
+        file_id = self._add_file(6, actual_episode=6)
+        with self.database.connect() as conn:
+            media_path = Path(conn.execute(
+                "SELECT path FROM files WHERE id=?", (file_id,)
+            ).fetchone()["path"])
+
+        original_candidate_set = self.service._candidate_set
+
+        def add_earlier_sidecar(file_row, sidecars, language):
+            media_path.with_suffix(".a.srt").write_text(
+                self._subtitle_payload("new lexically earlier subtitle evidence"),
+                encoding="utf-8",
+            )
+            return original_candidate_set(file_row, sidecars, language)
+
+        with patch.object(
+            self.service,
+            "_candidate_set",
+            side_effect=add_earlier_sidecar,
+        ):
+            with self.assertRaises(FastIdentityStaleError):
+                self.service.scan_file(file_id)
+
+        with self.database.connect() as conn:
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM media_identity_scans WHERE file_id=?",
+                    (file_id,),
+                ).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM media_identity_artifacts WHERE file_id=?",
                     (file_id,),
                 ).fetchone()[0],
                 0,
