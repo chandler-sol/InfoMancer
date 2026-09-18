@@ -41,7 +41,7 @@
 <a href="/files/{{ file.id }}/edition-version" data-organize-dialog>Edit Edition &amp; Version</a>
 <a href="/files/{{ file.id }}/favorite">Favorite Episode</a>
 <a href="/files/{{ file.id }}/collections">Add to Collection</a>
-<a href="/files/{{ file.id }}/rename">Preview Rename</a>{% if title.imdb_id or title.tvdb_id %}<form method="post" action="/files/{{ file.id }}/imdb-refresh"><button>Refresh IMDb Metadata</button></form>{% endif %}{% if file.episode_tvdb_id %}<a href="https://thetvdb.com/dereferrer/episode/{{ file.episode_tvdb_id }}" target="_blank" rel="noopener noreferrer">TVDB Link ↗</a>{% endif %}</div></details>
+<a href="/files/{{ file.id }}/rename">Preview Rename</a>{% if current_user.is_librarian %}<form method="post" action="/files/{{ file.id }}/episode-identity/fast"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>Verify Episode Identity</button></form>{% endif %}{% if title.imdb_id or title.tvdb_id %}<form method="post" action="/files/{{ file.id }}/imdb-refresh"><button>Refresh IMDb Metadata</button></form>{% endif %}{% if file.episode_tvdb_id %}<a href="https://thetvdb.com/dereferrer/episode/{{ file.episode_tvdb_id }}" target="_blank" rel="noopener noreferrer">TVDB Link ↗</a>{% endif %}</div></details>
 {% endif %}</article>{% endfor %}</div></section>
 </article>
 {% if title.kind=='tv' and title.tvdb_id %}<section class="panel missing-panel" id="missing-panel" {% if request.query_params.get('show_missing') != '1' %}hidden{% endif %}><div class="panel-head"><h2>Missing episodes <span class="count">{{ missing|length }}</span></h2></div>
