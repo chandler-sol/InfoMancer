@@ -229,7 +229,12 @@
           <form method="post" action="/library-health/findings/{{ finding.id }}/dismiss">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <label>Reason<select name="reason"><option value="expected">Expected for this media</option><option value="incorrect">Analysis is incorrect</option><option value="resolved_elsewhere">Already handled elsewhere</option><option value="other">Other</option></select></label>
+            {% if finding.rule_key == 'episode-identity-review' %}
+            <input type="hidden" name="scope" value="finding">
+            <p class="muted">Episode Identity feedback applies only to this evidence snapshot so future episode warnings remain eligible for review.</p>
+            {% else %}
             <label>Apply to<select name="scope"><option value="finding">This finding only</option>{% if finding.title_id %}<option value="title">This rule for this title</option>{% endif %}{% if finding.root_id %}<option value="source">This rule for this source</option>{% endif %}</select></label>
+            {% endif %}
             <label>Optional note<textarea name="note" maxlength="500" rows="2" placeholder="What should MIE understand?"></textarea></label>
             <button class="button">Save feedback</button>
           </form>
