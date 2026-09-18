@@ -134,6 +134,32 @@ def _catalog_snapshot_signature(
     })
 
 
+def _candidate_snapshot_signature(candidate_set: CandidateSet) -> str:
+    return _signature({
+        "provider_series_id": candidate_set.provider_series_id,
+        "provider_signature": candidate_set.provider_signature,
+        "used_provider_cache": candidate_set.used_provider_cache,
+        "candidates": [
+            {
+                "key": candidate.key,
+                "rank": candidate.rank,
+                "identity": {
+                    "identity_kind": candidate.identity.identity_kind,
+                    "provider": candidate.identity.provider,
+                    "provider_item_id": candidate.identity.provider_item_id,
+                    "expected_episode_id": candidate.identity.expected_episode_id,
+                    "order_namespace": candidate.identity.order_namespace,
+                    "season": candidate.identity.season,
+                    "episode": candidate.identity.episode,
+                    "display_name": candidate.identity.display_name,
+                },
+                "details": candidate.details,
+            }
+            for candidate in candidate_set.candidates
+        ],
+    })
+
+
 class FastIdentityService:
     """Gather and persist cheap, read-only Episode Identity evidence.
 
@@ -324,6 +350,7 @@ class FastIdentityService:
             if item.text.normalized_text
         }
         with self.database.connect() as conn:
+            conn.execute("BEGIN")
             candidate_set = generate_episode_candidates(
                 conn,
                 title_id=int(file_row["title_id"]),
@@ -785,6 +812,7 @@ class FastIdentityService:
         candidate_set, expanded_specials, corpora = self._candidate_set(
             file_row, sidecars, language
         )
+        candidate_snapshot_signature = _candidate_snapshot_signature(candidate_set)
 
         evidence = []
         evidence.extend(self._claimed_evidence(file_row, candidate_set.candidates))
@@ -809,6 +837,26 @@ class FastIdentityService:
             ):
                 raise FastIdentityStaleError(
                     "Catalog data used by the Fast scan changed before persistence. "
+                    "Retry the scan."
+                )
+
+            current_candidate_set = generate_episode_candidates(
+                conn,
+                title_id=int(current["title_id"]),
+                season=int(current["season"]),
+                episode_start=int(current["episode_start"]),
+                episode_end=int(current["episode_end"] or current["episode_start"]),
+                include_specials=(
+                    int(current["season"]) == 0 or expanded_specials
+                ),
+                language=language,
+            )
+            if (
+                _candidate_snapshot_signature(current_candidate_set)
+                != candidate_snapshot_signature
+            ):
+                raise FastIdentityStaleError(
+                    "Episode candidate metadata changed before Fast persistence. "
                     "Retry the scan."
                 )
 
