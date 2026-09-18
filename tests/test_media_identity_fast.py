@@ -458,6 +458,80 @@ class FastEpisodeIdentityTests(unittest.TestCase):
                 0,
             )
 
+    def test_catalog_filename_change_before_persistence_aborts_atomically(self) -> None:
+        file_id = self._add_file(7, actual_episode=7)
+        original_candidate_set = self.service._candidate_set
+
+        def mutate_catalog(file_row, sidecars, language):
+            with self.database.connect() as conn:
+                conn.execute(
+                    "UPDATE files SET filename=? WHERE id=?",
+                    ("renamed-during-fast.mkv", file_id),
+                )
+            return original_candidate_set(file_row, sidecars, language)
+
+        with patch.object(
+            self.service,
+            "_candidate_set",
+            side_effect=mutate_catalog,
+        ):
+            with self.assertRaises(FastIdentityStaleError):
+                self.service.scan_file(file_id)
+
+        with self.database.connect() as conn:
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM media_identity_scans WHERE file_id=?",
+                    (file_id,),
+                ).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM media_identity_artifacts WHERE file_id=?",
+                    (file_id,),
+                ).fetchone()[0],
+                0,
+            )
+
+    def test_stream_inventory_change_before_persistence_aborts_atomically(self) -> None:
+        file_id = self._add_file(8, actual_episode=8)
+        original_candidate_set = self.service._candidate_set
+
+        def mutate_streams(file_row, sidecars, language):
+            with self.database.connect() as conn:
+                conn.execute(
+                    """UPDATE media_streams
+                       SET title='Changed during Fast'
+                       WHERE file_id=? AND stream_index=1""",
+                    (file_id,),
+                )
+            return original_candidate_set(file_row, sidecars, language)
+
+        with patch.object(
+            self.service,
+            "_candidate_set",
+            side_effect=mutate_streams,
+        ):
+            with self.assertRaises(FastIdentityStaleError):
+                self.service.scan_file(file_id)
+
+        with self.database.connect() as conn:
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM media_identity_scans WHERE file_id=?",
+                    (file_id,),
+                ).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM media_identity_artifacts WHERE file_id=?",
+                    (file_id,),
+                ).fetchone()[0],
+                0,
+            )
+
     def test_persistence_failure_rolls_back_scan_candidates_evidence_and_artifact(self) -> None:
         file_id = self._add_file(5, actual_episode=5)
         with self.database.connect() as conn:
