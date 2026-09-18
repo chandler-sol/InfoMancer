@@ -532,6 +532,51 @@ class FastEpisodeIdentityTests(unittest.TestCase):
                 0,
             )
 
+    def test_sidecar_change_after_first_verification_aborts_under_write_lock(self) -> None:
+        file_id = self._add_file(9, actual_episode=9)
+        original_verify_sidecars = self.service._verify_sidecars
+        verification_count = 0
+
+        def mutate_after_first_verification(file_row, prepared):
+            nonlocal verification_count
+            verification_count += 1
+            result = original_verify_sidecars(file_row, prepared)
+            if verification_count == 1:
+                selected = list(prepared)
+                self.assertTrue(selected)
+                selected[0].identity.path.write_text(
+                    self._subtitle_payload(
+                        "subtitle changed after the first freshness verification"
+                    ),
+                    encoding="utf-8",
+                )
+            return result
+
+        with patch.object(
+            self.service,
+            "_verify_sidecars",
+            side_effect=mutate_after_first_verification,
+        ):
+            with self.assertRaises(FastIdentityStaleError):
+                self.service.scan_file(file_id)
+
+        self.assertEqual(verification_count, 2)
+        with self.database.connect() as conn:
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM media_identity_scans WHERE file_id=?",
+                    (file_id,),
+                ).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM media_identity_artifacts WHERE file_id=?",
+                    (file_id,),
+                ).fetchone()[0],
+                0,
+            )
+
     def test_persistence_failure_rolls_back_scan_candidates_evidence_and_artifact(self) -> None:
         file_id = self._add_file(5, actual_episode=5)
         with self.database.connect() as conn:
