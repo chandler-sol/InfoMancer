@@ -10,6 +10,7 @@ from app.db import Database
 from app.media_identity.models import IdentityReference, IdentityResultState
 from app.media_identity.scoring import resolve_identity
 from app.media_identity.service import MediaIdentityDecisionService
+from app.mie_history import MediaIntelligenceHistoryEngine
 
 
 def _candidate(
@@ -382,6 +383,29 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertGreater(float(best["support_strength"]), 0.8)
         self.assertGreaterEqual(int(best["independent_categories"]), 2)
         self.assertIn("resolution", json.loads(best["details_json"]))
+
+    def test_mie_history_resolves_pending_scan_and_persists_advisory(self) -> None:
+        mie = MediaIntelligenceHistoryEngine(self.database)
+        mie.analyze()
+        with self.database.connect() as conn:
+            scan = conn.execute(
+                "SELECT result_state,best_candidate_key FROM media_identity_scans WHERE id=?",
+                (self.scan_id,),
+            ).fetchone()
+            finding = conn.execute(
+                """SELECT rule_key,file_id,evidence_json,status
+                   FROM mie_findings
+                   WHERE rule_key='episode-identity-review' AND file_id=1"""
+            ).fetchone()
+        self.assertEqual(scan["result_state"], "strong_match_other")
+        self.assertTrue(scan["best_candidate_key"])
+        self.assertIsNotNone(finding)
+        self.assertEqual(finding["status"], "active")
+        evidence = json.loads(finding["evidence_json"])
+        self.assertEqual(evidence["scan_id"], self.scan_id)
+        self.assertEqual(evidence["result_state"], "strong_match_other")
+        self.assertNotIn("candidate_margin", evidence)
+        self.assertIn("candidate_separation", evidence)
 
     def test_confirmation_is_snapshot_bound_and_becomes_stale(self) -> None:
         self.service.resolve_scan(self.scan_id)
