@@ -19,6 +19,7 @@ from .dashboard import build_router as build_dashboard_router
 from .bulk_match_progress import build_router as build_bulk_match_progress_router
 from .bulk_match_apply import build_router as build_bulk_match_apply_router
 from .bulk_match_review import build_router as build_bulk_match_review_router
+from .episode_identity_review import build_router as build_episode_identity_review_router
 from .review import build_router as build_review_router
 from .library_optimized import build_router as build_library_router
 from .inspector_media import build_router as build_inspector_media_router
@@ -121,6 +122,7 @@ ROUTER_BUILDERS = (
     build_bulk_match_progress_router,
     build_bulk_match_apply_router,
     build_bulk_match_review_router,
+    build_episode_identity_review_router,
     build_review_router,
     build_library_router,
     build_inspector_media_router,
