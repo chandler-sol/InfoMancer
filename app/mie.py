@@ -1291,6 +1291,11 @@ class MediaIntelligenceEngine:
             ).fetchone()
             if not finding:
                 return False
+            if finding["rule_key"] == "episode-identity-review":
+                # Episode Identity feedback is bound to one evidence snapshot.
+                # Never allow a UI or direct POST to suppress future identity
+                # warnings for an entire title or source.
+                scope = "finding"
             if scope == "title" and finding["title_id"] is None:
                 raise ValueError("This finding is not tied to a title. Choose Finding only or Source.")
             if scope == "source" and finding["root_id"] is None:
