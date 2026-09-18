@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -433,6 +434,46 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertEqual(evidence["result_state"], "strong_match_other")
         self.assertNotIn("candidate_margin", evidence)
         self.assertIn("candidate_separation", evidence)
+
+    def test_stale_scan_does_not_emit_mie_finding(self) -> None:
+        self.service.resolve_scan(self.scan_id)
+        self.assertEqual(len(self.service.mie_findings()), 1)
+
+        self.media.write_bytes(b"replacement media with different contents")
+        current = self.media.stat()
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE files SET size_bytes=?,modified_at=?
+                   WHERE id=1""",
+                (current.st_size, current.st_mtime),
+            )
+
+        detail = self.service.scan_detail(self.scan_id)
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+        self.assertEqual(self.service.mie_findings(), [])
+
+    def test_snapshot_sha_requires_current_matching_hash_record(self) -> None:
+        self.service.resolve_scan(self.scan_id)
+        digest = hashlib.sha256(self.media.read_bytes()).hexdigest()
+        current = self.media.stat()
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE media_identity_scans SET file_sha256=?
+                   WHERE id=?""",
+                (digest, self.scan_id),
+            )
+            conn.execute(
+                """INSERT INTO media_file_hashes(
+                     file_id,sha256,size_bytes,modified_at,status,hashed_at
+                   ) VALUES (1,?,?,?,'complete',CURRENT_TIMESTAMP)""",
+                (digest, current.st_size, current.st_mtime),
+            )
+
+        self.assertTrue(self.service.scan_detail(self.scan_id)["snapshot_current"])
+        with self.database.connect() as conn:
+            conn.execute("DELETE FROM media_file_hashes WHERE file_id=1")
+        self.assertFalse(self.service.scan_detail(self.scan_id)["snapshot_current"])
 
     def test_confirmation_is_snapshot_bound_and_becomes_stale(self) -> None:
         self.service.resolve_scan(self.scan_id)
