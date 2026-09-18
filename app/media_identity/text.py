@@ -43,6 +43,8 @@ class SidecarIdentity:
     cache_key: str
     size_bytes: int
     modified_ns: int
+    device_id: int | None
+    inode_id: int | None
 
 
 @dataclass(frozen=True)
@@ -152,7 +154,15 @@ def sidecar_identity(path: Path) -> SidecarIdentity | None:
         resolved = path.resolve()
     except OSError:
         return None
-    signature_payload = f"{resolved}\0{stat.st_size}\0{stat.st_mtime_ns}"
+    device_id = int(getattr(stat, "st_dev", 0) or 0) or None
+    inode_id = int(getattr(stat, "st_ino", 0) or 0) or None
+    signature_payload = "\0".join((
+        str(resolved),
+        str(stat.st_size),
+        str(stat.st_mtime_ns),
+        "" if device_id is None else str(device_id),
+        "" if inode_id is None else str(inode_id),
+    ))
     source_signature = hashlib.sha256(signature_payload.encode("utf-8")).hexdigest()
     cache_key = hashlib.sha256(
         (source_signature + "\0" + NORMALIZER_VERSION).encode("utf-8")
@@ -163,6 +173,8 @@ def sidecar_identity(path: Path) -> SidecarIdentity | None:
         cache_key=cache_key,
         size_bytes=int(stat.st_size),
         modified_ns=int(stat.st_mtime_ns),
+        device_id=device_id,
+        inode_id=inode_id,
     )
 
 
@@ -170,11 +182,20 @@ def _same_descriptor_identity(
     descriptor_stat: os.stat_result,
     identity: SidecarIdentity,
 ) -> bool:
-    return (
-        stat.S_ISREG(descriptor_stat.st_mode)
-        and int(descriptor_stat.st_size) == identity.size_bytes
-        and int(descriptor_stat.st_mtime_ns) == identity.modified_ns
-    )
+    if (
+        not stat.S_ISREG(descriptor_stat.st_mode)
+        or int(descriptor_stat.st_size) != identity.size_bytes
+        or int(descriptor_stat.st_mtime_ns) != identity.modified_ns
+    ):
+        return False
+
+    descriptor_device = int(getattr(descriptor_stat, "st_dev", 0) or 0) or None
+    descriptor_inode = int(getattr(descriptor_stat, "st_ino", 0) or 0) or None
+    if identity.device_id is not None and descriptor_device != identity.device_id:
+        return False
+    if identity.inode_id is not None and descriptor_inode != identity.inode_id:
+        return False
+    return True
 
 
 def _open_sidecar_descriptor(path: Path) -> int | None:
