@@ -66,7 +66,7 @@
       <button class="button">Mark current filename correct</button>
     </form>
     {% endif %}
-    {% if identity.best_candidate and identity.best_candidate.candidate_key not in identity.claimed_candidate_keys %}
+    {% if identity.result_state in ['possible_mismatch', 'likely_mismatch', 'strong_match_other'] and identity.best_candidate and identity.best_candidate.candidate_key not in identity.claimed_candidate_keys %}
     <form method="post" action="/episode-identity/scans/{{ identity.id }}/confirm-best">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button class="button primary">Confirm suggested content</button>
