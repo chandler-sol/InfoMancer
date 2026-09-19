@@ -450,6 +450,20 @@ class DecisionServiceTests(unittest.TestCase):
         )
         return sidecar
 
+    def test_rename_preview_does_not_resolve_a_completed_pending_scan(self) -> None:
+        preview = self.service.rename_preview(self.scan_id)
+        self.assertFalse(preview["available"])
+        self.assertEqual(preview["status"], "unavailable")
+        self.assertTrue(preview["scan"]["decision_pending"])
+        with self.database.connect() as conn:
+            scan = conn.execute(
+                "SELECT result_state,best_candidate_key,stage FROM media_identity_scans WHERE id=?",
+                (self.scan_id,),
+            ).fetchone()
+        self.assertIsNone(scan["result_state"])
+        self.assertIsNone(scan["best_candidate_key"])
+        self.assertEqual(scan["stage"], "fast_complete")
+
     def test_resolve_scan_persists_scores_and_result(self) -> None:
         result = self.service.resolve_scan(self.scan_id)
         self.assertEqual(result.state, IdentityResultState.STRONG_MATCH_OTHER)
@@ -590,6 +604,7 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertEqual(preview["status"], "ready")
         self.assertEqual(preview["target_episode"], 2)
         self.assertIn("S01E02", Path(preview["destination"]).name)
+        self.assertEqual(Path(preview["destination"]).suffix, ".mkv")
         self.assertTrue(self.media.exists())
         self.assertEqual(self.media.read_bytes(), before)
         with self.database.connect() as conn:
