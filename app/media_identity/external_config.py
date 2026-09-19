@@ -28,6 +28,8 @@ class ExternalSourceConfig:
     server_url: str
     metadata_root: str
     config: dict[str, Any]
+    config_revision: int = 0
+    last_test_revision: int | None = None
     last_test_status: str = ""
     last_test_detail: str = ""
     last_test_server_name: str = ""
@@ -122,6 +124,7 @@ class ExternalSourceConfigService:
         with self.database.connect() as conn:
             row = conn.execute(
                 """SELECT source_key,enabled,server_url,metadata_root,config_json,
+                          config_revision,last_test_revision,
                           last_test_status,last_test_detail,last_test_server_name,
                           last_test_version,last_test_at
                    FROM external_analysis_sources WHERE source_key=?""",
@@ -137,17 +140,28 @@ class ExternalSourceConfigService:
             config = {}
         if not isinstance(config, dict):
             config = {}
+        config_revision = int(row["config_revision"] or 0)
+        last_test_revision = (
+            int(row["last_test_revision"])
+            if row["last_test_revision"] is not None
+            else None
+        )
+        test_is_current = last_test_revision == config_revision
         return ExternalSourceConfig(
             source_key=key,
             enabled=bool(row["enabled"]),
             server_url=str(row["server_url"] or ""),
             metadata_root=str(row["metadata_root"] or ""),
             config=config,
-            last_test_status=str(row["last_test_status"] or ""),
-            last_test_detail=str(row["last_test_detail"] or ""),
-            last_test_server_name=str(row["last_test_server_name"] or ""),
-            last_test_version=str(row["last_test_version"] or ""),
-            last_test_at=row["last_test_at"],
+            config_revision=config_revision,
+            last_test_revision=last_test_revision if test_is_current else None,
+            last_test_status=str(row["last_test_status"] or "") if test_is_current else "",
+            last_test_detail=str(row["last_test_detail"] or "") if test_is_current else "",
+            last_test_server_name=(
+                str(row["last_test_server_name"] or "") if test_is_current else ""
+            ),
+            last_test_version=str(row["last_test_version"] or "") if test_is_current else "",
+            last_test_at=row["last_test_at"] if test_is_current else None,
         )
 
     def sources(self) -> tuple[ExternalSourceConfig, ...]:
@@ -161,6 +175,7 @@ class ExternalSourceConfigService:
         server_url: str,
         metadata_root: str = "",
         config: dict[str, Any] | None = None,
+        force_revision_bump: bool = False,
     ) -> ExternalSourceConfig:
         key = self._source_key(source_key)
         url = normalize_server_url(server_url)
@@ -173,15 +188,29 @@ class ExternalSourceConfigService:
         with self.database.connect() as conn:
             conn.execute(
                 """INSERT INTO external_analysis_sources(
-                     source_key,enabled,server_url,metadata_root,config_json,updated_at
-                   ) VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)
+                     source_key,enabled,server_url,metadata_root,config_json,
+                     config_revision,updated_at
+                   ) VALUES (?,?,?,?,?,0,CURRENT_TIMESTAMP)
                    ON CONFLICT(source_key) DO UPDATE SET
                      enabled=excluded.enabled,
                      server_url=excluded.server_url,
                      metadata_root=excluded.metadata_root,
                      config_json=excluded.config_json,
+                     config_revision=external_analysis_sources.config_revision +
+                       CASE
+                         WHEN external_analysis_sources.server_url != excluded.server_url
+                              OR ? THEN 1
+                         ELSE 0
+                       END,
                      updated_at=CURRENT_TIMESTAMP""",
-                (key, 1 if enabled else 0, url, root, payload),
+                (
+                    key,
+                    1 if enabled else 0,
+                    url,
+                    root,
+                    payload,
+                    1 if force_revision_bump else 0,
+                ),
             )
         return self.source(key)
 
@@ -205,19 +234,22 @@ class ExternalSourceConfigService:
         result: ExternalConnectionResult,
         *,
         tested_server_url: str,
+        tested_revision: int,
     ) -> bool:
         key = self._source_key(result.source_key)
         endpoint = normalize_server_url(tested_server_url)
+        revision = int(tested_revision)
         with self.database.connect() as conn:
             cursor = conn.execute(
                 """UPDATE external_analysis_sources
-                   SET last_test_status=?,
+                   SET last_test_revision=config_revision,
+                       last_test_status=?,
                        last_test_detail=?,
                        last_test_server_name=?,
                        last_test_version=?,
                        last_test_at=CURRENT_TIMESTAMP,
                        updated_at=CURRENT_TIMESTAMP
-                   WHERE source_key=? AND server_url=?""",
+                   WHERE source_key=? AND server_url=? AND config_revision=?""",
                 (
                     "ok" if result.ok else "error",
                     result.detail,
@@ -225,6 +257,7 @@ class ExternalSourceConfigService:
                     result.version,
                     key,
                     endpoint,
+                    revision,
                 ),
             )
             return cursor.rowcount == 1
