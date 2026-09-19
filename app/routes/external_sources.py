@@ -71,6 +71,12 @@ def build_router(ctx: RouteContext):
                 provider_secrets.delete({secret_key})
             elif new_token:
                 provider_secrets.update({secret_key: new_token})
+            if (
+                previous.server_url != saved.server_url
+                or bool(new_token)
+                or bool(clear_token)
+            ):
+                external_source_config.clear_connection_result(key)
         except ProviderSecretError as exc:
             if previous is not None and saved is not None:
                 try:
