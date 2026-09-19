@@ -103,15 +103,13 @@ def build_router(ctx: RouteContext):
             message,
         )
 
-    @router.get(
+    @librarian_get(
         "/episode-identity/scans/{scan_id}",
         response_class=HTMLResponse,
     )
     def episode_identity_detail(request: Request, scan_id: int):
         try:
-            detail = decisions.scan_detail(
-                int(scan_id), resolve_if_needed=True
-            )
+            detail = decisions.scan_detail(int(scan_id))
         except MediaIdentityDecisionError as exc:
             raise HTTPException(404, str(exc)) from exc
         response = templates.TemplateResponse(
