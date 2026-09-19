@@ -116,6 +116,22 @@ class ExternalSourceConfigTests(unittest.TestCase):
         self.assertEqual(source.last_test_version, "")
         self.assertIsNone(source.last_test_at)
 
+    def test_failed_connection_result_degrades_configured_source_availability(self):
+        self.service.save_source(
+            "plex", enabled=True, server_url="http://plex.local:32400"
+        )
+        self.service.record_connection_result(
+            ExternalConnectionResult(
+                "plex", False, detail="The server rejected the access token."
+            )
+        )
+        registry = build_configured_source_registry(
+            self.service, {"plex_token": "secret"}
+        )
+        status = registry.require("plex").status()
+        self.assertFalse(status.available)
+        self.assertIn("failed", status.detail)
+
     def test_source_url_normalization_rejects_embedded_credentials_and_queries(self):
         self.assertEqual(
             normalize_server_url("HTTP://plex.local:32400/"),
