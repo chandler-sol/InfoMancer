@@ -75,6 +75,15 @@ class MigrationTests(unittest.TestCase):
                         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='external_path_mappings'"
                     ).fetchone()
                 )
+                external_source_columns = {
+                    row["name"]
+                    for row in upgraded.execute("PRAGMA table_info(external_analysis_sources)")
+                }
+                self.assertTrue({
+                    "source_key", "enabled", "server_url", "metadata_root",
+                    "last_test_status", "last_test_detail", "last_test_server_name",
+                    "last_test_version", "last_test_at",
+                }.issubset(external_source_columns))
 
     def test_migrations_17_through_21_preserve_safe_downgrade_semantics(self):
         migration_17 = next(item for item in MIGRATIONS if item.version == 17)
