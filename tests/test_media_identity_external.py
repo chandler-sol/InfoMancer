@@ -184,6 +184,22 @@ class ExternalPathMapperTests(unittest.TestCase):
             "/srv/tv/Show/Episode.mkv",
         )
 
+    def test_forward_translation_rejects_parent_traversal(self):
+        mapper = ExternalPathMapper(
+            [PathMapping("plex", "/srv/tv", str(self.local / "tv"))]
+        )
+        with self.assertRaisesRegex(PathMappingError, "parent traversal"):
+            mapper.translate("plex", "/srv/tv/../private/secret.mkv")
+
+    def test_reverse_translation_rejects_parent_traversal(self):
+        mapper = ExternalPathMapper(
+            [PathMapping("plex", "/srv/tv", str(self.local / "tv"))]
+        )
+        with self.assertRaisesRegex(PathMappingError, "parent traversal"):
+            mapper.reverse_translate(
+                "plex", str(self.local / "tv" / ".." / "private" / "secret.mkv")
+            )
+
     def test_mapping_requires_absolute_roots(self):
         with self.assertRaisesRegex(PathMappingError, "absolute"):
             PathMapping("plex", "relative/tv", str(self.local / "tv"))
