@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Episode Identity · {{ app_name }}{% endblock %}
 {% block content %}
+{% set decision_label = 'pending' if identity.decision_pending else (identity.result_state or 'inconclusive') %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">EPISODE IDENTITY · {{ (identity.result_state or 'inconclusive')|replace('_', ' ')|upper }}</p>
+    <p class="eyebrow">EPISODE IDENTITY · {{ decision_label|replace('_', ' ')|upper }}</p>
     <h1>{{ identity.file.filename if identity.file else 'Episode Identity review' }}</h1>
     <p>InfoMancer compared the catalog claim with independent local and provider evidence. This review never changes the media file by itself.</p>
   </div>
@@ -22,7 +23,7 @@
   <header>
     <div>
       <p class="eyebrow">CONSERVATIVE RESULT</p>
-      <h2>{{ (identity.result_state or 'inconclusive')|replace('_', ' ')|title }}</h2>
+      <h2>{{ decision_label|replace('_', ' ')|title }}</h2>
       <p>{{ identity.resolution_explanation }}</p>
     </div>
   </header>
@@ -62,7 +63,9 @@
 {% if current_user.is_librarian %}
 <section class="panel">
   <header><div><p class="eyebrow">HUMAN DECISION</p><h2>Confirm or inspect</h2><p>Confirmation records your decision for this exact file snapshot. It does not rename or rewrite the catalog claim.</p></div></header>
-  {% if identity.snapshot_current %}
+  {% if identity.decision_pending %}
+  <p>This scan is waiting for the decision resolver. Refresh Library Health before confirming or previewing a rename.</p>
+  {% elif identity.snapshot_current %}
   <div class="button-row">
     {% if identity.claimed_candidate_keys|length == 1 %}
     <form method="post" action="/episode-identity/scans/{{ identity.id }}/confirm-current">
