@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import io
 import json
 import sys
 import urllib.error
@@ -80,9 +81,14 @@ def _decode_registry_payload(payload: bytes, content_encoding: str = "") -> Any:
         raise NpmLockAuditError("npm advisory response exceeded the 8 MiB safety limit.")
     if payload.startswith(b"\x1f\x8b") or "gzip" in content_encoding.casefold():
         try:
-            payload = gzip.decompress(payload)
+            with gzip.GzipFile(fileobj=io.BytesIO(payload)) as archive:
+                payload = archive.read(MAX_RESPONSE_BYTES + 1)
         except OSError as exc:
             raise NpmLockAuditError("npm advisory response claimed gzip but could not be decoded.") from exc
+        if len(payload) > MAX_RESPONSE_BYTES:
+            raise NpmLockAuditError(
+                "npm advisory response exceeded the 8 MiB safety limit after decompression."
+            )
     try:
         return json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
