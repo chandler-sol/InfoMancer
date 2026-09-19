@@ -50,10 +50,13 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def normalize_server_url(value: str) -> str:
-    raw = str(value or "").strip()
+    raw = str(value or "")
     if not raw:
         return ""
-    if any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in raw):
+    if any(
+        character.isspace() or ord(character) < 32 or ord(character) == 127
+        for character in raw
+    ):
         raise ExternalSourceConfigError(
             "Server URL cannot contain whitespace or control characters."
         )
