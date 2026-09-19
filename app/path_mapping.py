@@ -64,17 +64,25 @@ class PathTranslation:
 def parse_absolute_path(value: str) -> ParsedPath:
     """Parse a Windows or POSIX absolute path without using host OS semantics."""
     raw = str(value or "").strip()
+    if "\x00" in raw:
+        raise PathMappingError("Media paths cannot contain a null byte.")
     if _WINDOWS_ABSOLUTE.match(raw):
         path = PureWindowsPath(raw)
         anchor = path.anchor
         if not anchor:
             raise PathMappingError("An external media path must be absolute.")
-        return ParsedPath(anchor=anchor, parts=tuple(path.parts[1:]), windows=True)
+        parts = tuple(path.parts[1:])
+        if ".." in parts:
+            raise PathMappingError("Media paths cannot contain parent traversal.")
+        return ParsedPath(anchor=anchor, parts=parts, windows=True)
 
     path = PurePosixPath(raw)
     if not path.is_absolute():
         raise PathMappingError("An external media path must be absolute.")
-    return ParsedPath(anchor=path.anchor, parts=tuple(path.parts[1:]), windows=False)
+    parts = tuple(path.parts[1:])
+    if ".." in parts:
+        raise PathMappingError("Media paths cannot contain parent traversal.")
+    return ParsedPath(anchor=path.anchor, parts=parts, windows=False)
 
 
 def relative_parts(value: str, root: str) -> tuple[str, ...]:
@@ -110,11 +118,15 @@ def local_relative_parts(value: str | Path, root: str | Path) -> tuple[str, ...]
     """Return lexical host-local relative parts using current-OS case semantics."""
     raw_value = str(value or "").strip()
     raw_root = str(root or "").strip()
+    if "\x00" in raw_value or "\x00" in raw_root:
+        raise PathMappingError("Local media paths cannot contain a null byte.")
     if os.name == "nt":
         value_path = PureWindowsPath(raw_value)
         root_path = PureWindowsPath(raw_root)
         if not value_path.is_absolute() or not root_path.is_absolute():
             raise PathMappingError("Local media paths and mapping roots must be absolute.")
+        if ".." in value_path.parts or ".." in root_path.parts:
+            raise PathMappingError("Local media paths cannot contain parent traversal.")
 
         def comparable(part: str) -> str:
             return part.casefold()
@@ -123,6 +135,8 @@ def local_relative_parts(value: str | Path, root: str | Path) -> tuple[str, ...]
         root_path = PurePosixPath(raw_root)
         if not value_path.is_absolute() or not root_path.is_absolute():
             raise PathMappingError("Local media paths and mapping roots must be absolute.")
+        if ".." in value_path.parts or ".." in root_path.parts:
+            raise PathMappingError("Local media paths cannot contain parent traversal.")
 
         def comparable(part: str) -> str:
             return part
