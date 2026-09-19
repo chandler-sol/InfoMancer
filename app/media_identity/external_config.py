@@ -53,6 +53,10 @@ def normalize_server_url(value: str) -> str:
     raw = str(value or "").strip()
     if not raw:
         return ""
+    if any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in raw):
+        raise ExternalSourceConfigError(
+            "Server URL cannot contain whitespace or control characters."
+        )
     try:
         parsed = urllib.parse.urlsplit(raw)
         scheme = parsed.scheme.casefold()
@@ -82,6 +86,15 @@ def normalize_server_url(value: str) -> str:
     return urllib.parse.urlunsplit(
         (scheme, parsed.netloc, path, "", "")
     )
+
+
+def external_token_is_bound(
+    source: ExternalSourceConfig,
+    secrets: dict[str, str],
+) -> bool:
+    token_key = f"{source.source_key}_token"
+    endpoint_key = f"{source.source_key}_token_endpoint"
+    return bool(secrets.get(token_key, "")) and secrets.get(endpoint_key, "") == source.server_url
 
 
 class ExternalSourceConfigService:
@@ -411,7 +424,7 @@ def build_configured_source_registry(
         tuple(
             ConfiguredExternalSource(
                 source,
-                token_configured=bool(secrets.get(f"{source.source_key}_token", "")),
+                token_configured=external_token_is_bound(source, secrets),
             )
             for source in service.sources()
         )
