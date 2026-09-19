@@ -226,6 +226,29 @@ class ExternalPathMapperTests(unittest.TestCase):
                 "plex", str(self.local / "tv" / ".." / "private" / "secret.mkv")
             )
 
+    def test_windows_host_rejects_posix_component_that_becomes_drive_qualified(self):
+        from app.path_mapping import validate_local_relative_components
+
+        with self.assertRaisesRegex(PathMappingError, "unsafe on this host"):
+            validate_local_relative_components(
+                (r"C:\\Windows\\secret.mkv",),
+                windows_host=True,
+            )
+
+    def test_windows_host_rejects_posix_component_with_embedded_backslash_path(self):
+        from app.path_mapping import validate_local_relative_components
+
+        with self.assertRaisesRegex(PathMappingError, "unsafe on this host"):
+            validate_local_relative_components(
+                (r"folder\\secret.mkv",),
+                windows_host=True,
+            )
+
+    def test_windows_host_accepts_normal_single_external_component(self):
+        from app.path_mapping import validate_local_relative_components
+
+        validate_local_relative_components(("Episode.mkv",), windows_host=True)
+
     def test_mapping_requires_absolute_roots(self):
         with self.assertRaisesRegex(PathMappingError, "absolute"):
             PathMapping("plex", "relative/tv", str(self.local / "tv"))
