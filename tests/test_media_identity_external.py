@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from app.media_identity.external import (
     ExternalAnalysisSource,
@@ -62,9 +64,16 @@ class AlternateDummySource(DummySource):
 
 
 class ExternalPathMapperTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.local = Path(self.temporary.name)
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
     def test_windows_source_paths_are_case_insensitive_on_any_host(self):
         mapper = ExternalPathMapper(
-            [PathMapping("plex", r"D:\TV", "/media/tv")]
+            [PathMapping("plex", r"D:\TV", str(self.local / "tv"))]
         )
         translated = mapper.translate(
             "PLEX",
@@ -73,12 +82,12 @@ class ExternalPathMapperTests(unittest.TestCase):
         self.assertIsNotNone(translated)
         self.assertEqual(
             translated.local_path,
-            "/media/tv/The Show/Season 01/Episode.mkv",
+            str(self.local / "tv" / "The Show" / "Season 01" / "Episode.mkv"),
         )
 
     def test_posix_source_paths_remain_case_sensitive(self):
         mapper = ExternalPathMapper(
-            [PathMapping("jellyfin", "/srv/TV", "/media/tv")]
+            [PathMapping("jellyfin", "/srv/TV", str(self.local / "tv"))]
         )
         self.assertIsNone(
             mapper.translate("jellyfin", "/srv/tv/Show/Episode.mkv")
@@ -86,7 +95,7 @@ class ExternalPathMapperTests(unittest.TestCase):
 
     def test_component_boundary_prevents_raw_prefix_matches(self):
         mapper = ExternalPathMapper(
-            [PathMapping("plex", "/srv/tv", "/media/tv")]
+            [PathMapping("plex", "/srv/tv", str(self.local / "tv"))]
         )
         self.assertIsNone(
             mapper.translate("plex", "/srv/tv-archive/Show/Episode.mkv")
@@ -95,34 +104,34 @@ class ExternalPathMapperTests(unittest.TestCase):
     def test_explicit_priority_beats_more_specific_lower_preference_mapping(self):
         mapper = ExternalPathMapper(
             [
-                PathMapping("plex", "/srv", "/media/general", priority=10),
-                PathMapping("plex", "/srv/tv", "/media/tv", priority=20),
+                PathMapping("plex", "/srv", str(self.local / "general"), priority=10),
+                PathMapping("plex", "/srv/tv", str(self.local / "tv"), priority=20),
             ]
         )
         translated = mapper.translate("plex", "/srv/tv/Show/Episode.mkv")
         self.assertEqual(
             translated.local_path,
-            "/media/general/tv/Show/Episode.mkv",
+            str(self.local / "general" / "tv" / "Show" / "Episode.mkv"),
         )
 
     def test_specific_root_wins_when_priority_is_equal(self):
         mapper = ExternalPathMapper(
             [
-                PathMapping("plex", "/srv", "/media/general", priority=10),
-                PathMapping("plex", "/srv/tv", "/media/tv", priority=10),
+                PathMapping("plex", "/srv", str(self.local / "general"), priority=10),
+                PathMapping("plex", "/srv/tv", str(self.local / "tv"), priority=10),
             ]
         )
         translated = mapper.translate("plex", "/srv/tv/Show/Episode.mkv")
         self.assertEqual(
             translated.local_path,
-            "/media/tv/Show/Episode.mkv",
+            str(self.local / "tv" / "Show" / "Episode.mkv"),
         )
 
     def test_equal_preference_conflict_fails_closed(self):
         mapper = ExternalPathMapper(
             [
-                PathMapping("plex", "/srv/tv", "/media/tv-a", priority=10),
-                PathMapping("plex", "/srv/tv", "/media/tv-b", priority=10),
+                PathMapping("plex", "/srv/tv", str(self.local / "tv-a"), priority=10),
+                PathMapping("plex", "/srv/tv", str(self.local / "tv-b"), priority=10),
             ]
         )
         with self.assertRaisesRegex(PathMappingError, "equally preferred"):
@@ -130,7 +139,7 @@ class ExternalPathMapperTests(unittest.TestCase):
 
     def test_disabled_mapping_is_ignored(self):
         mapper = ExternalPathMapper(
-            [PathMapping("plex", "/srv/tv", "/media/tv", enabled=False)]
+            [PathMapping("plex", "/srv/tv", str(self.local / "tv"), enabled=False)]
         )
         self.assertIsNone(
             mapper.translate("plex", "/srv/tv/Show/Episode.mkv")
@@ -138,7 +147,7 @@ class ExternalPathMapperTests(unittest.TestCase):
 
     def test_mapping_requires_absolute_roots(self):
         with self.assertRaisesRegex(PathMappingError, "absolute"):
-            PathMapping("plex", "relative/tv", "/media/tv")
+            PathMapping("plex", "relative/tv", str(self.local / "tv"))
         with self.assertRaisesRegex(PathMappingError, "absolute"):
             PathMapping("plex", "/srv/tv", "relative/tv")
 
