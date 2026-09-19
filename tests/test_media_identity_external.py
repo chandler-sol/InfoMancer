@@ -145,6 +145,45 @@ class ExternalPathMapperTests(unittest.TestCase):
             mapper.translate("plex", "/srv/tv/Show/Episode.mkv")
         )
 
+    def test_reverse_translation_maps_local_file_back_to_windows_source_path(self):
+        local_root = self.local / "tv"
+        mapper = ExternalPathMapper(
+            [PathMapping("plex", r"D:\TV", str(local_root))]
+        )
+        translated = mapper.reverse_translate(
+            "plex", local_root / "Show" / "Season 01" / "Episode.mkv"
+        )
+        self.assertIsNotNone(translated)
+        self.assertEqual(
+            translated.external_path,
+            r"D:\TV\Show\Season 01\Episode.mkv",
+        )
+
+    def test_reverse_translation_keeps_component_boundaries(self):
+        mapper = ExternalPathMapper(
+            [PathMapping("jellyfin", "/srv/tv", str(self.local / "tv"))]
+        )
+        self.assertIsNone(
+            mapper.reverse_translate(
+                "jellyfin", self.local / "tv-archive" / "Show" / "Episode.mkv"
+            )
+        )
+
+    def test_reverse_translation_uses_specific_local_root_when_priority_ties(self):
+        mapper = ExternalPathMapper(
+            [
+                PathMapping("jellyfin", "/srv", str(self.local), priority=10),
+                PathMapping("jellyfin", "/srv/tv", str(self.local / "tv"), priority=10),
+            ]
+        )
+        translated = mapper.reverse_translate(
+            "jellyfin", self.local / "tv" / "Show" / "Episode.mkv"
+        )
+        self.assertEqual(
+            translated.external_path,
+            "/srv/tv/Show/Episode.mkv",
+        )
+
     def test_mapping_requires_absolute_roots(self):
         with self.assertRaisesRegex(PathMappingError, "absolute"):
             PathMapping("plex", "relative/tv", str(self.local / "tv"))
