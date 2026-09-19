@@ -67,6 +67,7 @@ from .tvdb import TVDBClient, TVDBError
 from .provider_secrets import ProviderSecretError, ProviderSecretStore
 from .media_identity.external_config import (
     ExternalSourceConfigService, build_configured_source_registry,
+    external_token_is_bound,
 )
 from .background import BackgroundCoordinator
 from .title_metadata import TitleMetadataService
@@ -2748,8 +2749,8 @@ def settings_page_context(
                 "enabled": source.enabled,
                 "server_url": source.server_url,
                 "metadata_root": source.metadata_root,
-                "token_configured": bool(
-                    integration_secrets.get(f"{source.source_key}_token", "")
+                "token_configured": external_token_is_bound(
+                    source, integration_secrets
                 ),
                 "mappings": external_source_config.mappings(source.source_key),
                 "source_status": status,
