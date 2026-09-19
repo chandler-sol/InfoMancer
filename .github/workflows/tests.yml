@@ -159,7 +159,7 @@ jobs:
           # Audit the committed dependency graph rather than the host-specific
           # node_modules tree, where omitted optional packages can make npm's
           # registry audit endpoint reject an otherwise valid lockfile.
-          npm audit --package-lock-only --audit-level=high
+          npm audit --package-lock-only --omit=optional --audit-level=high
           # GitHub's hosted image already carries Chromium runtime libraries. Avoid
           # --with-deps here because it mutates runner apt sources and can fail on an
           # unrelated third-party repository before Playwright is even installed.
