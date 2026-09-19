@@ -527,7 +527,15 @@ class MediaIdentityDecisionService:
         result["best_candidate"] = best
         result["claimed_candidate_keys"] = list(resolution.claimed_candidate_keys)
         result["margin"] = resolution.margin
-        result["resolution_explanation"] = resolution.explanation
+        result["decision_pending"] = (
+            str(result.get("status") or "") == "complete"
+            and not result.get("result_state")
+        )
+        result["resolution_explanation"] = (
+            "This completed scan is waiting for the decision resolver. Refresh Library Health before making an identity decision."
+            if result["decision_pending"]
+            else resolution.explanation
+        )
         result["confirmation"] = confirmation
         result["snapshot_current"] = snapshot_current
         confirmed_key = None
