@@ -257,7 +257,6 @@ class ExternalSourceConfigService:
             "external_path": str(external_path or "").strip(),
             "local_path": local_path,
             "exists": exists,
-            "mapping_id": int(translated.mapping.priority) if False else None,
             "catalog_match": dict(row) if row is not None else None,
         }
 
