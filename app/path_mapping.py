@@ -105,9 +105,30 @@ def relative_parts(value: str, root: str) -> tuple[str, ...]:
     return parsed_value.parts[len(parsed_root.parts):]
 
 
+def validate_local_relative_components(
+    parts: tuple[str, ...], *, windows_host: bool | None = None
+) -> None:
+    """Reject external components that the local host could reinterpret as rooted paths."""
+    use_windows = os.name == "nt" if windows_host is None else bool(windows_host)
+    path_type = PureWindowsPath if use_windows else PurePosixPath
+    for part in parts:
+        parsed = path_type(part)
+        if (
+            not part
+            or parsed.anchor
+            or (use_windows and (parsed.drive or parsed.root))
+            or len(parsed.parts) != 1
+            or parsed.parts[0] != part
+        ):
+            raise PathMappingError(
+                "An external media path contains a component that is unsafe on this host."
+            )
+
+
 def translate_path(value: str, external_root: str, local_root: str | Path) -> str:
     """Translate one external absolute path into a local absolute path."""
     relative = relative_parts(value, external_root)
+    validate_local_relative_components(relative)
     destination = Path(local_root).expanduser()
     if not destination.is_absolute():
         raise PathMappingError("A path mapping local root must be absolute.")
