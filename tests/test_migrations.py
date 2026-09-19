@@ -76,7 +76,7 @@ class MigrationTests(unittest.TestCase):
                     ).fetchone()
                 )
 
-    def test_migrations_17_through_20_preserve_safe_downgrade_semantics(self):
+    def test_migrations_17_through_21_preserve_safe_downgrade_semantics(self):
         migration_17 = next(item for item in MIGRATIONS if item.version == 17)
         self.assertEqual(migration_17.compatibility, "behavioral")
         self.assertEqual(migration_17.minimum_reader_schema, 1)
