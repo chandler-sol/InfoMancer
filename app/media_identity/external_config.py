@@ -342,16 +342,24 @@ class ConfiguredExternalSource:
                 detail="Access token is not configured.",
             )
         if self.config.last_test_status == "ok":
-            detail = "Configured; the last explicit connection test succeeded."
-        elif self.config.last_test_status == "error":
-            detail = "Configured; the last explicit connection test failed."
-        else:
-            detail = "Configured and ready for a source-specific analysis adapter."
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=True,
+                capabilities=frozenset(),
+                detail="Configured; the last explicit connection test succeeded.",
+            )
+        if self.config.last_test_status == "error":
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=False,
+                capabilities=frozenset(),
+                detail="Configured; the last explicit connection test failed.",
+            )
         return ExternalSourceStatus(
             source_key=self.source_key,
             available=True,
             capabilities=frozenset(),
-            detail=detail,
+            detail="Configured and ready for a source-specific analysis adapter.",
         )
 
     def resolve_media(self, context):
