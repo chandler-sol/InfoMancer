@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest.mock import patch
 from dataclasses import replace
 from pathlib import Path
 
@@ -86,6 +87,52 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
             main.external_source_config.source("plex").server_url,
             "http://trusted-plex.local:32400",
         )
+
+    def test_non_ascii_server_url_is_rejected_without_500(self):
+        response = self.client.post(
+            "/settings/integrations/plex",
+            data={
+                "enabled": "1",
+                "server_url": "http://plex.local:32400/médias",
+                "metadata_root": "",
+                "token": "",
+                "clear_token": "",
+            },
+        )
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("non-ASCII", response.headers["location"])
+        self.assertEqual(
+            main.external_source_config.source("plex").server_url,
+            "http://trusted-plex.local:32400",
+        )
+
+    def test_inflight_connection_result_is_discarded_after_token_change(self):
+        from app.media_identity.external_config import ExternalConnectionResult
+
+        def change_token_during_test(*_args, **_kwargs):
+            main.provider_secrets.update({
+                "plex_token": "new-token",
+                "plex_token_endpoint": "http://trusted-plex.local:32400",
+            })
+            return ExternalConnectionResult(
+                "plex",
+                True,
+                server_name="Trusted Plex",
+                version="1.2.3",
+                detail="Authenticated Plex connection succeeded.",
+            )
+
+        with patch(
+            "app.routes.external_sources.test_external_connection",
+            side_effect=change_token_during_test,
+        ):
+            response = self.client.post("/settings/integrations/plex/test")
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("stale+result+was+discarded", response.headers["location"])
+        source = main.external_source_config.source("plex")
+        self.assertEqual(source.last_test_status, "")
+        self.assertIsNone(source.last_test_at)
 
     def test_changed_server_url_cannot_reuse_hidden_saved_token(self):
         response = self.client.post(
