@@ -69,6 +69,24 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         ) = self.original
         self.temporary.cleanup()
 
+    def test_whitespace_in_server_url_is_rejected_without_500(self):
+        response = self.client.post(
+            "/settings/integrations/plex",
+            data={
+                "enabled": "1",
+                "server_url": "http://plex local:32400",
+                "metadata_root": "",
+                "token": "",
+                "clear_token": "",
+            },
+        )
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("whitespace", response.headers["location"])
+        self.assertEqual(
+            main.external_source_config.source("plex").server_url,
+            "http://trusted-plex.local:32400",
+        )
+
     def test_changed_server_url_cannot_reuse_hidden_saved_token(self):
         response = self.client.post(
             "/settings/integrations/plex",
