@@ -80,6 +80,7 @@ class ExternalSourceConfigTests(unittest.TestCase):
                 detail="Authenticated Plex connection succeeded.",
             ),
             tested_server_url="http://plex.local:32400",
+            tested_revision=self.service.source("plex").config_revision,
         )
         source = self.service.source("plex")
         self.assertEqual(source.last_test_status, "ok")
@@ -114,6 +115,7 @@ class ExternalSourceConfigTests(unittest.TestCase):
                 "plex", True, server_name="Plex", version="1.2.3", detail="ok"
             ),
             tested_server_url="http://plex.local:32400",
+            tested_revision=self.service.source("plex").config_revision,
         )
         self.service.clear_connection_result("plex")
         source = self.service.source("plex")
@@ -131,6 +133,7 @@ class ExternalSourceConfigTests(unittest.TestCase):
                 "plex", False, detail="The server rejected the access token."
             ),
             tested_server_url="http://plex.local:32400",
+            tested_revision=self.service.source("plex").config_revision,
         )
         registry = build_configured_source_registry(
             self.service, {
@@ -141,6 +144,47 @@ class ExternalSourceConfigTests(unittest.TestCase):
         status = registry.require("plex").status()
         self.assertFalse(status.available)
         self.assertIn("failed", status.detail)
+
+    def test_connection_revision_increments_for_endpoint_or_token_identity_change(self):
+        initial = self.service.source("plex")
+        saved = self.service.save_source(
+            "plex", enabled=True, server_url="http://plex.local:32400"
+        )
+        self.assertGreater(saved.config_revision, initial.config_revision)
+
+        same_endpoint = self.service.save_source(
+            "plex", enabled=True, server_url="http://plex.local:32400"
+        )
+        self.assertEqual(same_endpoint.config_revision, saved.config_revision)
+
+        token_change = self.service.save_source(
+            "plex",
+            enabled=True,
+            server_url="http://plex.local:32400",
+            force_revision_bump=True,
+        )
+        self.assertEqual(token_change.config_revision, saved.config_revision + 1)
+
+    def test_stale_connection_test_revision_is_not_surfaced(self):
+        source = self.service.save_source(
+            "plex", enabled=True, server_url="http://plex.local:32400"
+        )
+        recorded = self.service.record_connection_result(
+            ExternalConnectionResult(
+                "plex", True, server_name="Plex", version="1", detail="ok"
+            ),
+            tested_server_url=source.server_url,
+            tested_revision=source.config_revision,
+        )
+        self.assertTrue(recorded)
+        changed = self.service.save_source(
+            "plex",
+            enabled=True,
+            server_url=source.server_url,
+            force_revision_bump=True,
+        )
+        self.assertEqual(changed.last_test_status, "")
+        self.assertIsNone(changed.last_test_at)
 
     def test_connection_result_is_discarded_if_endpoint_changed_during_test(self):
         self.service.save_source(
@@ -154,6 +198,7 @@ class ExternalSourceConfigTests(unittest.TestCase):
                 "plex", True, server_name="Old Plex", version="1.0", detail="ok"
             ),
             tested_server_url="http://plex-a.local:32400",
+            tested_revision=0,
         )
         self.assertFalse(recorded)
         source = self.service.source("plex")
