@@ -91,7 +91,10 @@ class ExternalSourceConfigTests(unittest.TestCase):
             "plex", enabled=True, server_url="http://plex.local:32400"
         )
         registry = build_configured_source_registry(
-            self.service, {"plex_token": "secret"}
+            self.service, {
+                "plex_token": "secret",
+                "plex_token_endpoint": "http://plex.local:32400",
+            }
         )
         self.assertEqual(registry.keys(), ("jellyfin", "plex"))
         plex = registry.require("plex")
@@ -127,7 +130,10 @@ class ExternalSourceConfigTests(unittest.TestCase):
             )
         )
         registry = build_configured_source_registry(
-            self.service, {"plex_token": "secret"}
+            self.service, {
+                "plex_token": "secret",
+                "plex_token_endpoint": "http://plex.local:32400",
+            }
         )
         status = registry.require("plex").status()
         self.assertFalse(status.available)
