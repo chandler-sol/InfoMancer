@@ -134,6 +134,58 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         self.assertEqual(source.last_test_status, "")
         self.assertIsNone(source.last_test_at)
 
+    def test_revision_closes_token_change_gap_before_result_write(self):
+        from app.media_identity.external_config import ExternalConnectionResult
+
+        original_record = main.external_source_config.record_connection_result
+
+        def race_before_record(
+            result,
+            *,
+            tested_server_url,
+            tested_revision,
+        ):
+            main.external_source_config.save_source(
+                "plex",
+                enabled=True,
+                server_url="http://trusted-plex.local:32400",
+                force_revision_bump=True,
+            )
+            main.provider_secrets.update({
+                "plex_token": "new-token",
+                "plex_token_endpoint": "http://trusted-plex.local:32400",
+            })
+            return original_record(
+                result,
+                tested_server_url=tested_server_url,
+                tested_revision=tested_revision,
+            )
+
+        with (
+            patch(
+                "app.routes.external_sources.test_external_connection",
+                return_value=ExternalConnectionResult(
+                    "plex",
+                    True,
+                    server_name="Trusted Plex",
+                    version="1.2.3",
+                    detail="Authenticated Plex connection succeeded.",
+                ),
+            ),
+            patch.object(
+                main.external_source_config,
+                "record_connection_result",
+                side_effect=race_before_record,
+            ),
+        ):
+            response = self.client.post("/settings/integrations/plex/test")
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("stale+result+was+discarded", response.headers["location"])
+        source = main.external_source_config.source("plex")
+        self.assertEqual(source.last_test_status, "")
+        self.assertIsNone(source.last_test_at)
+
     def test_changed_server_url_cannot_reuse_hidden_saved_token(self):
         response = self.client.post(
             "/settings/integrations/plex",
