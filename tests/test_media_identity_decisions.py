@@ -634,7 +634,7 @@ class DecisionServiceTests(unittest.TestCase):
             self.service.confirm_best(scan.scan_id, None)
         stale_preview = self.service.rename_preview(scan.scan_id)
         self.assertFalse(stale_preview["available"])
-        self.assertEqual(stale_preview["status"], "unavailable")
+        self.assertEqual(stale_preview["status"], "stale")
 
     def test_file_change_blocks_confirmation(self) -> None:
         self.service.resolve_scan(self.scan_id)
