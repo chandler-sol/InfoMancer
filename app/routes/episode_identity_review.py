@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 from fastapi import APIRouter, Depends
 
 from ..access import require_librarian
@@ -37,8 +39,20 @@ def build_router(ctx: RouteContext):
         dependencies.append(Depends(require_librarian))
         return router.post(path, dependencies=dependencies, **kwargs)
 
-    def _refresh_findings() -> None:
-        analyze_library_health_with_activity()
+    def _refresh_findings(user_id: int | None = None) -> bool:
+        try:
+            analyze_library_health_with_activity()
+        except sqlite3.Error as exc:
+            record_event(
+                "mie",
+                "Library Health could not refresh after an Episode Identity decision.",
+                level="warning",
+                detail=str(exc),
+                context={"operation": "episode-identity-refresh"},
+                user_id=user_id,
+            )
+            return False
+        return True
 
     @librarian_post("/files/{file_id}/episode-identity/fast")
     def verify_episode_identity(request: Request, file_id: int):
@@ -54,7 +68,7 @@ def build_router(ctx: RouteContext):
                 int(file_id), requested_by=request.state.user.id
             )
             resolution = decisions.resolve_scan(scan.scan_id)
-            _refresh_findings()
+            findings_refreshed = _refresh_findings(request.state.user.id)
         except (FastIdentityScanError, MediaIdentityDecisionError) as exc:
             record_event(
                 "mie",
@@ -79,9 +93,14 @@ def build_router(ctx: RouteContext):
             },
             user_id=request.state.user.id,
         )
+        message = (
+            "Episode Identity verification completed. Review the evidence before making any correction."
+        )
+        if not findings_refreshed:
+            message += " Library Health will catch up on the next successful analysis."
         return redirect(
             f"/episode-identity/scans/{scan.scan_id}",
-            "Episode Identity verification completed. Review the evidence before making any correction.",
+            message,
         )
 
     @router.get(
@@ -129,7 +148,7 @@ def build_router(ctx: RouteContext):
     def confirm_current_identity(request: Request, scan_id: int):
         try:
             decisions.confirm_current(int(scan_id), request.state.user.id)
-            _refresh_findings()
+            findings_refreshed = _refresh_findings(request.state.user.id)
         except MediaIdentityDecisionError as exc:
             return redirect(
                 f"/episode-identity/scans/{scan_id}",
@@ -141,9 +160,14 @@ def build_router(ctx: RouteContext):
             context={"scan_id": int(scan_id), "decision": "confirm-current"},
             user_id=request.state.user.id,
         )
+        message = (
+            "Marked correct for this exact media snapshot. A changed file will require confirmation again."
+        )
+        if not findings_refreshed:
+            message += " Library Health will catch up on the next successful analysis."
         return redirect(
             f"/episode-identity/scans/{scan_id}",
-            "Marked correct for this exact media snapshot. A changed file will require confirmation again.",
+            message,
         )
 
     @librarian_post(
@@ -152,7 +176,7 @@ def build_router(ctx: RouteContext):
     def confirm_best_identity(request: Request, scan_id: int):
         try:
             decisions.confirm_best(int(scan_id), request.state.user.id)
-            _refresh_findings()
+            findings_refreshed = _refresh_findings(request.state.user.id)
         except MediaIdentityDecisionError as exc:
             return redirect(
                 f"/episode-identity/scans/{scan_id}",
@@ -164,9 +188,14 @@ def build_router(ctx: RouteContext):
             context={"scan_id": int(scan_id), "decision": "confirm-best"},
             user_id=request.state.user.id,
         )
+        message = (
+            "Suggested content identity confirmed. The catalog claim and filename were not changed."
+        )
+        if not findings_refreshed:
+            message += " Library Health will catch up on the next successful analysis."
         return redirect(
             f"/episode-identity/scans/{scan_id}",
-            "Suggested content identity confirmed. The catalog claim and filename were not changed.",
+            message,
         )
 
     return router, {
