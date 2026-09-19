@@ -702,7 +702,7 @@ class MediaIdentityDecisionService:
         return findings
 
     def rename_preview(self, scan_id: int) -> dict[str, Any]:
-        detail = self.scan_detail(int(scan_id), resolve_if_needed=True)
+        detail = self.scan_detail(int(scan_id))
         if not detail.get("snapshot_current"):
             return {
                 "available": False,
@@ -781,13 +781,20 @@ class MediaIdentityDecisionService:
                 sha256=detail.get("file_sha256"),
             )
         source = Path(str(file_row["path"]))
+        raw_extension = str(file_row.get("extension") or "").strip()
+        extension = (
+            raw_extension
+            if raw_extension.startswith(".")
+            else f".{raw_extension}" if raw_extension
+            else source.suffix
+        )
         new_name = plex_episode_filename(
             str(file_row.get("title_name") or ""),
             file_row.get("metadata_year") or file_row.get("year"),
             int(target_season),
             int(target_episode),
             str(best.get("display_name") or ""),
-            str(file_row.get("extension") or source.suffix),
+            extension,
             None,
         )
         try:
