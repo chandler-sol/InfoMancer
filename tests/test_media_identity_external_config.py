@@ -162,6 +162,14 @@ class ExternalSourceConfigTests(unittest.TestCase):
             normalize_server_url("http://plex.local:32400/path with space")
         with self.assertRaisesRegex(ExternalSourceConfigError, "whitespace"):
             normalize_server_url("http://plex local:32400")
+        with self.assertRaisesRegex(ExternalSourceConfigError, "whitespace"):
+            normalize_server_url(" http://plex.local:32400")
+        with self.assertRaisesRegex(ExternalSourceConfigError, "whitespace"):
+            normalize_server_url("http://plex.local:32400 ")
+        with self.assertRaisesRegex(ExternalSourceConfigError, "whitespace"):
+            normalize_server_url("http://plex.local:32400\t")
+        with self.assertRaisesRegex(ExternalSourceConfigError, "whitespace"):
+            normalize_server_url("http://plex.local:32400\n")
 
     def test_enabled_source_requires_url_but_disabled_shell_can_be_saved(self):
         with self.assertRaisesRegex(ExternalSourceConfigError, "URL"):
