@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -105,6 +106,44 @@ def translate_path(value: str, external_root: str, local_root: str | Path) -> st
     return str(destination.joinpath(*relative))
 
 
+def local_relative_parts(value: str | Path, root: str | Path) -> tuple[str, ...]:
+    """Return lexical host-local relative parts using current-OS case semantics."""
+    raw_value = str(value or "").strip()
+    raw_root = str(root or "").strip()
+    if os.name == "nt":
+        value_path = PureWindowsPath(raw_value)
+        root_path = PureWindowsPath(raw_root)
+        if not value_path.is_absolute() or not root_path.is_absolute():
+            raise PathMappingError("Local media paths and mapping roots must be absolute.")
+
+        def comparable(part: str) -> str:
+            return part.casefold()
+    else:
+        value_path = PurePosixPath(raw_value)
+        root_path = PurePosixPath(raw_root)
+        if not value_path.is_absolute() or not root_path.is_absolute():
+            raise PathMappingError("Local media paths and mapping roots must be absolute.")
+
+        def comparable(part: str) -> str:
+            return part
+
+    value_parts = value_path.parts
+    root_parts = root_path.parts
+    if len(value_parts) < len(root_parts):
+        raise PathMappingError("The local path is outside the mapping root.")
+    for actual, expected in zip(value_parts, root_parts):
+        if comparable(actual) != comparable(expected):
+            raise PathMappingError("The local path is outside the mapping root.")
+    return tuple(value_parts[len(root_parts):])
+
+
+def external_join(root: str, relative: tuple[str, ...]) -> str:
+    parsed = parse_absolute_path(root)
+    if parsed.windows:
+        return str(PureWindowsPath(root).joinpath(*relative))
+    return str(PurePosixPath(root).joinpath(*relative))
+
+
 class ExternalPathMapper:
     """Component-aware source path translation with deterministic precedence."""
 
@@ -114,6 +153,51 @@ class ExternalPathMapper:
     def mappings_for(self, source_key: str) -> tuple[PathMapping, ...]:
         key = str(source_key or "").strip().casefold()
         return tuple(mapping for mapping in self._mappings if mapping.source_key == key)
+
+    def reverse_translate(
+        self, source_key: str, local_path: str | Path
+    ) -> PathTranslation | None:
+        key = str(source_key or "").strip().casefold()
+        matches: list[tuple[PathMapping, str]] = []
+        for mapping in self.mappings_for(key):
+            try:
+                relative = local_relative_parts(local_path, mapping.local_root)
+                external_path = external_join(mapping.external_root, relative)
+            except PathMappingError:
+                continue
+            matches.append((mapping, external_path))
+
+        if not matches:
+            return None
+
+        best_priority = min(mapping.priority for mapping, _ in matches)
+        priority_matches = [
+            (mapping, external_path)
+            for mapping, external_path in matches
+            if mapping.priority == best_priority
+        ]
+        best_depth = max(
+            len(Path(mapping.local_root).parts)
+            for mapping, _ in priority_matches
+        )
+        finalists = [
+            (mapping, external_path)
+            for mapping, external_path in priority_matches
+            if len(Path(mapping.local_root).parts) == best_depth
+        ]
+        destinations = {external_path for _, external_path in finalists}
+        if len(destinations) != 1:
+            raise PathMappingError(
+                "More than one equally preferred path mapping matches this local path."
+            )
+
+        mapping, external_path = finalists[0]
+        return PathTranslation(
+            source_key=key,
+            external_path=external_path,
+            local_path=str(local_path),
+            mapping=mapping,
+        )
 
     def translate(self, source_key: str, external_path: str) -> PathTranslation | None:
         key = str(source_key or "").strip().casefold()
