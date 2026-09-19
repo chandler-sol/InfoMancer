@@ -105,24 +105,31 @@ def relative_parts(value: str, root: str) -> tuple[str, ...]:
     return parsed_value.parts[len(parsed_root.parts):]
 
 
-def validate_local_relative_components(
-    parts: tuple[str, ...], *, windows_host: bool | None = None
+def validate_relative_components(
+    parts: tuple[str, ...], *, windows_semantics: bool
 ) -> None:
-    """Reject external components that the local host could reinterpret as rooted paths."""
-    use_windows = os.name == "nt" if windows_host is None else bool(windows_host)
-    path_type = PureWindowsPath if use_windows else PurePosixPath
+    """Reject components that a target path style could reinterpret as rooted paths."""
+    path_type = PureWindowsPath if windows_semantics else PurePosixPath
     for part in parts:
         parsed = path_type(part)
         if (
             not part
             or parsed.anchor
-            or (use_windows and (parsed.drive or parsed.root))
+            or (windows_semantics and (parsed.drive or parsed.root))
             or len(parsed.parts) != 1
             or parsed.parts[0] != part
         ):
             raise PathMappingError(
-                "An external media path contains a component that is unsafe on this host."
+                "A media path contains a component that is unsafe for the destination path style."
             )
+
+
+def validate_local_relative_components(
+    parts: tuple[str, ...], *, windows_host: bool | None = None
+) -> None:
+    """Reject external components that the local host could reinterpret as rooted paths."""
+    use_windows = os.name == "nt" if windows_host is None else bool(windows_host)
+    validate_relative_components(parts, windows_semantics=use_windows)
 
 
 def translate_path(value: str, external_root: str, local_root: str | Path) -> str:
@@ -186,6 +193,7 @@ def local_relative_parts(value: str | Path, root: str | Path) -> tuple[str, ...]
 
 def external_join(root: str, relative: tuple[str, ...]) -> str:
     parsed = parse_absolute_path(root)
+    validate_relative_components(relative, windows_semantics=parsed.windows)
     if parsed.windows:
         return str(PureWindowsPath(root).joinpath(*relative))
     return str(PurePosixPath(root).joinpath(*relative))
