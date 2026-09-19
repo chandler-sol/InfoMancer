@@ -326,6 +326,11 @@ class MediaIdentityDecisionService:
             expected_signature = str(
                 (item.get("details") or {}).get("source_signature") or ""
             )
+            if not source_ref and not expected_signature:
+                # A zero-similarity subtitle comparison records no selected source.
+                # It contributed no sidecar asset to the decision, so there is
+                # nothing to freshness-check for that evidence row.
+                continue
             if not source_ref or not expected_signature:
                 return False, file_row
             previous = checked_sidecars.get(source_ref)
