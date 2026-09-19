@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ..path_mapping import ExternalPathMapper, PathMapping, PathMappingError
+from .external import ExternalSourceRegistry, ExternalSourceStatus
 
 
 SUPPORTED_EXTERNAL_SOURCES = frozenset({"plex", "jellyfin"})
@@ -27,6 +28,11 @@ class ExternalSourceConfig:
     server_url: str
     metadata_root: str
     config: dict[str, Any]
+    last_test_status: str = ""
+    last_test_detail: str = ""
+    last_test_server_name: str = ""
+    last_test_version: str = ""
+    last_test_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -83,7 +89,9 @@ class ExternalSourceConfigService:
         key = self._source_key(source_key)
         with self.database.connect() as conn:
             row = conn.execute(
-                """SELECT source_key,enabled,server_url,metadata_root,config_json
+                """SELECT source_key,enabled,server_url,metadata_root,config_json,
+                          last_test_status,last_test_detail,last_test_server_name,
+                          last_test_version,last_test_at
                    FROM external_analysis_sources WHERE source_key=?""",
                 (key,),
             ).fetchone()
@@ -103,6 +111,11 @@ class ExternalSourceConfigService:
             server_url=str(row["server_url"] or ""),
             metadata_root=str(row["metadata_root"] or ""),
             config=config,
+            last_test_status=str(row["last_test_status"] or ""),
+            last_test_detail=str(row["last_test_detail"] or ""),
+            last_test_server_name=str(row["last_test_server_name"] or ""),
+            last_test_version=str(row["last_test_version"] or ""),
+            last_test_at=row["last_test_at"],
         )
 
     def sources(self) -> tuple[ExternalSourceConfig, ...]:
@@ -139,6 +152,29 @@ class ExternalSourceConfigService:
                 (key, 1 if enabled else 0, url, root, payload),
             )
         return self.source(key)
+
+    def record_connection_result(
+        self, result: ExternalConnectionResult
+    ) -> None:
+        key = self._source_key(result.source_key)
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE external_analysis_sources
+                   SET last_test_status=?,
+                       last_test_detail=?,
+                       last_test_server_name=?,
+                       last_test_version=?,
+                       last_test_at=CURRENT_TIMESTAMP,
+                       updated_at=CURRENT_TIMESTAMP
+                   WHERE source_key=?""",
+                (
+                    "ok" if result.ok else "error",
+                    result.detail,
+                    result.server_name,
+                    result.version,
+                    key,
+                ),
+            )
 
     def mappings(self, source_key: str) -> tuple[dict[str, Any], ...]:
         key = self._source_key(source_key)
@@ -259,6 +295,92 @@ class ExternalSourceConfigService:
             "exists": exists,
             "catalog_match": dict(row) if row is not None else None,
         }
+
+
+class ConfiguredExternalSource:
+    """Capability-safe shell until a source-specific evidence adapter is installed."""
+
+    version = "0.9-pr-e"
+
+    def __init__(self, config: ExternalSourceConfig, *, token_configured: bool) -> None:
+        self.source_key = config.source_key
+        self.config = config
+        self.token_configured = bool(token_configured)
+
+    def status(self) -> ExternalSourceStatus:
+        if not self.config.enabled:
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=False,
+                detail="Disabled in Settings.",
+            )
+        if not self.config.server_url:
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=False,
+                detail="Server URL is not configured.",
+            )
+        if not self.token_configured:
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=False,
+                detail="Access token is not configured.",
+            )
+        if self.config.last_test_status == "ok":
+            detail = "Configured; the last explicit connection test succeeded."
+        elif self.config.last_test_status == "error":
+            detail = "Configured; the last explicit connection test failed."
+        else:
+            detail = "Configured and ready for a source-specific analysis adapter."
+        return ExternalSourceStatus(
+            source_key=self.source_key,
+            available=True,
+            capabilities=frozenset(),
+            detail=detail,
+        )
+
+    def resolve_media(self, context):
+        return None
+
+    def preview_frames(self, media):
+        return ()
+
+    def read_preview(self, frame):
+        raise ExternalSourceConfigError(
+            f"{self.source_key.title()} preview ingestion is not installed yet."
+        )
+
+    def subtitles(self, media):
+        return ()
+
+    def read_subtitle(self, subtitle):
+        raise ExternalSourceConfigError(
+            f"{self.source_key.title()} subtitle ingestion is not installed yet."
+        )
+
+    def media_metadata(self, media):
+        return {}
+
+    def fingerprints(self, media):
+        return ()
+
+    def known_identity(self, media):
+        return None
+
+
+def build_configured_source_registry(
+    service: ExternalSourceConfigService,
+    secrets: dict[str, str],
+) -> ExternalSourceRegistry:
+    return ExternalSourceRegistry(
+        tuple(
+            ConfiguredExternalSource(
+                source,
+                token_configured=bool(secrets.get(f"{source.source_key}_token", "")),
+            )
+            for source in service.sources()
+        )
+    )
 
 
 def test_external_connection(
