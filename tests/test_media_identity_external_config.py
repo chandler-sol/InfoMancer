@@ -100,6 +100,22 @@ class ExternalSourceConfigTests(unittest.TestCase):
         self.assertIn("source-specific analysis adapter", status.detail)
         self.assertFalse(registry.require("jellyfin").status().available)
 
+    def test_clearing_connection_result_removes_stale_success(self):
+        self.service.save_source(
+            "plex", enabled=False, server_url="http://plex.local:32400"
+        )
+        self.service.record_connection_result(
+            ExternalConnectionResult(
+                "plex", True, server_name="Plex", version="1.2.3", detail="ok"
+            )
+        )
+        self.service.clear_connection_result("plex")
+        source = self.service.source("plex")
+        self.assertEqual(source.last_test_status, "")
+        self.assertEqual(source.last_test_server_name, "")
+        self.assertEqual(source.last_test_version, "")
+        self.assertIsNone(source.last_test_at)
+
     def test_source_url_normalization_rejects_embedded_credentials_and_queries(self):
         self.assertEqual(
             normalize_server_url("HTTP://plex.local:32400/"),
