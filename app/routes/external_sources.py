@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Form, Request
 
 from ..access import require_librarian
 from ..media_identity.external_config import (
@@ -14,8 +14,6 @@ from .context import RouteContext
 
 def build_router(ctx: RouteContext):
     router = APIRouter()
-    Form = ctx.get("Form")
-    Request = ctx.get("Request")
     external_source_config = ctx.live("external_source_config")
     provider_secrets = ctx.live("provider_secrets")
     record_event = ctx.live("record_event")
