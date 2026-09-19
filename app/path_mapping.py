@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Iterable
 
 
-_WINDOWS_ABSOLUTE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
+_WINDOWS_ABSOLUTE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|//)")
 
 
 class PathMappingError(ValueError):
