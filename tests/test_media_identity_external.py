@@ -229,7 +229,7 @@ class ExternalPathMapperTests(unittest.TestCase):
     def test_windows_host_rejects_posix_component_that_becomes_drive_qualified(self):
         from app.path_mapping import validate_local_relative_components
 
-        with self.assertRaisesRegex(PathMappingError, "unsafe on this host"):
+        with self.assertRaisesRegex(PathMappingError, "unsafe for the destination path style"):
             validate_local_relative_components(
                 (r"C:\\Windows\\secret.mkv",),
                 windows_host=True,
@@ -238,7 +238,7 @@ class ExternalPathMapperTests(unittest.TestCase):
     def test_windows_host_rejects_posix_component_with_embedded_backslash_path(self):
         from app.path_mapping import validate_local_relative_components
 
-        with self.assertRaisesRegex(PathMappingError, "unsafe on this host"):
+        with self.assertRaisesRegex(PathMappingError, "unsafe for the destination path style"):
             validate_local_relative_components(
                 (r"folder\\secret.mkv",),
                 windows_host=True,
@@ -248,6 +248,12 @@ class ExternalPathMapperTests(unittest.TestCase):
         from app.path_mapping import validate_local_relative_components
 
         validate_local_relative_components(("Episode.mkv",), windows_host=True)
+
+    def test_reverse_join_rejects_local_component_that_becomes_windows_drive(self):
+        from app.path_mapping import external_join
+
+        with self.assertRaisesRegex(PathMappingError, "unsafe for the destination path style"):
+            external_join(r"D:\TV", (r"C:\Windows\secret.mkv",))
 
     def test_mapping_requires_absolute_roots(self):
         with self.assertRaisesRegex(PathMappingError, "absolute"):
