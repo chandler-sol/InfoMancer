@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from app.db import Database
+from app.media_identity.fast import FastIdentityService
 from app.media_identity.models import IdentityReference, IdentityResultState
 from app.media_identity.scoring import resolve_identity
 from app.media_identity.service import MediaIdentityDecisionService
@@ -392,6 +393,63 @@ class DecisionServiceTests(unittest.TestCase):
             )
         return scan_id
 
+    def _seed_real_fast_mismatch_inputs(self) -> Path:
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE files
+                   SET runtime_seconds=1440,media_info_at='2026-09-18T12:00:00'
+                   WHERE id=1"""
+            )
+            conn.execute(
+                """INSERT INTO provider_episode_series_cache(
+                     provider,provider_series_id,language,source_signature,
+                     episode_count,mapping_count,order_namespaces_json
+                   ) VALUES ('tvdb','4242','eng','provider-v1',2,2,
+                             '[{"namespace":"default"}]')"""
+            )
+            conn.executemany(
+                """INSERT INTO provider_episode_identities(
+                     provider,provider_series_id,provider_episode_id,language,
+                     name,overview,aired,metadata_json
+                   ) VALUES ('tvdb','4242',?,'eng',?,?,?,?)""",
+                [
+                    (
+                        "1001",
+                        "Pilot",
+                        "amber falcon orchard glacier velvet compass",
+                        "2026-01-01",
+                        json.dumps({"runtime": 24}),
+                    ),
+                    (
+                        "1002",
+                        "Second Story",
+                        "bronze harbor lantern meadow quartz thunder",
+                        "2026-01-08",
+                        json.dumps({"runtime": 24}),
+                    ),
+                ],
+            )
+            conn.executemany(
+                """INSERT INTO provider_episode_mappings(
+                     provider,provider_series_id,provider_episode_id,language,
+                     order_namespace,order_name,season,episode,absolute_number,
+                     coordinate_key,details_json
+                   ) VALUES ('tvdb','4242',?,'eng','default','Default',1,?,?,?,'{}')""",
+                [
+                    ("1001", 1, 1, json.dumps([1, 1, 1])),
+                    ("1002", 2, 2, json.dumps([1, 2, 2])),
+                ],
+            )
+        sidecar = self.media.with_suffix(".en.srt")
+        sidecar.write_text(
+            "1\n00:00:00,000 --> 00:00:05,000\n"
+            "bronze harbor lantern meadow quartz thunder\n\n"
+            "2\n00:00:06,000 --> 00:00:10,000\n"
+            "bronze harbor lantern meadow quartz thunder\n",
+            encoding="utf-8",
+        )
+        return sidecar
+
     def test_resolve_scan_persists_scores_and_result(self) -> None:
         result = self.service.resolve_scan(self.scan_id)
         self.assertEqual(result.state, IdentityResultState.STRONG_MATCH_OTHER)
@@ -496,6 +554,12 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertEqual(len(self.service.mie_findings()), 1)
         self.service.confirm_current(self.scan_id, None)
         self.assertEqual(self.service.mie_findings(), [])
+        detail = self.service.scan_detail(self.scan_id)
+        self.assertTrue(detail["confirmed_claimed"])
+        self.assertFalse(detail["actionable"])
+        preview = self.service.rename_preview(self.scan_id)
+        self.assertFalse(preview["available"])
+        self.assertEqual(preview["status"], "unavailable")
 
     def test_confirm_best_rejects_an_inconclusive_result(self) -> None:
         self.service.resolve_scan(self.scan_id)
@@ -534,6 +598,43 @@ class DecisionServiceTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(file_row["path"], str(self.media))
         self.assertEqual(file_row["episode_start"], 1)
+
+    def test_real_fast_scan_flows_through_decision_mie_and_sidecar_freshness(self) -> None:
+        sidecar = self._seed_real_fast_mismatch_inputs()
+        fast = FastIdentityService(self.database)
+
+        scan = fast.scan_file(1)
+        resolution = self.service.resolve_scan(scan.scan_id)
+
+        self.assertEqual(resolution.state, IdentityResultState.STRONG_MATCH_OTHER)
+        detail = self.service.scan_detail(scan.scan_id)
+        self.assertTrue(detail["snapshot_current"])
+        self.assertTrue(detail["actionable"])
+        findings = self.service.mie_findings()
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["evidence"]["scan_id"], scan.scan_id)
+        self.assertEqual(findings[0]["evidence"]["result_state"], "strong_match_other")
+        preview = self.service.rename_preview(scan.scan_id)
+        self.assertEqual(preview["status"], "ready")
+        self.assertEqual(preview["target_episode"], 2)
+
+        sidecar.write_text(
+            "1\n00:00:00,000 --> 00:00:05,000\n"
+            "replacement subtitle evidence that no longer matches the scan\n",
+            encoding="utf-8",
+        )
+
+        stale = self.service.scan_detail(scan.scan_id)
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+        self.assertEqual(self.service.mie_findings(), [])
+        with self.assertRaisesRegex(
+            ValueError, "changed after this identity scan"
+        ):
+            self.service.confirm_best(scan.scan_id, None)
+        stale_preview = self.service.rename_preview(scan.scan_id)
+        self.assertFalse(stale_preview["available"])
+        self.assertEqual(stale_preview["status"], "unavailable")
 
     def test_file_change_blocks_confirmation(self) -> None:
         self.service.resolve_scan(self.scan_id)
