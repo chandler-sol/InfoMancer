@@ -65,7 +65,9 @@ from .source_browser import SourceBrowserError, list_folders, preview_folder
 from .smart_collections import decode_filters, encode_filters, matching_titles, normalize_filters
 from .tvdb import TVDBClient, TVDBError
 from .provider_secrets import ProviderSecretError, ProviderSecretStore
-from .media_identity.external_config import ExternalSourceConfigService
+from .media_identity.external_config import (
+    ExternalSourceConfigService, build_configured_source_registry,
+)
 from .background import BackgroundCoordinator
 from .title_metadata import TitleMetadataService
 from .request_security import (
@@ -2734,7 +2736,12 @@ def settings_page_context(
             integration_secret_error = str(exc)
         integration_rows = []
         labels = {"plex": "Plex", "jellyfin": "Jellyfin"}
+        registry = build_configured_source_registry(
+            external_source_config, integration_secrets
+        )
+        statuses = {status.source_key: status for status in registry.statuses()}
         for source in external_source_config.sources():
+            status = statuses[source.source_key]
             integration_rows.append({
                 "source_key": source.source_key,
                 "label": labels.get(source.source_key, source.source_key.title()),
@@ -2745,6 +2752,12 @@ def settings_page_context(
                     integration_secrets.get(f"{source.source_key}_token", "")
                 ),
                 "mappings": external_source_config.mappings(source.source_key),
+                "source_status": status,
+                "last_test_status": source.last_test_status,
+                "last_test_detail": source.last_test_detail,
+                "last_test_server_name": source.last_test_server_name,
+                "last_test_version": source.last_test_version,
+                "last_test_at": source.last_test_at,
             })
         context["external_integrations"] = integration_rows
         context["integration_secret_error"] = integration_secret_error
