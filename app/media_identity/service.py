@@ -703,6 +703,20 @@ class MediaIdentityDecisionService:
 
     def rename_preview(self, scan_id: int) -> dict[str, Any]:
         detail = self.scan_detail(int(scan_id), resolve_if_needed=True)
+        if not detail.get("snapshot_current"):
+            return {
+                "available": False,
+                "status": "stale",
+                "reason": "The media or supporting evidence changed after verification. Run Episode Identity again before considering a rename.",
+                "scan": detail,
+            }
+        if detail.get("confirmed_claimed"):
+            return {
+                "available": False,
+                "status": "unavailable",
+                "reason": "The current filename was marked correct for this media snapshot, so no alternate rename is suggested.",
+                "scan": detail,
+            }
         if not detail.get("actionable"):
             return {
                 "available": False,
