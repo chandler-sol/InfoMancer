@@ -399,7 +399,7 @@ class MediaIdentityDecisionService:
             )
             if not current:
                 raise MediaIdentityDecisionError(
-                    "The media file changed after this identity scan. Run verification again before confirming it."
+                    "The media file or supporting evidence changed after this identity scan. Run verification again before confirming it."
                 )
             conn.execute(
                 """INSERT INTO media_identity_confirmations(
@@ -598,9 +598,9 @@ class MediaIdentityDecisionService:
         for scan_id in scan_ids:
             detail = self.scan_detail(scan_id)
             if not detail.get("snapshot_current"):
-                # A scan describes a frozen media snapshot. Once the file changes,
-                # its old conclusion must not be presented as evidence about the
-                # replacement contents.
+                # A scan describes frozen media and supporting-evidence inputs.
+                # Once any of those inputs change, its old conclusion must not be
+                # presented as evidence about the current file.
                 continue
             state = str(detail.get("result_state") or "")
             if state not in ACTIONABLE_STATES:
