@@ -114,6 +114,18 @@ def translate_path(value: str, external_root: str, local_root: str | Path) -> st
     return str(destination.joinpath(*relative))
 
 
+def validate_local_absolute_path(value: str | Path) -> None:
+    """Reject malformed host-local paths before mapping selection."""
+    raw = str(value or "").strip()
+    if "\x00" in raw:
+        raise PathMappingError("Local media paths cannot contain a null byte.")
+    path = PureWindowsPath(raw) if os.name == "nt" else PurePosixPath(raw)
+    if not path.is_absolute():
+        raise PathMappingError("Local media paths must be absolute.")
+    if ".." in path.parts:
+        raise PathMappingError("Local media paths cannot contain parent traversal.")
+
+
 def local_relative_parts(value: str | Path, root: str | Path) -> tuple[str, ...]:
     """Return lexical host-local relative parts using current-OS case semantics."""
     raw_value = str(value or "").strip()
@@ -172,6 +184,7 @@ class ExternalPathMapper:
         self, source_key: str, local_path: str | Path
     ) -> PathTranslation | None:
         key = str(source_key or "").strip().casefold()
+        validate_local_absolute_path(local_path)
         matches: list[tuple[PathMapping, str]] = []
         for mapping in self.mappings_for(key):
             try:
@@ -215,6 +228,7 @@ class ExternalPathMapper:
 
     def translate(self, source_key: str, external_path: str) -> PathTranslation | None:
         key = str(source_key or "").strip().casefold()
+        parse_absolute_path(external_path)
         matches: list[tuple[PathMapping, str]] = []
         for mapping in self.mappings_for(key):
             try:
