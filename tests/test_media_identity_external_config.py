@@ -9,7 +9,9 @@ from unittest.mock import patch
 from app.db import Database
 from app.media_identity.external_config import (
     ExternalSourceConfigError,
+    ExternalConnectionResult,
     ExternalSourceConfigService,
+    build_configured_source_registry,
     normalize_server_url,
     test_external_connection,
 )
@@ -63,6 +65,40 @@ class ExternalSourceConfigTests(unittest.TestCase):
                 "SELECT MAX(version) FROM schema_migrations"
             ).fetchone()[0]
         self.assertEqual(version, 21)
+
+    def test_connection_result_is_persisted_for_status_ui(self):
+        self.service.save_source(
+            "plex", enabled=False, server_url="http://plex.local:32400"
+        )
+        self.service.record_connection_result(
+            ExternalConnectionResult(
+                "plex",
+                True,
+                server_name="Living Room Plex",
+                version="1.2.3",
+                detail="Authenticated Plex connection succeeded.",
+            )
+        )
+        source = self.service.source("plex")
+        self.assertEqual(source.last_test_status, "ok")
+        self.assertEqual(source.last_test_server_name, "Living Room Plex")
+        self.assertEqual(source.last_test_version, "1.2.3")
+        self.assertIsNotNone(source.last_test_at)
+
+    def test_configured_source_registry_has_no_evidence_capabilities_yet(self):
+        self.service.save_source(
+            "plex", enabled=True, server_url="http://plex.local:32400"
+        )
+        registry = build_configured_source_registry(
+            self.service, {"plex_token": "secret"}
+        )
+        self.assertEqual(registry.keys(), ("jellyfin", "plex"))
+        plex = registry.require("plex")
+        status = plex.status()
+        self.assertTrue(status.available)
+        self.assertEqual(status.capabilities, frozenset())
+        self.assertIn("source-specific analysis adapter", status.detail)
+        self.assertFalse(registry.require("jellyfin").status().available)
 
     def test_source_url_normalization_rejects_embedded_credentials_and_queries(self):
         self.assertEqual(
