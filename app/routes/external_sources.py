@@ -89,6 +89,7 @@ def build_router(ctx: RouteContext):
                 enabled=bool(enabled),
                 server_url=normalized_url,
                 metadata_root=metadata_root if key == "plex" else "",
+                force_revision_bump=bool(new_token or clear_token),
             )
             if clear_token:
                 provider_secrets.delete({secret_key, endpoint_key})
@@ -161,6 +162,7 @@ def build_router(ctx: RouteContext):
                     "Save the integration with the token again before testing the connection."
                 )
             token = secrets.get(f"{key}_token", "")
+            tested_revision = source.config_revision
             result = test_external_connection(key, source.server_url, token)
 
             current_secrets = provider_secrets.load()
@@ -170,6 +172,7 @@ def build_router(ctx: RouteContext):
                 or not external_source_config.record_connection_result(
                     result,
                     tested_server_url=source.server_url,
+                    tested_revision=tested_revision,
                 )
             ):
                 return redirect(
