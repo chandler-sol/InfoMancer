@@ -162,7 +162,21 @@ def build_router(ctx: RouteContext):
                 )
             token = secrets.get(f"{key}_token", "")
             result = test_external_connection(key, source.server_url, token)
-            external_source_config.record_connection_result(result)
+
+            current_secrets = provider_secrets.load()
+            if (
+                current_secrets.get(f"{key}_token", "") != token
+                or current_secrets.get(f"{key}_token_endpoint", "") != source.server_url
+                or not external_source_config.record_connection_result(
+                    result,
+                    tested_server_url=source.server_url,
+                )
+            ):
+                return redirect(
+                    "/settings/integrations",
+                    f"{key.title()} settings changed while the connection test was running. "
+                    "The stale result was discarded; test the connection again.",
+                )
         except (ExternalSourceConfigError, ProviderSecretError) as exc:
             return redirect("/settings/integrations", str(exc))
 
