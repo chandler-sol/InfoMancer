@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from ..access import require_librarian
 from ..media_identity.external_config import (
     ExternalSourceConfigError,
+    external_token_is_bound,
     normalize_server_url,
     test_external_connection,
 )
@@ -42,6 +43,7 @@ def build_router(ctx: RouteContext):
     ):
         key = source_key.strip().casefold()
         secret_key = f"{key}_token"
+        endpoint_key = f"{key}_token_endpoint"
         previous = None
         saved = None
         try:
@@ -55,6 +57,16 @@ def build_router(ctx: RouteContext):
             normalized_url = normalize_server_url(server_url)
             endpoint_changed = normalized_url != previous.server_url
             has_saved_token = bool(current_secrets.get(secret_key, ""))
+            saved_token_endpoint = current_secrets.get(endpoint_key, "")
+            saved_token_is_bound = (
+                has_saved_token
+                and saved_token_endpoint == previous.server_url
+            )
+            if has_saved_token and not saved_token_is_bound and not new_token and not clear_token:
+                raise ExternalSourceConfigError(
+                    f"The saved {key.title()} token is not bound to the current server URL. "
+                    "Enter the token again or remove it before continuing."
+                )
             if endpoint_changed and has_saved_token and not new_token and not clear_token:
                 raise ExternalSourceConfigError(
                     f"The {key.title()} server URL changed. Enter a replacement token or "
@@ -62,7 +74,11 @@ def build_router(ctx: RouteContext):
                 )
             will_have_token = bool(
                 new_token
-                or (has_saved_token and not clear_token and not endpoint_changed)
+                or (
+                    saved_token_is_bound
+                    and not clear_token
+                    and not endpoint_changed
+                )
             )
             if enabled and not will_have_token:
                 raise ExternalSourceConfigError(
@@ -75,9 +91,12 @@ def build_router(ctx: RouteContext):
                 metadata_root=metadata_root if key == "plex" else "",
             )
             if clear_token:
-                provider_secrets.delete({secret_key})
+                provider_secrets.delete({secret_key, endpoint_key})
             elif new_token:
-                provider_secrets.update({secret_key: new_token})
+                provider_secrets.update({
+                    secret_key: new_token,
+                    endpoint_key: saved.server_url,
+                })
             if (
                 previous.server_url != saved.server_url
                 or bool(new_token)
@@ -135,7 +154,13 @@ def build_router(ctx: RouteContext):
         key = source_key.strip().casefold()
         try:
             source = external_source_config.source(key)
-            token = provider_secrets.load().get(f"{key}_token", "")
+            secrets = provider_secrets.load()
+            if secrets.get(f"{key}_token", "") and not external_token_is_bound(source, secrets):
+                raise ExternalSourceConfigError(
+                    f"The saved {key.title()} token is not bound to this server URL. "
+                    "Save the integration with the token again before testing the connection."
+                )
+            token = secrets.get(f"{key}_token", "")
             result = test_external_connection(key, source.server_url, token)
             external_source_config.record_connection_result(result)
         except (ExternalSourceConfigError, ProviderSecretError) as exc:
