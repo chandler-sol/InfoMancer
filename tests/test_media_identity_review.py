@@ -151,6 +151,8 @@ class EpisodeIdentityReviewContractTests(unittest.TestCase):
         self.assertIn('/confirm-current', routes)
         self.assertIn('/confirm-best', routes)
         self.assertIn("MediaIdentityDecisionService", routes)
+        self.assertIn("except sqlite3.Error as exc", routes)
+        self.assertIn("Library Health will catch up", routes)
         self.assertIn("Mark current filename correct", drawer)
         self.assertIn("Confirm suggested content", drawer)
         self.assertIn("Preview rename suggestion", drawer)
