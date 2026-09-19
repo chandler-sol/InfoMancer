@@ -9,6 +9,7 @@ from ..db import Database
 from ..naming import contained_destination, plex_episode_filename
 from .models import IdentityResultState
 from .scoring import IdentityResolution, resolve_identity
+from .text import sidecar_identity
 
 
 SUGGESTED_CONFIRM_STATES = {
@@ -281,6 +282,64 @@ class MediaIdentityDecisionService:
                 return False, current
         return True, current
 
+    @staticmethod
+    def _scan_snapshot_is_current(
+        conn: sqlite3.Connection,
+        scan: Mapping[str, Any],
+        evidence: list[dict[str, Any]],
+    ) -> tuple[bool, dict[str, Any] | None]:
+        current, file_row = MediaIdentityDecisionService._snapshot_is_current(
+            conn,
+            int(scan["file_id"]),
+            size_bytes=int(scan["file_size_bytes"] or 0),
+            modified_at=scan["file_modified_at"],
+            sha256=scan["file_sha256"],
+        )
+        if not current or file_row is None:
+            return False, file_row
+
+        claimed = MediaIdentityDecisionService._claimed_identity(scan)
+        try:
+            expected_season = int(claimed["season"])
+            expected_start = int(claimed["episode_start"])
+            expected_end = int(claimed.get("episode_end") or expected_start)
+            current_season = int(file_row["season"])
+            current_start = int(file_row["episode_start"])
+            current_end = int(file_row["episode_end"] or current_start)
+        except (KeyError, TypeError, ValueError):
+            return False, file_row
+
+        expected_filename = str(claimed.get("filename") or "")
+        if (
+            not expected_filename
+            or str(file_row["filename"] or "") != expected_filename
+            or (current_season, current_start, current_end)
+            != (expected_season, expected_start, expected_end)
+        ):
+            return False, file_row
+
+        checked_sidecars: dict[str, str] = {}
+        for item in evidence:
+            if str(item.get("source_kind") or "") != "sidecar_subtitle":
+                continue
+            source_ref = str(item.get("source_ref") or "")
+            expected_signature = str(
+                (item.get("details") or {}).get("source_signature") or ""
+            )
+            if not source_ref or not expected_signature:
+                return False, file_row
+            previous = checked_sidecars.get(source_ref)
+            if previous is not None:
+                if previous != expected_signature:
+                    return False, file_row
+                continue
+            identity = sidecar_identity(Path(source_ref))
+            if identity is None or identity.source_signature != expected_signature:
+                return False, file_row
+            checked_sidecars[source_ref] = expected_signature
+
+        return True, file_row
+
     def confirmation_status(self, file_id: int) -> dict[str, Any] | None:
         with self.database.connect() as conn:
             row = conn.execute(
@@ -327,18 +386,16 @@ class MediaIdentityDecisionService:
         with self.database.connect() as conn:
             if not conn.in_transaction:
                 conn.execute("BEGIN IMMEDIATE")
-            scan, candidates, _ = self._scan_snapshot(conn, int(scan_id))
+            scan, candidates, evidence = self._scan_snapshot(conn, int(scan_id))
             if scan["status"] != "complete":
                 raise MediaIdentityDecisionError(
                     "Only a complete Episode Identity scan can be confirmed."
                 )
             candidate = self._candidate_for_key(candidates, candidate_key)
-            current, _ = self._snapshot_is_current(
+            current, _ = self._scan_snapshot_is_current(
                 conn,
-                int(scan["file_id"]),
-                size_bytes=int(scan["file_size_bytes"] or 0),
-                modified_at=scan["file_modified_at"],
-                sha256=scan["file_sha256"],
+                scan,
+                evidence,
             )
             if not current:
                 raise MediaIdentityDecisionError(
@@ -440,12 +497,10 @@ class MediaIdentityDecisionService:
                    WHERE f.id=?""",
                 (int(scan["file_id"]),),
             ).fetchone()
-            snapshot_current, _ = self._snapshot_is_current(
+            snapshot_current, _ = self._scan_snapshot_is_current(
                 conn,
-                int(scan["file_id"]),
-                size_bytes=int(scan["file_size_bytes"] or 0),
-                modified_at=scan["file_modified_at"],
-                sha256=scan["file_sha256"],
+                scan,
+                evidence,
             )
         claimed = self._claimed_identity(scan)
         resolution = self._resolve_snapshot(scan, candidates, evidence)
@@ -475,8 +530,19 @@ class MediaIdentityDecisionService:
         result["resolution_explanation"] = resolution.explanation
         result["confirmation"] = confirmation
         result["snapshot_current"] = snapshot_current
+        confirmed_key = None
+        if confirmation and confirmation.get("current"):
+            for candidate in candidates:
+                if self._confirmation_matches_candidate(confirmation, candidate):
+                    confirmed_key = str(candidate["candidate_key"])
+                    break
+        result["confirmed_claimed"] = (
+            confirmed_key is not None
+            and confirmed_key in set(result["claimed_candidate_keys"])
+        )
         result["actionable"] = (
             snapshot_current
+            and not result["confirmed_claimed"]
             and str(result.get("result_state") or "") in ACTIONABLE_STATES
         )
         return result
