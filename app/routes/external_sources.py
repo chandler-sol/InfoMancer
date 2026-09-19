@@ -124,6 +124,7 @@ def build_router(ctx: RouteContext):
             source = external_source_config.source(key)
             token = provider_secrets.load().get(f"{key}_token", "")
             result = test_external_connection(key, source.server_url, token)
+            external_source_config.record_connection_result(result)
         except (ExternalSourceConfigError, ProviderSecretError) as exc:
             return redirect("/settings/integrations", str(exc))
 
