@@ -148,6 +148,8 @@ class EpisodeIdentityReviewContractTests(unittest.TestCase):
 
         self.assertIn('/files/{file_id}/episode-identity/fast', routes)
         self.assertIn('/episode-identity/scans/{scan_id}', routes)
+        self.assertIn("@librarian_get(", routes)
+        self.assertNotIn("resolve_if_needed=True", routes)
         self.assertIn('/confirm-current', routes)
         self.assertIn('/confirm-best', routes)
         self.assertIn("MediaIdentityDecisionService", routes)
