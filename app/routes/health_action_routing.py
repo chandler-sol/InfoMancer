@@ -8,6 +8,7 @@ from .context import RouteContext
 _SOURCE_RULES = {"source-stale", "source-offline", "source-degraded"}
 _IDENTITY_REVIEW_RULES = {"unmatched-title", "identity-confidence-low"}
 _DUPLICATE_RULES = {"duplicate-candidates", "duplicate-storage-recovery"}
+_EPISODE_IDENTITY_RULE = "episode-identity-review"
 
 
 def health_finding_href(finding: dict) -> str:
@@ -32,6 +33,11 @@ def health_finding_href(finding: dict) -> str:
 
     if rule_key in _DUPLICATE_RULES:
         return "/duplicates"
+
+    if rule_key == _EPISODE_IDENTITY_RULE:
+        scan_id = (finding.get("evidence") or {}).get("scan_id")
+        if scan_id:
+            return f"/episode-identity/scans/{int(scan_id)}"
 
     if rule_key == "technical-details-missing":
         return "/settings/system#media-information"

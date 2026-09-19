@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}Episode Identity · {{ app_name }}{% endblock %}
+{% block content %}
+{% set decision_label = 'pending' if identity.decision_pending else (identity.result_state or 'inconclusive') %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">EPISODE IDENTITY · {{ decision_label|replace('_', ' ')|upper }}</p>
+    <h1>{{ identity.file.filename if identity.file else 'Episode Identity review' }}</h1>
+    <p>InfoMancer compared the catalog claim with independent local and provider evidence. This review never changes the media file by itself.</p>
+  </div>
+  <div class="button-row">
+    {% if identity.file %}<a class="button" href="/titles/{{ identity.file.title_id }}">Back to title</a>{% endif %}
+    <a class="button" href="/review?bucket=matching">Review queue</a>
+  </div>
+</section>
+
+{% if message %}<div class="success-banner">{{ message }}</div>{% endif %}
+{% if not identity.snapshot_current %}
+<div class="notice"><strong>This verification snapshot is stale.</strong> The media file changed or can no longer be proven to match the file that was analyzed. Run Episode Identity again before confirming or renaming anything.</div>
+{% endif %}
+
+<section class="panel">
+  <header>
+    <div>
+      <p class="eyebrow">CONSERVATIVE RESULT</p>
+      <h2>{{ decision_label|replace('_', ' ')|title }}</h2>
+      <p>{{ identity.resolution_explanation }}</p>
+    </div>
+  </header>
+  <div class="mie-score-grid">
+    <article>
+      <strong>
+        {% if identity.claimed_identity.season is not none and identity.claimed_identity.episode_start is not none %}
+          S{{ '%02d'|format(identity.claimed_identity.season) }}E{{ '%02d'|format(identity.claimed_identity.episode_start) }}
+          {% if identity.claimed_identity.episode_end and identity.claimed_identity.episode_end > identity.claimed_identity.episode_start %}–E{{ '%02d'|format(identity.claimed_identity.episode_end) }}{% endif %}
+        {% else %}Unknown{% endif %}
+      </strong>
+      <h3>Catalog claim</h3>
+      <p>Derived from the cataloged filename and episode coordinates.</p>
+    </article>
+    <article>
+      <strong>
+        {% if identity.best_candidate %}
+          {% if identity.best_candidate.season is not none and identity.best_candidate.episode is not none %}S{{ '%02d'|format(identity.best_candidate.season) }}E{{ '%02d'|format(identity.best_candidate.episode) }}{% else %}Candidate{% endif %}
+        {% else %}None{% endif %}
+      </strong>
+      <h3>Best candidate</h3>
+      <p>{% if identity.best_candidate %}{{ identity.best_candidate.display_name or 'Untitled episode' }} · {{ identity.best_candidate.support_label }} support{% else %}No candidate led the evidence.{% endif %}</p>
+    </article>
+    <article>
+      <strong>{{ (identity.completed_profile or identity.requested_profile)|title }}</strong>
+      <h3>Completed tier</h3>
+      <p>Fast uses local catalog, provider metadata, stream facts, and available subtitle text.</p>
+    </article>
+    <article>
+      <strong>{{ identity.confirmation.freshness|title if identity.confirmation else 'None' }}</strong>
+      <h3>Human confirmation</h3>
+      <p>{% if identity.confirmation and identity.confirmation.current %}A Librarian confirmed content for this exact media snapshot.{% elif identity.confirmation %}The previous confirmation is stale because the media snapshot changed.{% else %}No explicit confirmation has been saved.{% endif %}</p>
+    </article>
+  </div>
+</section>
+
+{% if current_user.is_librarian %}
+<section class="panel">
+  <header><div><p class="eyebrow">HUMAN DECISION</p><h2>Confirm or inspect</h2><p>Confirmation records your decision for this exact file snapshot. It does not rename or rewrite the catalog claim.</p></div></header>
+  {% if identity.decision_pending %}
+  <p>This scan is waiting for the decision resolver. Refresh Library Health before confirming or previewing a rename.</p>
+  {% elif identity.snapshot_current %}
+  <div class="button-row">
+    {% if identity.claimed_candidate_keys|length == 1 %}
+    <form method="post" action="/episode-identity/scans/{{ identity.id }}/confirm-current">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="button">Mark current filename correct</button>
+    </form>
+    {% endif %}
+    {% if identity.result_state in ['possible_mismatch', 'likely_mismatch', 'strong_match_other'] and identity.best_candidate and identity.best_candidate.candidate_key not in identity.claimed_candidate_keys %}
+    <form method="post" action="/episode-identity/scans/{{ identity.id }}/confirm-best">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="button primary">Confirm suggested content</button>
+    </form>
+    {% endif %}
+    {% if identity.actionable %}
+    <a class="button" href="/episode-identity/scans/{{ identity.id }}/rename-preview">Preview rename suggestion</a>
+    {% endif %}
+  </div>
+  <p class="legal-note">A rename preview is advisory only. Episode Identity never applies a filesystem change automatically.</p>
+  {% else %}
+  <p>Run verification again for the current media file before recording a human decision.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="panel">
+  <header><div><p class="eyebrow">CANDIDATES</p><h2>What the evidence compared</h2><p>Candidate ordering is not a certainty score. InfoMancer requires independent content evidence before warning that another episode may be present.</p></div></header>
+  <div class="mie-profile-list">
+    {% for candidate in identity.candidates %}
+    <article class="mie-profile-card">
+      <header>
+        <div>
+          <h3>{% if candidate.season is not none and candidate.episode is not none %}S{{ '%02d'|format(candidate.season) }}E{{ '%02d'|format(candidate.episode) }} · {% endif %}{{ candidate.display_name or 'Untitled episode' }}</h3>
+          <p>{{ candidate.support_label }} supporting evidence · {{ candidate.conflict_label }} conflicting evidence · {{ candidate.independent_categories }} independent categor{{ 'y' if candidate.independent_categories == 1 else 'ies' }}</p>
+        </div>
+        {% if candidate.candidate_key == identity.best_candidate_key %}<span class="mie-profile-state">Best supported</span>{% elif candidate.candidate_key in identity.claimed_candidate_keys %}<span class="mie-profile-state inherited">Claimed</span>{% endif %}
+      </header>
+      {% if candidate.details.mappings %}
+      <details>
+        <summary class="button">Episode order mappings</summary>
+        <ul>
+          {% for mapping in candidate.details.mappings %}
+          <li><strong>{{ mapping.order_name or mapping.order_namespace|title }}</strong>: {% if mapping.season is not none and mapping.episode is not none %}S{{ '%02d'|format(mapping.season) }}E{{ '%02d'|format(mapping.episode) }}{% else %}No season/episode coordinate{% endif %}</li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel">
+  <header><div><p class="eyebrow">EVIDENCE</p><h2>Signals used</h2><p>Signals that share a correlation group are counted once by the resolver, so repeated versions of the same evidence cannot inflate confidence.</p></div></header>
+  <div class="mie-history-table">
+    <table>
+      <thead><tr><th>Category</th><th>Relation</th><th>Strength</th><th>Source</th><th>Observed value</th></tr></thead>
+      <tbody>
+      {% for item in identity.evidence %}
+        <tr>
+          <td>{{ item.evidence_category|replace('_', ' ')|title }}</td>
+          <td>{{ item.relation|title }}</td>
+          <td>{{ item.strength_label }}</td>
+          <td>{{ item.source_kind|replace('_', ' ')|title }}</td>
+          <td>{{ item.value_text or 'No additional value recorded' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

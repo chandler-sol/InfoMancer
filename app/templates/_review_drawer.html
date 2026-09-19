@@ -42,13 +42,41 @@
     {% if item.title_id %}<a class="button" href="/titles/{{ item.title_id }}">Open title</a>{% endif %}
   </div>
 
+  {% if current_user.is_librarian and item.source == 'finding' and item.status == 'active' and item.rule_key == 'episode-identity-review' and item.identity_scan_id %}
+  <section class="review-drawer-section">
+    <h3>Episode Identity decision</h3>
+    <p>These choices record a human decision for the exact media snapshot. They do not rename or rewrite the file.</p>
+    <div class="button-row">
+      <form method="post" action="/episode-identity/scans/{{ item.identity_scan_id }}/confirm-current">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button">Mark current filename correct</button>
+      </form>
+      {% if item.identity_state in ['possible_mismatch', 'likely_mismatch', 'strong_match_other'] %}
+      <form method="post" action="/episode-identity/scans/{{ item.identity_scan_id }}/confirm-best">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button primary">Confirm suggested content</button>
+      </form>
+      {% endif %}
+    </div>
+    <div class="button-row">
+      <a class="button" href="/episode-identity/scans/{{ item.identity_scan_id }}">Open full evidence</a>
+      <a class="button" href="/episode-identity/scans/{{ item.identity_scan_id }}/rename-preview">Preview rename suggestion</a>
+    </div>
+  </section>
+  {% endif %}
+
   {% if current_user.is_librarian and item.source == 'finding' and item.status == 'active' %}
   <details class="review-feedback-panel">
     <summary>Correct or dismiss</summary>
     <form method="post" action="/api/review/findings/{{ item.item_id }}/dismiss" data-workspace-ajax data-workspace-remove-key="{{ item.key }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label>Reason<select name="reason"><option value="expected">Expected for this media</option><option value="incorrect">Analysis is incorrect</option><option value="resolved_elsewhere">Already handled elsewhere</option><option value="other">Other</option></select></label>
+      {% if item.rule_key == 'episode-identity-review' %}
+      <input type="hidden" name="scope" value="finding">
+      <p class="muted">Episode Identity feedback applies only to this evidence snapshot so future episode warnings for the series remain eligible for review.</p>
+      {% else %}
       <label>Apply to<select name="scope"><option value="finding">This finding only</option>{% if item.title_id %}<option value="title">This rule for this title</option>{% endif %}{% if item.root_id %}<option value="source">This rule for this source</option>{% endif %}</select></label>
+      {% endif %}
       <label>Optional note<textarea name="note" maxlength="500" rows="3" placeholder="What should MIE understand?"></textarea></label>
       <button class="button">Save feedback and dismiss</button>
     </form>
