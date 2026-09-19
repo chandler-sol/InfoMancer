@@ -13,6 +13,8 @@ def apply_external_source_foundation(conn: sqlite3.Connection) -> None:
              server_url TEXT NOT NULL DEFAULT '',
              metadata_root TEXT NOT NULL DEFAULT '',
              config_json TEXT NOT NULL DEFAULT '{}',
+             config_revision INTEGER NOT NULL DEFAULT 0 CHECK(config_revision>=0),
+             last_test_revision INTEGER,
              last_test_status TEXT NOT NULL DEFAULT '',
              last_test_detail TEXT NOT NULL DEFAULT '',
              last_test_server_name TEXT NOT NULL DEFAULT '',
