@@ -29,6 +29,7 @@ from .source_commit import build_router as build_source_commit_router
 from .source_health import build_router as build_source_health_router
 from .update_channel_settings import build_router as build_update_channel_settings_router
 from .settings import build_router as build_settings_router
+from .external_sources import build_router as build_external_sources_router
 from .settings_quick_actions import build_router as build_settings_quick_actions_router
 from .account_avatar import build_router as build_account_avatar_router
 from .user_management import build_router as build_user_management_router
@@ -131,6 +132,7 @@ ROUTER_BUILDERS = (
     build_source_commit_router,
     build_source_health_router,
     build_update_channel_settings_router,
+    build_external_sources_router,
     build_settings_router,
     build_settings_quick_actions_router,
     build_account_avatar_router,

@@ -65,6 +65,9 @@ from .source_browser import SourceBrowserError, list_folders, preview_folder
 from .smart_collections import decode_filters, encode_filters, matching_titles, normalize_filters
 from .tvdb import TVDBClient, TVDBError
 from .provider_secrets import ProviderSecretError, ProviderSecretStore
+from .media_identity.external_config import (
+    ExternalSourceConfigService, build_configured_source_registry,
+)
 from .background import BackgroundCoordinator
 from .title_metadata import TitleMetadataService
 from .request_security import (
@@ -96,6 +99,7 @@ engagement.seed_official()
 provider_secrets = ProviderSecretStore(
     settings.database.parent / "provider-secrets.enc", settings.application_secret
 )
+external_source_config = ExternalSourceConfigService(db)
 provider_secret_error = ""
 try:
     stored_provider_secrets = provider_secrets.load()
@@ -2664,12 +2668,13 @@ def remediation_context(finding_id: int) -> dict | None:
     return {"finding": finding, "actions": actions}
 
 
-SETTINGS_SECTIONS = {"general", "metadata", "external-search", "system"}
+SETTINGS_SECTIONS = {"general", "metadata", "integrations", "external-search", "system"}
 
 
 def settings_page_context(
     request: Request, section: str, error: str = "",
     submitted: dict[str, str] | None = None,
+    extra: dict | None = None,
 ) -> dict:
     preferences = app_settings.values()
     if submitted:
@@ -2681,6 +2686,8 @@ def settings_page_context(
         "message": request.query_params.get("message", ""),
         "app_version": APP_VERSION,
     }
+    if extra:
+        context.update(extra)
     if section == "general":
         context["timezone_groups"] = timezone_groups()
     if section == "metadata":
@@ -2720,6 +2727,40 @@ def settings_page_context(
             ),
             "pin_configured": bool(tvdb.pin),
         }
+    elif section == "integrations":
+        try:
+            integration_secrets = provider_secrets.load()
+            integration_secret_error = ""
+        except ProviderSecretError as exc:
+            integration_secrets = {}
+            integration_secret_error = str(exc)
+        integration_rows = []
+        labels = {"plex": "Plex", "jellyfin": "Jellyfin"}
+        registry = build_configured_source_registry(
+            external_source_config, integration_secrets
+        )
+        statuses = {status.source_key: status for status in registry.statuses()}
+        for source in external_source_config.sources():
+            status = statuses[source.source_key]
+            integration_rows.append({
+                "source_key": source.source_key,
+                "label": labels.get(source.source_key, source.source_key.title()),
+                "enabled": source.enabled,
+                "server_url": source.server_url,
+                "metadata_root": source.metadata_root,
+                "token_configured": bool(
+                    integration_secrets.get(f"{source.source_key}_token", "")
+                ),
+                "mappings": external_source_config.mappings(source.source_key),
+                "source_status": status,
+                "last_test_status": source.last_test_status,
+                "last_test_detail": source.last_test_detail,
+                "last_test_server_name": source.last_test_server_name,
+                "last_test_version": source.last_test_version,
+                "last_test_at": source.last_test_at,
+            })
+        context["external_integrations"] = integration_rows
+        context["integration_secret_error"] = integration_secret_error
     elif section == "external-search":
         context["test_search_url"] = preferences["search_url_template"].replace(
             "{query}", quote_plus("House of the Dragon S01E01")
@@ -2777,10 +2818,11 @@ def settings_page_context(
 def render_settings(
     request: Request, section: str, error: str = "",
     submitted: dict[str, str] | None = None, status_code: int = 200,
+    extra: dict | None = None,
 ):
     return templates.TemplateResponse(
         request, "settings.html",
-        settings_page_context(request, section, error, submitted),
+        settings_page_context(request, section, error, submitted, extra),
         status_code=status_code,
     )
 

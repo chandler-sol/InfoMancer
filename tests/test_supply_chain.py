@@ -71,8 +71,8 @@ class SupplyChainTests(unittest.TestCase):
         self.assertIn("bandit -r app scripts desktop", tests)
         self.assertIn("cargo-audit --version 0.22.2", tests)
         self.assertIn("cargo audit --file desktop/src-tauri/Cargo.lock", tests)
-        self.assertIn("npm audit --audit-level=high", windows)
-        self.assertIn("npm audit --audit-level=high", release)
+        self.assertIn("npm audit --package-lock-only --omit=optional --audit-level=high", windows)
+        self.assertIn("npm audit --package-lock-only --omit=optional --audit-level=high", release)
 
     def test_rust_audit_rejects_a_stale_lockfile_before_scanning(self):
         tests = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
@@ -118,7 +118,7 @@ class SupplyChainTests(unittest.TestCase):
         self.assertNotIn("npm install", acceptance)
         self.assertLess(
             acceptance.index("npm ci --ignore-scripts"),
-            acceptance.index("npm audit --audit-level=high"),
+            acceptance.index("npm audit --audit-level=high || python ../scripts/audit_npm_lock.py package-lock.json --audit-level high"),
         )
 
     def test_windows_package_smoke_and_signed_publisher_share_real_builder(self):

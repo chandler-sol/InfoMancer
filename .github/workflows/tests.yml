@@ -156,7 +156,11 @@ jobs:
         working-directory: e2e
         run: |
           npm ci --ignore-scripts
-          npm audit --audit-level=high
+          # npm's registry can currently return a malformed Bulk Advisory response
+          # and then reject the retiring Quick Audit fallback. Keep npm audit as the
+          # primary check, but fail closed through our lockfile-based Bulk endpoint
+          # reader when the CLI cannot complete the audit.
+          npm audit --audit-level=high || python ../scripts/audit_npm_lock.py package-lock.json --audit-level high
           # GitHub's hosted image already carries Chromium runtime libraries. Avoid
           # --with-deps here because it mutates runner apt sources and can fail on an
           # unrelated third-party repository before Playwright is even installed.

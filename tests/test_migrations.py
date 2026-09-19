@@ -42,6 +42,7 @@ class MigrationTests(unittest.TestCase):
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=18").fetchone())
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=19").fetchone())
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=20").fetchone())
+                self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=21").fetchone())
                 rename_columns = {row["name"] for row in upgraded.execute("PRAGMA table_info(rename_proposals)")}
                 self.assertTrue({"file_id", "source_path", "destination_path", "source_size", "source_mtime_ns", "status"}.issubset(rename_columns))
                 operation_columns = {
@@ -64,15 +65,34 @@ class MigrationTests(unittest.TestCase):
                         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='provider_episode_series_cache'"
                     ).fetchone()
                 )
+                self.assertIsNotNone(
+                    upgraded.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='external_analysis_sources'"
+                    ).fetchone()
+                )
+                self.assertIsNotNone(
+                    upgraded.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='external_path_mappings'"
+                    ).fetchone()
+                )
+                external_source_columns = {
+                    row["name"]
+                    for row in upgraded.execute("PRAGMA table_info(external_analysis_sources)")
+                }
+                self.assertTrue({
+                    "source_key", "enabled", "server_url", "metadata_root",
+                    "last_test_status", "last_test_detail", "last_test_server_name",
+                    "last_test_version", "last_test_at",
+                }.issubset(external_source_columns))
 
-    def test_migrations_17_through_20_preserve_safe_downgrade_semantics(self):
+    def test_migrations_17_through_21_preserve_safe_downgrade_semantics(self):
         migration_17 = next(item for item in MIGRATIONS if item.version == 17)
         self.assertEqual(migration_17.compatibility, "behavioral")
         self.assertEqual(migration_17.minimum_reader_schema, 1)
         self.assertEqual(migration_17.minimum_writer_schema, 1)
         self.assertEqual(migration_17.downgrade_policy, "compatible")
 
-        for version in (18, 19, 20):
+        for version in (18, 19, 20, 21):
             migration = next(item for item in MIGRATIONS if item.version == version)
             self.assertEqual(migration.compatibility, "additive")
             self.assertEqual(migration.minimum_reader_schema, 1)
@@ -80,7 +100,7 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(migration.downgrade_policy, "compatible")
 
         self.assertEqual(schema_contract(), {
-            "current": 20,
+            "current": 21,
             "minimum_reader_schema": 1,
             "minimum_writer_schema": 1,
             "downgrade_policy": "compatible",
@@ -96,11 +116,11 @@ class MigrationTests(unittest.TestCase):
                         """SELECT migration_version,compatibility,minimum_reader_schema,
                                   minimum_writer_schema,downgrade_policy
                            FROM schema_compatibility
-                           WHERE migration_version IN (17,18,19,20)"""
+                           WHERE migration_version IN (17,18,19,20,21)"""
                     )
                 }
             self.assertEqual(rows[17]["compatibility"], "behavioral")
-            for version in (18, 19, 20):
+            for version in (18, 19, 20, 21):
                 self.assertEqual(rows[version]["compatibility"], "additive")
                 self.assertEqual(rows[version]["minimum_reader_schema"], 1)
                 self.assertEqual(rows[version]["minimum_writer_schema"], 1)

@@ -112,6 +112,49 @@ class ProviderSecretStore:
             if isinstance(key, str) and isinstance(value, str)
         }
 
+    def delete(self, keys: set[str] | tuple[str, ...] | list[str]) -> None:
+        current = self.load()
+        changed = False
+        for key in keys:
+            if key in current:
+                del current[key]
+                changed = True
+        if not changed:
+            return
+        temporary = ""
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            descriptor, temporary = tempfile.mkstemp(
+                dir=self.path.parent,
+                prefix=f".{self.path.name}.",
+                suffix=".tmp",
+            )
+            try:
+                os.chmod(temporary, 0o600)
+            except OSError:
+                pass
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(
+                    self._cipher(create_local=True).encrypt(
+                        json.dumps(current, sort_keys=True).encode("utf-8")
+                    )
+                )
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.path)
+            temporary = ""
+        except OSError as exc:
+            raise ProviderSecretError(
+                "InfoMancer could not update the saved provider credentials. Check that the "
+                "application data folder is writable, then try again."
+            ) from exc
+        finally:
+            if temporary:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+
     def update(self, values: dict[str, str]) -> None:
         current = self.load()
         current.update({key: value.strip() for key, value in values.items()})
