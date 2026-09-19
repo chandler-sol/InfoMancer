@@ -43,9 +43,16 @@ def build_router(ctx: RouteContext):
     ):
         key = source_key.strip().casefold()
         secret_key = f"{key}_token"
+        previous = None
+        saved = None
         try:
+            previous = external_source_config.source(key)
             current_secrets = provider_secrets.load()
             new_token = token.strip()
+            if new_token and clear_token:
+                raise ExternalSourceConfigError(
+                    "Choose either a replacement token or Remove saved token, not both."
+                )
             will_have_token = bool(
                 new_token
                 or (secret_key in current_secrets and not clear_token)
@@ -64,7 +71,27 @@ def build_router(ctx: RouteContext):
                 provider_secrets.delete({secret_key})
             elif new_token:
                 provider_secrets.update({secret_key: new_token})
-        except (ExternalSourceConfigError, ProviderSecretError) as exc:
+        except ProviderSecretError as exc:
+            if previous is not None and saved is not None:
+                try:
+                    external_source_config.save_source(
+                        previous.source_key,
+                        enabled=previous.enabled,
+                        server_url=previous.server_url,
+                        metadata_root=previous.metadata_root,
+                        config=previous.config,
+                    )
+                except ExternalSourceConfigError:
+                    pass
+            record_event(
+                "settings",
+                f"{key.title() if key else 'External'} integration was not saved.",
+                level="error",
+                detail=str(exc),
+                user_id=request.state.user.id,
+            )
+            return redirect("/settings/integrations", str(exc))
+        except ExternalSourceConfigError as exc:
             record_event(
                 "settings",
                 f"{key.title() if key else 'External'} integration was not saved.",
