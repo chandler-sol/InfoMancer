@@ -85,6 +85,32 @@ class ExternalPathMapperTests(unittest.TestCase):
             str(self.local / "tv" / "The Show" / "Season 01" / "Episode.mkv"),
         )
 
+    def test_windows_unc_source_path_is_host_independent(self):
+        mapper = ExternalPathMapper(
+            [PathMapping("plex", r"\\\\NAS\\TV", str(self.local / "tv"))]
+        )
+        translated = mapper.translate(
+            "plex",
+            r"\\\\nas\\tv\\Show\\Episode.mkv",
+        )
+        self.assertEqual(
+            translated.local_path,
+            str(self.local / "tv" / "Show" / "Episode.mkv"),
+        )
+
+    def test_forward_slash_unc_source_path_uses_windows_semantics(self):
+        mapper = ExternalPathMapper(
+            [PathMapping("jellyfin", "//NAS/TV", str(self.local / "tv"))]
+        )
+        translated = mapper.translate(
+            "jellyfin",
+            "//nas/tv/Show/Episode.mkv",
+        )
+        self.assertEqual(
+            translated.local_path,
+            str(self.local / "tv" / "Show" / "Episode.mkv"),
+        )
+
     def test_posix_source_paths_remain_case_sensitive(self):
         mapper = ExternalPathMapper(
             [PathMapping("jellyfin", "/srv/TV", str(self.local / "tv"))]
