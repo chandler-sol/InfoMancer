@@ -82,6 +82,11 @@ class NpmLockAuditTests(unittest.TestCase):
         decoded = _decode_registry_payload(payload)
         self.assertEqual(decoded["playwright"][0]["severity"], "high")
 
+    def test_registry_payload_caps_decompressed_size(self):
+        oversized = gzip.compress(b"x" * (8 * 1024 * 1024 + 1))
+        with self.assertRaisesRegex(NpmLockAuditError, "after decompression"):
+            _decode_registry_payload(oversized)
+
     def test_blocking_advisories_respects_threshold(self):
         advisories = {
             "a": [{"severity": "moderate", "title": "moderate"}],
