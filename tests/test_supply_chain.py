@@ -118,7 +118,7 @@ class SupplyChainTests(unittest.TestCase):
         self.assertNotIn("npm install", acceptance)
         self.assertLess(
             acceptance.index("npm ci --ignore-scripts"),
-            acceptance.index("npm audit --package-lock-only --omit=optional --audit-level=high"),
+            acceptance.index("npm audit --audit-level=high || python ../scripts/audit_npm_lock.py package-lock.json --audit-level high"),
         )
 
     def test_windows_package_smoke_and_signed_publisher_share_real_builder(self):
