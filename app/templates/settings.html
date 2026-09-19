@@ -82,6 +82,14 @@
       <div><strong>Pending</strong><span>Preview adapter</span></div>
       <div><strong>Read-only</strong><span>Source access</span></div>
     </div>
+    <p class="muted">{{ source.source_status.detail }}</p>
+    {% if source.last_test_at %}
+    <dl class="settings-facts">
+      <div><dt>Last connection test</dt><dd>{{ 'Succeeded' if source.last_test_status == 'ok' else 'Failed' }} · {{ local_time(source.last_test_at) }}</dd></div>
+      {% if source.last_test_server_name %}<div><dt>Server</dt><dd>{{ source.last_test_server_name }}{% if source.last_test_version %} · {{ source.last_test_version }}{% endif %}</dd></div>{% endif %}
+      {% if source.last_test_detail %}<div><dt>Test detail</dt><dd>{{ source.last_test_detail }}</dd></div>{% endif %}
+    </dl>
+    {% endif %}
 
     <form class="settings-form" method="post" action="/settings/integrations/{{ source.source_key }}">
       <div class="settings-form-grid">
