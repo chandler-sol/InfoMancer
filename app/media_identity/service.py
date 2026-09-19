@@ -786,12 +786,11 @@ class MediaIdentityDecisionService:
             }
 
         with self.database.connect() as conn:
-            current, _ = self._snapshot_is_current(
+            scan, _, evidence = self._scan_snapshot(conn, int(scan_id))
+            current, _ = self._scan_snapshot_is_current(
                 conn,
-                int(detail["file_id"]),
-                size_bytes=int(detail["file_size_bytes"] or 0),
-                modified_at=detail["file_modified_at"],
-                sha256=detail.get("file_sha256"),
+                scan,
+                evidence,
             )
         source = Path(str(file_row["path"]))
         raw_extension = str(file_row.get("extension") or "").strip()
