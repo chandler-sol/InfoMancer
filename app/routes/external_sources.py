@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from ..access import require_librarian
 from ..media_identity.external_config import (
     ExternalSourceConfigError,
+    normalize_server_url,
     test_external_connection,
 )
 from ..provider_secrets import ProviderSecretError
@@ -53,9 +54,17 @@ def build_router(ctx: RouteContext):
                 raise ExternalSourceConfigError(
                     "Choose either a replacement token or Remove saved token, not both."
                 )
+            normalized_url = normalize_server_url(server_url)
+            endpoint_changed = normalized_url != previous.server_url
+            has_saved_token = bool(current_secrets.get(secret_key, ""))
+            if endpoint_changed and has_saved_token and not new_token and not clear_token:
+                raise ExternalSourceConfigError(
+                    f"The {key.title()} server URL changed. Enter a replacement token or "
+                    "select Remove saved token so the credential cannot be sent to a different server."
+                )
             will_have_token = bool(
                 new_token
-                or (secret_key in current_secrets and not clear_token)
+                or (has_saved_token and not clear_token and not endpoint_changed)
             )
             if enabled and not will_have_token:
                 raise ExternalSourceConfigError(
@@ -64,7 +73,7 @@ def build_router(ctx: RouteContext):
             saved = external_source_config.save_source(
                 key,
                 enabled=bool(enabled),
-                server_url=server_url,
+                server_url=normalized_url,
                 metadata_root=metadata_root if key == "plex" else "",
             )
             if clear_token:
