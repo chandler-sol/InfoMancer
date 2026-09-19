@@ -152,6 +152,10 @@ class ExternalSourceConfigTests(unittest.TestCase):
             normalize_server_url("http://[::1")
         with self.assertRaisesRegex(ExternalSourceConfigError, "not valid"):
             normalize_server_url("http://plex.local:99999")
+        with self.assertRaisesRegex(ExternalSourceConfigError, "whitespace"):
+            normalize_server_url("http://plex.local:32400/path with space")
+        with self.assertRaisesRegex(ExternalSourceConfigError, "whitespace"):
+            normalize_server_url("http://plex local:32400")
 
     def test_enabled_source_requires_url_but_disabled_shell_can_be_saved(self):
         with self.assertRaisesRegex(ExternalSourceConfigError, "URL"):
