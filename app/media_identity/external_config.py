@@ -153,6 +153,21 @@ class ExternalSourceConfigService:
             )
         return self.source(key)
 
+    def clear_connection_result(self, source_key: str) -> None:
+        key = self._source_key(source_key)
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE external_analysis_sources
+                   SET last_test_status='',
+                       last_test_detail='',
+                       last_test_server_name='',
+                       last_test_version='',
+                       last_test_at=NULL,
+                       updated_at=CURRENT_TIMESTAMP
+                   WHERE source_key=?""",
+                (key,),
+            )
+
     def record_connection_result(
         self, result: ExternalConnectionResult
     ) -> None:
