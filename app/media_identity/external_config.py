@@ -60,6 +60,10 @@ def normalize_server_url(value: str) -> str:
         raise ExternalSourceConfigError(
             "Server URL cannot contain whitespace or control characters."
         )
+    if any(ord(character) > 127 for character in raw):
+        raise ExternalSourceConfigError(
+            "Server URL cannot contain non-ASCII characters. Use the server's ASCII URL."
+        )
     try:
         parsed = urllib.parse.urlsplit(raw)
         scheme = parsed.scheme.casefold()
@@ -197,11 +201,15 @@ class ExternalSourceConfigService:
             )
 
     def record_connection_result(
-        self, result: ExternalConnectionResult
-    ) -> None:
+        self,
+        result: ExternalConnectionResult,
+        *,
+        tested_server_url: str,
+    ) -> bool:
         key = self._source_key(result.source_key)
+        endpoint = normalize_server_url(tested_server_url)
         with self.database.connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """UPDATE external_analysis_sources
                    SET last_test_status=?,
                        last_test_detail=?,
@@ -209,15 +217,17 @@ class ExternalSourceConfigService:
                        last_test_version=?,
                        last_test_at=CURRENT_TIMESTAMP,
                        updated_at=CURRENT_TIMESTAMP
-                   WHERE source_key=?""",
+                   WHERE source_key=? AND server_url=?""",
                 (
                     "ok" if result.ok else "error",
                     result.detail,
                     result.server_name,
                     result.version,
                     key,
+                    endpoint,
                 ),
             )
+            return cursor.rowcount == 1
 
     def mappings(self, source_key: str) -> tuple[dict[str, Any], ...]:
         key = self._source_key(source_key)
