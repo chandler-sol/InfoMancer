@@ -53,12 +53,24 @@ def normalize_server_url(value: str) -> str:
     raw = str(value or "").strip()
     if not raw:
         return ""
-    parsed = urllib.parse.urlsplit(raw)
-    if parsed.scheme.casefold() not in {"http", "https"} or not parsed.hostname:
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+        scheme = parsed.scheme.casefold()
+        hostname = parsed.hostname
+        username = parsed.username
+        password = parsed.password
+        # Accessing port validates malformed or out-of-range port syntax even
+        # though urlunsplit() preserves the original normalized netloc.
+        _port = parsed.port
+    except ValueError as exc:
+        raise ExternalSourceConfigError(
+            "Server URL is not valid. Enter a complete HTTP or HTTPS address."
+        ) from exc
+    if scheme not in {"http", "https"} or not hostname:
         raise ExternalSourceConfigError(
             "Server URL must be a complete HTTP or HTTPS address."
         )
-    if parsed.username or parsed.password:
+    if username or password:
         raise ExternalSourceConfigError(
             "Do not put credentials in the server URL. Save the access token separately."
         )
@@ -68,7 +80,7 @@ def normalize_server_url(value: str) -> str:
         )
     path = parsed.path.rstrip("/")
     return urllib.parse.urlunsplit(
-        (parsed.scheme.casefold(), parsed.netloc, path, "", "")
+        (scheme, parsed.netloc, path, "", "")
     )
 
 
@@ -441,7 +453,10 @@ def test_external_connection(
         }
 
     request = urllib.request.Request(url, headers=headers, method="GET")
-    opener = urllib.request.build_opener(_NoRedirect)
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        _NoRedirect(),
+    )
     try:
         with opener.open(request, timeout=max(1.0, min(float(timeout), 15.0))) as response:
             if response.status != 200:
