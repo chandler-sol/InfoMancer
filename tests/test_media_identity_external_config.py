@@ -78,7 +78,8 @@ class ExternalSourceConfigTests(unittest.TestCase):
                 server_name="Living Room Plex",
                 version="1.2.3",
                 detail="Authenticated Plex connection succeeded.",
-            )
+            ),
+            tested_server_url="http://plex.local:32400",
         )
         source = self.service.source("plex")
         self.assertEqual(source.last_test_status, "ok")
@@ -111,7 +112,8 @@ class ExternalSourceConfigTests(unittest.TestCase):
         self.service.record_connection_result(
             ExternalConnectionResult(
                 "plex", True, server_name="Plex", version="1.2.3", detail="ok"
-            )
+            ),
+            tested_server_url="http://plex.local:32400",
         )
         self.service.clear_connection_result("plex")
         source = self.service.source("plex")
@@ -127,7 +129,8 @@ class ExternalSourceConfigTests(unittest.TestCase):
         self.service.record_connection_result(
             ExternalConnectionResult(
                 "plex", False, detail="The server rejected the access token."
-            )
+            ),
+            tested_server_url="http://plex.local:32400",
         )
         registry = build_configured_source_registry(
             self.service, {
@@ -138,6 +141,29 @@ class ExternalSourceConfigTests(unittest.TestCase):
         status = registry.require("plex").status()
         self.assertFalse(status.available)
         self.assertIn("failed", status.detail)
+
+    def test_connection_result_is_discarded_if_endpoint_changed_during_test(self):
+        self.service.save_source(
+            "plex", enabled=True, server_url="http://plex-a.local:32400"
+        )
+        self.service.save_source(
+            "plex", enabled=True, server_url="http://plex-b.local:32400"
+        )
+        recorded = self.service.record_connection_result(
+            ExternalConnectionResult(
+                "plex", True, server_name="Old Plex", version="1.0", detail="ok"
+            ),
+            tested_server_url="http://plex-a.local:32400",
+        )
+        self.assertFalse(recorded)
+        source = self.service.source("plex")
+        self.assertEqual(source.server_url, "http://plex-b.local:32400")
+        self.assertEqual(source.last_test_status, "")
+        self.assertIsNone(source.last_test_at)
+
+    def test_source_url_normalization_rejects_non_ascii_characters(self):
+        with self.assertRaisesRegex(ExternalSourceConfigError, "non-ASCII"):
+            normalize_server_url("http://jellyfin.local/jellyfín")
 
     def test_source_url_normalization_rejects_embedded_credentials_and_queries(self):
         self.assertEqual(
