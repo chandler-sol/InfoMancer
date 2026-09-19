@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
@@ -147,6 +148,10 @@ class ExternalSourceConfigTests(unittest.TestCase):
             normalize_server_url("http://plex.local:32400/?token=secret")
         with self.assertRaisesRegex(ExternalSourceConfigError, "complete"):
             normalize_server_url("plex.local:32400")
+        with self.assertRaisesRegex(ExternalSourceConfigError, "not valid"):
+            normalize_server_url("http://[::1")
+        with self.assertRaisesRegex(ExternalSourceConfigError, "not valid"):
+            normalize_server_url("http://plex.local:99999")
 
     def test_enabled_source_requires_url_but_disabled_shell_can_be_saved(self):
         with self.assertRaisesRegex(ExternalSourceConfigError, "URL"):
@@ -229,10 +234,21 @@ class ExternalSourceConfigTests(unittest.TestCase):
         opener = DummyOpener(
             DummyResponse({"MediaContainer": {"friendlyName": "Plex", "version": "1.2.3"}})
         )
-        with patch("app.media_identity.external_config.urllib.request.build_opener", return_value=opener):
+        with patch(
+            "app.media_identity.external_config.urllib.request.build_opener",
+            return_value=opener,
+        ) as builder:
             result = test_external_connection(
                 "plex", "http://plex.local:32400", "top-secret", timeout=3
             )
+        handlers = builder.call_args.args
+        proxy_handlers = [
+            handler
+            for handler in handlers
+            if isinstance(handler, urllib.request.ProxyHandler)
+        ]
+        self.assertEqual(len(proxy_handlers), 1)
+        self.assertEqual(proxy_handlers[0].proxies, {})
         self.assertTrue(result.ok)
         self.assertEqual(result.server_name, "Plex")
         self.assertNotIn("top-secret", opener.request.full_url)
