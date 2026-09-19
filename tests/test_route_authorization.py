@@ -51,6 +51,7 @@ class RouteAuthorizationTests(unittest.TestCase):
             ("/titles/{title_id}/collections", "POST"),
             ("/episode-identity/scans/{scan_id}", "GET"),
             ("/episode-identity/scans/{scan_id}/rename-preview", "GET"),
+            ("/settings/integrations/plex/mapping-test", "GET"),
         ):
             with self.subTest(path=path, method=method):
                 self.assertIn(require_librarian, self.dependencies_for(path, method))
