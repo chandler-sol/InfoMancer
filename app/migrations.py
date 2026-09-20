@@ -7,7 +7,10 @@ from typing import Callable
 
 from .media_identity.migration import apply_media_identity_foundation
 from .media_identity.provider_migration import apply_provider_episode_cache
-from .media_identity.external_migration import apply_external_source_foundation
+from .media_identity.external_migration import (
+    apply_external_source_credential_generation,
+    apply_external_source_foundation,
+)
 
 
 COMPATIBILITY_LEVELS = {"additive", "behavioral", "breaking"}
@@ -404,6 +407,11 @@ MIGRATIONS = (
     additive_migration(19, "0.9 media identity foundation", apply_media_identity_foundation),
     additive_migration(20, "0.9 provider episode identity cache", apply_provider_episode_cache),
     additive_migration(21, "0.9 external analysis source foundation", apply_external_source_foundation),
+    additive_migration(
+        22,
+        "0.9 external credential generation binding",
+        apply_external_source_credential_generation,
+    ),
 )
 
 CURRENT_SCHEMA_VERSION = max(migration.version for migration in MIGRATIONS)
