@@ -1357,12 +1357,10 @@ class PlexBifSource:
                 current.media_source_id,
                 allow_insecure_http=self.allow_insecure_http,
             )
-        except PlexBifError as http_error:
+        except PlexPreviewUnavailable:
             metadata_root = effective_plex_metadata_root(self.metadata_root)
             if metadata_root is None:
-                if isinstance(http_error, PlexPreviewUnavailable):
-                    return ()
-                raise
+                return ()
             try:
                 bif_path = resolve_local_bif_path(
                     metadata_root,
@@ -1370,9 +1368,7 @@ class PlexBifSource:
                     expected_external_path=current.path,
                 )
                 if bif_path is None:
-                    if isinstance(http_error, PlexPreviewUnavailable):
-                        return ()
-                    raise http_error
+                    return ()
                 local_index = read_bif_index(bif_path)
                 return enumerate_bif_preview_frames(
                     item_id=current.item_id,
@@ -1383,9 +1379,7 @@ class PlexBifSource:
                     metadata_root=metadata_root,
                 )
             except PlexBifError:
-                if isinstance(http_error, PlexPreviewUnavailable):
-                    return ()
-                raise http_error
+                return ()
         return enumerate_plex_http_preview_frames(
             item_id=current.item_id,
             part_id=current.media_source_id,
