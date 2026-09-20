@@ -65,7 +65,7 @@
   <section class="panel settings-card full-width">
     <p class="eyebrow">MEDIA SERVERS</p>
     <h2>Episode Identity integrations</h2>
-    <p class="muted">Plex and Jellyfin are optional, read-only analysis accelerators. The Jellyfin Trickplay adapter can be configured now, but preview frames are not advertised as analysis-ready until a consuming analyzer is installed. Plex preview-image ingestion remains unavailable until its dedicated adapter is installed.</p>
+    <p class="muted">Plex and Jellyfin are optional, read-only analysis accelerators. Their preview adapters can be configured now, but preview frames are not advertised as analysis-ready until a consuming analyzer is installed.</p>
     {% if integration_secret_error %}<div class="form-error">{{ integration_secret_error }}</div>{% endif %}
   </section>
 
@@ -82,7 +82,7 @@
       {% if source.source_key == 'jellyfin' %}
       <div><strong>{{ 'Ready' if source.preview_frames_available else 'Installed' if source.source_status.available else 'Unavailable' }}</strong><span>Trickplay adapter</span></div>
       {% else %}
-      <div><strong>Pending</strong><span>Preview adapter</span></div>
+      <div><strong>{{ 'Ready' if source.preview_frames_available else 'Installed' if source.source_status.available else 'Unavailable' }}</strong><span>BIF adapter</span></div>
       {% endif %}
       <div><strong>Read-only</strong><span>Source access</span></div>
     </div>
@@ -108,7 +108,7 @@
         {% if source.source_key == 'plex' %}
         <label>Plex metadata root
           <input name="metadata_root" value="{{ source.metadata_root }}" placeholder="Optional custom Plex data root">
-          <small>Optional for now. PR G will use this for read-only BIF discovery when automatic detection is insufficient.</small>
+          <small>Optional custom local Plex data root for read-only filesystem fallback. Normal BIF reuse prefers Plex's HTTP API and does not require this path.</small>
         </label>
         {% endif %}
       </div>
