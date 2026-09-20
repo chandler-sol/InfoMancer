@@ -10,6 +10,7 @@ from ..media_identity.external_config import (
     normalize_server_url,
     test_external_connection,
 )
+from ..media_identity.sources.plex import PlexBifError, normalize_plex_metadata_root
 from ..provider_secrets import ProviderSecretError
 from .context import RouteContext
 
@@ -69,6 +70,18 @@ def build_router(ctx: RouteContext):
                     f"{key.title()} credentials will not be sent over plain HTTP. "
                     "Use HTTPS or explicitly allow insecure HTTP for this integration."
                 )
+
+            validated_metadata_root = str(metadata_root or "").strip()
+            if key == "plex" and validated_metadata_root:
+                try:
+                    validated_metadata_root = str(
+                        normalize_plex_metadata_root(validated_metadata_root)
+                    )
+                except PlexBifError as exc:
+                    raise ExternalSourceConfigError(str(exc)) from exc
+            elif key != "plex":
+                validated_metadata_root = ""
+
             source_config = dict(previous.config)
             if key in {"plex", "jellyfin"}:
                 source_config["allow_insecure_http"] = allow_insecure
@@ -123,7 +136,7 @@ def build_router(ctx: RouteContext):
                 key,
                 enabled=bool(enabled),
                 server_url=normalized_url,
-                metadata_root=metadata_root if key == "plex" else "",
+                metadata_root=validated_metadata_root,
                 config=source_config,
                 credential_generation=credential_generation,
             )
