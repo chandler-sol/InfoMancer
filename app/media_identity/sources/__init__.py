@@ -39,24 +39,38 @@ __all__ = [
 
 from .plex import (
     PlexBifError,
+    PlexBifSource,
     PlexBifFrameRange,
     PlexBifIndex,
     bif_source_signature,
     enumerate_bif_preview_frames,
+    enumerate_plex_http_preview_frames,
+    fetch_plex_bif_image,
+    fetch_plex_bif_index,
+    fetch_plex_episode_candidates,
+    fetch_plex_item,
     normalize_plex_metadata_root,
     parse_bif_index,
     plex_bif_path_for_bundle,
     read_bif_index,
+    resolve_plex_media_ref,
 )
 
 __all__ += [
     "PlexBifError",
+    "PlexBifSource",
     "PlexBifFrameRange",
     "PlexBifIndex",
     "bif_source_signature",
     "enumerate_bif_preview_frames",
+    "enumerate_plex_http_preview_frames",
+    "fetch_plex_bif_image",
+    "fetch_plex_bif_index",
+    "fetch_plex_episode_candidates",
+    "fetch_plex_item",
     "normalize_plex_metadata_root",
     "parse_bif_index",
     "plex_bif_path_for_bundle",
     "read_bif_index",
+    "resolve_plex_media_ref",
 ]
