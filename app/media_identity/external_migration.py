@@ -48,3 +48,17 @@ def apply_external_source_foundation(conn: sqlite3.Connection) -> None:
            VALUES (?,0)""",
         (("plex",), ("jellyfin",)),
     )
+
+
+def apply_external_source_credential_generation(conn: sqlite3.Connection) -> None:
+    """Upgrade databases that already applied the earlier Migration 21 shape."""
+
+    columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(external_analysis_sources)")
+    }
+    if "credential_generation" not in columns:
+        conn.execute(
+            """ALTER TABLE external_analysis_sources
+               ADD COLUMN credential_generation TEXT NOT NULL DEFAULT ''"""
+        )
