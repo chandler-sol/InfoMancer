@@ -81,7 +81,7 @@ class MigrationTests(unittest.TestCase):
                 }
                 self.assertTrue({
                     "source_key", "enabled", "server_url", "metadata_root",
-                    "config_revision", "last_test_revision",
+                    "credential_generation", "config_revision", "last_test_revision",
                     "last_test_status", "last_test_detail", "last_test_server_name",
                     "last_test_version", "last_test_at",
                 }.issubset(external_source_columns))
