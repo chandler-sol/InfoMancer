@@ -12,8 +12,14 @@ import uuid
 
 from PIL import Image, UnidentifiedImageError
 
-from ...path_mapping import PathMappingError, parse_absolute_path
-from ..external import ExternalMediaRef, PreviewFrameRef
+from ...path_mapping import ExternalPathMapper, PathMappingError, parse_absolute_path
+from ..external import (
+    ExternalCapability,
+    ExternalMediaRef,
+    ExternalSourceStatus,
+    PreviewFrameRef,
+)
+from ..models import AnalyzerContext
 
 
 _MAX_THUMBNAILS = 1_000_000
@@ -23,6 +29,8 @@ _MAX_INTERVAL_MS = 86_400_000
 _MAX_TILE_SHEET_DIMENSION = 32_768
 _MAX_TILE_SHEET_PIXELS = 64_000_000
 _MAX_TILE_JPEG_BYTES = 32 * 1024 * 1024
+_MAX_JSON_BYTES = 8 * 1024 * 1024
+_MAX_EPISODE_CANDIDATES = 256
 
 
 class JellyfinAdapterError(ValueError):
@@ -619,3 +627,319 @@ def resolve_media_ref(
         provider_ids=provider_ids,
         source_signature=(f"jellyfin-item:{item_id}:{etag}" if etag else f"jellyfin-item:{item_id}"),
     )
+
+
+def _read_jellyfin_json(
+    server_url: str,
+    token: str,
+    path: str,
+    *,
+    query: Mapping[str, Any] | None = None,
+    timeout: float = 5.0,
+    max_bytes: int = _MAX_JSON_BYTES,
+) -> Mapping[str, Any]:
+    credential = str(token or "").strip()
+    if not credential:
+        raise JellyfinAdapterError("A Jellyfin access token is required.")
+    limit = int(max_bytes)
+    if limit <= 0 or limit > _MAX_JSON_BYTES:
+        raise JellyfinAdapterError("Jellyfin JSON response limit is invalid.")
+
+    base = _normalize_jellyfin_server_url(server_url)
+    route = "/" + str(path or "").lstrip("/")
+    url = base + route
+    if query:
+        url += "?" + urllib.parse.urlencode(
+            [(str(key), str(value)) for key, value in query.items()]
+        )
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "X-Emby-Token": credential,
+        },
+        method="GET",
+    )
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        _NoRedirect(),
+    )
+    try:
+        with opener.open(
+            request,
+            timeout=max(1.0, min(float(timeout), 15.0)),
+        ) as response:
+            if response.status != 200:
+                raise JellyfinAdapterError(
+                    f"Jellyfin returned HTTP {response.status} while reading library metadata."
+                )
+            raw_length = response.headers.get("Content-Length")
+            if raw_length not in {None, ""}:
+                try:
+                    content_length = int(raw_length)
+                except (TypeError, ValueError) as exc:
+                    raise JellyfinAdapterError(
+                        "Jellyfin metadata response had an invalid Content-Length."
+                    ) from exc
+                if content_length < 0 or content_length > limit:
+                    raise JellyfinAdapterError(
+                        "Jellyfin metadata response exceeded the safe response-size limit."
+                    )
+            payload = response.read(limit + 1)
+    except urllib.error.HTTPError as exc:
+        if exc.code in {301, 302, 303, 307, 308}:
+            detail = (
+                "Jellyfin redirected the metadata request; save the final local server URL instead."
+            )
+        elif exc.code in {401, 403}:
+            detail = "Jellyfin rejected the access token while reading library metadata."
+        elif exc.code == 404:
+            detail = "Jellyfin did not have the requested library item."
+        else:
+            detail = f"Jellyfin returned HTTP {exc.code} while reading library metadata."
+        raise JellyfinAdapterError(detail) from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        reason = getattr(exc, "reason", exc)
+        raise JellyfinAdapterError(
+            f"InfoMancer could not read Jellyfin library metadata: {reason}"
+        ) from exc
+
+    if len(payload) > limit:
+        raise JellyfinAdapterError(
+            "Jellyfin metadata response exceeded the safe response-size limit."
+        )
+    try:
+        parsed = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise JellyfinAdapterError(
+            "Jellyfin returned malformed JSON library metadata."
+        ) from exc
+    if not isinstance(parsed, Mapping):
+        raise JellyfinAdapterError(
+            "Jellyfin returned an unexpected library metadata payload."
+        )
+    return parsed
+
+
+def fetch_episode_candidates(
+    server_url: str,
+    token: str,
+    *,
+    season: int,
+    episode: int,
+    timeout: float = 5.0,
+) -> tuple[Mapping[str, Any], ...]:
+    season_number = int(season)
+    episode_number = int(episode)
+    if season_number < 0 or episode_number < 0:
+        raise JellyfinAdapterError(
+            "Jellyfin episode coordinates cannot be negative."
+        )
+    payload = _read_jellyfin_json(
+        server_url,
+        token,
+        "/Items",
+        query={
+            "recursive": "true",
+            "includeItemTypes": "Episode",
+            "parentIndexNumber": season_number,
+            "indexNumber": episode_number,
+            "fields": "Path,ProviderIds",
+            "enableImages": "false",
+            "enableUserData": "false",
+            "limit": _MAX_EPISODE_CANDIDATES + 1,
+        },
+        timeout=timeout,
+    )
+    raw_items = payload.get("Items")
+    if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes)):
+        raise JellyfinAdapterError(
+            "Jellyfin episode search returned an invalid item list."
+        )
+    try:
+        total = int(payload.get("TotalRecordCount", len(raw_items)))
+    except (TypeError, ValueError) as exc:
+        raise JellyfinAdapterError(
+            "Jellyfin episode search returned an invalid result count."
+        ) from exc
+    if total > _MAX_EPISODE_CANDIDATES or len(raw_items) > _MAX_EPISODE_CANDIDATES:
+        raise JellyfinAdapterError(
+            "Jellyfin returned too many episode candidates to resolve safely."
+        )
+    return tuple(item for item in raw_items if isinstance(item, Mapping))
+
+
+def fetch_item(
+    server_url: str,
+    token: str,
+    item_id: str,
+    *,
+    timeout: float = 5.0,
+) -> Mapping[str, Any]:
+    normalized_id = _jellyfin_guid(item_id, "Jellyfin item id")
+    return _read_jellyfin_json(
+        server_url,
+        token,
+        f"/Items/{urllib.parse.quote(normalized_id, safe='')}",
+        timeout=timeout,
+    )
+
+
+class JellyfinTrickplaySource:
+    """Configured read-only Jellyfin Trickplay source for Episode Identity."""
+
+    source_key = "jellyfin"
+    version = "0.9-pr-f"
+
+    def __init__(
+        self,
+        server_url: str,
+        token: str,
+        mapper: ExternalPathMapper,
+        *,
+        enabled: bool = True,
+        last_test_status: str = "",
+    ) -> None:
+        self.server_url = (
+            _normalize_jellyfin_server_url(server_url)
+            if str(server_url or "").strip()
+            else ""
+        )
+        self._token = str(token or "").strip()
+        self.mapper = mapper
+        self.enabled = bool(enabled)
+        self.last_test_status = str(last_test_status or "").strip().casefold()
+
+    def status(self) -> ExternalSourceStatus:
+        if not self.enabled:
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=False,
+                detail="Disabled in Settings.",
+            )
+        if not self.server_url:
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=False,
+                detail="Server URL is not configured.",
+            )
+        if not self._token:
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=False,
+                detail="Access token is not configured or is not bound to this server URL.",
+            )
+        if self.last_test_status == "error":
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=False,
+                detail="Configured; the last explicit connection test failed.",
+            )
+        if not self.mapper.mappings_for(self.source_key):
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=False,
+                detail="Add at least one Jellyfin-to-InfoMancer path mapping.",
+            )
+        return ExternalSourceStatus(
+            source_key=self.source_key,
+            available=True,
+            capabilities=frozenset({ExternalCapability.PREVIEW_FRAMES}),
+            detail="Jellyfin Trickplay preview frames are available for Episode Identity.",
+        )
+
+    def resolve_media(self, context: AnalyzerContext) -> ExternalMediaRef | None:
+        translation = self.mapper.reverse_translate(
+            self.source_key,
+            context.media.path,
+        )
+        if translation is None:
+            return None
+        season = context.claimed_identity.season
+        episode = context.claimed_identity.episode
+        if season is None or episode is None:
+            return None
+
+        candidates = fetch_episode_candidates(
+            self.server_url,
+            self._token,
+            season=season,
+            episode=episode,
+        )
+        matched = _select_item_by_path(candidates, translation.external_path)
+        if matched is None:
+            return None
+        item_id = str(matched.get("Id") or "").strip()
+        if not item_id:
+            raise JellyfinAdapterError(
+                "The matching Jellyfin episode has no stable item id."
+            )
+
+        detail = fetch_item(self.server_url, self._token, item_id)
+        resolved = resolve_media_ref(
+            (detail,),
+            expected_external_path=translation.external_path,
+        )
+        if resolved is None or resolved.item_id != item_id:
+            raise JellyfinAdapterError(
+                "The Jellyfin episode changed while it was being resolved."
+            )
+        return resolved
+
+    def preview_frames(
+        self,
+        media: ExternalMediaRef,
+    ) -> tuple[PreviewFrameRef, ...]:
+        if str(media.source_key or "").strip().casefold() != self.source_key:
+            return ()
+        if not media.item_id or not media.path or not media.media_source_id:
+            return ()
+
+        item = fetch_item(self.server_url, self._token, media.item_id)
+        current = resolve_media_ref(
+            (item,),
+            expected_external_path=media.path,
+        )
+        if (
+            current is None
+            or current.item_id != media.item_id
+            or current.media_source_id != media.media_source_id
+        ):
+            return ()
+
+        variant = select_trickplay_variant(
+            parse_trickplay_variants(item),
+            media_source_id=current.media_source_id,
+        )
+        if variant is None:
+            return ()
+        return enumerate_preview_frames(
+            item_id=current.item_id,
+            item_etag=str(item.get("Etag") or "").strip(),
+            variant=variant,
+        )
+
+    def read_preview(self, frame: PreviewFrameRef) -> bytes:
+        return read_trickplay_preview(
+            self.server_url,
+            self._token,
+            frame,
+        )
+
+    def subtitles(self, media: ExternalMediaRef):
+        return ()
+
+    def read_subtitle(self, subtitle):
+        raise JellyfinAdapterError(
+            "Jellyfin subtitle ingestion is not implemented by the Trickplay adapter."
+        )
+
+    def media_metadata(self, media: ExternalMediaRef):
+        return {}
+
+    def fingerprints(self, media: ExternalMediaRef):
+        return ()
+
+    def known_identity(self, media: ExternalMediaRef):
+        return None
