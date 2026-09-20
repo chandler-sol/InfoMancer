@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Form, Request
+import uuid
 
 from ..access import require_librarian
 from ..media_identity.external_config import (
@@ -44,6 +45,7 @@ def build_router(ctx: RouteContext):
         key = source_key.strip().casefold()
         secret_key = f"{key}_token"
         endpoint_key = f"{key}_token_endpoint"
+        generation_key = f"{key}_token_generation"
         previous = None
         saved = None
         try:
@@ -58,9 +60,12 @@ def build_router(ctx: RouteContext):
             endpoint_changed = normalized_url != previous.server_url
             has_saved_token = bool(current_secrets.get(secret_key, ""))
             saved_token_endpoint = current_secrets.get(endpoint_key, "")
+            saved_token_generation = current_secrets.get(generation_key, "")
             saved_token_is_bound = (
                 has_saved_token
                 and saved_token_endpoint == previous.server_url
+                and bool(previous.credential_generation)
+                and saved_token_generation == previous.credential_generation
             )
             if has_saved_token and not saved_token_is_bound and not new_token and not clear_token:
                 raise ExternalSourceConfigError(
@@ -84,26 +89,28 @@ def build_router(ctx: RouteContext):
                 raise ExternalSourceConfigError(
                     f"Save a {key.title()} access token before enabling this integration."
                 )
+            if new_token or clear_token:
+                external_source_config.clear_connection_result(key)
+
+            credential_generation: str | None = None
+            if clear_token:
+                provider_secrets.delete({secret_key, endpoint_key, generation_key})
+                credential_generation = ""
+            elif new_token:
+                credential_generation = uuid.uuid4().hex
+                provider_secrets.update({
+                    secret_key: new_token,
+                    endpoint_key: normalized_url,
+                    generation_key: credential_generation,
+                })
+
             saved = external_source_config.save_source(
                 key,
                 enabled=bool(enabled),
                 server_url=normalized_url,
                 metadata_root=metadata_root if key == "plex" else "",
-                force_revision_bump=bool(new_token or clear_token),
+                credential_generation=credential_generation,
             )
-            if clear_token:
-                provider_secrets.delete({secret_key, endpoint_key})
-            elif new_token:
-                provider_secrets.update({
-                    secret_key: new_token,
-                    endpoint_key: saved.server_url,
-                })
-            if (
-                previous.server_url != saved.server_url
-                or bool(new_token)
-                or bool(clear_token)
-            ):
-                external_source_config.clear_connection_result(key)
         except ProviderSecretError as exc:
             if previous is not None and saved is not None:
                 try:
@@ -169,6 +176,8 @@ def build_router(ctx: RouteContext):
             if (
                 current_secrets.get(f"{key}_token", "") != token
                 or current_secrets.get(f"{key}_token_endpoint", "") != source.server_url
+                or current_secrets.get(f"{key}_token_generation", "")
+                    != source.credential_generation
                 or not external_source_config.record_connection_result(
                     result,
                     tested_server_url=source.server_url,
