@@ -183,10 +183,17 @@ def plex_bif_path_for_bundle(
 ) -> Path:
     """Build a contained index-sd.bif path beneath Plex Media/localhost."""
     root = normalize_plex_metadata_root(metadata_root)
-    raw_relative = str(bundle_relative_path or "").replace("\\", "/").strip("/")
+    raw_relative = str(bundle_relative_path or "").replace("\\", "/")
     relative = PurePosixPath(raw_relative)
+    windows_absolute = (
+        len(raw_relative) >= 2
+        and raw_relative[0].isalpha()
+        and raw_relative[1] == ":"
+    )
     if (
         not raw_relative
+        or raw_relative.startswith("/")
+        or windows_absolute
         or relative.is_absolute()
         or any(part in {"", ".", ".."} for part in relative.parts)
     ):
