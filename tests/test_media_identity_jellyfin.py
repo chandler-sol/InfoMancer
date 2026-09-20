@@ -189,7 +189,7 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
 
     def test_absurd_thumbnail_count_is_rejected_fail_closed(self):
         item = self._item()
-        item["Trickplay"]["media-a"]["480"]["ThumbnailCount"] = 1_000_001
+        item["Trickplay"]["media-a"]["480"]["ThumbnailCount"] = 50_001
         variants = parse_trickplay_variants(item)
         self.assertEqual([value.width for value in variants], [320])
 
@@ -432,6 +432,40 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(JellyfinAdapterError, "offline"):
                     source.resolve_media(context)
+
+    def test_unavailable_source_does_not_attempt_network_resolution(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            local_root = Path(temporary) / "tv"
+            mapper = ExternalPathMapper(
+                [PathMapping("jellyfin", "/srv/tv", str(local_root))]
+            )
+            source = JellyfinTrickplaySource(
+                "http://jellyfin.local:8096",
+                "jf-secret",
+                mapper,
+                enabled=False,
+            )
+            context = AnalyzerContext(
+                media=MediaIdentityFile(
+                    file_id=1,
+                    title_id=1,
+                    path=str(local_root / "Show" / "Episode.mkv"),
+                    size_bytes=1,
+                    modified_at=1.0,
+                ),
+                claimed_identity=IdentityReference(
+                    identity_kind="episode",
+                    season=1,
+                    episode=1,
+                    display_name="Episode",
+                ),
+                profile=IdentityProfile.DEEP,
+            )
+            with patch(
+                "app.media_identity.sources.jellyfin.fetch_episode_candidates"
+            ) as candidates:
+                self.assertIsNone(source.resolve_media(context))
+            candidates.assert_not_called()
 
     def _network_frame(self):
         item_id = "11111111111111111111111111111111"
