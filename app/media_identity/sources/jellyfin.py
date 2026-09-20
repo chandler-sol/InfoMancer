@@ -364,6 +364,26 @@ def _normalize_jellyfin_server_url(value: str) -> str:
     )
 
 
+def _credential_transport_url(
+    server_url: str,
+    *,
+    allow_insecure_http: bool = False,
+) -> str:
+    base = _credential_transport_url(
+        server_url,
+        allow_insecure_http=allow_insecure_http,
+    )
+    if (
+        urllib.parse.urlsplit(base).scheme.casefold() != "https"
+        and not allow_insecure_http
+    ):
+        raise JellyfinAdapterError(
+            "Jellyfin credentials will not be sent over plain HTTP. "
+            "Use HTTPS or explicitly allow insecure HTTP for this integration."
+        )
+    return base
+
+
 def _jellyfin_guid(value: str, label: str) -> str:
     raw = str(value or "").strip()
     try:
@@ -393,6 +413,7 @@ def fetch_trickplay_tile(
     *,
     timeout: float = 5.0,
     max_bytes: int = _MAX_TILE_JPEG_BYTES,
+    allow_insecure_http: bool = False,
 ) -> bytes:
     credential = str(token or "").strip()
     if not credential:
@@ -400,7 +421,11 @@ def fetch_trickplay_tile(
     limit = int(max_bytes)
     if limit <= 0 or limit > _MAX_TILE_JPEG_BYTES:
         raise JellyfinAdapterError("Jellyfin Trickplay response limit is invalid.")
-    url = trickplay_tile_url(server_url, frame)
+    secure_base = _credential_transport_url(
+        server_url,
+        allow_insecure_http=allow_insecure_http,
+    )
+    url = trickplay_tile_url(secure_base, frame)
     request = urllib.request.Request(
         url,
         headers={
@@ -519,6 +544,7 @@ def read_trickplay_preview(
     frame: PreviewFrameRef,
     *,
     timeout: float = 5.0,
+    allow_insecure_http: bool = False,
 ) -> bytes:
     return crop_trickplay_frame(
         fetch_trickplay_tile(
@@ -526,6 +552,7 @@ def read_trickplay_preview(
             token,
             frame,
             timeout=timeout,
+            allow_insecure_http=allow_insecure_http,
         ),
         frame,
     )
@@ -579,6 +606,7 @@ def _select_media_source_id(
     sources = raw_sources if isinstance(raw_sources, Sequence) and not isinstance(raw_sources, (str, bytes)) else ()
     path_matches: list[str] = []
     all_ids: list[str] = []
+    has_declared_path = False
     for source in sources:
         if not isinstance(source, Mapping):
             continue
@@ -586,7 +614,10 @@ def _select_media_source_id(
         if not source_id:
             continue
         all_ids.append(source_id)
-        if external_paths_equal(str(source.get("Path") or ""), expected_external_path):
+        source_path = str(source.get("Path") or "").strip()
+        if source_path:
+            has_declared_path = True
+        if external_paths_equal(source_path, expected_external_path):
             path_matches.append(source_id)
     unique_path_matches = tuple(dict.fromkeys(path_matches))
     if len(unique_path_matches) > 1:
@@ -596,7 +627,7 @@ def _select_media_source_id(
     if unique_path_matches:
         return unique_path_matches[0]
     unique_ids = tuple(dict.fromkeys(all_ids))
-    return unique_ids[0] if len(unique_ids) == 1 else ""
+    return unique_ids[0] if len(unique_ids) == 1 and not has_declared_path else ""
 
 
 def resolve_media_ref(
@@ -637,6 +668,7 @@ def _read_jellyfin_json(
     query: Mapping[str, Any] | None = None,
     timeout: float = 5.0,
     max_bytes: int = _MAX_JSON_BYTES,
+    allow_insecure_http: bool = False,
 ) -> Mapping[str, Any]:
     credential = str(token or "").strip()
     if not credential:
@@ -729,6 +761,7 @@ def fetch_episode_candidates(
     season: int,
     episode: int,
     timeout: float = 5.0,
+    allow_insecure_http: bool = False,
 ) -> tuple[Mapping[str, Any], ...]:
     season_number = int(season)
     episode_number = int(episode)
@@ -751,6 +784,7 @@ def fetch_episode_candidates(
             "limit": _MAX_EPISODE_CANDIDATES + 1,
         },
         timeout=timeout,
+        allow_insecure_http=allow_insecure_http,
     )
     raw_items = payload.get("Items")
     if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes)):
@@ -767,7 +801,11 @@ def fetch_episode_candidates(
         raise JellyfinAdapterError(
             "Jellyfin returned too many episode candidates to resolve safely."
         )
-    return tuple(item for item in raw_items if isinstance(item, Mapping))
+    if any(not isinstance(item, Mapping) for item in raw_items):
+        raise JellyfinAdapterError(
+            "Jellyfin episode search returned a malformed candidate entry."
+        )
+    return tuple(raw_items)
 
 
 def fetch_item(
@@ -776,6 +814,7 @@ def fetch_item(
     item_id: str,
     *,
     timeout: float = 5.0,
+    allow_insecure_http: bool = False,
 ) -> Mapping[str, Any]:
     normalized_id = _jellyfin_guid(item_id, "Jellyfin item id")
     return _read_jellyfin_json(
@@ -783,6 +822,7 @@ def fetch_item(
         token,
         f"/Items/{urllib.parse.quote(normalized_id, safe='')}",
         timeout=timeout,
+        allow_insecure_http=allow_insecure_http,
     )
 
 
@@ -800,6 +840,8 @@ class JellyfinTrickplaySource:
         *,
         enabled: bool = True,
         last_test_status: str = "",
+        allow_insecure_http: bool = False,
+        advertise_preview_frames: bool = False,
     ) -> None:
         self.server_url = (
             _normalize_jellyfin_server_url(server_url)
@@ -810,6 +852,8 @@ class JellyfinTrickplaySource:
         self.mapper = mapper
         self.enabled = bool(enabled)
         self.last_test_status = str(last_test_status or "").strip().casefold()
+        self.allow_insecure_http = bool(allow_insecure_http)
+        self.advertise_preview_frames = bool(advertise_preview_frames)
 
     def status(self) -> ExternalSourceStatus:
         if not self.enabled:
@@ -836,17 +880,42 @@ class JellyfinTrickplaySource:
                 available=False,
                 detail="Configured; the last explicit connection test failed.",
             )
+        if (
+            urllib.parse.urlsplit(self.server_url).scheme.casefold() == "http"
+            and not self.allow_insecure_http
+        ):
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=False,
+                detail=(
+                    "Jellyfin uses plain HTTP. Use HTTPS or explicitly allow insecure "
+                    "HTTP before InfoMancer sends the access token."
+                ),
+            )
         if not self.mapper.mappings_for(self.source_key):
             return ExternalSourceStatus(
                 source_key=self.source_key,
                 available=False,
                 detail="Add at least one Jellyfin-to-InfoMancer path mapping.",
             )
+        capabilities = (
+            frozenset({ExternalCapability.PREVIEW_FRAMES})
+            if self.advertise_preview_frames
+            else frozenset()
+        )
+        detail = (
+            "Jellyfin Trickplay preview frames are ready for Episode Identity."
+            if self.advertise_preview_frames
+            else (
+                "Jellyfin Trickplay adapter is configured and validated. "
+                "Preview-frame analysis becomes available when a consuming analyzer is installed."
+            )
+        )
         return ExternalSourceStatus(
             source_key=self.source_key,
             available=True,
-            capabilities=frozenset({ExternalCapability.PREVIEW_FRAMES}),
-            detail="Jellyfin Trickplay preview reuse is enabled for Episode Identity.",
+            capabilities=capabilities,
+            detail=detail,
         )
 
     def resolve_media(self, context: AnalyzerContext) -> ExternalMediaRef | None:
@@ -868,6 +937,7 @@ class JellyfinTrickplaySource:
             self._token,
             season=season,
             episode=episode,
+            allow_insecure_http=self.allow_insecure_http,
         )
         matched = _select_item_by_path(candidates, translation.external_path)
         if matched is None:
@@ -878,7 +948,12 @@ class JellyfinTrickplaySource:
                 "The matching Jellyfin episode has no stable item id."
             )
 
-        detail = fetch_item(self.server_url, self._token, item_id)
+        detail = fetch_item(
+            self.server_url,
+            self._token,
+            item_id,
+            allow_insecure_http=self.allow_insecure_http,
+        )
         resolved = resolve_media_ref(
             (detail,),
             expected_external_path=translation.external_path,
@@ -904,7 +979,12 @@ class JellyfinTrickplaySource:
         if not media.item_id or not media.path or not media.media_source_id:
             return ()
 
-        item = fetch_item(self.server_url, self._token, media.item_id)
+        item = fetch_item(
+            self.server_url,
+            self._token,
+            media.item_id,
+            allow_insecure_http=self.allow_insecure_http,
+        )
         current = resolve_media_ref(
             (item,),
             expected_external_path=media.path,
@@ -946,6 +1026,7 @@ class JellyfinTrickplaySource:
             self.server_url,
             self._token,
             frame,
+            allow_insecure_http=self.allow_insecure_http,
         )
 
     def subtitles(self, media: ExternalMediaRef):
