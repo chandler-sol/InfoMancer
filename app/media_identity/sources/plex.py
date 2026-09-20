@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
+import re
+import sqlite3
 import struct
 from typing import Any, Mapping, Sequence
 import urllib.error
@@ -31,6 +33,8 @@ _MAX_PLEX_JSON_BYTES = 8 * 1024 * 1024
 _MAX_PLEX_BIF_BYTES = 128 * 1024 * 1024
 _MAX_PLEX_JPEG_BYTES = 8 * 1024 * 1024
 _MAX_EPISODE_CANDIDATES = 4096
+_PLEX_PAGE_SIZE = 256
+_PLEX_MEDIA_HASH = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
 class PlexBifError(ValueError):
@@ -223,6 +227,114 @@ def plex_bif_path_for_bundle(
         / "Indexes"
         / "index-sd.bif"
     )
+
+
+def plex_library_database_path(metadata_root: str | Path) -> Path:
+    root = normalize_plex_metadata_root(metadata_root)
+    return (
+        root
+        / "Plug-in Support"
+        / "Databases"
+        / "com.plexapp.plugins.library.db"
+    )
+
+
+def plex_bif_path_for_media_hash(
+    metadata_root: str | Path,
+    media_hash: str,
+) -> Path:
+    normalized_hash = str(media_hash or "").strip()
+    if not _PLEX_MEDIA_HASH.fullmatch(normalized_hash):
+        raise PlexBifError("Plex media-part hash is invalid.")
+    normalized_hash = normalized_hash.casefold()
+    return plex_bif_path_for_bundle(
+        metadata_root,
+        f"{normalized_hash[0]}/{normalized_hash[1:]}.bundle",
+    )
+
+
+def resolve_local_bif_path(
+    metadata_root: str | Path,
+    *,
+    part_id: str,
+    expected_external_path: str,
+) -> Path | None:
+    normalized_part = _plex_numeric_id(part_id, "Plex part id")
+    root = normalize_plex_metadata_root(metadata_root)
+    database_path = plex_library_database_path(root)
+    if not database_path.is_file():
+        return None
+    try:
+        connection = sqlite3.connect(
+            database_path.resolve().as_uri() + "?mode=ro",
+            uri=True,
+            timeout=1.0,
+        )
+    except (OSError, sqlite3.Error) as exc:
+        raise PlexBifError(
+            f"Plex library database could not be opened read-only: {exc}"
+        ) from exc
+    try:
+        connection.execute("PRAGMA query_only=ON")
+        rows = connection.execute(
+            "SELECT hash,file FROM media_parts WHERE id=? LIMIT 2",
+            (int(normalized_part),),
+        ).fetchall()
+    except sqlite3.Error as exc:
+        raise PlexBifError(
+            f"Plex library database could not resolve the media part: {exc}"
+        ) from exc
+    finally:
+        connection.close()
+
+    if not rows:
+        return None
+    if len(rows) != 1:
+        raise PlexBifError("Plex library database returned an ambiguous media part.")
+    media_hash, part_path = rows[0]
+    if not _external_paths_equal(
+        str(part_path or "").strip(),
+        expected_external_path,
+    ):
+        raise PlexBifError(
+            "Plex library database media path does not match the resolved media part."
+        )
+    bif_path = plex_bif_path_for_media_hash(root, str(media_hash or ""))
+    return bif_path if bif_path.is_file() else None
+
+
+def read_bif_preview_range(
+    path: str | Path,
+    *,
+    offset: int,
+    length: int,
+) -> bytes:
+    bif_path = Path(path)
+    start = int(offset)
+    count = int(length)
+    if start < 0 or count <= 0 or count > _MAX_PLEX_JPEG_BYTES:
+        raise PlexBifError("Plex BIF preview byte range is outside safe bounds.")
+    try:
+        stat = bif_path.stat()
+    except OSError as exc:
+        raise PlexBifError(f"Plex BIF preview could not be inspected: {exc}") from exc
+    if not bif_path.is_file() or start + count > stat.st_size:
+        raise PlexBifError("Plex BIF preview byte range is outside the file.")
+    try:
+        with bif_path.open("rb") as handle:
+            handle.seek(start)
+            payload = handle.read(count)
+    except OSError as exc:
+        raise PlexBifError(f"Plex BIF preview could not be read: {exc}") from exc
+    if len(payload) != count:
+        raise PlexBifError("Plex BIF preview byte range was truncated.")
+    if (
+        len(payload) < 4
+        or not payload.startswith(b"\xff\xd8")
+        or not payload.endswith(b"\xff\xd9")
+    ):
+        raise PlexBifError("Plex BIF preview range is not a valid JPEG.")
+    return payload
 
 
 def bif_source_signature(path: str | Path, index: PlexBifIndex) -> str:
@@ -454,34 +566,75 @@ def fetch_plex_episode_candidates(
     episode_number = int(episode)
     if season_number < 0 or episode_number < 0:
         raise PlexBifError("Plex episode coordinates cannot be negative.")
-    payload = _read_plex_json(
-        server_url,
-        token,
-        "/library/all",
-        query={
-            "type": 4,
-            "parentIndex": season_number,
-            "index": episode_number,
-            "includeGuids": 1,
-            "limit": _MAX_EPISODE_CANDIDATES + 1,
-        },
-        timeout=timeout,
-    )
-    container = payload.get("MediaContainer")
-    if not isinstance(container, Mapping):
-        raise PlexBifError("Plex episode search returned an invalid container.")
-    raw_items = container.get("Metadata", ())
-    if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes)):
-        raise PlexBifError("Plex episode search returned an invalid item list.")
-    try:
-        total = int(container.get("totalSize", len(raw_items)))
-    except (TypeError, ValueError) as exc:
-        raise PlexBifError("Plex episode search returned an invalid result count.") from exc
-    if total > _MAX_EPISODE_CANDIDATES or len(raw_items) > _MAX_EPISODE_CANDIDATES:
-        raise PlexBifError("Plex returned too many episode candidates to resolve safely.")
-    if any(not isinstance(item, Mapping) for item in raw_items):
-        raise PlexBifError("Plex episode search returned a malformed candidate entry.")
-    return tuple(raw_items)
+
+    items: list[Mapping[str, Any]] = []
+    expected_total: int | None = None
+    start = 0
+    while expected_total is None or start < expected_total:
+        payload = _read_plex_json(
+            server_url,
+            token,
+            "/library/all",
+            query={
+                "type": 4,
+                "parentIndex": season_number,
+                "index": episode_number,
+                "includeGuids": 1,
+                "X-Plex-Container-Start": start,
+                "X-Plex-Container-Size": _PLEX_PAGE_SIZE,
+            },
+            timeout=timeout,
+        )
+        container = payload.get("MediaContainer")
+        if not isinstance(container, Mapping):
+            raise PlexBifError("Plex episode search returned an invalid container.")
+        raw_items = container.get("Metadata", ())
+        if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes)):
+            raise PlexBifError("Plex episode search returned an invalid item list.")
+        if any(not isinstance(item, Mapping) for item in raw_items):
+            raise PlexBifError(
+                "Plex episode search returned a malformed candidate entry."
+            )
+        try:
+            total = int(container.get("totalSize", len(raw_items)))
+            returned_offset = int(container.get("offset", start))
+            returned_size = int(container.get("size", len(raw_items)))
+        except (TypeError, ValueError) as exc:
+            raise PlexBifError(
+                "Plex episode search returned invalid pagination metadata."
+            ) from exc
+        if total < 0 or total > _MAX_EPISODE_CANDIDATES:
+            raise PlexBifError(
+                "Plex returned too many episode candidates to resolve safely."
+            )
+        if returned_offset != start or returned_size != len(raw_items):
+            raise PlexBifError(
+                "Plex episode search returned inconsistent pagination metadata."
+            )
+        if expected_total is None:
+            expected_total = total
+        elif total != expected_total:
+            raise PlexBifError(
+                "Plex episode search changed while candidates were being paged."
+            )
+        if len(items) + len(raw_items) > _MAX_EPISODE_CANDIDATES:
+            raise PlexBifError(
+                "Plex returned too many episode candidates to resolve safely."
+            )
+        items.extend(raw_items)
+        if len(items) == expected_total:
+            break
+        if not raw_items:
+            raise PlexBifError(
+                "Plex episode search ended before all candidates were returned."
+            )
+        start += len(raw_items)
+        if start > expected_total:
+            raise PlexBifError(
+                "Plex episode search returned more candidates than declared."
+            )
+
+    return tuple(items)
 
 
 def _iter_plex_parts(
@@ -872,11 +1025,28 @@ class PlexBifSource:
         ):
             return ()
 
-        index = fetch_plex_bif_index(
-            self.server_url,
-            self._token,
-            current.media_source_id,
-        )
+        try:
+            index = fetch_plex_bif_index(
+                self.server_url,
+                self._token,
+                current.media_source_id,
+            )
+        except PlexBifError:
+            if not self.metadata_root:
+                raise
+            bif_path = resolve_local_bif_path(
+                self.metadata_root,
+                part_id=current.media_source_id,
+                expected_external_path=current.path,
+            )
+            if bif_path is None:
+                return ()
+            local_index = read_bif_index(bif_path)
+            return enumerate_bif_preview_frames(
+                item_id=current.item_id,
+                bif_path=bif_path,
+                index=local_index,
+            )
         return enumerate_plex_http_preview_frames(
             item_id=current.item_id,
             part_id=current.media_source_id,
@@ -894,21 +1064,60 @@ class PlexBifSource:
             asset = json.loads(frame.asset_ref)
         except json.JSONDecodeError as exc:
             raise PlexBifError("Plex preview asset reference is malformed.") from exc
-        if not isinstance(asset, Mapping) or asset.get("kind") != "plex_bif_http":
+        if not isinstance(asset, Mapping):
             raise PlexBifError("Plex preview asset reference is invalid.")
-        part_id = _plex_numeric_id(asset.get("part_id"), "Plex part id")
-        try:
-            timestamp_ms = int(asset.get("timestamp_ms"))
-        except (TypeError, ValueError) as exc:
-            raise PlexBifError("Plex preview timestamp is invalid.") from exc
-        if timestamp_ms != int(frame.timestamp_ms):
-            raise PlexBifError("Plex preview asset timestamp does not match its frame.")
-        return fetch_plex_bif_image(
-            self.server_url,
-            self._token,
-            part_id,
-            timestamp_ms,
-        )
+        kind = str(asset.get("kind") or "")
+        if kind == "plex_bif_http":
+            part_id = _plex_numeric_id(asset.get("part_id"), "Plex part id")
+            try:
+                timestamp_ms = int(asset.get("timestamp_ms"))
+            except (TypeError, ValueError) as exc:
+                raise PlexBifError("Plex preview timestamp is invalid.") from exc
+            if timestamp_ms != int(frame.timestamp_ms):
+                raise PlexBifError(
+                    "Plex preview asset timestamp does not match its frame."
+                )
+            return fetch_plex_bif_image(
+                self.server_url,
+                self._token,
+                part_id,
+                timestamp_ms,
+            )
+        if kind == "plex_bif":
+            if not self.metadata_root:
+                raise PlexBifError(
+                    "Plex local BIF preview requires a configured metadata root."
+                )
+            try:
+                offset = int(asset.get("offset"))
+                length = int(asset.get("length"))
+            except (TypeError, ValueError) as exc:
+                raise PlexBifError("Plex local BIF byte range is invalid.") from exc
+            candidate = Path(str(asset.get("path") or ""))
+            try:
+                allowed_root = (
+                    normalize_plex_metadata_root(self.metadata_root)
+                    / "Media"
+                    / "localhost"
+                ).resolve()
+                resolved_candidate = candidate.resolve(strict=True)
+            except OSError as exc:
+                raise PlexBifError(
+                    f"Plex local BIF preview path could not be resolved: {exc}"
+                ) from exc
+            if (
+                resolved_candidate.name != "index-sd.bif"
+                or not resolved_candidate.is_relative_to(allowed_root)
+            ):
+                raise PlexBifError(
+                    "Plex local BIF preview path is outside the configured metadata root."
+                )
+            return read_bif_preview_range(
+                resolved_candidate,
+                offset=offset,
+                length=length,
+            )
+        raise PlexBifError("Plex preview asset reference is invalid.")
 
     def subtitles(self, media: ExternalMediaRef):
         return ()
