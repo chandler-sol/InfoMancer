@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from app.db import Database
 from app.migrations import CURRENT_SCHEMA_VERSION
+from app.media_identity.external import ExternalCapability
 from app.media_identity.external_config import (
     ExternalSourceConfigError,
     ExternalConnectionResult,
@@ -110,6 +111,76 @@ class ExternalSourceConfigTests(unittest.TestCase):
         self.assertEqual(status.capabilities, frozenset())
         self.assertIn("source-specific analysis adapter", status.detail)
         self.assertFalse(registry.require("jellyfin").status().available)
+
+    def test_jellyfin_registry_exposes_preview_frames_only_when_usable(self):
+        local_root = self.data / "media"
+        self.service.add_mapping(
+            "jellyfin",
+            "/srv/tv",
+            str(local_root),
+        )
+        source = self.service.save_source(
+            "jellyfin",
+            enabled=True,
+            server_url="http://jellyfin.local:8096",
+            credential_generation="generation-1",
+        )
+        secrets = {
+            "jellyfin_token": "jf-secret",
+            "jellyfin_token_endpoint": source.server_url,
+            "jellyfin_token_generation": "generation-1",
+        }
+
+        registry = build_configured_source_registry(self.service, secrets)
+        jellyfin = registry.require("jellyfin")
+        status = jellyfin.status()
+        self.assertTrue(status.available)
+        self.assertEqual(
+            status.capabilities,
+            frozenset({ExternalCapability.PREVIEW_FRAMES}),
+        )
+        self.assertEqual(
+            registry.available_for(ExternalCapability.PREVIEW_FRAMES),
+            (jellyfin,),
+        )
+
+        stale_registry = build_configured_source_registry(
+            self.service,
+            {
+                **secrets,
+                "jellyfin_token_generation": "stale-generation",
+            },
+        )
+        stale_status = stale_registry.require("jellyfin").status()
+        self.assertFalse(stale_status.available)
+        self.assertNotIn(
+            ExternalCapability.PREVIEW_FRAMES,
+            stale_status.capabilities,
+        )
+        self.assertEqual(
+            stale_registry.available_for(ExternalCapability.PREVIEW_FRAMES),
+            (),
+        )
+
+    def test_jellyfin_preview_capability_requires_a_path_mapping(self):
+        source = self.service.save_source(
+            "jellyfin",
+            enabled=True,
+            server_url="http://jellyfin.local:8096",
+            credential_generation="generation-1",
+        )
+        registry = build_configured_source_registry(
+            self.service,
+            {
+                "jellyfin_token": "jf-secret",
+                "jellyfin_token_endpoint": source.server_url,
+                "jellyfin_token_generation": "generation-1",
+            },
+        )
+        status = registry.require("jellyfin").status()
+        self.assertFalse(status.available)
+        self.assertEqual(status.capabilities, frozenset())
+        self.assertIn("path mapping", status.detail.casefold())
 
     def test_clearing_connection_result_removes_stale_success(self):
         self.service.save_source(
