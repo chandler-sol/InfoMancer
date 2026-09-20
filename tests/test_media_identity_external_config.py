@@ -10,6 +10,12 @@ from unittest.mock import patch
 from app.db import Database
 from app.migrations import CURRENT_SCHEMA_VERSION
 from app.media_identity.external import ExternalCapability
+from app.media_identity.models import (
+    AnalyzerContext,
+    IdentityProfile,
+    IdentityReference,
+    MediaIdentityFile,
+)
 from app.media_identity.external_config import (
     ExternalSourceConfigError,
     ExternalConnectionResult,
@@ -135,6 +141,92 @@ class ExternalSourceConfigTests(unittest.TestCase):
         stale_status = stale_registry.require("plex").status()
         self.assertFalse(stale_status.available)
         self.assertEqual(stale_status.capabilities, frozenset())
+
+    def test_configured_plex_registry_resolves_media_through_real_adapter(self):
+        local_root = self.data / "media"
+        local_path = local_root / "Show" / "Season 01" / "Episode.mkv"
+        external_path = "/srv/tv/Show/Season 01/Episode.mkv"
+        self.service.add_mapping(
+            "plex",
+            "/srv/tv",
+            str(local_root),
+        )
+        source = self.service.save_source(
+            "plex",
+            enabled=True,
+            server_url="http://plex.local:32400",
+            credential_generation="generation-1",
+        )
+        registry = build_configured_source_registry(
+            self.service,
+            {
+                "plex_token": "secret",
+                "plex_token_endpoint": source.server_url,
+                "plex_token_generation": "generation-1",
+            },
+        )
+        candidate = {
+            "ratingKey": "101",
+            "updatedAt": 123456,
+            "Guid": [{"id": "tvdb://12345"}],
+            "Media": [
+                {
+                    "id": "301",
+                    "Part": [
+                        {
+                            "id": "501",
+                            "file": external_path,
+                            "key": "/library/parts/501/123/file.mkv",
+                            "indexes": "sd",
+                        }
+                    ],
+                }
+            ],
+        }
+        context = AnalyzerContext(
+            media=MediaIdentityFile(
+                file_id=1,
+                title_id=1,
+                path=str(local_path),
+                size_bytes=1,
+                modified_at=1.0,
+            ),
+            claimed_identity=IdentityReference(
+                identity_kind="episode",
+                season=1,
+                episode=2,
+                display_name="Episode",
+            ),
+            profile=IdentityProfile.DEEP,
+        )
+
+        with (
+            patch(
+                "app.media_identity.sources.plex.fetch_plex_episode_candidates",
+                return_value=(candidate,),
+            ) as candidates,
+            patch(
+                "app.media_identity.sources.plex.fetch_plex_item",
+                return_value=candidate,
+            ) as item_fetch,
+        ):
+            resolved = registry.require("plex").resolve_media(context)
+
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved.item_id, "101")
+        self.assertEqual(resolved.media_source_id, "501")
+        self.assertEqual(resolved.path, external_path)
+        candidates.assert_called_once_with(
+            "http://plex.local:32400",
+            "secret",
+            season=1,
+            episode=2,
+        )
+        item_fetch.assert_called_once_with(
+            "http://plex.local:32400",
+            "secret",
+            "101",
+        )
 
     def test_plex_preview_capability_requires_a_path_mapping(self):
         source = self.service.save_source(
