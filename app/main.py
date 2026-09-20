@@ -65,6 +65,7 @@ from .source_browser import SourceBrowserError, list_folders, preview_folder
 from .smart_collections import decode_filters, encode_filters, matching_titles, normalize_filters
 from .tvdb import TVDBClient, TVDBError
 from .provider_secrets import ProviderSecretError, ProviderSecretStore
+from .media_identity.external import ExternalCapability
 from .media_identity.external_config import (
     ExternalSourceConfigService, build_configured_source_registry,
     external_token_is_bound,
@@ -2754,6 +2755,10 @@ def settings_page_context(
                 ),
                 "mappings": external_source_config.mappings(source.source_key),
                 "source_status": status,
+                "preview_frames_available": (
+                    status.available
+                    and ExternalCapability.PREVIEW_FRAMES in status.capabilities
+                ),
                 "last_test_status": source.last_test_status,
                 "last_test_detail": source.last_test_detail,
                 "last_test_server_name": source.last_test_server_name,
