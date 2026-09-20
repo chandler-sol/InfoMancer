@@ -107,8 +107,8 @@
         </label>
         {% if source.source_key == 'plex' %}
         <label>Plex metadata root
-          <input name="metadata_root" value="{{ source.metadata_root }}" placeholder="Optional custom Plex data root">
-          <small>Optional custom local Plex data root for read-only filesystem fallback. Normal BIF reuse prefers Plex's HTTP API and does not require this path.</small>
+          <input name="metadata_root" value="{{ source.metadata_root }}" placeholder="Auto-detect, or enter a custom Plex data root">
+          <small>Leave blank for Auto detection of common local Plex data roots. Set a custom absolute path when Plex metadata lives somewhere else. HTTP BIF reuse remains the preferred path.</small>
         </label>
         {% endif %}
       </div>
