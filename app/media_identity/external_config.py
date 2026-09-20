@@ -13,7 +13,7 @@ from typing import Any
 from ..path_mapping import ExternalPathMapper, PathMapping, PathMappingError
 from .external import ExternalSourceRegistry, ExternalSourceStatus
 from .sources.jellyfin import JellyfinTrickplaySource
-from .sources.plex import PlexBifSource
+from .sources.plex import PlexBifError, PlexBifSource, normalize_plex_metadata_root
 
 
 SUPPORTED_EXTERNAL_SOURCES = frozenset({"plex", "jellyfin"})
@@ -190,6 +190,13 @@ class ExternalSourceConfigService:
         key = self._source_key(source_key)
         url = normalize_server_url(server_url)
         root = str(metadata_root or "").strip()
+        if key == "plex" and root:
+            try:
+                root = str(normalize_plex_metadata_root(root))
+            except PlexBifError as exc:
+                raise ExternalSourceConfigError(str(exc)) from exc
+        elif key != "plex":
+            root = ""
         if enabled and not url:
             raise ExternalSourceConfigError(
                 "Enter the media server URL before enabling this integration."
@@ -211,6 +218,7 @@ class ExternalSourceConfigService:
                      config_revision=external_analysis_sources.config_revision +
                        CASE
                          WHEN external_analysis_sources.server_url != excluded.server_url
+                              OR external_analysis_sources.metadata_root != excluded.metadata_root
                               OR external_analysis_sources.config_json != excluded.config_json
                               OR (
                                 ? AND external_analysis_sources.credential_generation
