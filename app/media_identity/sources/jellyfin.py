@@ -369,10 +369,7 @@ def _credential_transport_url(
     *,
     allow_insecure_http: bool = False,
 ) -> str:
-    base = _credential_transport_url(
-        server_url,
-        allow_insecure_http=allow_insecure_http,
-    )
+    base = _normalize_jellyfin_server_url(server_url)
     if (
         urllib.parse.urlsplit(base).scheme.casefold() != "https"
         and not allow_insecure_http
@@ -677,7 +674,10 @@ def _read_jellyfin_json(
     if limit <= 0 or limit > _MAX_JSON_BYTES:
         raise JellyfinAdapterError("Jellyfin JSON response limit is invalid.")
 
-    base = _normalize_jellyfin_server_url(server_url)
+    base = _credential_transport_url(
+        server_url,
+        allow_insecure_http=allow_insecure_http,
+    )
     route = "/" + str(path or "").lstrip("/")
     url = base + route
     if query:
