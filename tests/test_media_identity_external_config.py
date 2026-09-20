@@ -90,12 +90,16 @@ class ExternalSourceConfigTests(unittest.TestCase):
 
     def test_configured_source_registry_has_no_evidence_capabilities_yet(self):
         self.service.save_source(
-            "plex", enabled=True, server_url="http://plex.local:32400"
+            "plex",
+            enabled=True,
+            server_url="http://plex.local:32400",
+            credential_generation="generation-1",
         )
         registry = build_configured_source_registry(
             self.service, {
                 "plex_token": "secret",
                 "plex_token_endpoint": "http://plex.local:32400",
+                "plex_token_generation": "generation-1",
             }
         )
         self.assertEqual(registry.keys(), ("jellyfin", "plex"))
@@ -126,7 +130,10 @@ class ExternalSourceConfigTests(unittest.TestCase):
 
     def test_failed_connection_result_degrades_configured_source_availability(self):
         self.service.save_source(
-            "plex", enabled=True, server_url="http://plex.local:32400"
+            "plex",
+            enabled=True,
+            server_url="http://plex.local:32400",
+            credential_generation="generation-1",
         )
         self.service.record_connection_result(
             ExternalConnectionResult(
@@ -139,11 +146,55 @@ class ExternalSourceConfigTests(unittest.TestCase):
             self.service, {
                 "plex_token": "secret",
                 "plex_token_endpoint": "http://plex.local:32400",
+                "plex_token_generation": "generation-1",
             }
         )
         status = registry.require("plex").status()
         self.assertFalse(status.available)
         self.assertIn("failed", status.detail)
+
+    def test_unadopted_secret_generation_is_not_bound(self):
+        source = self.service.save_source(
+            "plex",
+            enabled=True,
+            server_url="http://plex.local:32400",
+            credential_generation="generation-old",
+        )
+        registry = build_configured_source_registry(
+            self.service,
+            {
+                "plex_token": "new-token",
+                "plex_token_endpoint": source.server_url,
+                "plex_token_generation": "generation-new",
+            },
+        )
+        status = registry.require("plex").status()
+        self.assertFalse(status.available)
+        self.assertIn("token", status.detail.casefold())
+
+    def test_credential_generation_change_bumps_revision_only_when_adopted(self):
+        source = self.service.save_source(
+            "plex",
+            enabled=True,
+            server_url="http://plex.local:32400",
+            credential_generation="generation-old",
+        )
+        same = self.service.save_source(
+            "plex",
+            enabled=True,
+            server_url=source.server_url,
+        )
+        self.assertEqual(same.config_revision, source.config_revision)
+        self.assertEqual(same.credential_generation, "generation-old")
+
+        adopted = self.service.save_source(
+            "plex",
+            enabled=True,
+            server_url=source.server_url,
+            credential_generation="generation-new",
+        )
+        self.assertEqual(adopted.config_revision, source.config_revision + 1)
+        self.assertEqual(adopted.credential_generation, "generation-new")
 
     def test_connection_revision_increments_for_endpoint_or_token_identity_change(self):
         initial = self.service.source("plex")
@@ -161,9 +212,10 @@ class ExternalSourceConfigTests(unittest.TestCase):
             "plex",
             enabled=True,
             server_url="http://plex.local:32400",
-            force_revision_bump=True,
+            credential_generation="generation-2",
         )
         self.assertEqual(token_change.config_revision, saved.config_revision + 1)
+        self.assertEqual(token_change.credential_generation, "generation-2")
 
     def test_stale_connection_test_revision_is_not_surfaced(self):
         source = self.service.save_source(
@@ -181,7 +233,7 @@ class ExternalSourceConfigTests(unittest.TestCase):
             "plex",
             enabled=True,
             server_url=source.server_url,
-            force_revision_bump=True,
+            credential_generation="generation-2",
         )
         self.assertEqual(changed.last_test_status, "")
         self.assertIsNone(changed.last_test_at)
