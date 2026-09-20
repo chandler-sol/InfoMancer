@@ -5,9 +5,19 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import struct
-from typing import Sequence
+from typing import Any, Mapping, Sequence
+import urllib.error
+import urllib.parse
+import urllib.request
 
-from ..external import PreviewFrameRef
+from ...path_mapping import ExternalPathMapper, PathMappingError, parse_absolute_path
+from ..external import (
+    ExternalCapability,
+    ExternalMediaRef,
+    ExternalSourceStatus,
+    PreviewFrameRef,
+)
+from ..models import AnalyzerContext
 
 
 _BIF_MAGIC = b"\x89BIF\r\n\x1a\n"
@@ -17,6 +27,10 @@ _BIF_END_TIMESTAMP = 0xFFFFFFFF
 _BIF_VERSION = 0
 _MAX_BIF_IMAGES = 100_000
 _MAX_TIMESTAMP_MS = (1 << 63) - 1
+_MAX_PLEX_JSON_BYTES = 8 * 1024 * 1024
+_MAX_PLEX_BIF_BYTES = 128 * 1024 * 1024
+_MAX_PLEX_JPEG_BYTES = 8 * 1024 * 1024
+_MAX_EPISODE_CANDIDATES = 4096
 
 
 class PlexBifError(ValueError):
@@ -259,3 +273,656 @@ def enumerate_bif_preview_frames(
             )
         )
     return tuple(frames)
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _normalize_plex_server_url(value: str) -> str:
+    raw = str(value or "")
+    if not raw:
+        raise PlexBifError("Plex server URL is required.")
+    if any(
+        character.isspace() or ord(character) < 32 or ord(character) == 127
+        for character in raw
+    ):
+        raise PlexBifError("Plex server URL contains whitespace or control characters.")
+    if any(ord(character) > 127 for character in raw):
+        raise PlexBifError("Plex server URL must use ASCII characters.")
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+        scheme = parsed.scheme.casefold()
+        hostname = parsed.hostname
+        username = parsed.username
+        password = parsed.password
+        _port = parsed.port
+    except ValueError as exc:
+        raise PlexBifError("Plex server URL is invalid.") from exc
+    if scheme not in {"http", "https"} or not hostname:
+        raise PlexBifError("Plex server URL must be a complete HTTP or HTTPS address.")
+    if username or password:
+        raise PlexBifError("Do not put credentials in the Plex server URL.")
+    if parsed.query or parsed.fragment:
+        raise PlexBifError("Plex server URL cannot contain a query or fragment.")
+    return urllib.parse.urlunsplit(
+        (scheme, parsed.netloc, parsed.path.rstrip("/"), "", "")
+    )
+
+
+def _plex_numeric_id(value: object, label: str) -> str:
+    text = str(value or "").strip()
+    if not text.isdigit() or int(text) <= 0:
+        raise PlexBifError(f"{label} must be a positive numeric Plex id.")
+    return str(int(text))
+
+
+def _external_paths_equal(left_value: str, right_value: str) -> bool:
+    try:
+        left = parse_absolute_path(left_value)
+        right = parse_absolute_path(right_value)
+    except PathMappingError:
+        return False
+    if left.windows != right.windows:
+        return False
+
+    def comparable(value: str) -> str:
+        return value.casefold() if left.windows else value
+
+    if comparable(left.anchor) != comparable(right.anchor):
+        return False
+    if len(left.parts) != len(right.parts):
+        return False
+    return all(
+        comparable(actual) == comparable(expected)
+        for actual, expected in zip(left.parts, right.parts)
+    )
+
+
+def _plex_headers(token: str, *, accept: str) -> dict[str, str]:
+    credential = str(token or "").strip()
+    if not credential:
+        raise PlexBifError("A Plex access token is required.")
+    return {
+        "Accept": accept,
+        "X-Plex-Token": credential,
+        "X-Plex-Product": "InfoMancer",
+        "X-Plex-Client-Identifier": "infomancer-episode-identity",
+    }
+
+
+def _read_plex_bytes(
+    server_url: str,
+    token: str,
+    path: str,
+    *,
+    query: Mapping[str, object] | None = None,
+    accept: str,
+    max_bytes: int,
+    timeout: float = 5.0,
+) -> tuple[bytes, str]:
+    base = _normalize_plex_server_url(server_url)
+    route = str(path or "")
+    if not route.startswith("/") or "\x00" in route:
+        raise PlexBifError("Plex API path is invalid.")
+    query_string = urllib.parse.urlencode(
+        {key: value for key, value in (query or {}).items()}
+    )
+    url = base + route + (f"?{query_string}" if query_string else "")
+    request = urllib.request.Request(
+        url,
+        headers=_plex_headers(token, accept=accept),
+        method="GET",
+    )
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        _NoRedirect(),
+    )
+    limit = max(1, int(max_bytes))
+    try:
+        with opener.open(
+            request,
+            timeout=max(1.0, min(float(timeout), 15.0)),
+        ) as response:
+            if response.status != 200:
+                raise PlexBifError(f"Plex returned HTTP {response.status}.")
+            content_type = str(
+                response.headers.get("Content-Type", "")
+            ).split(";", 1)[0].strip().casefold()
+            payload = response.read(limit + 1)
+    except urllib.error.HTTPError as exc:
+        if exc.code in {401, 403}:
+            detail = "Plex rejected the access token."
+        elif exc.code == 404:
+            detail = "The requested Plex media or preview asset does not exist."
+        elif 300 <= exc.code < 400:
+            detail = "Plex redirected the request; save the final server URL instead."
+        else:
+            detail = f"Plex returned HTTP {exc.code}."
+        raise PlexBifError(detail) from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        reason = getattr(exc, "reason", exc)
+        raise PlexBifError(f"InfoMancer could not read Plex: {reason}") from exc
+
+    if len(payload) > limit:
+        raise PlexBifError("Plex response exceeded the safe size limit.")
+    return payload, content_type
+
+
+def _read_plex_json(
+    server_url: str,
+    token: str,
+    path: str,
+    *,
+    query: Mapping[str, object] | None = None,
+    timeout: float = 5.0,
+) -> Mapping[str, Any]:
+    payload, content_type = _read_plex_bytes(
+        server_url,
+        token,
+        path,
+        query=query,
+        accept="application/json",
+        max_bytes=_MAX_PLEX_JSON_BYTES,
+        timeout=timeout,
+    )
+    if content_type and content_type not in {
+        "application/json",
+        "text/json",
+        "text/plain",
+    }:
+        raise PlexBifError("Plex returned an unexpected metadata content type.")
+    try:
+        parsed = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PlexBifError("Plex returned malformed JSON metadata.") from exc
+    if not isinstance(parsed, Mapping):
+        raise PlexBifError("Plex returned an unexpected metadata payload.")
+    return parsed
+
+
+def fetch_plex_episode_candidates(
+    server_url: str,
+    token: str,
+    *,
+    season: int,
+    episode: int,
+    timeout: float = 5.0,
+) -> tuple[Mapping[str, Any], ...]:
+    season_number = int(season)
+    episode_number = int(episode)
+    if season_number < 0 or episode_number < 0:
+        raise PlexBifError("Plex episode coordinates cannot be negative.")
+    payload = _read_plex_json(
+        server_url,
+        token,
+        "/library/all",
+        query={
+            "type": 4,
+            "parentIndex": season_number,
+            "index": episode_number,
+            "includeGuids": 1,
+            "limit": _MAX_EPISODE_CANDIDATES + 1,
+        },
+        timeout=timeout,
+    )
+    container = payload.get("MediaContainer")
+    if not isinstance(container, Mapping):
+        raise PlexBifError("Plex episode search returned an invalid container.")
+    raw_items = container.get("Metadata", ())
+    if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes)):
+        raise PlexBifError("Plex episode search returned an invalid item list.")
+    try:
+        total = int(container.get("totalSize", len(raw_items)))
+    except (TypeError, ValueError) as exc:
+        raise PlexBifError("Plex episode search returned an invalid result count.") from exc
+    if total > _MAX_EPISODE_CANDIDATES or len(raw_items) > _MAX_EPISODE_CANDIDATES:
+        raise PlexBifError("Plex returned too many episode candidates to resolve safely.")
+    if any(not isinstance(item, Mapping) for item in raw_items):
+        raise PlexBifError("Plex episode search returned a malformed candidate entry.")
+    return tuple(raw_items)
+
+
+def _iter_plex_parts(
+    item: Mapping[str, Any],
+) -> tuple[tuple[Mapping[str, Any], Mapping[str, Any]], ...]:
+    raw_media = item.get("Media", ())
+    if not isinstance(raw_media, Sequence) or isinstance(raw_media, (str, bytes)):
+        raise PlexBifError("Plex returned an invalid Media list.")
+    parts: list[tuple[Mapping[str, Any], Mapping[str, Any]]] = []
+    for media in raw_media:
+        if not isinstance(media, Mapping):
+            raise PlexBifError("Plex returned a malformed Media entry.")
+        raw_parts = media.get("Part", ())
+        if not isinstance(raw_parts, Sequence) or isinstance(raw_parts, (str, bytes)):
+            raise PlexBifError("Plex returned an invalid Part list.")
+        for part in raw_parts:
+            if not isinstance(part, Mapping):
+                raise PlexBifError("Plex returned a malformed Part entry.")
+            _plex_numeric_id(part.get("id"), "Plex part id")
+            parts.append((media, part))
+    return tuple(parts)
+
+
+def _plex_provider_ids(item: Mapping[str, Any]) -> dict[str, str]:
+    raw_guids = item.get("Guid", ())
+    if not isinstance(raw_guids, Sequence) or isinstance(raw_guids, (str, bytes)):
+        return {}
+    result: dict[str, str] = {}
+    for entry in raw_guids:
+        if not isinstance(entry, Mapping):
+            continue
+        raw = str(entry.get("id") or "").strip()
+        if "://" not in raw:
+            continue
+        provider, value = raw.split("://", 1)
+        provider = provider.strip().casefold()
+        value = value.strip()
+        if provider and value and provider not in result:
+            result[provider] = value
+    return result
+
+
+def resolve_plex_media_ref(
+    items: Sequence[Mapping[str, Any]],
+    *,
+    expected_external_path: str,
+) -> ExternalMediaRef | None:
+    matches: list[tuple[Mapping[str, Any], Mapping[str, Any]]] = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            raise PlexBifError("Plex returned a malformed episode candidate.")
+        for _media, part in _iter_plex_parts(item):
+            part_path = str(part.get("file") or "").strip()
+            if part_path and _external_paths_equal(
+                part_path, expected_external_path
+            ):
+                matches.append((item, part))
+
+    if len(matches) > 1:
+        raise PlexBifError(
+            "More than one Plex media part matches the mapped media path; resolution is ambiguous."
+        )
+    if not matches:
+        return None
+
+    item, part = matches[0]
+    item_id = _plex_numeric_id(item.get("ratingKey"), "Plex rating key")
+    part_id = _plex_numeric_id(part.get("id"), "Plex part id")
+    updated_at = str(item.get("updatedAt") or "").strip()
+    part_key = str(part.get("key") or "").strip()
+    signature_payload = json.dumps(
+        {
+            "item": item_id,
+            "part": part_id,
+            "path": expected_external_path,
+            "updated_at": updated_at,
+            "part_key": part_key,
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    signature = "plex-item:" + hashlib.sha256(
+        signature_payload.encode("utf-8")
+    ).hexdigest()
+    return ExternalMediaRef(
+        source_key="plex",
+        item_id=item_id,
+        path=expected_external_path,
+        media_source_id=part_id,
+        provider_ids=_plex_provider_ids(item),
+        source_signature=signature,
+    )
+
+
+def fetch_plex_item(
+    server_url: str,
+    token: str,
+    item_id: str,
+    *,
+    timeout: float = 5.0,
+) -> Mapping[str, Any]:
+    normalized_id = _plex_numeric_id(item_id, "Plex rating key")
+    payload = _read_plex_json(
+        server_url,
+        token,
+        f"/library/metadata/{urllib.parse.quote(normalized_id, safe='')}",
+        query={"includeGuids": 1},
+        timeout=timeout,
+    )
+    container = payload.get("MediaContainer")
+    if not isinstance(container, Mapping):
+        raise PlexBifError("Plex item lookup returned an invalid container.")
+    raw_items = container.get("Metadata", ())
+    if (
+        not isinstance(raw_items, Sequence)
+        or isinstance(raw_items, (str, bytes))
+        or len(raw_items) != 1
+        or not isinstance(raw_items[0], Mapping)
+    ):
+        raise PlexBifError("Plex item lookup did not return exactly one item.")
+    returned_id = _plex_numeric_id(raw_items[0].get("ratingKey"), "Plex rating key")
+    if returned_id != normalized_id:
+        raise PlexBifError("Plex returned a different item than the one requested.")
+    return raw_items[0]
+
+
+def fetch_plex_bif_index(
+    server_url: str,
+    token: str,
+    part_id: str,
+    *,
+    timeout: float = 10.0,
+) -> PlexBifIndex:
+    normalized_part = _plex_numeric_id(part_id, "Plex part id")
+    payload, content_type = _read_plex_bytes(
+        server_url,
+        token,
+        f"/library/parts/{normalized_part}/indexes/sd",
+        accept="application/octet-stream",
+        max_bytes=_MAX_PLEX_BIF_BYTES,
+        timeout=timeout,
+    )
+    if content_type and content_type not in {
+        "application/octet-stream",
+        "application/bif",
+        "binary/octet-stream",
+    }:
+        raise PlexBifError("Plex returned an unexpected BIF content type.")
+    if len(payload) < _BIF_HEADER_SIZE:
+        raise PlexBifError("Plex returned a truncated BIF.")
+    _, image_count, _ = _header_fields(payload[:_BIF_HEADER_SIZE])
+    index_size = _BIF_HEADER_SIZE + (image_count + 1) * _BIF_INDEX_ENTRY_SIZE
+    if index_size > len(payload):
+        raise PlexBifError("Plex returned a truncated BIF index.")
+    return parse_bif_index(
+        payload[:index_size],
+        file_size=len(payload),
+    )
+
+
+def _http_bif_signature(part_id: str, index: PlexBifIndex) -> str:
+    payload = json.dumps(
+        {
+            "part": _plex_numeric_id(part_id, "Plex part id"),
+            "size": index.file_size,
+            "index_digest": index.index_digest,
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return "plex-bif-http:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def enumerate_plex_http_preview_frames(
+    *,
+    item_id: str,
+    part_id: str,
+    index: PlexBifIndex,
+) -> tuple[PreviewFrameRef, ...]:
+    normalized_item = _plex_numeric_id(item_id, "Plex rating key")
+    normalized_part = _plex_numeric_id(part_id, "Plex part id")
+    signature = _http_bif_signature(normalized_part, index)
+    return tuple(
+        PreviewFrameRef(
+            source_key="plex",
+            item_id=normalized_item,
+            timestamp_ms=frame.timestamp_ms,
+            asset_ref=json.dumps(
+                {
+                    "kind": "plex_bif_http",
+                    "part_id": normalized_part,
+                    "timestamp_ms": frame.timestamp_ms,
+                    "offset": frame.offset,
+                    "length": frame.length,
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            source_signature=signature,
+        )
+        for frame in index.frames
+    )
+
+
+def fetch_plex_bif_image(
+    server_url: str,
+    token: str,
+    part_id: str,
+    timestamp_ms: int,
+    *,
+    timeout: float = 5.0,
+) -> bytes:
+    normalized_part = _plex_numeric_id(part_id, "Plex part id")
+    offset = int(timestamp_ms)
+    if offset < 0 or offset > _MAX_TIMESTAMP_MS:
+        raise PlexBifError("Plex BIF image timestamp is outside the safe range.")
+    payload, content_type = _read_plex_bytes(
+        server_url,
+        token,
+        f"/library/parts/{normalized_part}/indexes/sd/{offset}",
+        accept="image/jpeg",
+        max_bytes=_MAX_PLEX_JPEG_BYTES,
+        timeout=timeout,
+    )
+    if content_type and content_type not in {"image/jpeg", "image/jpg"}:
+        raise PlexBifError("Plex returned an unexpected preview-image content type.")
+    if len(payload) < 4 or not payload.startswith(b"\xff\xd8") or not payload.endswith(b"\xff\xd9"):
+        raise PlexBifError("Plex returned an invalid JPEG preview image.")
+    return payload
+
+
+class PlexBifSource:
+    """Configured read-only Plex BIF source for Episode Identity."""
+
+    source_key = "plex"
+    version = "0.9-pr-g"
+
+    def __init__(
+        self,
+        server_url: str,
+        token: str,
+        mapper: ExternalPathMapper,
+        *,
+        metadata_root: str = "",
+        enabled: bool = True,
+        last_test_status: str = "",
+        advertise_preview_frames: bool = False,
+    ) -> None:
+        self.server_url = (
+            _normalize_plex_server_url(server_url)
+            if str(server_url or "").strip()
+            else ""
+        )
+        self._token = str(token or "").strip()
+        self.mapper = mapper
+        self.metadata_root = str(metadata_root or "").strip()
+        self.enabled = bool(enabled)
+        self.last_test_status = str(last_test_status or "").strip().casefold()
+        self.advertise_preview_frames = bool(advertise_preview_frames)
+
+    def status(self) -> ExternalSourceStatus:
+        if not self.enabled:
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=False,
+                detail="Disabled in Settings.",
+            )
+        if not self.server_url:
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=False,
+                detail="Server URL is not configured.",
+            )
+        if not self._token:
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=False,
+                detail="Access token is not configured or is not bound to this server URL.",
+            )
+        if self.last_test_status == "error":
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=False,
+                detail="Configured; the last explicit connection test failed.",
+            )
+        if not self.mapper.mappings_for(self.source_key):
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=False,
+                detail="Add at least one Plex-to-InfoMancer path mapping.",
+            )
+        capabilities = (
+            frozenset({ExternalCapability.PREVIEW_FRAMES})
+            if self.advertise_preview_frames
+            else frozenset()
+        )
+        detail = (
+            "Plex BIF preview frames are ready for Episode Identity."
+            if self.advertise_preview_frames
+            else (
+                "Plex BIF adapter is configured and validated. "
+                "Preview-frame analysis becomes available when a consuming analyzer is installed."
+            )
+        )
+        return ExternalSourceStatus(
+            source_key=self.source_key,
+            available=True,
+            capabilities=capabilities,
+            detail=detail,
+        )
+
+    def resolve_media(self, context: AnalyzerContext) -> ExternalMediaRef | None:
+        if not self.status().available:
+            return None
+        translation = self.mapper.reverse_translate(
+            self.source_key,
+            context.media.path,
+        )
+        if translation is None:
+            return None
+        season = context.claimed_identity.season
+        episode = context.claimed_identity.episode
+        if season is None or episode is None:
+            return None
+
+        candidates = fetch_plex_episode_candidates(
+            self.server_url,
+            self._token,
+            season=season,
+            episode=episode,
+        )
+        resolved = resolve_plex_media_ref(
+            candidates,
+            expected_external_path=translation.external_path,
+        )
+        if resolved is None:
+            return None
+
+        detail = fetch_plex_item(
+            self.server_url,
+            self._token,
+            resolved.item_id,
+        )
+        current = resolve_plex_media_ref(
+            (detail,),
+            expected_external_path=translation.external_path,
+        )
+        if current is None:
+            raise PlexBifError(
+                "The Plex episode changed while it was being resolved."
+            )
+        if (
+            current.item_id != resolved.item_id
+            or current.media_source_id != resolved.media_source_id
+        ):
+            raise PlexBifError(
+                "The Plex episode media version changed while it was being resolved."
+            )
+        return current
+
+    def preview_frames(
+        self,
+        media: ExternalMediaRef,
+    ) -> tuple[PreviewFrameRef, ...]:
+        if not self.status().available:
+            return ()
+        if str(media.source_key or "").strip().casefold() != self.source_key:
+            return ()
+        if not media.item_id or not media.path or not media.media_source_id:
+            return ()
+
+        item = fetch_plex_item(
+            self.server_url,
+            self._token,
+            media.item_id,
+        )
+        current = resolve_plex_media_ref(
+            (item,),
+            expected_external_path=media.path,
+        )
+        if (
+            current is None
+            or current.item_id != media.item_id
+            or current.media_source_id != media.media_source_id
+        ):
+            return ()
+
+        index = fetch_plex_bif_index(
+            self.server_url,
+            self._token,
+            current.media_source_id,
+        )
+        return enumerate_plex_http_preview_frames(
+            item_id=current.item_id,
+            part_id=current.media_source_id,
+            index=index,
+        )
+
+    def read_preview(self, frame: PreviewFrameRef) -> bytes:
+        if not self.status().available:
+            raise PlexBifError(
+                "Plex BIF preview reuse is not currently available."
+            )
+        if str(frame.source_key or "").strip().casefold() != self.source_key:
+            raise PlexBifError("Preview frame does not belong to Plex.")
+        try:
+            asset = json.loads(frame.asset_ref)
+        except json.JSONDecodeError as exc:
+            raise PlexBifError("Plex preview asset reference is malformed.") from exc
+        if not isinstance(asset, Mapping) or asset.get("kind") != "plex_bif_http":
+            raise PlexBifError("Plex preview asset reference is invalid.")
+        part_id = _plex_numeric_id(asset.get("part_id"), "Plex part id")
+        try:
+            timestamp_ms = int(asset.get("timestamp_ms"))
+        except (TypeError, ValueError) as exc:
+            raise PlexBifError("Plex preview timestamp is invalid.") from exc
+        if timestamp_ms != int(frame.timestamp_ms):
+            raise PlexBifError("Plex preview asset timestamp does not match its frame.")
+        return fetch_plex_bif_image(
+            self.server_url,
+            self._token,
+            part_id,
+            timestamp_ms,
+        )
+
+    def subtitles(self, media: ExternalMediaRef):
+        return ()
+
+    def read_subtitle(self, subtitle):
+        raise PlexBifError(
+            "Plex subtitle ingestion is not implemented by the BIF adapter."
+        )
+
+    def media_metadata(self, media: ExternalMediaRef):
+        return {}
+
+    def fingerprints(self, media: ExternalMediaRef):
+        return ()
+
+    def known_identity(self, media: ExternalMediaRef):
+        return None
