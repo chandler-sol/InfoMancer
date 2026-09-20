@@ -423,6 +423,23 @@ def _normalize_plex_server_url(value: str) -> str:
     )
 
 
+def _credential_transport_url(
+    server_url: str,
+    *,
+    allow_insecure_http: bool = False,
+) -> str:
+    base = _normalize_plex_server_url(server_url)
+    if (
+        urllib.parse.urlsplit(base).scheme.casefold() == "http"
+        and not allow_insecure_http
+    ):
+        raise PlexBifError(
+            "Plex credentials will not be sent over plain HTTP. "
+            "Use HTTPS or explicitly allow insecure HTTP for this integration."
+        )
+    return base
+
+
 def _plex_numeric_id(value: object, label: str) -> str:
     text = str(value or "").strip()
     if not text.isdigit() or int(text) <= 0:
@@ -473,8 +490,12 @@ def _read_plex_bytes(
     accept: str,
     max_bytes: int,
     timeout: float = 5.0,
+    allow_insecure_http: bool = False,
 ) -> tuple[bytes, str]:
-    base = _normalize_plex_server_url(server_url)
+    base = _credential_transport_url(
+        server_url,
+        allow_insecure_http=allow_insecure_http,
+    )
     route = str(path or "")
     if not route.startswith("/") or "\x00" in route:
         raise PlexBifError("Plex API path is invalid.")
@@ -529,6 +550,7 @@ def _read_plex_json(
     *,
     query: Mapping[str, object] | None = None,
     timeout: float = 5.0,
+    allow_insecure_http: bool = False,
 ) -> Mapping[str, Any]:
     payload, content_type = _read_plex_bytes(
         server_url,
@@ -538,6 +560,7 @@ def _read_plex_json(
         accept="application/json",
         max_bytes=_MAX_PLEX_JSON_BYTES,
         timeout=timeout,
+        allow_insecure_http=allow_insecure_http,
     )
     if content_type and content_type not in {
         "application/json",
@@ -561,6 +584,7 @@ def fetch_plex_episode_candidates(
     season: int,
     episode: int,
     timeout: float = 5.0,
+    allow_insecure_http: bool = False,
 ) -> tuple[Mapping[str, Any], ...]:
     season_number = int(season)
     episode_number = int(episode)
@@ -584,6 +608,7 @@ def fetch_plex_episode_candidates(
                 "X-Plex-Container-Size": _PLEX_PAGE_SIZE,
             },
             timeout=timeout,
+            allow_insecure_http=allow_insecure_http,
         )
         container = payload.get("MediaContainer")
         if not isinstance(container, Mapping):
@@ -736,6 +761,7 @@ def fetch_plex_item(
     item_id: str,
     *,
     timeout: float = 5.0,
+    allow_insecure_http: bool = False,
 ) -> Mapping[str, Any]:
     normalized_id = _plex_numeric_id(item_id, "Plex rating key")
     payload = _read_plex_json(
@@ -744,6 +770,7 @@ def fetch_plex_item(
         f"/library/metadata/{urllib.parse.quote(normalized_id, safe='')}",
         query={"includeGuids": 1},
         timeout=timeout,
+        allow_insecure_http=allow_insecure_http,
     )
     container = payload.get("MediaContainer")
     if not isinstance(container, Mapping):
@@ -768,6 +795,7 @@ def fetch_plex_bif_index(
     part_id: str,
     *,
     timeout: float = 10.0,
+    allow_insecure_http: bool = False,
 ) -> PlexBifIndex:
     normalized_part = _plex_numeric_id(part_id, "Plex part id")
     payload, content_type = _read_plex_bytes(
@@ -777,6 +805,7 @@ def fetch_plex_bif_index(
         accept="application/octet-stream",
         max_bytes=_MAX_PLEX_BIF_BYTES,
         timeout=timeout,
+        allow_insecure_http=allow_insecure_http,
     )
     if content_type and content_type not in {
         "application/octet-stream",
@@ -849,6 +878,7 @@ def fetch_plex_bif_image(
     timestamp_ms: int,
     *,
     timeout: float = 5.0,
+    allow_insecure_http: bool = False,
 ) -> bytes:
     normalized_part = _plex_numeric_id(part_id, "Plex part id")
     offset = int(timestamp_ms)
@@ -861,6 +891,7 @@ def fetch_plex_bif_image(
         accept="image/jpeg",
         max_bytes=_MAX_PLEX_JPEG_BYTES,
         timeout=timeout,
+        allow_insecure_http=allow_insecure_http,
     )
     if content_type and content_type not in {"image/jpeg", "image/jpg"}:
         raise PlexBifError("Plex returned an unexpected preview-image content type.")
@@ -884,6 +915,7 @@ class PlexBifSource:
         metadata_root: str = "",
         enabled: bool = True,
         last_test_status: str = "",
+        allow_insecure_http: bool = False,
         advertise_preview_frames: bool = False,
     ) -> None:
         self.server_url = (
@@ -896,6 +928,7 @@ class PlexBifSource:
         self.metadata_root = str(metadata_root or "").strip()
         self.enabled = bool(enabled)
         self.last_test_status = str(last_test_status or "").strip().casefold()
+        self.allow_insecure_http = bool(allow_insecure_http)
         self.advertise_preview_frames = bool(advertise_preview_frames)
 
     def status(self) -> ExternalSourceStatus:
@@ -922,6 +955,18 @@ class PlexBifSource:
                 source_key=self.source_key,
                 available=False,
                 detail="Configured; the last explicit connection test failed.",
+            )
+        if (
+            urllib.parse.urlsplit(self.server_url).scheme.casefold() == "http"
+            and not self.allow_insecure_http
+        ):
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=False,
+                detail=(
+                    "Plex uses plain HTTP. Use HTTPS or explicitly allow insecure "
+                    "HTTP before InfoMancer sends the access token."
+                ),
             )
         if not self.mapper.mappings_for(self.source_key):
             return ExternalSourceStatus(
@@ -968,6 +1013,7 @@ class PlexBifSource:
             self._token,
             season=season,
             episode=episode,
+            allow_insecure_http=self.allow_insecure_http,
         )
         resolved = resolve_plex_media_ref(
             candidates,
@@ -980,6 +1026,7 @@ class PlexBifSource:
             self.server_url,
             self._token,
             resolved.item_id,
+            allow_insecure_http=self.allow_insecure_http,
         )
         current = resolve_plex_media_ref(
             (detail,),
@@ -1013,6 +1060,7 @@ class PlexBifSource:
             self.server_url,
             self._token,
             media.item_id,
+            allow_insecure_http=self.allow_insecure_http,
         )
         current = resolve_plex_media_ref(
             (item,),
@@ -1030,6 +1078,7 @@ class PlexBifSource:
                 self.server_url,
                 self._token,
                 current.media_source_id,
+                allow_insecure_http=self.allow_insecure_http,
             )
         except PlexBifError:
             if not self.metadata_root:
@@ -1071,17 +1120,46 @@ class PlexBifSource:
             part_id = _plex_numeric_id(asset.get("part_id"), "Plex part id")
             try:
                 timestamp_ms = int(asset.get("timestamp_ms"))
+                expected_offset = int(asset.get("offset"))
+                expected_length = int(asset.get("length"))
             except (TypeError, ValueError) as exc:
-                raise PlexBifError("Plex preview timestamp is invalid.") from exc
+                raise PlexBifError("Plex preview frame reference is invalid.") from exc
             if timestamp_ms != int(frame.timestamp_ms):
                 raise PlexBifError(
                     "Plex preview asset timestamp does not match its frame."
+                )
+            current_index = fetch_plex_bif_index(
+                self.server_url,
+                self._token,
+                part_id,
+                allow_insecure_http=self.allow_insecure_http,
+            )
+            if _http_bif_signature(part_id, current_index) != frame.source_signature:
+                raise PlexBifError(
+                    "Plex BIF changed after preview frames were enumerated."
+                )
+            current_range = next(
+                (
+                    candidate
+                    for candidate in current_index.frames
+                    if candidate.timestamp_ms == timestamp_ms
+                ),
+                None,
+            )
+            if (
+                current_range is None
+                or current_range.offset != expected_offset
+                or current_range.length != expected_length
+            ):
+                raise PlexBifError(
+                    "Plex BIF frame range changed after preview enumeration."
                 )
             return fetch_plex_bif_image(
                 self.server_url,
                 self._token,
                 part_id,
                 timestamp_ms,
+                allow_insecure_http=self.allow_insecure_http,
             )
         if kind == "plex_bif":
             if not self.metadata_root:
@@ -1111,6 +1189,30 @@ class PlexBifSource:
             ):
                 raise PlexBifError(
                     "Plex local BIF preview path is outside the configured metadata root."
+                )
+            current_index = read_bif_index(resolved_candidate)
+            if (
+                bif_source_signature(resolved_candidate, current_index)
+                != frame.source_signature
+            ):
+                raise PlexBifError(
+                    "Plex local BIF changed after preview frames were enumerated."
+                )
+            current_range = next(
+                (
+                    candidate
+                    for candidate in current_index.frames
+                    if candidate.timestamp_ms == int(frame.timestamp_ms)
+                ),
+                None,
+            )
+            if (
+                current_range is None
+                or current_range.offset != offset
+                or current_range.length != length
+            ):
+                raise PlexBifError(
+                    "Plex local BIF frame range changed after preview enumeration."
                 )
             return read_bif_preview_range(
                 resolved_candidate,
