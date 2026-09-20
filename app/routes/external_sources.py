@@ -58,19 +58,19 @@ def build_router(ctx: RouteContext):
                     "Choose either a replacement token or Remove saved token, not both."
                 )
             normalized_url = normalize_server_url(server_url)
-            allow_insecure = bool(allow_insecure_http) if key == "jellyfin" else False
+            allow_insecure = bool(allow_insecure_http) if key in {"plex", "jellyfin"} else False
             if (
-                key == "jellyfin"
+                key in {"plex", "jellyfin"}
                 and normalized_url.startswith("http://")
                 and bool(enabled)
                 and not allow_insecure
             ):
                 raise ExternalSourceConfigError(
-                    "Jellyfin credentials will not be sent over plain HTTP. "
+                    f"{key.title()} credentials will not be sent over plain HTTP. "
                     "Use HTTPS or explicitly allow insecure HTTP for this integration."
                 )
             source_config = dict(previous.config)
-            if key == "jellyfin":
+            if key in {"plex", "jellyfin"}:
                 source_config["allow_insecure_http"] = allow_insecure
             endpoint_changed = normalized_url != previous.server_url
             has_saved_token = bool(current_secrets.get(secret_key, ""))
