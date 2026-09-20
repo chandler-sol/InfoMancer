@@ -7,6 +7,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import sqlite3
+import stat as stat_module
 import struct
 from typing import Any, Mapping, Sequence
 import urllib.error
@@ -44,6 +45,16 @@ class PlexBifError(ValueError):
 
 class PlexPreviewUnavailable(PlexBifError):
     """Raised when optional Plex preview evidence is unavailable for an item."""
+
+
+class _PlexHttpError(PlexBifError):
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = int(status_code)
+
+
+class _PlexResponseTooLarge(PlexBifError):
+    """Raised when a bounded Plex response exceeds its caller's safe limit."""
 
 
 @dataclass(frozen=True)
@@ -419,6 +430,117 @@ def bif_source_signature(path: str | Path, index: PlexBifIndex) -> str:
     return "plex-bif:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def read_verified_bif_preview(
+    path: str | Path,
+    *,
+    expected_signature: str,
+    timestamp_ms: int,
+    offset: int,
+    length: int,
+) -> bytes:
+    """Verify the local BIF index and read one JPEG through the same open file."""
+    bif_path = Path(path)
+    start = int(offset)
+    count = int(length)
+    if start < 0 or count <= 0 or count > _MAX_PLEX_JPEG_BYTES:
+        raise PlexBifError("Plex BIF preview byte range is outside safe bounds.")
+
+    try:
+        with bif_path.open("rb") as handle:
+            before = os.fstat(handle.fileno())
+            if not stat_module.S_ISREG(before.st_mode):
+                raise PlexPreviewUnavailable(
+                    "Plex BIF path is no longer a regular file."
+                )
+            if before.st_size < _BIF_HEADER_SIZE + _BIF_INDEX_ENTRY_SIZE:
+                raise PlexPreviewUnavailable(
+                    "Plex BIF file is too small to contain an index."
+                )
+            if before.st_size > 0xFFFFFFFF:
+                raise PlexPreviewUnavailable(
+                    "Plex BIF file exceeds the supported version 0 offset range."
+                )
+
+            header = handle.read(_BIF_HEADER_SIZE)
+            try:
+                _, image_count, _ = _header_fields(header)
+            except PlexBifError as exc:
+                raise PlexPreviewUnavailable(
+                    f"Plex local BIF header is unusable: {exc}"
+                ) from exc
+            index_size = (image_count + 1) * _BIF_INDEX_ENTRY_SIZE
+            index_bytes = handle.read(index_size)
+            if len(index_bytes) != index_size:
+                raise PlexPreviewUnavailable("Plex local BIF index is truncated.")
+            try:
+                current_index = parse_bif_index(
+                    header + index_bytes,
+                    file_size=before.st_size,
+                    source_mtime_ns=getattr(
+                        before,
+                        "st_mtime_ns",
+                        int(before.st_mtime * 1_000_000_000),
+                    ),
+                )
+            except PlexBifError as exc:
+                raise PlexPreviewUnavailable(
+                    f"Plex local BIF index is unusable: {exc}"
+                ) from exc
+
+            if bif_source_signature(bif_path, current_index) != expected_signature:
+                raise PlexPreviewUnavailable(
+                    "Plex local BIF changed after preview frames were enumerated."
+                )
+            current_range = next(
+                (
+                    candidate
+                    for candidate in current_index.frames
+                    if candidate.timestamp_ms == int(timestamp_ms)
+                ),
+                None,
+            )
+            if (
+                current_range is None
+                or current_range.offset != start
+                or current_range.length != count
+            ):
+                raise PlexPreviewUnavailable(
+                    "Plex local BIF frame range changed after preview enumeration."
+                )
+
+            handle.seek(start)
+            payload = handle.read(count)
+            after = os.fstat(handle.fileno())
+    except PlexPreviewUnavailable:
+        raise
+    except OSError as exc:
+        raise PlexPreviewUnavailable(
+            f"Plex local BIF preview could not be read: {exc}"
+        ) from exc
+
+    before_mtime = getattr(
+        before, "st_mtime_ns", int(before.st_mtime * 1_000_000_000)
+    )
+    after_mtime = getattr(
+        after, "st_mtime_ns", int(after.st_mtime * 1_000_000_000)
+    )
+    if before.st_size != after.st_size or before_mtime != after_mtime:
+        raise PlexPreviewUnavailable(
+            "Plex local BIF changed while the preview frame was being read."
+        )
+    if len(payload) != count:
+        raise PlexPreviewUnavailable("Plex local BIF preview range was truncated.")
+    if (
+        len(payload) < 4
+        or not payload.startswith(b"\xff\xd8")
+        or not payload.endswith(b"\xff\xd9")
+    ):
+        raise PlexPreviewUnavailable(
+            "Plex local BIF preview range is not a valid JPEG."
+        )
+    return payload
+
+
 def enumerate_bif_preview_frames(
     *,
     item_id: str,
@@ -609,7 +731,10 @@ def _read_plex_bytes(
             timeout=max(1.0, min(float(timeout), 15.0)),
         ) as response:
             if response.status != 200:
-                raise PlexBifError(f"Plex returned HTTP {response.status}.")
+                raise _PlexHttpError(
+                    int(response.status),
+                    f"Plex returned HTTP {response.status}.",
+                )
             content_type = str(
                 response.headers.get("Content-Type", "")
             ).split(";", 1)[0].strip().casefold()
@@ -617,21 +742,19 @@ def _read_plex_bytes(
     except urllib.error.HTTPError as exc:
         if exc.code in {401, 403}:
             detail = "Plex rejected the access token."
-        elif exc.code == 404:
-            raise PlexPreviewUnavailable(
-                "The requested Plex preview asset does not exist."
-            ) from exc
         elif 300 <= exc.code < 400:
             detail = "Plex redirected the request; save the final server URL instead."
+        elif exc.code == 404:
+            detail = "The requested Plex resource does not exist."
         else:
             detail = f"Plex returned HTTP {exc.code}."
-        raise PlexBifError(detail) from exc
+        raise _PlexHttpError(exc.code, detail) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         reason = getattr(exc, "reason", exc)
         raise PlexBifError(f"InfoMancer could not read Plex: {reason}") from exc
 
     if len(payload) > limit:
-        raise PlexBifError("Plex response exceeded the safe size limit.")
+        raise _PlexResponseTooLarge("Plex response exceeded the safe size limit.")
     return payload, content_type
 
 
@@ -901,15 +1024,26 @@ def fetch_plex_bif_index(
     allow_insecure_http: bool = False,
 ) -> PlexBifIndex:
     normalized_part = _plex_numeric_id(part_id, "Plex part id")
-    payload, content_type = _read_plex_bytes(
-        server_url,
-        token,
-        f"/library/parts/{normalized_part}/indexes/sd",
-        accept="application/octet-stream",
-        max_bytes=_MAX_PLEX_BIF_BYTES,
-        timeout=timeout,
-        allow_insecure_http=allow_insecure_http,
-    )
+    try:
+        payload, content_type = _read_plex_bytes(
+            server_url,
+            token,
+            f"/library/parts/{normalized_part}/indexes/sd",
+            accept="application/octet-stream",
+            max_bytes=_MAX_PLEX_BIF_BYTES,
+            timeout=timeout,
+            allow_insecure_http=allow_insecure_http,
+        )
+    except _PlexHttpError as exc:
+        if exc.status_code == 404:
+            raise PlexPreviewUnavailable(
+                "Plex has no BIF preview asset for this media part."
+            ) from exc
+        raise
+    except _PlexResponseTooLarge as exc:
+        raise PlexPreviewUnavailable(
+            "Plex BIF preview exceeds the safe size limit."
+        ) from exc
     if content_type and content_type not in {
         "application/octet-stream",
         "application/bif",
@@ -1010,19 +1144,36 @@ def fetch_plex_bif_image(
     offset = int(timestamp_ms)
     if offset < 0 or offset > _MAX_TIMESTAMP_MS:
         raise PlexBifError("Plex BIF image timestamp is outside the safe range.")
-    payload, content_type = _read_plex_bytes(
-        server_url,
-        token,
-        f"/library/parts/{normalized_part}/indexes/sd/{offset}",
-        accept="image/jpeg",
-        max_bytes=_MAX_PLEX_JPEG_BYTES,
-        timeout=timeout,
-        allow_insecure_http=allow_insecure_http,
-    )
+    try:
+        payload, content_type = _read_plex_bytes(
+            server_url,
+            token,
+            f"/library/parts/{normalized_part}/indexes/sd/{offset}",
+            accept="image/jpeg",
+            max_bytes=_MAX_PLEX_JPEG_BYTES,
+            timeout=timeout,
+            allow_insecure_http=allow_insecure_http,
+        )
+    except _PlexHttpError as exc:
+        if exc.status_code == 404:
+            raise PlexPreviewUnavailable(
+                "Plex no longer has the requested preview frame."
+            ) from exc
+        raise
+    except _PlexResponseTooLarge as exc:
+        raise PlexPreviewUnavailable(
+            "Plex preview frame exceeds the safe size limit."
+        ) from exc
     if content_type and content_type not in {"image/jpeg", "image/jpg"}:
-        raise PlexBifError("Plex returned an unexpected preview-image content type.")
-    if len(payload) < 4 or not payload.startswith(b"\xff\xd8") or not payload.endswith(b"\xff\xd9"):
-        raise PlexBifError("Plex returned an invalid JPEG preview image.")
+        raise PlexPreviewUnavailable(
+            "Plex returned an unsupported preview-image content type."
+        )
+    if (
+        len(payload) < 4
+        or not payload.startswith(b"\xff\xd8")
+        or not payload.endswith(b"\xff\xd9")
+    ):
+        raise PlexPreviewUnavailable("Plex returned an invalid JPEG preview image.")
     return payload
 
 
@@ -1282,11 +1433,11 @@ class PlexBifSource:
                 allow_insecure_http=self.allow_insecure_http,
             )
             if len(payload) != expected_length:
-                raise PlexBifError(
+                raise PlexPreviewUnavailable(
                     "Plex BIF frame length changed after preview enumeration."
                 )
             if hashlib.sha256(payload).hexdigest() != expected_sha256:
-                raise PlexBifError(
+                raise PlexPreviewUnavailable(
                     "Plex BIF frame content changed after preview enumeration."
                 )
             return payload
@@ -1318,7 +1469,7 @@ class PlexBifSource:
                     f"Plex metadata root could not be resolved: {exc}"
                 ) from exc
             if normalized_asset_root != normalized_current_root:
-                raise PlexBifError(
+                raise PlexPreviewUnavailable(
                     "Plex metadata root changed after preview enumeration."
                 )
             candidate = Path(str(asset.get("path") or ""))
@@ -1328,7 +1479,7 @@ class PlexBifSource:
                 ).resolve()
                 resolved_candidate = candidate.resolve(strict=True)
             except OSError as exc:
-                raise PlexBifError(
+                raise PlexPreviewUnavailable(
                     f"Plex local BIF preview path could not be resolved: {exc}"
                 ) from exc
             if (
@@ -1345,42 +1496,20 @@ class PlexBifSource:
                     expected_external_path=expected_external_path,
                 )
             except PlexBifError as exc:
-                raise PlexBifError(
+                raise PlexPreviewUnavailable(
                     f"Plex media identity anchor changed after preview enumeration: {exc}"
                 ) from exc
             if (
                 current_bif_path is None
                 or current_bif_path.resolve() != resolved_candidate
             ):
-                raise PlexBifError(
+                raise PlexPreviewUnavailable(
                     "Plex media identity anchor changed after preview enumeration."
                 )
-            current_index = read_bif_index(resolved_candidate)
-            if (
-                bif_source_signature(resolved_candidate, current_index)
-                != frame.source_signature
-            ):
-                raise PlexBifError(
-                    "Plex local BIF changed after preview frames were enumerated."
-                )
-            current_range = next(
-                (
-                    candidate
-                    for candidate in current_index.frames
-                    if candidate.timestamp_ms == int(frame.timestamp_ms)
-                ),
-                None,
-            )
-            if (
-                current_range is None
-                or current_range.offset != offset
-                or current_range.length != length
-            ):
-                raise PlexBifError(
-                    "Plex local BIF frame range changed after preview enumeration."
-                )
-            return read_bif_preview_range(
+            return read_verified_bif_preview(
                 resolved_candidate,
+                expected_signature=frame.source_signature,
+                timestamp_ms=int(frame.timestamp_ms),
                 offset=offset,
                 length=length,
             )
