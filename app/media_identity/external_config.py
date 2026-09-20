@@ -12,6 +12,7 @@ from typing import Any
 
 from ..path_mapping import ExternalPathMapper, PathMapping, PathMappingError
 from .external import ExternalSourceRegistry, ExternalSourceStatus
+from .sources.jellyfin import JellyfinTrickplaySource
 
 
 SUPPORTED_EXTERNAL_SOURCES = frozenset({"plex", "jellyfin"})
@@ -488,15 +489,27 @@ def build_configured_source_registry(
     service: ExternalSourceConfigService,
     secrets: dict[str, str],
 ) -> ExternalSourceRegistry:
-    return ExternalSourceRegistry(
-        tuple(
-            ConfiguredExternalSource(
-                source,
-                token_configured=external_token_is_bound(source, secrets),
+    configured = []
+    for source in service.sources():
+        token_is_bound = external_token_is_bound(source, secrets)
+        if source.source_key == "jellyfin":
+            configured.append(
+                JellyfinTrickplaySource(
+                    source.server_url,
+                    secrets.get("jellyfin_token", "") if token_is_bound else "",
+                    service.mapper("jellyfin"),
+                    enabled=source.enabled,
+                    last_test_status=source.last_test_status,
+                )
             )
-            for source in service.sources()
-        )
-    )
+        else:
+            configured.append(
+                ConfiguredExternalSource(
+                    source,
+                    token_configured=token_is_bound,
+                )
+            )
+    return ExternalSourceRegistry(tuple(configured))
 
 
 def test_external_connection(
