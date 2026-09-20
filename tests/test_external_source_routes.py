@@ -48,10 +48,12 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
             "plex",
             enabled=True,
             server_url="http://trusted-plex.local:32400",
+            credential_generation="trusted-generation",
         )
         main.provider_secrets.update({
             "plex_token": "trusted-token",
             "plex_token_endpoint": "http://trusted-plex.local:32400",
+            "plex_token_generation": "trusted-generation",
         })
 
         self.client = TestClient(main.app, follow_redirects=False)
@@ -113,6 +115,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
             main.provider_secrets.update({
                 "plex_token": "new-token",
                 "plex_token_endpoint": "http://trusted-plex.local:32400",
+                "plex_token_generation": "new-generation",
             })
             return ExternalConnectionResult(
                 "plex",
@@ -134,6 +137,31 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         self.assertEqual(source.last_test_status, "")
         self.assertIsNone(source.last_test_at)
 
+    def test_connection_test_cannot_start_between_secret_write_and_generation_adoption(self):
+        from app.media_identity.external_config import ExternalConnectionResult
+
+        main.external_source_config.clear_connection_result("plex")
+        main.provider_secrets.update({
+            "plex_token": "replacement-token",
+            "plex_token_endpoint": "http://trusted-plex.local:32400",
+            "plex_token_generation": "replacement-generation",
+        })
+
+        with patch(
+            "app.routes.external_sources.test_external_connection",
+            return_value=ExternalConnectionResult(
+                "plex", True, server_name="Plex", version="1", detail="ok"
+            ),
+        ) as probe:
+            response = self.client.post("/settings/integrations/plex/test")
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("not+bound", response.headers["location"])
+        probe.assert_not_called()
+        source = main.external_source_config.source("plex")
+        self.assertEqual(source.credential_generation, "trusted-generation")
+        self.assertEqual(source.last_test_status, "")
+
     def test_revision_closes_token_change_gap_before_result_write(self):
         from app.media_identity.external_config import ExternalConnectionResult
 
@@ -145,16 +173,17 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
             tested_server_url,
             tested_revision,
         ):
+            main.provider_secrets.update({
+                "plex_token": "new-token",
+                "plex_token_endpoint": "http://trusted-plex.local:32400",
+                "plex_token_generation": "new-generation",
+            })
             main.external_source_config.save_source(
                 "plex",
                 enabled=True,
                 server_url="http://trusted-plex.local:32400",
-                force_revision_bump=True,
+                credential_generation="new-generation",
             )
-            main.provider_secrets.update({
-                "plex_token": "new-token",
-                "plex_token_endpoint": "http://trusted-plex.local:32400",
-            })
             return original_record(
                 result,
                 tested_server_url=tested_server_url,
@@ -240,6 +269,12 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         self.assertEqual(
             secrets["plex_token_endpoint"],
             "http://replacement-plex.local:32400",
+        )
+        source = main.external_source_config.source("plex")
+        self.assertTrue(secrets["plex_token_generation"])
+        self.assertEqual(
+            secrets["plex_token_generation"],
+            source.credential_generation,
         )
 
     def test_changed_server_url_accepts_explicit_replacement_token(self):
