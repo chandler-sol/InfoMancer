@@ -96,6 +96,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         self.assertNotIn(">Ready</span><span>BIF adapter", response.text)
         self.assertNotIn(">Pending</strong><span>Preview adapter", response.text)
         self.assertIn("Allow this Plex token over plain HTTP", response.text)
+        self.assertIn('placeholder="https://plex.local:32400"', response.text)
 
     def test_integrations_page_reports_jellyfin_adapter_without_claiming_analysis_ready(self):
         local_root = Path(self.temporary.name) / "media"
