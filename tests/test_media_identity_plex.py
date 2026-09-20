@@ -325,7 +325,7 @@ class PlexBifFoundationTests(unittest.TestCase):
             return_value=opener,
         ) as builder:
             items = fetch_plex_episode_candidates(
-                "http://plex.local:32400",
+                "https://plex.local:32400",
                 "top-secret",
                 season=1,
                 episode=2,
@@ -388,7 +388,7 @@ class PlexBifFoundationTests(unittest.TestCase):
             side_effect=paged_read,
         ):
             items = fetch_plex_episode_candidates(
-                "http://plex.local:32400",
+                "https://plex.local:32400",
                 "secret",
                 season=1,
                 episode=2,
@@ -406,6 +406,47 @@ class PlexBifFoundationTests(unittest.TestCase):
         self.assertIsNotNone(resolved)
         self.assertEqual(resolved.item_id, "102")
         self.assertEqual(resolved.media_source_id, "502")
+
+    def test_plex_helpers_reject_plain_http_before_sending_token(self):
+        with patch(
+            "app.media_identity.sources.plex.urllib.request.build_opener"
+        ) as opener:
+            with self.assertRaisesRegex(
+                PlexBifError, "will not be sent over plain HTTP"
+            ):
+                fetch_plex_item(
+                    "http://plex.local:32400",
+                    "secret",
+                    "101",
+                )
+
+        opener.assert_not_called()
+
+    def test_plex_helpers_allow_explicit_trusted_http_opt_in(self):
+        payload = json.dumps(
+            {
+                "MediaContainer": {
+                    "Metadata": [plex_episode_item(rating_key="101")]
+                }
+            }
+        ).encode("utf-8")
+        opener = DummyOpener(
+            DummyResponse(payload, content_type="application/json")
+        )
+
+        with patch(
+            "app.media_identity.sources.plex.urllib.request.build_opener",
+            return_value=opener,
+        ):
+            item = fetch_plex_item(
+                "http://plex.local:32400",
+                "secret",
+                "101",
+                allow_insecure_http=True,
+            )
+
+        self.assertEqual(item["ratingKey"], "101")
+        self.assertEqual(opener.request.get_header("X-plex-token"), "secret")
 
     def test_fetch_plex_item_requires_exact_requested_rating_key(self):
         payload = json.dumps(
@@ -425,7 +466,7 @@ class PlexBifFoundationTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(PlexBifError, "different item"):
                 fetch_plex_item(
-                    "http://plex.local:32400",
+                    "https://plex.local:32400",
                     "token",
                     "101",
                 )
@@ -441,7 +482,7 @@ class PlexBifFoundationTests(unittest.TestCase):
             return_value=opener,
         ):
             parsed = fetch_plex_bif_index(
-                "http://plex.local:32400",
+                "https://plex.local:32400",
                 "secret",
                 "501",
             )
@@ -482,7 +523,7 @@ class PlexBifFoundationTests(unittest.TestCase):
             return_value=opener,
         ):
             result = fetch_plex_bif_image(
-                "http://plex.local:32400",
+                "https://plex.local:32400",
                 "secret",
                 "501",
                 10_000,
@@ -505,7 +546,7 @@ class PlexBifFoundationTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(PlexBifError, "invalid JPEG"):
                 fetch_plex_bif_image(
-                    "http://plex.local:32400",
+                    "https://plex.local:32400",
                     "secret",
                     "501",
                     0,
@@ -526,7 +567,7 @@ class PlexBifFoundationTests(unittest.TestCase):
                 [PathMapping("plex", "/srv/tv", str(local_root))]
             )
             source = PlexBifSource(
-                "http://plex.local:32400",
+                "https://plex.local:32400",
                 "secret",
                 mapper,
             )
@@ -578,10 +619,11 @@ class PlexBifFoundationTests(unittest.TestCase):
             self.assertEqual(len(frames), 2)
             self.assertEqual(image, b"\xff\xd8frame\xff\xd9")
             image_fetch.assert_called_once_with(
-                "http://plex.local:32400",
+                "https://plex.local:32400",
                 "secret",
                 "501",
                 10_000,
+                allow_insecure_http=False,
             )
             self.assertEqual(source.status().capabilities, frozenset())
             self.assertEqual(
@@ -592,6 +634,71 @@ class PlexBifFoundationTests(unittest.TestCase):
                 ExternalCapability.PREVIEW_FRAMES,
                 source.status().capabilities,
             )
+
+    def test_http_bif_change_is_rejected_before_preview_read(self):
+        old_bif = build_bif(
+            frames=((0, b"\xff\xd8AAAA\xff\xd9"),)
+        )
+        new_bif = build_bif(
+            frames=((0, b"\xff\xd8BBBB\xff\xd9"),)
+        )
+
+        old_opener = DummyOpener(
+            DummyResponse(old_bif, content_type="application/octet-stream")
+        )
+        with patch(
+            "app.media_identity.sources.plex.urllib.request.build_opener",
+            return_value=old_opener,
+        ):
+            old_index = fetch_plex_bif_index(
+                "https://plex.local:32400",
+                "secret",
+                "501",
+            )
+
+        new_opener = DummyOpener(
+            DummyResponse(new_bif, content_type="application/octet-stream")
+        )
+        with patch(
+            "app.media_identity.sources.plex.urllib.request.build_opener",
+            return_value=new_opener,
+        ):
+            new_index = fetch_plex_bif_index(
+                "https://plex.local:32400",
+                "secret",
+                "501",
+            )
+
+        self.assertNotEqual(old_index.index_digest, new_index.index_digest)
+        frames = enumerate_plex_http_preview_frames(
+            item_id="101",
+            part_id="501",
+            index=old_index,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            local_root = Path(temporary) / "tv"
+            source = PlexBifSource(
+                "https://plex.local:32400",
+                "secret",
+                ExternalPathMapper(
+                    [PathMapping("plex", "/srv/tv", str(local_root))]
+                ),
+            )
+            with (
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_bif_index",
+                    return_value=new_index,
+                ),
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_bif_image"
+                ) as image_fetch,
+            ):
+                with self.assertRaisesRegex(
+                    PlexBifError, "changed after preview frames were enumerated"
+                ):
+                    source.read_preview(frames[0])
+
+            image_fetch.assert_not_called()
 
     def test_custom_metadata_root_falls_back_to_exact_local_bif(self):
         expected = "/srv/tv/Show/Season 01/Episode.mkv"
@@ -638,7 +745,7 @@ class PlexBifFoundationTests(unittest.TestCase):
                 [PathMapping("plex", "/srv/tv", str(local_root))]
             )
             source = PlexBifSource(
-                "http://plex.local:32400",
+                "https://plex.local:32400",
                 "secret",
                 mapper,
                 metadata_root=str(root),
@@ -670,6 +777,87 @@ class PlexBifFoundationTests(unittest.TestCase):
             self.assertEqual(Path(asset["path"]), bif_path)
             self.assertEqual(image, b"\xff\xd8frame-one\xff\xd9")
 
+    def test_local_bif_change_is_rejected_before_preview_read(self):
+        expected = "/srv/tv/Show/Season 01/Episode.mkv"
+        candidate = plex_episode_item(
+            rating_key="101",
+            path=expected,
+            part_id="501",
+        )
+        media_hash = "a" + "b" * 39
+        original_bif = build_bif()
+        changed_bif = build_bif(
+            frames=(
+                (0, b"\xff\xd8frame-zero\xff\xd9"),
+                (11, b"\xff\xd8frame-one\xff\xd9"),
+            )
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "Plex Media Server"
+            database_path = (
+                root
+                / "Plug-in Support"
+                / "Databases"
+                / "com.plexapp.plugins.library.db"
+            )
+            database_path.parent.mkdir(parents=True)
+            with sqlite3.connect(database_path) as connection:
+                connection.execute(
+                    "CREATE TABLE media_parts (id INTEGER PRIMARY KEY, hash TEXT, file TEXT)"
+                )
+                connection.execute(
+                    "INSERT INTO media_parts(id,hash,file) VALUES (?,?,?)",
+                    (501, media_hash, expected),
+                )
+
+            bif_path = (
+                root
+                / "Media"
+                / "localhost"
+                / media_hash[0]
+                / f"{media_hash[1:]}.bundle"
+                / "Contents"
+                / "Indexes"
+                / "index-sd.bif"
+            )
+            bif_path.parent.mkdir(parents=True)
+            bif_path.write_bytes(original_bif)
+
+            local_root = Path(temporary) / "tv"
+            source = PlexBifSource(
+                "https://plex.local:32400",
+                "secret",
+                ExternalPathMapper(
+                    [PathMapping("plex", "/srv/tv", str(local_root))]
+                ),
+                metadata_root=str(root),
+            )
+            from app.media_identity.external import ExternalMediaRef
+            media = ExternalMediaRef(
+                source_key="plex",
+                item_id="101",
+                path=expected,
+                media_source_id="501",
+            )
+            with (
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_item",
+                    return_value=candidate,
+                ),
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_bif_index",
+                    side_effect=PlexBifError("HTTP BIF unavailable"),
+                ),
+            ):
+                frames = source.preview_frames(media)
+
+            bif_path.write_bytes(changed_bif)
+
+            with self.assertRaisesRegex(
+                PlexBifError, "changed after preview frames were enumerated"
+            ):
+                source.read_preview(frames[0])
+
     def test_custom_metadata_root_rejects_wrong_media_part_path(self):
         expected = "/srv/tv/Show/Season 01/Episode.mkv"
         candidate = plex_episode_item(
@@ -698,7 +886,7 @@ class PlexBifFoundationTests(unittest.TestCase):
 
             local_root = Path(temporary) / "tv"
             source = PlexBifSource(
-                "http://plex.local:32400",
+                "https://plex.local:32400",
                 "secret",
                 ExternalPathMapper(
                     [PathMapping("plex", "/srv/tv", str(local_root))]
@@ -738,7 +926,7 @@ class PlexBifFoundationTests(unittest.TestCase):
                 [PathMapping("plex", "/srv/tv", str(local_root))]
             )
             source = PlexBifSource(
-                "http://plex.local:32400",
+                "https://plex.local:32400",
                 "secret",
                 mapper,
             )
