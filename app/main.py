@@ -2755,6 +2755,10 @@ def settings_page_context(
                 ),
                 "mappings": external_source_config.mappings(source.source_key),
                 "source_status": status,
+                "analysis_ready": bool(status.available and status.capabilities),
+                "allow_insecure_http": bool(
+                    source.config.get("allow_insecure_http", False)
+                ),
                 "preview_frames_available": (
                     status.available
                     and ExternalCapability.PREVIEW_FRAMES in status.capabilities
