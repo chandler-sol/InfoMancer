@@ -30,7 +30,7 @@ _MAX_TILE_SHEET_DIMENSION = 32_768
 _MAX_TILE_SHEET_PIXELS = 64_000_000
 _MAX_TILE_JPEG_BYTES = 32 * 1024 * 1024
 _MAX_JSON_BYTES = 8 * 1024 * 1024
-_MAX_EPISODE_CANDIDATES = 256
+_MAX_EPISODE_CANDIDATES = 4096
 
 
 class JellyfinAdapterError(ValueError):
@@ -881,7 +881,11 @@ class JellyfinTrickplaySource:
             (detail,),
             expected_external_path=translation.external_path,
         )
-        if resolved is None or resolved.item_id != item_id:
+        if (
+            resolved is None
+            or _jellyfin_guid(resolved.item_id, "Jellyfin item id")
+            != _jellyfin_guid(item_id, "Jellyfin item id")
+        ):
             raise JellyfinAdapterError(
                 "The Jellyfin episode changed while it was being resolved."
             )
@@ -901,11 +905,20 @@ class JellyfinTrickplaySource:
             (item,),
             expected_external_path=media.path,
         )
-        if (
-            current is None
-            or current.item_id != media.item_id
-            or current.media_source_id != media.media_source_id
-        ):
+        if current is None:
+            return ()
+        try:
+            same_item = (
+                _jellyfin_guid(current.item_id, "Jellyfin item id")
+                == _jellyfin_guid(media.item_id, "Jellyfin item id")
+            )
+            same_media_source = (
+                _jellyfin_guid(current.media_source_id, "Jellyfin media source id")
+                == _jellyfin_guid(media.media_source_id, "Jellyfin media source id")
+            )
+        except JellyfinAdapterError:
+            return ()
+        if not same_item or not same_media_source:
             return ()
 
         variant = select_trickplay_variant(
