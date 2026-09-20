@@ -190,3 +190,19 @@ their presence alone is not a claim that every redistribution obligation has
 been satisfied. Before publishing a production release, confirm the exact
 FFmpeg build configuration and applicable LGPL/GPL obligations, including any
 source or build-correspondence requirements that apply to that binary.
+
+
+### Pillow image-decoding contract
+
+Episode Identity's optional Jellyfin Trickplay adapter uses Pillow to decode an
+existing Jellyfin JPEG tile sheet and crop only the requested logical preview
+cell. Pillow is a normal pinned Python dependency rather than a downloaded
+runtime or managed executable. The adapter does not generate Trickplay assets or
+modify Jellyfin.
+
+The adapter bounds HTTP response bytes before decode, rejects non-JPEG content,
+bounds the expected tile-sheet dimensions and total decoded pixels, verifies the
+decoded sheet dimensions against the Trickplay manifest, and then re-encodes only
+the requested cell for analysis. Pillow 12.3.0 is pinned in `requirements.txt`
+and is distributed under the MIT-CMU license. Production dependency/license
+reporting should include the Pillow package and its installed license metadata.
