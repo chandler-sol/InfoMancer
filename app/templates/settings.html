@@ -113,9 +113,9 @@
         {% endif %}
       </div>
       <label class="checkbox-label"><input type="checkbox" name="enabled" value="1" {% if source.enabled %}checked{% endif %}> Enable {{ source.label }} as an Episode Identity external source</label>
-      {% if source.source_key == 'jellyfin' %}
-      <label class="checkbox-label"><input type="checkbox" name="allow_insecure_http" value="1" {% if source.allow_insecure_http %}checked{% endif %}> Allow this Jellyfin token over plain HTTP</label>
-      <small class="muted">Off by default. Prefer HTTPS. Enable only when you intentionally use a trusted local HTTP-only Jellyfin connection.</small>
+      {% if source.source_key in ['plex', 'jellyfin'] %}
+      <label class="checkbox-label"><input type="checkbox" name="allow_insecure_http" value="1" {% if source.allow_insecure_http %}checked{% endif %}> Allow this {{ source.label }} token over plain HTTP</label>
+      <small class="muted">Off by default. Prefer HTTPS. Enable only when you intentionally use a trusted local HTTP-only {{ source.label }} connection.</small>
       {% endif %}
       {% if source.token_configured %}<label class="checkbox-label"><input type="checkbox" name="clear_token" value="1"> Remove the saved {{ source.label }} token</label>{% endif %}
       <div class="actions">
