@@ -72,6 +72,30 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         ) = self.original
         self.temporary.cleanup()
 
+    def test_integrations_page_reports_plex_adapter_without_claiming_analysis_ready(self):
+        local_root = Path(self.temporary.name) / "media"
+        main.external_source_config.add_mapping(
+            "plex",
+            "/srv/tv",
+            str(local_root),
+        )
+
+        response = self.client.get("/settings/integrations")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("BIF adapter", response.text)
+        self.assertIn("Installed", response.text)
+        self.assertIn(
+            "Plex BIF adapter is configured and validated.",
+            response.text,
+        )
+        self.assertIn(
+            "Preview-frame analysis becomes available when a consuming analyzer is installed.",
+            response.text,
+        )
+        self.assertNotIn(">Ready</span><span>BIF adapter", response.text)
+        self.assertNotIn(">Pending</strong><span>Preview adapter", response.text)
+
     def test_integrations_page_reports_jellyfin_adapter_without_claiming_analysis_ready(self):
         local_root = Path(self.temporary.name) / "media"
         source = main.external_source_config.save_source(
