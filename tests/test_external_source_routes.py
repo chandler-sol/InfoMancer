@@ -72,6 +72,70 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         ) = self.original
         self.temporary.cleanup()
 
+    def test_integrations_page_reports_jellyfin_adapter_without_claiming_analysis_ready(self):
+        local_root = Path(self.temporary.name) / "media"
+        source = main.external_source_config.save_source(
+            "jellyfin",
+            enabled=True,
+            server_url="https://jellyfin.local:8096",
+            credential_generation="jellyfin-generation",
+        )
+        main.external_source_config.add_mapping(
+            "jellyfin",
+            "/srv/tv",
+            str(local_root),
+        )
+        main.provider_secrets.update({
+            "jellyfin_token": "jellyfin-token",
+            "jellyfin_token_endpoint": source.server_url,
+            "jellyfin_token_generation": "jellyfin-generation",
+        })
+
+        response = self.client.get("/settings/integrations")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Trickplay adapter", response.text)
+        self.assertIn("Installed", response.text)
+        self.assertIn(
+            "Preview-frame analysis becomes available when a consuming analyzer is installed.",
+            response.text,
+        )
+        self.assertNotIn(">Ready</span><span>Trickplay adapter", response.text)
+
+    def test_jellyfin_plain_http_requires_explicit_opt_in(self):
+        response = self.client.post(
+            "/settings/integrations/jellyfin",
+            data={
+                "enabled": "1",
+                "server_url": "http://jellyfin.local:8096",
+                "metadata_root": "",
+                "token": "jf-secret",
+                "clear_token": "",
+            },
+        )
+        self.assertEqual(response.status_code, 303)
+        source = main.external_source_config.source("jellyfin")
+        self.assertFalse(source.enabled)
+        self.assertEqual(source.server_url, "")
+
+    def test_jellyfin_plain_http_can_be_explicitly_allowed(self):
+        response = self.client.post(
+            "/settings/integrations/jellyfin",
+            data={
+                "enabled": "1",
+                "server_url": "http://jellyfin.local:8096",
+                "metadata_root": "",
+                "token": "jf-secret",
+                "clear_token": "",
+                "allow_insecure_http": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 303)
+        source = main.external_source_config.source("jellyfin")
+        self.assertTrue(source.enabled)
+        self.assertEqual(source.server_url, "http://jellyfin.local:8096")
+        self.assertTrue(source.config.get("allow_insecure_http"))
+
     def test_whitespace_in_server_url_is_rejected_without_500(self):
         response = self.client.post(
             "/settings/integrations/plex",

@@ -65,7 +65,7 @@
   <section class="panel settings-card full-width">
     <p class="eyebrow">MEDIA SERVERS</p>
     <h2>Episode Identity integrations</h2>
-    <p class="muted">Plex and Jellyfin are optional, read-only analysis accelerators. PR E configures connections and translates media paths. Preview-image ingestion remains disabled until the dedicated adapter slices land.</p>
+    <p class="muted">Plex and Jellyfin are optional, read-only analysis accelerators. The Jellyfin Trickplay adapter can be configured now, but preview frames are not advertised as analysis-ready until a consuming analyzer is installed. Plex preview-image ingestion remains unavailable until its dedicated adapter is installed.</p>
     {% if integration_secret_error %}<div class="form-error">{{ integration_secret_error }}</div>{% endif %}
   </section>
 
@@ -73,13 +73,17 @@
   <section class="panel settings-card full-width" id="integration-{{ source.source_key }}">
     <div class="settings-card-head">
       <div><p class="eyebrow">{{ source.label|upper }}</p><h2>{{ source.label }}</h2></div>
-      <span class="settings-state {{ 'good' if source.enabled and source.token_configured and source.server_url else 'active' if source.server_url or source.token_configured else 'warn' }}">{{ 'Enabled' if source.enabled else 'Configured' if source.server_url or source.token_configured else 'Not configured' }}</span>
+      <span class="settings-state {{ 'good' if source.analysis_ready else 'active' if source.source_status.available or source.server_url or source.token_configured else 'warn' }}">{{ 'Ready' if source.analysis_ready else 'Configured' if source.source_status.available else 'Needs attention' if source.enabled else 'Configured' if source.server_url or source.token_configured else 'Not configured' }}</span>
     </div>
 
     <div class="settings-metrics">
       <div><strong>{{ 'Yes' if source.token_configured else 'No' }}</strong><span>Encrypted token</span></div>
       <div><strong>{{ source.mappings|length }}</strong><span>Path mapping{% if source.mappings|length != 1 %}s{% endif %}</span></div>
+      {% if source.source_key == 'jellyfin' %}
+      <div><strong>{{ 'Ready' if source.preview_frames_available else 'Installed' if source.source_status.available else 'Unavailable' }}</strong><span>Trickplay adapter</span></div>
+      {% else %}
       <div><strong>Pending</strong><span>Preview adapter</span></div>
+      {% endif %}
       <div><strong>Read-only</strong><span>Source access</span></div>
     </div>
     <p class="muted">{{ source.source_status.detail }}</p>
@@ -94,7 +98,7 @@
     <form class="settings-form" method="post" action="/settings/integrations/{{ source.source_key }}">
       <div class="settings-form-grid">
         <label>Server URL
-          <input name="server_url" type="url" value="{{ source.server_url }}" placeholder="{{ 'http://plex.local:32400' if source.source_key == 'plex' else 'http://jellyfin.local:8096' }}">
+          <input name="server_url" type="url" value="{{ source.server_url }}" placeholder="{{ 'http://plex.local:32400' if source.source_key == 'plex' else 'https://jellyfin.local:8096' }}">
           <small>Use the URL reachable from the InfoMancer server. Redirects are not followed during connection tests.</small>
         </label>
         <label>Access token
@@ -109,6 +113,10 @@
         {% endif %}
       </div>
       <label class="checkbox-label"><input type="checkbox" name="enabled" value="1" {% if source.enabled %}checked{% endif %}> Enable {{ source.label }} as an Episode Identity external source</label>
+      {% if source.source_key == 'jellyfin' %}
+      <label class="checkbox-label"><input type="checkbox" name="allow_insecure_http" value="1" {% if source.allow_insecure_http %}checked{% endif %}> Allow this Jellyfin token over plain HTTP</label>
+      <small class="muted">Off by default. Prefer HTTPS. Enable only when you intentionally use a trusted local HTTP-only Jellyfin connection.</small>
+      {% endif %}
       {% if source.token_configured %}<label class="checkbox-label"><input type="checkbox" name="clear_token" value="1"> Remove the saved {{ source.label }} token</label>{% endif %}
       <div class="actions">
         <button class="button primary">Save {{ source.label }}</button>

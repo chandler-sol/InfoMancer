@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from app.db import Database
 from app.migrations import CURRENT_SCHEMA_VERSION
+from app.media_identity.external import ExternalCapability
 from app.media_identity.external_config import (
     ExternalSourceConfigError,
     ExternalConnectionResult,
@@ -111,6 +112,74 @@ class ExternalSourceConfigTests(unittest.TestCase):
         self.assertIn("source-specific analysis adapter", status.detail)
         self.assertFalse(registry.require("jellyfin").status().available)
 
+    def test_jellyfin_registry_keeps_preview_capability_hidden_until_consumer_exists(self):
+        local_root = self.data / "media"
+        self.service.add_mapping(
+            "jellyfin",
+            "/srv/tv",
+            str(local_root),
+        )
+        source = self.service.save_source(
+            "jellyfin",
+            enabled=True,
+            server_url="https://jellyfin.local:8096",
+            credential_generation="generation-1",
+        )
+        secrets = {
+            "jellyfin_token": "jf-secret",
+            "jellyfin_token_endpoint": source.server_url,
+            "jellyfin_token_generation": "generation-1",
+        }
+
+        registry = build_configured_source_registry(self.service, secrets)
+        jellyfin = registry.require("jellyfin")
+        status = jellyfin.status()
+        self.assertTrue(status.available)
+        self.assertEqual(status.capabilities, frozenset())
+        self.assertIn("consuming analyzer", status.detail)
+        self.assertEqual(
+            registry.available_for(ExternalCapability.PREVIEW_FRAMES),
+            (),
+        )
+
+        stale_registry = build_configured_source_registry(
+            self.service,
+            {
+                **secrets,
+                "jellyfin_token_generation": "stale-generation",
+            },
+        )
+        stale_status = stale_registry.require("jellyfin").status()
+        self.assertFalse(stale_status.available)
+        self.assertNotIn(
+            ExternalCapability.PREVIEW_FRAMES,
+            stale_status.capabilities,
+        )
+        self.assertEqual(
+            stale_registry.available_for(ExternalCapability.PREVIEW_FRAMES),
+            (),
+        )
+
+    def test_jellyfin_preview_capability_requires_a_path_mapping(self):
+        source = self.service.save_source(
+            "jellyfin",
+            enabled=True,
+            server_url="https://jellyfin.local:8096",
+            credential_generation="generation-1",
+        )
+        registry = build_configured_source_registry(
+            self.service,
+            {
+                "jellyfin_token": "jf-secret",
+                "jellyfin_token_endpoint": source.server_url,
+                "jellyfin_token_generation": "generation-1",
+            },
+        )
+        status = registry.require("jellyfin").status()
+        self.assertFalse(status.available)
+        self.assertEqual(status.capabilities, frozenset())
+        self.assertIn("path mapping", status.detail.casefold())
+
     def test_clearing_connection_result_removes_stale_success(self):
         self.service.save_source(
             "plex", enabled=False, server_url="http://plex.local:32400"
@@ -196,6 +265,22 @@ class ExternalSourceConfigTests(unittest.TestCase):
         )
         self.assertEqual(adopted.config_revision, source.config_revision + 1)
         self.assertEqual(adopted.credential_generation, "generation-new")
+
+    def test_connection_revision_increments_when_transport_policy_changes(self):
+        source = self.service.save_source(
+            "jellyfin",
+            enabled=True,
+            server_url="https://jellyfin.local:8096",
+            config={"allow_insecure_http": False},
+            credential_generation="generation-1",
+        )
+        changed = self.service.save_source(
+            "jellyfin",
+            enabled=True,
+            server_url=source.server_url,
+            config={"allow_insecure_http": True},
+        )
+        self.assertEqual(changed.config_revision, source.config_revision + 1)
 
     def test_connection_revision_increments_for_endpoint_or_token_identity_change(self):
         initial = self.service.source("plex")
@@ -397,18 +482,50 @@ class ExternalSourceConfigTests(unittest.TestCase):
         self.assertEqual(opener.request.get_header("X-plex-token"), "top-secret")
         self.assertLessEqual(opener.timeout, 15.0)
 
+    def test_jellyfin_connection_test_rejects_plain_http_without_opt_in(self):
+        with patch(
+            "app.media_identity.external_config.urllib.request.build_opener"
+        ) as builder:
+            with self.assertRaisesRegex(ExternalSourceConfigError, "plain HTTP"):
+                test_external_connection(
+                    "jellyfin",
+                    "http://jellyfin.local:8096",
+                    "jf-secret",
+                )
+        builder.assert_not_called()
+
+    def test_jellyfin_connection_test_allows_explicit_insecure_http_opt_in(self):
+        opener = DummyOpener(
+            DummyResponse({"ServerName": "Jellyfin", "Version": "10.11.0", "Id": "server"})
+        )
+        with patch(
+            "app.media_identity.external_config.urllib.request.build_opener",
+            return_value=opener,
+        ):
+            result = test_external_connection(
+                "jellyfin",
+                "http://jellyfin.local:8096",
+                "jf-secret",
+                allow_insecure_http=True,
+            )
+        self.assertTrue(result.ok)
+        self.assertEqual(
+            opener.request.full_url,
+            "http://jellyfin.local:8096/System/Info",
+        )
+
     def test_jellyfin_connection_test_uses_authenticated_system_info(self):
         opener = DummyOpener(
             DummyResponse({"ServerName": "Jellyfin", "Version": "10.11.0", "Id": "server"})
         )
         with patch("app.media_identity.external_config.urllib.request.build_opener", return_value=opener):
             result = test_external_connection(
-                "jellyfin", "http://jellyfin.local:8096", "jf-secret"
+                "jellyfin", "https://jellyfin.local:8096", "jf-secret"
             )
         self.assertTrue(result.ok)
         self.assertEqual(
             opener.request.full_url,
-            "http://jellyfin.local:8096/System/Info",
+            "https://jellyfin.local:8096/System/Info",
         )
         self.assertEqual(opener.request.get_header("X-emby-token"), "jf-secret")
 

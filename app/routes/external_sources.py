@@ -41,6 +41,7 @@ def build_router(ctx: RouteContext):
         metadata_root: str = Form(""),
         token: str = Form(""),
         clear_token: str = Form(""),
+        allow_insecure_http: str = Form(""),
     ):
         key = source_key.strip().casefold()
         secret_key = f"{key}_token"
@@ -57,6 +58,20 @@ def build_router(ctx: RouteContext):
                     "Choose either a replacement token or Remove saved token, not both."
                 )
             normalized_url = normalize_server_url(server_url)
+            allow_insecure = bool(allow_insecure_http) if key == "jellyfin" else False
+            if (
+                key == "jellyfin"
+                and normalized_url.startswith("http://")
+                and bool(enabled)
+                and not allow_insecure
+            ):
+                raise ExternalSourceConfigError(
+                    "Jellyfin credentials will not be sent over plain HTTP. "
+                    "Use HTTPS or explicitly allow insecure HTTP for this integration."
+                )
+            source_config = dict(previous.config)
+            if key == "jellyfin":
+                source_config["allow_insecure_http"] = allow_insecure
             endpoint_changed = normalized_url != previous.server_url
             has_saved_token = bool(current_secrets.get(secret_key, ""))
             saved_token_endpoint = current_secrets.get(endpoint_key, "")
@@ -109,6 +124,7 @@ def build_router(ctx: RouteContext):
                 enabled=bool(enabled),
                 server_url=normalized_url,
                 metadata_root=metadata_root if key == "plex" else "",
+                config=source_config,
                 credential_generation=credential_generation,
             )
         except ProviderSecretError as exc:
@@ -170,7 +186,14 @@ def build_router(ctx: RouteContext):
                 )
             token = secrets.get(f"{key}_token", "")
             tested_revision = source.config_revision
-            result = test_external_connection(key, source.server_url, token)
+            result = test_external_connection(
+                key,
+                source.server_url,
+                token,
+                allow_insecure_http=bool(
+                    source.config.get("allow_insecure_http", False)
+                ),
+            )
 
             current_secrets = provider_secrets.load()
             if (
