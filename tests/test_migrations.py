@@ -86,14 +86,90 @@ class MigrationTests(unittest.TestCase):
                     "last_test_version", "last_test_at",
                 }.issubset(external_source_columns))
 
-    def test_migrations_17_through_21_preserve_safe_downgrade_semantics(self):
+    def test_existing_migration_21_database_receives_credential_generation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "catalog.db"
+            conn = sqlite3.connect(path)
+            conn.executescript(
+                """
+                CREATE TABLE schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE external_analysis_sources (
+                    source_key TEXT PRIMARY KEY CHECK(source_key!=''),
+                    enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),
+                    server_url TEXT NOT NULL DEFAULT '',
+                    metadata_root TEXT NOT NULL DEFAULT '',
+                    config_json TEXT NOT NULL DEFAULT '{}',
+                    config_revision INTEGER NOT NULL DEFAULT 0 CHECK(config_revision>=0),
+                    last_test_revision INTEGER,
+                    last_test_status TEXT NOT NULL DEFAULT '',
+                    last_test_detail TEXT NOT NULL DEFAULT '',
+                    last_test_server_name TEXT NOT NULL DEFAULT '',
+                    last_test_version TEXT NOT NULL DEFAULT '',
+                    last_test_at TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE external_path_mappings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_key TEXT NOT NULL
+                      REFERENCES external_analysis_sources(source_key) ON DELETE CASCADE,
+                    external_root TEXT NOT NULL CHECK(external_root!=''),
+                    local_root TEXT NOT NULL CHECK(local_root!=''),
+                    priority INTEGER NOT NULL DEFAULT 100,
+                    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(source_key,external_root,local_root)
+                );
+                """
+            )
+            for migration in (item for item in MIGRATIONS if item.version <= 21):
+                conn.execute(
+                    "INSERT INTO schema_migrations(version,name) VALUES (?,?)",
+                    (migration.version, migration.name),
+                )
+            conn.execute(
+                """INSERT INTO external_analysis_sources(
+                     source_key,enabled,server_url,config_revision
+                   ) VALUES ('plex',1,'http://plex.local:32400',7)"""
+            )
+            conn.commit()
+            conn.close()
+
+            Database(path).initialize()
+
+            with Database(path).connect() as upgraded:
+                columns = {
+                    row["name"]
+                    for row in upgraded.execute(
+                        "PRAGMA table_info(external_analysis_sources)"
+                    )
+                }
+                self.assertIn("credential_generation", columns)
+                row = upgraded.execute(
+                    """SELECT credential_generation,config_revision
+                       FROM external_analysis_sources WHERE source_key='plex'"""
+                ).fetchone()
+                self.assertEqual(row["credential_generation"], "")
+                self.assertEqual(row["config_revision"], 7)
+                self.assertIsNotNone(
+                    upgraded.execute(
+                        "SELECT 1 FROM schema_migrations WHERE version=22"
+                    ).fetchone()
+                )
+
+    def test_migrations_17_through_22_preserve_safe_downgrade_semantics(self):
         migration_17 = next(item for item in MIGRATIONS if item.version == 17)
         self.assertEqual(migration_17.compatibility, "behavioral")
         self.assertEqual(migration_17.minimum_reader_schema, 1)
         self.assertEqual(migration_17.minimum_writer_schema, 1)
         self.assertEqual(migration_17.downgrade_policy, "compatible")
 
-        for version in (18, 19, 20, 21):
+        for version in (18, 19, 20, 21, 22):
             migration = next(item for item in MIGRATIONS if item.version == version)
             self.assertEqual(migration.compatibility, "additive")
             self.assertEqual(migration.minimum_reader_schema, 1)
@@ -101,7 +177,7 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(migration.downgrade_policy, "compatible")
 
         self.assertEqual(schema_contract(), {
-            "current": 21,
+            "current": 22,
             "minimum_reader_schema": 1,
             "minimum_writer_schema": 1,
             "downgrade_policy": "compatible",
@@ -117,11 +193,11 @@ class MigrationTests(unittest.TestCase):
                         """SELECT migration_version,compatibility,minimum_reader_schema,
                                   minimum_writer_schema,downgrade_policy
                            FROM schema_compatibility
-                           WHERE migration_version IN (17,18,19,20,21)"""
+                           WHERE migration_version IN (17,18,19,20,21,22)"""
                     )
                 }
             self.assertEqual(rows[17]["compatibility"], "behavioral")
-            for version in (18, 19, 20, 21):
+            for version in (18, 19, 20, 21, 22):
                 self.assertEqual(rows[version]["compatibility"], "additive")
                 self.assertEqual(rows[version]["minimum_reader_schema"], 1)
                 self.assertEqual(rows[version]["minimum_writer_schema"], 1)
