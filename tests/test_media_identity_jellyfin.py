@@ -1,17 +1,68 @@
 from __future__ import annotations
 
+from io import BytesIO
 import json
 import unittest
+import urllib.error
+import urllib.request
+from unittest.mock import patch
+
+from PIL import Image
 
 from app.media_identity.sources.jellyfin import (
     JellyfinAdapterError,
+    crop_trickplay_frame,
     enumerate_preview_frames,
     external_paths_equal,
+    fetch_trickplay_tile,
     parse_trickplay_variants,
     resolve_media_ref,
+    read_trickplay_preview,
     select_trickplay_variant,
     trickplay_source_signature,
+    trickplay_tile_url,
 )
+
+
+
+
+
+class DummyHeaders(dict):
+    def get_content_type(self):
+        return str(self.get("Content-Type") or "").split(";", 1)[0].strip().casefold()
+
+
+class DummyResponse:
+    def __init__(self, payload: bytes, *, status: int = 200, content_type: str = "image/jpeg", content_length: str | None = None):
+        self.status = status
+        self.payload = payload
+        self.headers = DummyHeaders({"Content-Type": content_type})
+        if content_length is not None:
+            self.headers["Content-Length"] = content_length
+
+    def read(self, limit: int = -1):
+        return self.payload if limit < 0 else self.payload[:limit]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+
+class DummyOpener:
+    def __init__(self, response=None, error=None):
+        self.response = response
+        self.error = error
+        self.request = None
+        self.timeout = None
+
+    def open(self, request, timeout=None):
+        self.request = request
+        self.timeout = timeout
+        if self.error is not None:
+            raise self.error
+        return self.response
 
 
 class JellyfinTrickplayFoundationTests(unittest.TestCase):
@@ -197,6 +248,197 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
         ]
         ref = resolve_media_ref([item], expected_external_path=item["Path"])
         self.assertEqual(ref.media_source_id, "media-a")
+
+    def _network_frame(self):
+        item_id = "11111111111111111111111111111111"
+        media_source_id = "22222222222222222222222222222222"
+        variant = type(select_trickplay_variant(
+            parse_trickplay_variants(self._item()), media_source_id="media-a"
+        ))(
+            media_source_id=media_source_id,
+            width=8,
+            height=6,
+            tile_width=2,
+            tile_height=2,
+            thumbnail_count=4,
+            interval_ms=1000,
+            bandwidth=1000,
+        )
+        return enumerate_preview_frames(
+            item_id=item_id,
+            item_etag="etag-network",
+            variant=variant,
+        )[3]
+
+    @staticmethod
+    def _tile_jpeg():
+        image = Image.new("RGB", (16, 12))
+        colors = (
+            (240, 20, 20),
+            (20, 240, 20),
+            (20, 20, 240),
+            (220, 180, 20),
+        )
+        for index, color in enumerate(colors):
+            row, column = divmod(index, 2)
+            cell = Image.new("RGB", (8, 6), color)
+            image.paste(cell, (column * 8, row * 6))
+        output = BytesIO()
+        image.save(output, format="JPEG", quality=95, subsampling=0)
+        return output.getvalue()
+
+    def test_tile_url_uses_read_only_route_and_media_source_query(self):
+        frame = self._network_frame()
+        url = trickplay_tile_url("http://jellyfin.local:8096/base", frame)
+        self.assertEqual(
+            url,
+            "http://jellyfin.local:8096/base/Videos/11111111111111111111111111111111/Trickplay/8/0.jpg?mediaSourceId=22222222222222222222222222222222",
+        )
+
+    def test_tile_fetch_uses_header_token_no_proxy_and_no_token_in_url(self):
+        frame = self._network_frame()
+        opener = DummyOpener(DummyResponse(self._tile_jpeg()))
+        with patch(
+            "app.media_identity.sources.jellyfin.urllib.request.build_opener",
+            return_value=opener,
+        ) as builder:
+            payload = fetch_trickplay_tile(
+                "http://jellyfin.local:8096",
+                "top-secret",
+                frame,
+                timeout=3,
+            )
+        self.assertTrue(payload.startswith(b"\xff\xd8"))
+        self.assertNotIn("top-secret", opener.request.full_url)
+        self.assertEqual(opener.request.get_header("X-emby-token"), "top-secret")
+        proxy_handlers = [
+            handler
+            for handler in builder.call_args.args
+            if isinstance(handler, urllib.request.ProxyHandler)
+        ]
+        self.assertEqual(len(proxy_handlers), 1)
+        self.assertEqual(proxy_handlers[0].proxies, {})
+        self.assertLessEqual(opener.timeout, 15.0)
+
+    def test_read_preview_crops_only_requested_cell(self):
+        frame = self._network_frame()
+        opener = DummyOpener(DummyResponse(self._tile_jpeg()))
+        with patch(
+            "app.media_identity.sources.jellyfin.urllib.request.build_opener",
+            return_value=opener,
+        ):
+            preview = read_trickplay_preview(
+                "http://jellyfin.local:8096",
+                "token",
+                frame,
+            )
+        with Image.open(BytesIO(preview)) as image:
+            self.assertEqual(image.size, (8, 6))
+            red, green, blue = image.convert("RGB").getpixel((4, 3))
+        self.assertGreater(red, 150)
+        self.assertGreater(green, 120)
+        self.assertLess(blue, 100)
+
+    def test_crop_rejects_wrong_sheet_dimensions_and_corrupt_jpeg(self):
+        frame = self._network_frame()
+        wrong = Image.new("RGB", (8, 6), (1, 2, 3))
+        output = BytesIO()
+        wrong.save(output, format="JPEG")
+        with self.assertRaisesRegex(JellyfinAdapterError, "dimensions"):
+            crop_trickplay_frame(output.getvalue(), frame)
+        with self.assertRaisesRegex(JellyfinAdapterError, "decoded safely"):
+            crop_trickplay_frame(b"not-a-jpeg", frame)
+
+    def test_fetch_rejects_wrong_content_type_and_oversized_response(self):
+        frame = self._network_frame()
+        for response, pattern in (
+            (DummyResponse(b"{}", content_type="application/json"), "not a JPEG"),
+            (
+                DummyResponse(
+                    self._tile_jpeg(),
+                    content_length=str(32 * 1024 * 1024 + 1),
+                ),
+                "response-size",
+            ),
+        ):
+            opener = DummyOpener(response)
+            with patch(
+                "app.media_identity.sources.jellyfin.urllib.request.build_opener",
+                return_value=opener,
+            ):
+                with self.assertRaisesRegex(JellyfinAdapterError, pattern):
+                    fetch_trickplay_tile(
+                        "http://jellyfin.local:8096",
+                        "token",
+                        frame,
+                    )
+
+    def test_fetch_rejects_redirect_auth_and_missing_tile(self):
+        frame = self._network_frame()
+        for code, pattern in (
+            (302, "redirected"),
+            (401, "rejected"),
+            (404, "did not have"),
+        ):
+            error = urllib.error.HTTPError(
+                "http://jellyfin.local/test",
+                code,
+                "error",
+                {},
+                None,
+            )
+            opener = DummyOpener(error=error)
+            with patch(
+                "app.media_identity.sources.jellyfin.urllib.request.build_opener",
+                return_value=opener,
+            ):
+                with self.assertRaisesRegex(JellyfinAdapterError, pattern):
+                    fetch_trickplay_tile(
+                        "http://jellyfin.local:8096",
+                        "token",
+                        frame,
+                    )
+
+    def test_manifest_rejects_unsafe_total_tile_sheet_size(self):
+        item = self._item()
+        item["Trickplay"]["media-a"]["480"].update(
+            {
+                "Width": 480,
+                "Height": 270,
+                "TileWidth": 100,
+                "TileHeight": 100,
+            }
+        )
+        widths = [value.width for value in parse_trickplay_variants(item)]
+        self.assertEqual(widths, [320])
+
+    def test_asset_reference_bounds_and_guid_validation_fail_closed(self):
+        frame = self._network_frame()
+        payload = json.loads(frame.asset_ref)
+        payload["column"] = payload["tile_width"]
+        bad_frame = type(frame)(
+            source_key=frame.source_key,
+            item_id=frame.item_id,
+            timestamp_ms=frame.timestamp_ms,
+            asset_ref=json.dumps(payload),
+            source_signature=frame.source_signature,
+            width=frame.width,
+            height=frame.height,
+        )
+        with self.assertRaisesRegex(JellyfinAdapterError, "tile bounds"):
+            trickplay_tile_url("http://jellyfin.local:8096", bad_frame)
+
+        invalid_item = type(frame)(
+            source_key=frame.source_key,
+            item_id="not-a-guid",
+            timestamp_ms=frame.timestamp_ms,
+            asset_ref=frame.asset_ref,
+            source_signature=frame.source_signature,
+            width=frame.width,
+            height=frame.height,
+        )
+        with self.assertRaisesRegex(JellyfinAdapterError, "valid Jellyfin GUID"):
+            trickplay_tile_url("http://jellyfin.local:8096", invalid_item)
 
     def test_ambiguous_media_source_path_fails_closed(self):
         item = self._item()
