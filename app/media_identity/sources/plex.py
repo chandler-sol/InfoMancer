@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
@@ -300,7 +300,7 @@ def resolve_local_bif_path(
             "Plex library database media path does not match the resolved media part."
         )
     bif_path = plex_bif_path_for_media_hash(root, str(media_hash or ""))
-    return bif_path if bif_path.is_file() else None
+    return bif_path.resolve() if bif_path.is_file() else None
 
 
 def read_bif_preview_range(
@@ -819,9 +819,13 @@ def fetch_plex_bif_index(
     index_size = _BIF_HEADER_SIZE + (image_count + 1) * _BIF_INDEX_ENTRY_SIZE
     if index_size > len(payload):
         raise PlexBifError("Plex returned a truncated BIF index.")
-    return parse_bif_index(
+    parsed = parse_bif_index(
         payload[:index_size],
         file_size=len(payload),
+    )
+    return replace(
+        parsed,
+        index_digest=hashlib.sha256(payload).hexdigest(),
     )
 
 
