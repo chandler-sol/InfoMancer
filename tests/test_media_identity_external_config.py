@@ -90,27 +90,71 @@ class ExternalSourceConfigTests(unittest.TestCase):
         self.assertEqual(source.last_test_version, "1.2.3")
         self.assertIsNotNone(source.last_test_at)
 
-    def test_configured_source_registry_has_no_evidence_capabilities_yet(self):
-        self.service.save_source(
+    def test_plex_registry_keeps_preview_capability_hidden_until_consumer_exists(self):
+        local_root = self.data / "media"
+        self.service.add_mapping(
+            "plex",
+            "/srv/tv",
+            str(local_root),
+        )
+        source = self.service.save_source(
+            "plex",
+            enabled=True,
+            server_url="http://plex.local:32400",
+            metadata_root=str(self.data / "plex-data"),
+            credential_generation="generation-1",
+        )
+        secrets = {
+            "plex_token": "secret",
+            "plex_token_endpoint": source.server_url,
+            "plex_token_generation": "generation-1",
+        }
+
+        registry = build_configured_source_registry(self.service, secrets)
+        self.assertEqual(registry.keys(), ("jellyfin", "plex"))
+        plex = registry.require("plex")
+        status = plex.status()
+        self.assertTrue(status.available)
+        self.assertEqual(status.capabilities, frozenset())
+        self.assertIn("BIF adapter", status.detail)
+        self.assertIn("consuming analyzer", status.detail)
+        self.assertEqual(
+            registry.available_for(ExternalCapability.PREVIEW_FRAMES),
+            (),
+        )
+        self.assertEqual(plex.metadata_root, str(self.data / "plex-data"))
+        self.assertFalse(registry.require("jellyfin").status().available)
+
+        stale_registry = build_configured_source_registry(
+            self.service,
+            {
+                **secrets,
+                "plex_token_generation": "stale-generation",
+            },
+        )
+        stale_status = stale_registry.require("plex").status()
+        self.assertFalse(stale_status.available)
+        self.assertEqual(stale_status.capabilities, frozenset())
+
+    def test_plex_preview_capability_requires_a_path_mapping(self):
+        source = self.service.save_source(
             "plex",
             enabled=True,
             server_url="http://plex.local:32400",
             credential_generation="generation-1",
         )
         registry = build_configured_source_registry(
-            self.service, {
+            self.service,
+            {
                 "plex_token": "secret",
-                "plex_token_endpoint": "http://plex.local:32400",
+                "plex_token_endpoint": source.server_url,
                 "plex_token_generation": "generation-1",
-            }
+            },
         )
-        self.assertEqual(registry.keys(), ("jellyfin", "plex"))
-        plex = registry.require("plex")
-        status = plex.status()
-        self.assertTrue(status.available)
+        status = registry.require("plex").status()
+        self.assertFalse(status.available)
         self.assertEqual(status.capabilities, frozenset())
-        self.assertIn("source-specific analysis adapter", status.detail)
-        self.assertFalse(registry.require("jellyfin").status().available)
+        self.assertIn("path mapping", status.detail.casefold())
 
     def test_jellyfin_registry_keeps_preview_capability_hidden_until_consumer_exists(self):
         local_root = self.data / "media"
