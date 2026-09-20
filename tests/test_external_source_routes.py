@@ -96,7 +96,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Trickplay previews", response.text)
         self.assertIn(
-            "Jellyfin Trickplay preview frames are available for Episode Identity.",
+            "Jellyfin Trickplay preview reuse is enabled for Episode Identity.",
             response.text,
         )
 
