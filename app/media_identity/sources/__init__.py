@@ -35,3 +35,28 @@ __all__ = [
     "select_trickplay_variant",
     "trickplay_tile_url",
 ]
+
+
+from .plex import (
+    PlexBifError,
+    PlexBifFrameRange,
+    PlexBifIndex,
+    bif_source_signature,
+    enumerate_bif_preview_frames,
+    normalize_plex_metadata_root,
+    parse_bif_index,
+    plex_bif_path_for_bundle,
+    read_bif_index,
+)
+
+__all__ += [
+    "PlexBifError",
+    "PlexBifFrameRange",
+    "PlexBifIndex",
+    "bif_source_signature",
+    "enumerate_bif_preview_frames",
+    "normalize_plex_metadata_root",
+    "parse_bif_index",
+    "plex_bif_path_for_bundle",
+    "read_bif_index",
+]
