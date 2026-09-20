@@ -1157,6 +1157,8 @@ class PlexBifSource:
                 or any(character not in "0123456789abcdef" for character in expected_sha256)
             ):
                 raise PlexBifError("Plex preview frame digest is invalid.")
+            if expected_length <= 0 or expected_length > _MAX_PLEX_JPEG_BYTES:
+                raise PlexBifError("Plex preview frame length is outside safe bounds.")
             if timestamp_ms != int(frame.timestamp_ms):
                 raise PlexBifError(
                     "Plex preview asset timestamp does not match its frame."
