@@ -28,6 +28,7 @@ class ExternalSourceConfig:
     server_url: str
     metadata_root: str
     config: dict[str, Any]
+    credential_generation: str = ""
     config_revision: int = 0
     last_test_revision: int | None = None
     last_test_status: str = ""
@@ -103,7 +104,13 @@ def external_token_is_bound(
 ) -> bool:
     token_key = f"{source.source_key}_token"
     endpoint_key = f"{source.source_key}_token_endpoint"
-    return bool(secrets.get(token_key, "")) and secrets.get(endpoint_key, "") == source.server_url
+    generation_key = f"{source.source_key}_token_generation"
+    return (
+        bool(secrets.get(token_key, ""))
+        and secrets.get(endpoint_key, "") == source.server_url
+        and bool(source.credential_generation)
+        and secrets.get(generation_key, "") == source.credential_generation
+    )
 
 
 class ExternalSourceConfigService:
@@ -124,7 +131,7 @@ class ExternalSourceConfigService:
         with self.database.connect() as conn:
             row = conn.execute(
                 """SELECT source_key,enabled,server_url,metadata_root,config_json,
-                          config_revision,last_test_revision,
+                          credential_generation,config_revision,last_test_revision,
                           last_test_status,last_test_detail,last_test_server_name,
                           last_test_version,last_test_at
                    FROM external_analysis_sources WHERE source_key=?""",
@@ -153,6 +160,7 @@ class ExternalSourceConfigService:
             server_url=str(row["server_url"] or ""),
             metadata_root=str(row["metadata_root"] or ""),
             config=config,
+            credential_generation=str(row["credential_generation"] or ""),
             config_revision=config_revision,
             last_test_revision=last_test_revision if test_is_current else None,
             last_test_status=str(row["last_test_status"] or "") if test_is_current else "",
@@ -175,7 +183,7 @@ class ExternalSourceConfigService:
         server_url: str,
         metadata_root: str = "",
         config: dict[str, Any] | None = None,
-        force_revision_bump: bool = False,
+        credential_generation: str | None = None,
     ) -> ExternalSourceConfig:
         key = self._source_key(source_key)
         url = normalize_server_url(server_url)
@@ -185,12 +193,14 @@ class ExternalSourceConfigService:
                 "Enter the media server URL before enabling this integration."
             )
         payload = json.dumps(config or {}, sort_keys=True, separators=(",", ":"))
+        apply_credential_generation = credential_generation is not None
+        generation = str(credential_generation or "").strip()
         with self.database.connect() as conn:
             conn.execute(
                 """INSERT INTO external_analysis_sources(
                      source_key,enabled,server_url,metadata_root,config_json,
-                     config_revision,updated_at
-                   ) VALUES (?,?,?,?,?,0,CURRENT_TIMESTAMP)
+                     credential_generation,config_revision,updated_at
+                   ) VALUES (?,?,?,?,?,?,0,CURRENT_TIMESTAMP)
                    ON CONFLICT(source_key) DO UPDATE SET
                      enabled=excluded.enabled,
                      server_url=excluded.server_url,
@@ -199,8 +209,17 @@ class ExternalSourceConfigService:
                      config_revision=external_analysis_sources.config_revision +
                        CASE
                          WHEN external_analysis_sources.server_url != excluded.server_url
-                              OR ? THEN 1
+                              OR (
+                                ? AND external_analysis_sources.credential_generation
+                                  != excluded.credential_generation
+                              )
+                         THEN 1
                          ELSE 0
+                       END,
+                     credential_generation=
+                       CASE
+                         WHEN ? THEN excluded.credential_generation
+                         ELSE external_analysis_sources.credential_generation
                        END,
                      updated_at=CURRENT_TIMESTAMP""",
                 (
@@ -209,7 +228,9 @@ class ExternalSourceConfigService:
                     url,
                     root,
                     payload,
-                    1 if force_revision_bump else 0,
+                    generation,
+                    1 if apply_credential_generation else 0,
+                    1 if apply_credential_generation else 0,
                 ),
             )
         return self.source(key)
@@ -219,7 +240,8 @@ class ExternalSourceConfigService:
         with self.database.connect() as conn:
             conn.execute(
                 """UPDATE external_analysis_sources
-                   SET last_test_status='',
+                   SET last_test_revision=NULL,
+                       last_test_status='',
                        last_test_detail='',
                        last_test_server_name='',
                        last_test_version='',
