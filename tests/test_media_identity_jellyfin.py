@@ -2,18 +2,31 @@ from __future__ import annotations
 
 from io import BytesIO
 import json
+import tempfile
 import unittest
 import urllib.error
 import urllib.request
+import urllib.parse
 from unittest.mock import patch
+from pathlib import Path
 
 from PIL import Image
 
+from app.media_identity.models import (
+    AnalyzerContext,
+    IdentityProfile,
+    IdentityReference,
+    MediaIdentityFile,
+)
+from app.path_mapping import ExternalPathMapper, PathMapping
+
 from app.media_identity.sources.jellyfin import (
     JellyfinAdapterError,
+    JellyfinTrickplaySource,
     crop_trickplay_frame,
     enumerate_preview_frames,
     external_paths_equal,
+    fetch_episode_candidates,
     fetch_trickplay_tile,
     parse_trickplay_variants,
     resolve_media_ref,
@@ -248,6 +261,177 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
         ]
         ref = resolve_media_ref([item], expected_external_path=item["Path"])
         self.assertEqual(ref.media_source_id, "media-a")
+
+    def test_episode_candidate_query_is_bounded_read_only_and_token_safe(self):
+        payload = json.dumps(
+            {
+                "Items": [
+                    {
+                        "Id": "11111111111111111111111111111111",
+                        "Path": "/srv/tv/Show/Season 01/Episode.mkv",
+                    }
+                ],
+                "TotalRecordCount": 1,
+            }
+        ).encode("utf-8")
+        opener = DummyOpener(
+            DummyResponse(payload, content_type="application/json")
+        )
+        with patch(
+            "app.media_identity.sources.jellyfin.urllib.request.build_opener",
+            return_value=opener,
+        ) as builder:
+            items = fetch_episode_candidates(
+                "http://jellyfin.local:8096",
+                "top-secret",
+                season=1,
+                episode=2,
+                timeout=3,
+            )
+
+        self.assertEqual(len(items), 1)
+        parsed = urllib.parse.urlsplit(opener.request.full_url)
+        query = urllib.parse.parse_qs(parsed.query)
+        self.assertEqual(parsed.path, "/Items")
+        self.assertEqual(query["recursive"], ["true"])
+        self.assertEqual(query["includeItemTypes"], ["Episode"])
+        self.assertEqual(query["parentIndexNumber"], ["1"])
+        self.assertEqual(query["indexNumber"], ["2"])
+        self.assertEqual(query["limit"], ["4097"])
+        self.assertNotIn("top-secret", opener.request.full_url)
+        self.assertEqual(opener.request.get_header("X-emby-token"), "top-secret")
+        proxy_handlers = [
+            handler
+            for handler in builder.call_args.args
+            if isinstance(handler, urllib.request.ProxyHandler)
+        ]
+        self.assertEqual(len(proxy_handlers), 1)
+        self.assertEqual(proxy_handlers[0].proxies, {})
+
+    def test_configured_source_resolves_exact_mapped_episode_and_enumerates_trickplay(self):
+        item_id = "11111111111111111111111111111111"
+        media_source_id = "22222222222222222222222222222222"
+        external_path = "/srv/tv/Show/Season 01/Episode.mkv"
+        with tempfile.TemporaryDirectory() as temporary:
+            local_root = Path(temporary) / "tv"
+            local_path = local_root / "Show" / "Season 01" / "Episode.mkv"
+            mapper = ExternalPathMapper(
+                [PathMapping("jellyfin", "/srv/tv", str(local_root))]
+            )
+            source = JellyfinTrickplaySource(
+                "http://jellyfin.local:8096",
+                "jf-secret",
+                mapper,
+            )
+            context = AnalyzerContext(
+                media=MediaIdentityFile(
+                    file_id=1,
+                    title_id=1,
+                    path=str(local_path),
+                    size_bytes=1,
+                    modified_at=1.0,
+                ),
+                claimed_identity=IdentityReference(
+                    identity_kind="episode",
+                    season=1,
+                    episode=2,
+                    display_name="Episode",
+                ),
+                profile=IdentityProfile.DEEP,
+            )
+            candidate = {
+                "Id": "11111111-1111-1111-1111-111111111111",
+                "Path": external_path,
+            }
+            detail = {
+                "Id": item_id,
+                "Etag": "etag-source",
+                "Path": external_path,
+                "ProviderIds": {"Tvdb": "12345"},
+                "MediaSources": [
+                    {
+                        "Id": media_source_id,
+                        "Path": external_path,
+                    }
+                ],
+                "Trickplay": {
+                    media_source_id: {
+                        "8": {
+                            "Width": 8,
+                            "Height": 6,
+                            "TileWidth": 2,
+                            "TileHeight": 2,
+                            "ThumbnailCount": 4,
+                            "Interval": 1000,
+                            "Bandwidth": 1000,
+                        }
+                    }
+                },
+            }
+
+            with (
+                patch(
+                    "app.media_identity.sources.jellyfin.fetch_episode_candidates",
+                    return_value=(candidate,),
+                ) as candidates,
+                patch(
+                    "app.media_identity.sources.jellyfin.fetch_item",
+                    return_value=detail,
+                ) as item_fetch,
+            ):
+                media = source.resolve_media(context)
+                self.assertIsNotNone(media)
+                frames = source.preview_frames(media)
+
+            candidates.assert_called_once_with(
+                "http://jellyfin.local:8096",
+                "jf-secret",
+                season=1,
+                episode=2,
+            )
+            self.assertEqual(item_fetch.call_count, 2)
+            self.assertEqual(media.item_id, item_id)
+            self.assertEqual(media.media_source_id, media_source_id)
+            self.assertEqual(media.provider_ids, {"Tvdb": "12345"})
+            self.assertEqual(len(frames), 4)
+            self.assertEqual(
+                [frame.timestamp_ms for frame in frames],
+                [0, 1000, 2000, 3000],
+            )
+
+    def test_configured_source_resolution_fails_closed_on_external_error(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            local_root = Path(temporary) / "tv"
+            mapper = ExternalPathMapper(
+                [PathMapping("jellyfin", "/srv/tv", str(local_root))]
+            )
+            source = JellyfinTrickplaySource(
+                "http://jellyfin.local:8096",
+                "jf-secret",
+                mapper,
+            )
+            context = AnalyzerContext(
+                media=MediaIdentityFile(
+                    file_id=1,
+                    title_id=1,
+                    path=str(local_root / "Show" / "Episode.mkv"),
+                    size_bytes=1,
+                    modified_at=1.0,
+                ),
+                claimed_identity=IdentityReference(
+                    identity_kind="episode",
+                    season=1,
+                    episode=1,
+                    display_name="Episode",
+                ),
+                profile=IdentityProfile.DEEP,
+            )
+            with patch(
+                "app.media_identity.sources.jellyfin.fetch_episode_candidates",
+                side_effect=JellyfinAdapterError("offline"),
+            ):
+                with self.assertRaisesRegex(JellyfinAdapterError, "offline"):
+                    source.resolve_media(context)
 
     def _network_frame(self):
         item_id = "11111111111111111111111111111111"
