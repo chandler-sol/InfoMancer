@@ -428,6 +428,7 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
                 "jf-secret",
                 season=1,
                 episode=2,
+                allow_insecure_http=False,
             )
             self.assertEqual(item_fetch.call_count, 2)
             self.assertEqual(media.item_id, item_id)
