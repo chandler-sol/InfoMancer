@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.db import Database
+from app.migrations import CURRENT_SCHEMA_VERSION
 from app.media_identity.external_config import (
     ExternalSourceConfigError,
     ExternalConnectionResult,
@@ -65,7 +66,7 @@ class ExternalSourceConfigTests(unittest.TestCase):
             version = conn.execute(
                 "SELECT MAX(version) FROM schema_migrations"
             ).fetchone()[0]
-        self.assertEqual(version, 21)
+        self.assertEqual(version, CURRENT_SCHEMA_VERSION)
 
     def test_connection_result_is_persisted_for_status_ui(self):
         self.service.save_source(
