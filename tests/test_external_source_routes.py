@@ -350,6 +350,35 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         self.assertEqual(source.last_test_status, "")
         self.assertIsNone(source.last_test_at)
 
+    def test_invalid_plex_metadata_root_cannot_replace_saved_token(self):
+        response = self.client.post(
+            "/settings/integrations/plex",
+            data={
+                "enabled": "1",
+                "server_url": "https://trusted-plex.local:32400",
+                "metadata_root": "relative/plex-data",
+                "token": "replacement-token",
+                "clear_token": "",
+            },
+        )
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("absolute", response.headers["location"])
+
+        source = main.external_source_config.source("plex")
+        secrets = main.provider_secrets.load()
+        self.assertEqual(source.server_url, "https://trusted-plex.local:32400")
+        self.assertEqual(source.metadata_root, "")
+        self.assertEqual(source.credential_generation, "trusted-generation")
+        self.assertEqual(secrets["plex_token"], "trusted-token")
+        self.assertEqual(
+            secrets["plex_token_endpoint"],
+            "https://trusted-plex.local:32400",
+        )
+        self.assertEqual(
+            secrets["plex_token_generation"],
+            "trusted-generation",
+        )
+
     def test_changed_server_url_cannot_reuse_hidden_saved_token(self):
         response = self.client.post(
             "/settings/integrations/plex",
