@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+import hashlib
 import json
 import sqlite3
 import struct
@@ -129,6 +131,20 @@ def index_prefix(bif: bytes) -> bytes:
     image_count = struct.unpack_from("<I", bif, 12)[0]
     size = 64 + (image_count + 1) * 8
     return bif[:size]
+
+
+def http_bif_index(bif: bytes):
+    parsed = parse_bif_index(index_prefix(bif), file_size=len(bif))
+    return replace(
+        parsed,
+        index_digest=hashlib.sha256(bif).hexdigest(),
+        frame_digests=tuple(
+            hashlib.sha256(
+                bif[frame.offset : frame.offset + frame.length]
+            ).hexdigest()
+            for frame in parsed.frames
+        ),
+    )
 
 
 class PlexBifFoundationTests(unittest.TestCase):
@@ -360,7 +376,15 @@ class PlexBifFoundationTests(unittest.TestCase):
         )
         calls = []
 
-        def paged_read(_server, _token, _path, *, query, timeout):
+        def paged_read(
+            _server,
+            _token,
+            _path,
+            *,
+            query,
+            timeout,
+            allow_insecure_http,
+        ):
             calls.append(dict(query))
             start = int(query["X-Plex-Container-Start"])
             if start == 0:
@@ -406,6 +430,80 @@ class PlexBifFoundationTests(unittest.TestCase):
         self.assertIsNotNone(resolved)
         self.assertEqual(resolved.item_id, "102")
         self.assertEqual(resolved.media_source_id, "502")
+
+    def test_plex_episode_candidates_page_until_empty_without_total_size(self):
+        page = [
+            plex_episode_item(
+                rating_key=str(1000 + index),
+                part_id=str(5000 + index),
+                path=f"/srv/tv/Show {index}/Season 01/Episode.mkv",
+            )
+            for index in range(256)
+        ]
+        target = plex_episode_item(
+            rating_key="9001",
+            part_id="9901",
+            path="/srv/tv/Target/Season 01/Episode.mkv",
+        )
+        starts = []
+
+        def paged_read(
+            _server,
+            _token,
+            _path,
+            *,
+            query,
+            timeout,
+            allow_insecure_http,
+        ):
+            start = int(query["X-Plex-Container-Start"])
+            starts.append(start)
+            if start == 0:
+                return {
+                    "MediaContainer": {
+                        "offset": 0,
+                        "size": len(page),
+                        "Metadata": page,
+                    }
+                }
+            if start == 256:
+                return {
+                    "MediaContainer": {
+                        "offset": 256,
+                        "size": 1,
+                        "Metadata": [target],
+                    }
+                }
+            if start == 257:
+                return {
+                    "MediaContainer": {
+                        "offset": 257,
+                        "size": 0,
+                        "Metadata": [],
+                    }
+                }
+            self.fail(f"unexpected page start {start}")
+
+        with patch(
+            "app.media_identity.sources.plex._read_plex_json",
+            side_effect=paged_read,
+        ):
+            items = fetch_plex_episode_candidates(
+                "https://plex.local:32400",
+                "secret",
+                season=1,
+                episode=1,
+            )
+
+        self.assertEqual(len(items), 257)
+        self.assertEqual(starts, [0, 256, 257])
+        resolved = resolve_plex_media_ref(
+            items,
+            expected_external_path="/srv/tv/Target/Season 01/Episode.mkv",
+        )
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved.item_id, "9001")
+        self.assertEqual(resolved.media_source_id, "9901")
 
     def test_plex_helpers_reject_plain_http_before_sending_token(self):
         with patch(
@@ -497,7 +595,7 @@ class PlexBifFoundationTests(unittest.TestCase):
 
     def test_http_preview_refs_use_part_id_and_timestamp_not_raw_token(self):
         bif = build_bif()
-        index = parse_bif_index(index_prefix(bif), file_size=len(bif))
+        index = http_bif_index(bif)
         frames = enumerate_plex_http_preview_frames(
             item_id="101",
             part_id="501",
@@ -508,6 +606,10 @@ class PlexBifFoundationTests(unittest.TestCase):
         self.assertEqual(first["kind"], "plex_bif_http")
         self.assertEqual(first["part_id"], "501")
         self.assertEqual(first["timestamp_ms"], 0)
+        self.assertEqual(
+            first["sha256"],
+            hashlib.sha256(b"\xff\xd8frame-zero\xff\xd9").hexdigest(),
+        )
         self.assertTrue(
             frames[0].source_signature.startswith("plex-bif-http:")
         )
@@ -599,14 +701,11 @@ class PlexBifFoundationTests(unittest.TestCase):
                 ),
                 patch(
                     "app.media_identity.sources.plex.fetch_plex_bif_index",
-                    return_value=parse_bif_index(
-                        index_prefix(bif),
-                        file_size=len(bif),
-                    ),
-                ),
+                    return_value=http_bif_index(bif),
+                ) as bif_fetch,
                 patch(
                     "app.media_identity.sources.plex.fetch_plex_bif_image",
-                    return_value=b"\xff\xd8frame\xff\xd9",
+                    return_value=b"\xff\xd8frame-one\xff\xd9",
                 ) as image_fetch,
             ):
                 media = source.resolve_media(context)
@@ -617,7 +716,13 @@ class PlexBifFoundationTests(unittest.TestCase):
             self.assertEqual(media.item_id, "101")
             self.assertEqual(media.media_source_id, "501")
             self.assertEqual(len(frames), 2)
-            self.assertEqual(image, b"\xff\xd8frame\xff\xd9")
+            self.assertEqual(image, b"\xff\xd8frame-one\xff\xd9")
+            bif_fetch.assert_called_once_with(
+                "https://plex.local:32400",
+                "secret",
+                "501",
+                allow_insecure_http=False,
+            )
             image_fetch.assert_called_once_with(
                 "https://plex.local:32400",
                 "secret",
@@ -635,45 +740,14 @@ class PlexBifFoundationTests(unittest.TestCase):
                 source.status().capabilities,
             )
 
-    def test_http_bif_change_is_rejected_before_preview_read(self):
-        old_bif = build_bif(
-            frames=((0, b"\xff\xd8AAAA\xff\xd9"),)
-        )
-        new_bif = build_bif(
-            frames=((0, b"\xff\xd8BBBB\xff\xd9"),)
-        )
-
-        old_opener = DummyOpener(
-            DummyResponse(old_bif, content_type="application/octet-stream")
-        )
-        with patch(
-            "app.media_identity.sources.plex.urllib.request.build_opener",
-            return_value=old_opener,
-        ):
-            old_index = fetch_plex_bif_index(
-                "https://plex.local:32400",
-                "secret",
-                "501",
-            )
-
-        new_opener = DummyOpener(
-            DummyResponse(new_bif, content_type="application/octet-stream")
-        )
-        with patch(
-            "app.media_identity.sources.plex.urllib.request.build_opener",
-            return_value=new_opener,
-        ):
-            new_index = fetch_plex_bif_index(
-                "https://plex.local:32400",
-                "secret",
-                "501",
-            )
-
-        self.assertNotEqual(old_index.index_digest, new_index.index_digest)
+    def test_http_frame_hash_rejects_changed_jpeg_without_refetching_bif(self):
+        original = b"\xff\xd8AAAA\xff\xd9"
+        changed = b"\xff\xd8BBBB\xff\xd9"
+        bif = build_bif(frames=((0, original),))
         frames = enumerate_plex_http_preview_frames(
             item_id="101",
             part_id="501",
-            index=old_index,
+            index=http_bif_index(bif),
         )
         with tempfile.TemporaryDirectory() as temporary:
             local_root = Path(temporary) / "tv"
@@ -686,19 +760,26 @@ class PlexBifFoundationTests(unittest.TestCase):
             )
             with (
                 patch(
-                    "app.media_identity.sources.plex.fetch_plex_bif_index",
-                    return_value=new_index,
-                ),
+                    "app.media_identity.sources.plex.fetch_plex_bif_index"
+                ) as bif_fetch,
                 patch(
-                    "app.media_identity.sources.plex.fetch_plex_bif_image"
+                    "app.media_identity.sources.plex.fetch_plex_bif_image",
+                    return_value=changed,
                 ) as image_fetch,
             ):
                 with self.assertRaisesRegex(
-                    PlexBifError, "changed after preview frames were enumerated"
+                    PlexBifError, "frame content changed"
                 ):
                     source.read_preview(frames[0])
 
-            image_fetch.assert_not_called()
+            bif_fetch.assert_not_called()
+            image_fetch.assert_called_once_with(
+                "https://plex.local:32400",
+                "secret",
+                "501",
+                0,
+                allow_insecure_http=False,
+            )
 
     def test_custom_metadata_root_falls_back_to_exact_local_bif(self):
         expected = "/srv/tv/Show/Season 01/Episode.mkv"
