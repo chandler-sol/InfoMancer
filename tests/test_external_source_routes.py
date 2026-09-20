@@ -47,12 +47,12 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         main.external_source_config.save_source(
             "plex",
             enabled=True,
-            server_url="http://trusted-plex.local:32400",
+            server_url="https://trusted-plex.local:32400",
             credential_generation="trusted-generation",
         )
         main.provider_secrets.update({
             "plex_token": "trusted-token",
-            "plex_token_endpoint": "http://trusted-plex.local:32400",
+            "plex_token_endpoint": "https://trusted-plex.local:32400",
             "plex_token_generation": "trusted-generation",
         })
 
@@ -95,6 +95,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         )
         self.assertNotIn(">Ready</span><span>BIF adapter", response.text)
         self.assertNotIn(">Pending</strong><span>Preview adapter", response.text)
+        self.assertIn("Allow this Plex token over plain HTTP", response.text)
 
     def test_integrations_page_reports_jellyfin_adapter_without_claiming_analysis_ready(self):
         local_root = Path(self.temporary.name) / "media"
@@ -125,6 +126,49 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
             response.text,
         )
         self.assertNotIn(">Ready</span><span>Trickplay adapter", response.text)
+
+    def test_plex_plain_http_requires_explicit_opt_in(self):
+        response = self.client.post(
+            "/settings/integrations/plex",
+            data={
+                "enabled": "1",
+                "server_url": "http://plex.local:32400",
+                "metadata_root": "",
+                "token": "plex-secret",
+                "clear_token": "",
+            },
+        )
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("plain+HTTP", response.headers["location"])
+        source = main.external_source_config.source("plex")
+        self.assertEqual(
+            source.server_url,
+            "https://trusted-plex.local:32400",
+        )
+        self.assertFalse(source.config.get("allow_insecure_http", False))
+
+    def test_plex_plain_http_can_be_explicitly_allowed(self):
+        response = self.client.post(
+            "/settings/integrations/plex",
+            data={
+                "enabled": "1",
+                "server_url": "http://plex.local:32400",
+                "metadata_root": "",
+                "token": "plex-secret",
+                "clear_token": "",
+                "allow_insecure_http": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 303)
+        source = main.external_source_config.source("plex")
+        self.assertTrue(source.enabled)
+        self.assertEqual(source.server_url, "http://plex.local:32400")
+        self.assertTrue(source.config.get("allow_insecure_http"))
+        secrets = main.provider_secrets.load()
+        self.assertEqual(
+            secrets["plex_token_endpoint"],
+            "http://plex.local:32400",
+        )
 
     def test_jellyfin_plain_http_requires_explicit_opt_in(self):
         response = self.client.post(
@@ -165,7 +209,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
             "/settings/integrations/plex",
             data={
                 "enabled": "1",
-                "server_url": "http://plex local:32400",
+                "server_url": "https://plex local:32400",
                 "metadata_root": "",
                 "token": "",
                 "clear_token": "",
@@ -175,7 +219,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         self.assertIn("whitespace", response.headers["location"])
         self.assertEqual(
             main.external_source_config.source("plex").server_url,
-            "http://trusted-plex.local:32400",
+            "https://trusted-plex.local:32400",
         )
 
     def test_non_ascii_server_url_is_rejected_without_500(self):
@@ -183,7 +227,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
             "/settings/integrations/plex",
             data={
                 "enabled": "1",
-                "server_url": "http://plex.local:32400/médias",
+                "server_url": "https://plex.local:32400/médias",
                 "metadata_root": "",
                 "token": "",
                 "clear_token": "",
@@ -193,7 +237,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         self.assertIn("non-ASCII", response.headers["location"])
         self.assertEqual(
             main.external_source_config.source("plex").server_url,
-            "http://trusted-plex.local:32400",
+            "https://trusted-plex.local:32400",
         )
 
     def test_inflight_connection_result_is_discarded_after_token_change(self):
@@ -202,7 +246,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         def change_token_during_test(*_args, **_kwargs):
             main.provider_secrets.update({
                 "plex_token": "new-token",
-                "plex_token_endpoint": "http://trusted-plex.local:32400",
+                "plex_token_endpoint": "https://trusted-plex.local:32400",
                 "plex_token_generation": "new-generation",
             })
             return ExternalConnectionResult(
@@ -231,7 +275,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         main.external_source_config.clear_connection_result("plex")
         main.provider_secrets.update({
             "plex_token": "replacement-token",
-            "plex_token_endpoint": "http://trusted-plex.local:32400",
+            "plex_token_endpoint": "https://trusted-plex.local:32400",
             "plex_token_generation": "replacement-generation",
         })
 
@@ -263,13 +307,13 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         ):
             main.provider_secrets.update({
                 "plex_token": "new-token",
-                "plex_token_endpoint": "http://trusted-plex.local:32400",
+                "plex_token_endpoint": "https://trusted-plex.local:32400",
                 "plex_token_generation": "new-generation",
             })
             main.external_source_config.save_source(
                 "plex",
                 enabled=True,
-                server_url="http://trusted-plex.local:32400",
+                server_url="https://trusted-plex.local:32400",
                 credential_generation="new-generation",
             )
             return original_record(
@@ -308,7 +352,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
             "/settings/integrations/plex",
             data={
                 "enabled": "1",
-                "server_url": "http://attacker.example:32400",
+                "server_url": "https://attacker.example:32400",
                 "metadata_root": "",
                 "token": "",
                 "clear_token": "",
@@ -319,7 +363,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
 
         source = main.external_source_config.source("plex")
         secrets = main.provider_secrets.load()
-        self.assertEqual(source.server_url, "http://trusted-plex.local:32400")
+        self.assertEqual(source.server_url, "https://trusted-plex.local:32400")
         self.assertTrue(source.enabled)
         self.assertEqual(secrets["plex_token"], "trusted-token")
 
@@ -327,13 +371,13 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         main.external_source_config.save_source(
             "plex",
             enabled=True,
-            server_url="http://replacement-plex.local:32400",
+            server_url="https://replacement-plex.local:32400",
         )
         secrets = main.provider_secrets.load()
         self.assertEqual(secrets["plex_token"], "trusted-token")
         self.assertEqual(
             secrets.get("plex_token_endpoint"),
-            "http://trusted-plex.local:32400",
+            "https://trusted-plex.local:32400",
         )
 
         response = self.client.post("/settings/integrations/plex/test")
@@ -345,7 +389,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
             "/settings/integrations/plex",
             data={
                 "enabled": "1",
-                "server_url": "http://replacement-plex.local:32400",
+                "server_url": "https://replacement-plex.local:32400",
                 "metadata_root": "",
                 "token": "replacement-token",
                 "clear_token": "",
@@ -356,7 +400,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         self.assertEqual(secrets["plex_token"], "replacement-token")
         self.assertEqual(
             secrets["plex_token_endpoint"],
-            "http://replacement-plex.local:32400",
+            "https://replacement-plex.local:32400",
         )
         source = main.external_source_config.source("plex")
         self.assertTrue(secrets["plex_token_generation"])
@@ -370,7 +414,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
             "/settings/integrations/plex",
             data={
                 "enabled": "1",
-                "server_url": "http://replacement-plex.local:32400",
+                "server_url": "https://replacement-plex.local:32400",
                 "metadata_root": "",
                 "token": "replacement-token",
                 "clear_token": "",
@@ -380,7 +424,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
 
         source = main.external_source_config.source("plex")
         secrets = main.provider_secrets.load()
-        self.assertEqual(source.server_url, "http://replacement-plex.local:32400")
+        self.assertEqual(source.server_url, "https://replacement-plex.local:32400")
         self.assertTrue(source.enabled)
         self.assertEqual(secrets["plex_token"], "replacement-token")
 
