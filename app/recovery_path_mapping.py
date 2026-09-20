@@ -1,58 +1,49 @@
 from __future__ import annotations
 
 import json
-import re
 import shutil
 import sqlite3
 import tempfile
 import zipfile
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 from typing import Iterable
 
 from .maintenance import MaintenanceError, validate_database_backup, validate_database_paths
+from .path_mapping import PathMappingError, parse_absolute_path, relative_parts, translate_path
 from .recovery_package import RecoveryPackageError, RecoveryPackageService
 
 
-_WINDOWS_ABSOLUTE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
-
-
 def _path_parts(value: str) -> tuple[str, tuple[str, ...], bool]:
-    """Return root marker, relative components, and Windows-style semantics."""
-    raw = str(value or "").strip()
-    if _WINDOWS_ABSOLUTE.match(raw):
-        path = PureWindowsPath(raw)
-        anchor = path.anchor
-        if not anchor:
-            raise RecoveryPackageError("A recovery media path is not absolute.")
-        return anchor, tuple(path.parts[1:]), True
-    path = PurePosixPath(raw)
-    if not path.is_absolute():
-        raise RecoveryPackageError("A recovery media path is not absolute.")
-    return path.anchor, tuple(path.parts[1:]), False
+    """Recovery compatibility wrapper around the shared path-style parser."""
+    try:
+        parsed = parse_absolute_path(value)
+    except PathMappingError as exc:
+        raise RecoveryPackageError(str(exc).replace("external media path", "recovery media path")) from exc
+    return parsed.anchor, parsed.parts, parsed.windows
 
 
 def _relative_parts(value: str, root: str) -> tuple[str, ...]:
-    value_anchor, value_parts, value_windows = _path_parts(value)
-    root_anchor, root_parts, root_windows = _path_parts(root)
-    if value_windows != root_windows:
-        raise RecoveryPackageError("A catalog path uses a different path style than its media root.")
-
-    def comparable(part: str) -> str:
-        return part.casefold() if value_windows else part
-
-    if comparable(value_anchor) != comparable(root_anchor):
-        raise RecoveryPackageError("A catalog path is outside its media root.")
-    if len(value_parts) < len(root_parts):
-        raise RecoveryPackageError("A catalog path is outside its media root.")
-    for actual, expected in zip(value_parts, root_parts):
-        if comparable(actual) != comparable(expected):
-            raise RecoveryPackageError("A catalog path is outside its media root.")
-    return value_parts[len(root_parts):]
+    try:
+        return relative_parts(value, root)
+    except PathMappingError as exc:
+        message = str(exc)
+        if "different style" in message:
+            message = "A catalog path uses a different path style than its media root."
+        elif "outside" in message:
+            message = "A catalog path is outside its media root."
+        raise RecoveryPackageError(message) from exc
 
 
 def _rewritten_path(value: str, old_root: str, new_root: Path) -> str:
-    relative = _relative_parts(value, old_root)
-    return str(new_root.joinpath(*relative))
+    try:
+        return translate_path(value, old_root, new_root)
+    except PathMappingError as exc:
+        message = str(exc)
+        if "different style" in message:
+            message = "A catalog path uses a different path style than its media root."
+        elif "outside" in message:
+            message = "A catalog path is outside its media root."
+        raise RecoveryPackageError(message) from exc
 
 
 def _inside(candidate: Path, parent: Path) -> bool:

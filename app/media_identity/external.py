@@ -106,3 +106,80 @@ class ExternalAnalysisSource(Protocol):
     def known_identity(self, media: ExternalMediaRef) -> IdentityReference | None:
         """Return the source's known media identity when available."""
         ...
+
+
+
+class ExternalSourceRegistryError(ValueError):
+    """Raised when an external analysis source cannot be registered safely."""
+
+
+class ExternalSourceRegistry:
+    """Small source-agnostic registry for optional read-only analysis adapters."""
+
+    def __init__(self, sources: Sequence[ExternalAnalysisSource] = ()) -> None:
+        self._sources: dict[str, ExternalAnalysisSource] = {}
+        for source in sources:
+            self.register(source)
+
+    @staticmethod
+    def _key(value: str) -> str:
+        key = str(value or "").strip().casefold()
+        if not key:
+            raise ExternalSourceRegistryError("An external analysis source requires a key.")
+        return key
+
+    def register(self, source: ExternalAnalysisSource) -> None:
+        if not isinstance(source, ExternalAnalysisSource):
+            raise ExternalSourceRegistryError(
+                "External analysis sources must satisfy the ExternalAnalysisSource protocol."
+            )
+        key = self._key(source.source_key)
+        if key in self._sources:
+            raise ExternalSourceRegistryError(
+                f"External analysis source '{key}' is already registered."
+            )
+        self._sources[key] = source
+
+    def get(self, source_key: str) -> ExternalAnalysisSource | None:
+        return self._sources.get(self._key(source_key))
+
+    def require(self, source_key: str) -> ExternalAnalysisSource:
+        key = self._key(source_key)
+        source = self._sources.get(key)
+        if source is None:
+            raise ExternalSourceRegistryError(
+                f"External analysis source '{key}' is not registered."
+            )
+        return source
+
+    def statuses(self) -> tuple[ExternalSourceStatus, ...]:
+        statuses: list[ExternalSourceStatus] = []
+        for key in sorted(self._sources):
+            source = self._sources[key]
+            try:
+                status = source.status()
+            except Exception as exc:
+                status = ExternalSourceStatus(
+                    source_key=key,
+                    available=False,
+                    detail=f"Status check failed: {exc}",
+                )
+            statuses.append(status)
+        return tuple(statuses)
+
+    def available_for(
+        self, capability: ExternalCapability
+    ) -> tuple[ExternalAnalysisSource, ...]:
+        available: list[ExternalAnalysisSource] = []
+        for key in sorted(self._sources):
+            source = self._sources[key]
+            try:
+                status = source.status()
+            except Exception:
+                continue
+            if status.available and capability in status.capabilities:
+                available.append(source)
+        return tuple(available)
+
+    def keys(self) -> tuple[str, ...]:
+        return tuple(sorted(self._sources))

@@ -5,6 +5,8 @@ import sys
 import tempfile
 import unittest
 
+from app.migrations import CURRENT_SCHEMA_VERSION
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "build_update_channel_manifest.py"
@@ -75,7 +77,10 @@ class UpdateManifest09Tests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
             manifest = json.loads(output.read_text(encoding="utf-8"))
-            self.assertEqual(manifest["database_schema"]["current"], 20)
+            self.assertEqual(
+                manifest["database_schema"]["current"],
+                CURRENT_SCHEMA_VERSION,
+            )
             self.assertEqual(manifest["database_schema"]["downgrade_policy"], "compatible")
 
     def test_builder_refuses_failed_qualification(self):

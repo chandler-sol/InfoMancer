@@ -74,6 +74,28 @@ class ProviderSecretStoreTests(unittest.TestCase):
             self.assertFalse(path.exists())
             self.assertEqual(list(Path(temporary).glob(f".{path.name}.*.tmp")), [])
 
+    def test_delete_removes_selected_secret_without_changing_wire_format(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "providers.enc"
+            secret = "delete-compatible-secret"
+            store = ProviderSecretStore(path, secret)
+            store.update({
+                "tvdb_api_key": "keep-me",
+                "plex_token": "remove-me",
+                "jellyfin_token": "also-keep",
+            })
+            store.delete({"plex_token"})
+
+            values = store.load()
+            self.assertEqual(values["tvdb_api_key"], "keep-me")
+            self.assertEqual(values["jellyfin_token"], "also-keep")
+            self.assertNotIn("plex_token", values)
+
+            payload = self._qualified_application_cipher(secret).decrypt(path.read_bytes())
+            decoded = json.loads(payload.decode("utf-8"))
+            self.assertNotIn("plex_token", decoded)
+            self.assertEqual(decoded["tvdb_api_key"], "keep-me")
+
     def test_wrong_application_secret_fails_closed(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "providers.enc"

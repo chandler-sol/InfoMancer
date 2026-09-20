@@ -26,6 +26,32 @@ class SettingsUiContractTests(unittest.TestCase):
         ):
             self.assertIn(target, css)
 
+    def test_integrations_page_exposes_read_only_media_server_foundation(self):
+        template = (ROOT / "app/templates/settings.html").read_text(encoding="utf-8")
+        nav = (ROOT / "app/templates/_settings_nav.html").read_text(encoding="utf-8")
+        self.assertIn("/settings/integrations", nav)
+        self.assertIn("Episode Identity integrations", template)
+        self.assertIn("Plex and Jellyfin are optional, read-only analysis accelerators.", template)
+        self.assertIn("Test path mapping", template)
+        self.assertIn("Preview adapter", template)
+        self.assertIn('type="password"', template)
+        self.assertNotIn('value="{{ source.token', template)
+
+    def test_integration_mapping_test_is_get_and_mutations_are_post(self):
+        template = (ROOT / "app/templates/settings.html").read_text(encoding="utf-8")
+        self.assertIn(
+            'method="get" action="/settings/integrations/{{ source.source_key }}/mapping-test"',
+            template,
+        )
+        self.assertIn(
+            'method="post" action="/settings/integrations/{{ source.source_key }}/mappings"',
+            template,
+        )
+        self.assertIn(
+            'method="post" action="/settings/integrations/{{ source.source_key }}/test"',
+            template,
+        )
+
     def test_recovery_wrapper_cannot_bleed_to_shell_edges(self):
         css = (ROOT / "app/static/settings-polish.css").read_text(encoding="utf-8")
         self.assertIn("body .settings-shell", css)

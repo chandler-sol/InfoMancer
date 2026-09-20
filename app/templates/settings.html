@@ -60,6 +60,134 @@
 </div>
 <script src="{{ url_for('static', path='settings-tvdb-credentials.js') }}?v={{ static_version }}" defer></script>
 
+{% elif section == 'integrations' %}
+<div class="settings-page-grid">
+  <section class="panel settings-card full-width">
+    <p class="eyebrow">MEDIA SERVERS</p>
+    <h2>Episode Identity integrations</h2>
+    <p class="muted">Plex and Jellyfin are optional, read-only analysis accelerators. PR E configures connections and translates media paths. Preview-image ingestion remains disabled until the dedicated adapter slices land.</p>
+    {% if integration_secret_error %}<div class="form-error">{{ integration_secret_error }}</div>{% endif %}
+  </section>
+
+  {% for source in external_integrations %}
+  <section class="panel settings-card full-width" id="integration-{{ source.source_key }}">
+    <div class="settings-card-head">
+      <div><p class="eyebrow">{{ source.label|upper }}</p><h2>{{ source.label }}</h2></div>
+      <span class="settings-state {{ 'good' if source.enabled and source.token_configured and source.server_url else 'active' if source.server_url or source.token_configured else 'warn' }}">{{ 'Enabled' if source.enabled else 'Configured' if source.server_url or source.token_configured else 'Not configured' }}</span>
+    </div>
+
+    <div class="settings-metrics">
+      <div><strong>{{ 'Yes' if source.token_configured else 'No' }}</strong><span>Encrypted token</span></div>
+      <div><strong>{{ source.mappings|length }}</strong><span>Path mapping{% if source.mappings|length != 1 %}s{% endif %}</span></div>
+      <div><strong>Pending</strong><span>Preview adapter</span></div>
+      <div><strong>Read-only</strong><span>Source access</span></div>
+    </div>
+    <p class="muted">{{ source.source_status.detail }}</p>
+    {% if source.last_test_at %}
+    <dl class="settings-facts">
+      <div><dt>Last connection test</dt><dd>{{ 'Succeeded' if source.last_test_status == 'ok' else 'Failed' }} · {{ local_time(source.last_test_at) }}</dd></div>
+      {% if source.last_test_server_name %}<div><dt>Server</dt><dd>{{ source.last_test_server_name }}{% if source.last_test_version %} · {{ source.last_test_version }}{% endif %}</dd></div>{% endif %}
+      {% if source.last_test_detail %}<div><dt>Test detail</dt><dd>{{ source.last_test_detail }}</dd></div>{% endif %}
+    </dl>
+    {% endif %}
+
+    <form class="settings-form" method="post" action="/settings/integrations/{{ source.source_key }}">
+      <div class="settings-form-grid">
+        <label>Server URL
+          <input name="server_url" type="url" value="{{ source.server_url }}" placeholder="{{ 'http://plex.local:32400' if source.source_key == 'plex' else 'http://jellyfin.local:8096' }}">
+          <small>Use the URL reachable from the InfoMancer server. Redirects are not followed during connection tests.</small>
+        </label>
+        <label>Access token
+          <input name="token" type="password" autocomplete="new-password" placeholder="{{ 'Leave blank to keep the saved token' if source.token_configured else 'Paste an access token' }}">
+          <small>Stored in InfoMancer's encrypted provider-secret store, never in the catalog database.</small>
+        </label>
+        {% if source.source_key == 'plex' %}
+        <label>Plex metadata root
+          <input name="metadata_root" value="{{ source.metadata_root }}" placeholder="Optional custom Plex data root">
+          <small>Optional for now. PR G will use this for read-only BIF discovery when automatic detection is insufficient.</small>
+        </label>
+        {% endif %}
+      </div>
+      <label class="checkbox-label"><input type="checkbox" name="enabled" value="1" {% if source.enabled %}checked{% endif %}> Enable {{ source.label }} as an Episode Identity external source</label>
+      {% if source.token_configured %}<label class="checkbox-label"><input type="checkbox" name="clear_token" value="1"> Remove the saved {{ source.label }} token</label>{% endif %}
+      <div class="actions">
+        <button class="button primary">Save {{ source.label }}</button>
+      </div>
+    </form>
+    <form class="inline-form" method="post" action="/settings/integrations/{{ source.source_key }}/test">
+      <button class="button" {% if not source.server_url or not source.token_configured %}disabled{% endif %}>Test {{ source.label }} connection</button>
+    </form>
+
+    <hr>
+    <div>
+      <p class="eyebrow">PATH TRANSLATION</p>
+      <h3>External path mappings</h3>
+      <p class="muted">Translate the path {{ source.label }} reports into the path InfoMancer sees. Windows source paths compare case-insensitively. POSIX source paths remain case-sensitive. Lower priority numbers win, then the most specific root wins.</p>
+    </div>
+
+    {% if source.mappings %}
+    <div class="settings-table-wrap">
+      <table>
+        <thead><tr><th>Priority</th><th>{{ source.label }} root</th><th>InfoMancer root</th><th></th></tr></thead>
+        <tbody>
+          {% for mapping in source.mappings %}
+          <tr>
+            <td>{{ mapping.priority }}</td>
+            <td><code>{{ mapping.external_root }}</code></td>
+            <td><code>{{ mapping.local_root }}</code></td>
+            <td><form method="post" action="/settings/integrations/{{ source.source_key }}/mappings/{{ mapping.id }}/delete"><button class="button compact danger">Remove</button></form></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <form class="settings-form" method="post" action="/settings/integrations/{{ source.source_key }}/mappings">
+      <div class="settings-form-grid">
+        <label>{{ source.label }} root
+          <input name="external_root" required placeholder="{{ 'D:\\TV' if source.source_key == 'plex' else '/media/tv' }}">
+          <small>The root exactly as {{ source.label }} reports it.</small>
+        </label>
+        <label>InfoMancer root
+          <input name="local_root" required placeholder="/media/tv">
+          <small>The absolute path visible inside this InfoMancer installation or container.</small>
+        </label>
+        <label>Priority
+          <input name="priority" type="number" min="0" max="10000" value="100" required>
+          <small>Lower numbers take precedence when more than one mapping matches.</small>
+        </label>
+      </div>
+      <button class="button">Add path mapping</button>
+    </form>
+
+    <form class="settings-form" method="get" action="/settings/integrations/{{ source.source_key }}/mapping-test">
+      <label>Test an external media path
+        <input name="external_path" required placeholder="{{ 'D:\\TV\\Show\\Season 01\\Episode.mkv' if source.source_key == 'plex' else '/media/tv/Show/Season 01/Episode.mkv' }}">
+        <small>This is read-only. InfoMancer shows the translated local path and whether it matches a cataloged file.</small>
+      </label>
+      <button class="button">Test path mapping</button>
+    </form>
+
+    {% if mapping_test_source == source.source_key and mapping_test is defined %}
+    <div class="{{ 'success-banner' if mapping_test.matched else 'form-error' }}">
+      {% if not mapping_test.matched %}
+        No enabled {{ source.label }} path mapping matched <code>{{ mapping_test.external_path }}</code>.
+      {% else %}
+        <strong>Translated path:</strong> <code>{{ mapping_test.local_path }}</code><br>
+        <strong>File visible now:</strong> {{ 'Yes' if mapping_test.exists else 'No' }}<br>
+        {% if mapping_test.catalog_match %}
+          <strong>Catalog match:</strong> {{ mapping_test.catalog_match.title_name }} · <code>{{ mapping_test.catalog_match.filename }}</code> · file #{{ mapping_test.catalog_match.id }}
+        {% else %}
+          <strong>Catalog match:</strong> None
+        {% endif %}
+      {% endif %}
+    </div>
+    {% endif %}
+  </section>
+  {% endfor %}
+</div>
+
 {% elif section == 'external-search' %}
 <form class="settings-page-grid" method="post" action="/settings/external-search">
   <section class="panel settings-card settings-form full-width">
