@@ -13,6 +13,7 @@ from typing import Any
 from ..path_mapping import ExternalPathMapper, PathMapping, PathMappingError
 from .external import ExternalSourceRegistry, ExternalSourceStatus
 from .sources.jellyfin import JellyfinTrickplaySource
+from .sources.plex import PlexBifSource
 
 
 SUPPORTED_EXTERNAL_SOURCES = frozenset({"plex", "jellyfin"})
@@ -504,6 +505,18 @@ def build_configured_source_registry(
                     allow_insecure_http=bool(
                         source.config.get("allow_insecure_http", False)
                     ),
+                    advertise_preview_frames=False,
+                )
+            )
+        elif source.source_key == "plex":
+            configured.append(
+                PlexBifSource(
+                    source.server_url,
+                    secrets.get("plex_token", "") if token_is_bound else "",
+                    service.mapper("plex"),
+                    metadata_root=source.metadata_root,
+                    enabled=source.enabled,
+                    last_test_status=source.last_test_status,
                     advertise_preview_frames=False,
                 )
             )
