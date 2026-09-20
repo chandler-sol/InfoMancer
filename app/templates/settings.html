@@ -98,7 +98,7 @@
     <form class="settings-form" method="post" action="/settings/integrations/{{ source.source_key }}">
       <div class="settings-form-grid">
         <label>Server URL
-          <input name="server_url" type="url" value="{{ source.server_url }}" placeholder="{{ 'http://plex.local:32400' if source.source_key == 'plex' else 'https://jellyfin.local:8096' }}">
+          <input name="server_url" type="url" value="{{ source.server_url }}" placeholder="{{ 'https://plex.local:32400' if source.source_key == 'plex' else 'https://jellyfin.local:8096' }}">
           <small>Use the URL reachable from the InfoMancer server. Redirects are not followed during connection tests.</small>
         </label>
         <label>Access token
