@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 import sqlite3
@@ -38,7 +39,11 @@ _PLEX_MEDIA_HASH = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
 class PlexBifError(ValueError):
-    """Raised when a Plex BIF asset is malformed, unsupported, or unsafe."""
+    """Raised when a Plex source operation is malformed, unsafe, or unavailable."""
+
+
+class PlexPreviewUnavailable(PlexBifError):
+    """Raised when optional Plex preview evidence is unavailable for an item."""
 
 
 @dataclass(frozen=True)
@@ -194,6 +199,67 @@ def normalize_plex_metadata_root(value: str | Path) -> Path:
     if not root.is_absolute():
         raise PlexBifError("Plex metadata root must be an absolute local path.")
     return root
+
+
+def plex_metadata_root_candidates() -> tuple[Path, ...]:
+    """Return bounded common Plex data-root candidates without scanning the filesystem."""
+    candidates: list[Path] = []
+
+    support_dir = str(
+        os.environ.get("PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR", "")
+    ).strip()
+    if support_dir:
+        support = Path(support_dir).expanduser()
+        candidates.append(support)
+        if support.name.casefold() != "plex media server":
+            candidates.append(support / "Plex Media Server")
+
+    local_app_data = str(os.environ.get("LOCALAPPDATA", "")).strip()
+    if local_app_data:
+        candidates.append(Path(local_app_data).expanduser() / "Plex Media Server")
+
+    home = Path.home()
+    candidates.extend(
+        (
+            Path(
+                "/var/lib/plexmediaserver/Library/Application Support/Plex Media Server"
+            ),
+            Path("/config/Library/Application Support/Plex Media Server"),
+            home / "Library" / "Application Support" / "Plex Media Server",
+        )
+    )
+
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        text = str(candidate)
+        key = text.casefold() if os.name == "nt" else text
+        if key not in seen:
+            seen.add(key)
+            unique.append(candidate)
+    return tuple(unique)
+
+
+def detect_plex_metadata_root() -> Path | None:
+    """Detect a common readable Plex data root without recursive filesystem search."""
+    for candidate in plex_metadata_root_candidates():
+        try:
+            root = normalize_plex_metadata_root(candidate)
+            database = plex_library_database_path(root)
+        except PlexBifError:
+            continue
+        if database.is_file() and (root / "Media" / "localhost").is_dir():
+            return root
+    return None
+
+
+def effective_plex_metadata_root(
+    configured_root: str | Path = "",
+) -> Path | None:
+    raw = str(configured_root or "").strip()
+    if raw:
+        return normalize_plex_metadata_root(raw)
+    return detect_plex_metadata_root()
 
 
 def plex_bif_path_for_bundle(
@@ -358,12 +424,32 @@ def enumerate_bif_preview_frames(
     item_id: str,
     bif_path: str | Path,
     index: PlexBifIndex,
+    part_id: str = "",
+    expected_external_path: str = "",
+    metadata_root: str | Path = "",
 ) -> tuple[PreviewFrameRef, ...]:
     normalized_item_id = str(item_id or "").strip()
     if not normalized_item_id:
         raise PlexBifError("A Plex item id is required for BIF preview frames.")
     source_signature = bif_source_signature(bif_path, index)
     path_text = str(Path(bif_path))
+    normalized_part = (
+        _plex_numeric_id(part_id, "Plex part id")
+        if str(part_id or "").strip()
+        else ""
+    )
+    expected_path = str(expected_external_path or "").strip()
+    root_text = (
+        str(normalize_plex_metadata_root(metadata_root))
+        if str(metadata_root or "").strip()
+        else ""
+    )
+    if any((normalized_part, expected_path, root_text)) and not all(
+        (normalized_part, expected_path, root_text)
+    ):
+        raise PlexBifError(
+            "Local Plex BIF frames require part id, external path, and metadata root together."
+        )
     frames: list[PreviewFrameRef] = []
     for frame in index.frames:
         frames.append(
@@ -377,6 +463,9 @@ def enumerate_bif_preview_frames(
                         "path": path_text,
                         "offset": frame.offset,
                         "length": frame.length,
+                        "part_id": normalized_part,
+                        "expected_external_path": expected_path,
+                        "metadata_root": root_text,
                     },
                     ensure_ascii=True,
                     sort_keys=True,
@@ -529,7 +618,9 @@ def _read_plex_bytes(
         if exc.code in {401, 403}:
             detail = "Plex rejected the access token."
         elif exc.code == 404:
-            detail = "The requested Plex media or preview asset does not exist."
+            raise PlexPreviewUnavailable(
+                "The requested Plex preview asset does not exist."
+            ) from exc
         elif 300 <= exc.code < 400:
             detail = "Plex redirected the request; save the final server URL instead."
         else:
@@ -824,17 +915,24 @@ def fetch_plex_bif_index(
         "application/bif",
         "binary/octet-stream",
     }:
-        raise PlexBifError("Plex returned an unexpected BIF content type.")
+        raise PlexPreviewUnavailable(
+            "Plex returned an unsupported BIF content type."
+        )
     if len(payload) < _BIF_HEADER_SIZE:
-        raise PlexBifError("Plex returned a truncated BIF.")
-    _, image_count, _ = _header_fields(payload[:_BIF_HEADER_SIZE])
-    index_size = _BIF_HEADER_SIZE + (image_count + 1) * _BIF_INDEX_ENTRY_SIZE
-    if index_size > len(payload):
-        raise PlexBifError("Plex returned a truncated BIF index.")
-    parsed = parse_bif_index(
-        payload[:index_size],
-        file_size=len(payload),
-    )
+        raise PlexPreviewUnavailable("Plex returned a truncated BIF.")
+    try:
+        _, image_count, _ = _header_fields(payload[:_BIF_HEADER_SIZE])
+        index_size = _BIF_HEADER_SIZE + (image_count + 1) * _BIF_INDEX_ENTRY_SIZE
+        if index_size > len(payload):
+            raise PlexBifError("Plex returned a truncated BIF index.")
+        parsed = parse_bif_index(
+            payload[:index_size],
+            file_size=len(payload),
+        )
+    except PlexBifError as exc:
+        raise PlexPreviewUnavailable(
+            f"Plex BIF preview index is unusable: {exc}"
+        ) from exc
     frame_digests = tuple(
         hashlib.sha256(
             payload[frame.offset : frame.offset + frame.length]
@@ -1108,22 +1206,35 @@ class PlexBifSource:
                 current.media_source_id,
                 allow_insecure_http=self.allow_insecure_http,
             )
-        except PlexBifError:
-            if not self.metadata_root:
+        except PlexBifError as http_error:
+            metadata_root = effective_plex_metadata_root(self.metadata_root)
+            if metadata_root is None:
+                if isinstance(http_error, PlexPreviewUnavailable):
+                    return ()
                 raise
-            bif_path = resolve_local_bif_path(
-                self.metadata_root,
-                part_id=current.media_source_id,
-                expected_external_path=current.path,
-            )
-            if bif_path is None:
-                return ()
-            local_index = read_bif_index(bif_path)
-            return enumerate_bif_preview_frames(
-                item_id=current.item_id,
-                bif_path=bif_path,
-                index=local_index,
-            )
+            try:
+                bif_path = resolve_local_bif_path(
+                    metadata_root,
+                    part_id=current.media_source_id,
+                    expected_external_path=current.path,
+                )
+                if bif_path is None:
+                    if isinstance(http_error, PlexPreviewUnavailable):
+                        return ()
+                    raise http_error
+                local_index = read_bif_index(bif_path)
+                return enumerate_bif_preview_frames(
+                    item_id=current.item_id,
+                    bif_path=bif_path,
+                    index=local_index,
+                    part_id=current.media_source_id,
+                    expected_external_path=current.path,
+                    metadata_root=metadata_root,
+                )
+            except PlexBifError:
+                if isinstance(http_error, PlexPreviewUnavailable):
+                    return ()
+                raise http_error
         return enumerate_plex_http_preview_frames(
             item_id=current.item_id,
             part_id=current.media_source_id,
@@ -1180,21 +1291,40 @@ class PlexBifSource:
                 )
             return payload
         if kind == "plex_bif":
-            if not self.metadata_root:
-                raise PlexBifError(
-                    "Plex local BIF preview requires a configured metadata root."
-                )
             try:
                 offset = int(asset.get("offset"))
                 length = int(asset.get("length"))
+                part_id = _plex_numeric_id(asset.get("part_id"), "Plex part id")
             except (TypeError, ValueError) as exc:
-                raise PlexBifError("Plex local BIF byte range is invalid.") from exc
+                raise PlexBifError("Plex local BIF reference is invalid.") from exc
+            expected_external_path = str(
+                asset.get("expected_external_path") or ""
+            ).strip()
+            asset_root = str(asset.get("metadata_root") or "").strip()
+            if not expected_external_path or not asset_root:
+                raise PlexBifError(
+                    "Plex local BIF reference is missing its media identity anchor."
+                )
+            current_root = effective_plex_metadata_root(self.metadata_root)
+            if current_root is None:
+                raise PlexPreviewUnavailable(
+                    "The Plex metadata root is no longer available."
+                )
+            try:
+                normalized_asset_root = normalize_plex_metadata_root(asset_root).resolve()
+                normalized_current_root = current_root.resolve()
+            except OSError as exc:
+                raise PlexBifError(
+                    f"Plex metadata root could not be resolved: {exc}"
+                ) from exc
+            if normalized_asset_root != normalized_current_root:
+                raise PlexBifError(
+                    "Plex metadata root changed after preview enumeration."
+                )
             candidate = Path(str(asset.get("path") or ""))
             try:
                 allowed_root = (
-                    normalize_plex_metadata_root(self.metadata_root)
-                    / "Media"
-                    / "localhost"
+                    normalized_current_root / "Media" / "localhost"
                 ).resolve()
                 resolved_candidate = candidate.resolve(strict=True)
             except OSError as exc:
@@ -1207,6 +1337,23 @@ class PlexBifSource:
             ):
                 raise PlexBifError(
                     "Plex local BIF preview path is outside the configured metadata root."
+                )
+            try:
+                current_bif_path = resolve_local_bif_path(
+                    normalized_current_root,
+                    part_id=part_id,
+                    expected_external_path=expected_external_path,
+                )
+            except PlexBifError as exc:
+                raise PlexBifError(
+                    f"Plex media identity anchor changed after preview enumeration: {exc}"
+                ) from exc
+            if (
+                current_bif_path is None
+                or current_bif_path.resolve() != resolved_candidate
+            ):
+                raise PlexBifError(
+                    "Plex media identity anchor changed after preview enumeration."
                 )
             current_index = read_bif_index(resolved_candidate)
             if (
