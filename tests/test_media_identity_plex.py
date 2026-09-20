@@ -902,7 +902,7 @@ class PlexBifFoundationTests(unittest.TestCase):
                 ),
                 patch(
                     "app.media_identity.sources.plex.fetch_plex_bif_index",
-                    side_effect=PlexBifError("HTTP BIF unavailable"),
+                    side_effect=PlexPreviewUnavailable("HTTP BIF unavailable"),
                 ),
             ):
                 frames = source.preview_frames(media)
@@ -1009,6 +1009,47 @@ class PlexBifFoundationTests(unittest.TestCase):
             asset = json.loads(frames[0].asset_ref)
             self.assertEqual(Path(asset["metadata_root"]), root)
             self.assertEqual(image, b"\xff\xd8frame-zero\xff\xd9")
+
+    def test_source_failure_does_not_fall_back_to_local_preview(self):
+        expected = "/srv/tv/Show/Season 01/Episode.mkv"
+        candidate = plex_episode_item(path=expected, part_id="501")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "Plex Media Server"
+            local_root = Path(temporary) / "tv"
+            source = PlexBifSource(
+                "https://plex.local:32400",
+                "secret",
+                ExternalPathMapper(
+                    [PathMapping("plex", "/srv/tv", str(local_root))]
+                ),
+                metadata_root=str(root),
+            )
+            from app.media_identity.external import ExternalMediaRef
+            media = ExternalMediaRef(
+                source_key="plex",
+                item_id="101",
+                path=expected,
+                media_source_id="501",
+            )
+            with (
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_item",
+                    return_value=candidate,
+                ),
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_bif_index",
+                    side_effect=PlexBifError("Plex rejected the access token."),
+                ),
+                patch(
+                    "app.media_identity.sources.plex.resolve_local_bif_path"
+                ) as local_fallback,
+            ):
+                with self.assertRaisesRegex(
+                    PlexBifError, "rejected the access token"
+                ):
+                    source.preview_frames(media)
+
+            local_fallback.assert_not_called()
 
     def test_optional_preview_unavailable_without_local_fallback_returns_no_frames(self):
         expected = "/srv/tv/Show/Season 01/Episode.mkv"
@@ -1233,7 +1274,7 @@ class PlexBifFoundationTests(unittest.TestCase):
                 ),
                 patch(
                     "app.media_identity.sources.plex.fetch_plex_bif_index",
-                    side_effect=PlexBifError("HTTP BIF unavailable"),
+                    side_effect=PlexPreviewUnavailable("HTTP BIF unavailable"),
                 ),
             ):
                 frames = source.preview_frames(media)
