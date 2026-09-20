@@ -8,6 +8,7 @@ import sqlite3
 import struct
 import tempfile
 import unittest
+import urllib.error
 import urllib.parse
 import urllib.request
 from unittest.mock import patch
@@ -69,6 +70,16 @@ class DummyOpener:
         self.request = request
         self.timeout = timeout
         return self.response
+
+
+class ErrorOpener:
+    def __init__(self, error):
+        self.error = error
+        self.request = None
+
+    def open(self, request, timeout=None):
+        self.request = request
+        raise self.error
 
 
 def plex_episode_item(
@@ -547,6 +558,50 @@ class PlexBifFoundationTests(unittest.TestCase):
         self.assertEqual(item["ratingKey"], "101")
         self.assertEqual(opener.request.get_header("X-plex-token"), "secret")
 
+    def test_missing_plex_item_404_is_not_preview_unavailable(self):
+        error = urllib.error.HTTPError(
+            "https://plex.local:32400/library/metadata/101",
+            404,
+            "Not Found",
+            {},
+            None,
+        )
+        opener = ErrorOpener(error)
+        with patch(
+            "app.media_identity.sources.plex.urllib.request.build_opener",
+            return_value=opener,
+        ):
+            with self.assertRaises(PlexBifError) as caught:
+                fetch_plex_item(
+                    "https://plex.local:32400",
+                    "secret",
+                    "101",
+                )
+
+        self.assertNotIsInstance(caught.exception, PlexPreviewUnavailable)
+
+    def test_missing_bif_404_is_preview_unavailable(self):
+        error = urllib.error.HTTPError(
+            "https://plex.local:32400/library/parts/501/indexes/sd",
+            404,
+            "Not Found",
+            {},
+            None,
+        )
+        opener = ErrorOpener(error)
+        with patch(
+            "app.media_identity.sources.plex.urllib.request.build_opener",
+            return_value=opener,
+        ):
+            with self.assertRaisesRegex(
+                PlexPreviewUnavailable, "no BIF preview asset"
+            ):
+                fetch_plex_bif_index(
+                    "https://plex.local:32400",
+                    "secret",
+                    "501",
+                )
+
     def test_fetch_plex_item_requires_exact_requested_rating_key(self):
         payload = json.dumps(
             {
@@ -647,7 +702,7 @@ class PlexBifFoundationTests(unittest.TestCase):
             "app.media_identity.sources.plex.urllib.request.build_opener",
             return_value=opener,
         ):
-            with self.assertRaisesRegex(PlexBifError, "invalid JPEG"):
+            with self.assertRaisesRegex(PlexPreviewUnavailable, "invalid JPEG"):
                 fetch_plex_bif_image(
                     "https://plex.local:32400",
                     "secret",
@@ -769,7 +824,7 @@ class PlexBifFoundationTests(unittest.TestCase):
                 ) as image_fetch,
             ):
                 with self.assertRaisesRegex(
-                    PlexBifError, "frame content changed"
+                    PlexPreviewUnavailable, "frame content changed"
                 ):
                     source.read_preview(frames[0])
 
@@ -851,6 +906,21 @@ class PlexBifFoundationTests(unittest.TestCase):
                 ),
             ):
                 frames = source.preview_frames(media)
+
+            with (
+                patch(
+                    "app.media_identity.sources.plex.read_bif_index",
+                    side_effect=AssertionError(
+                        "read_preview must not reopen the BIF index separately"
+                    ),
+                ),
+                patch(
+                    "app.media_identity.sources.plex.read_bif_preview_range",
+                    side_effect=AssertionError(
+                        "read_preview must not reopen the BIF payload separately"
+                    ),
+                ),
+            ):
                 image = source.read_preview(frames[1])
 
             self.assertEqual(len(frames), 2)
@@ -1090,7 +1160,7 @@ class PlexBifFoundationTests(unittest.TestCase):
                 )
 
             with self.assertRaisesRegex(
-                PlexBifError, "identity anchor changed"
+                PlexPreviewUnavailable, "identity anchor changed"
             ):
                 source.read_preview(frames[0])
 
@@ -1171,7 +1241,7 @@ class PlexBifFoundationTests(unittest.TestCase):
             bif_path.write_bytes(changed_bif)
 
             with self.assertRaisesRegex(
-                PlexBifError, "changed after preview frames were enumerated"
+                PlexPreviewUnavailable, "changed after preview frames were enumerated"
             ):
                 source.read_preview(frames[0])
 
