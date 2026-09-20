@@ -578,16 +578,55 @@ def external_paths_equal(first: str, second: str) -> bool:
     )
 
 
+def _media_source_entries(
+    item: Mapping[str, Any],
+) -> tuple[Mapping[str, Any], ...]:
+    raw_sources = item.get("MediaSources")
+    if raw_sources is None:
+        return ()
+    if not isinstance(raw_sources, Sequence) or isinstance(
+        raw_sources, (str, bytes)
+    ):
+        raise JellyfinAdapterError(
+            "Jellyfin returned an invalid media source list."
+        )
+
+    sources: list[Mapping[str, Any]] = []
+    for source in raw_sources:
+        if not isinstance(source, Mapping):
+            raise JellyfinAdapterError(
+                "Jellyfin returned a malformed media source entry."
+            )
+        source_id = str(source.get("Id") or "").strip()
+        if not source_id:
+            raise JellyfinAdapterError(
+                "Jellyfin returned a media source without a stable id."
+            )
+        sources.append(source)
+    return tuple(sources)
+
+
 def _select_item_by_path(
     items: Sequence[Mapping[str, Any]],
     expected_external_path: str,
 ) -> Mapping[str, Any] | None:
-    matches = [
-        item
-        for item in items
-        if isinstance(item, Mapping)
-        and external_paths_equal(str(item.get("Path") or ""), expected_external_path)
-    ]
+    matches: list[Mapping[str, Any]] = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            raise JellyfinAdapterError(
+                "Jellyfin returned a malformed episode candidate."
+            )
+        paths = [str(item.get("Path") or "").strip()]
+        paths.extend(
+            str(source.get("Path") or "").strip()
+            for source in _media_source_entries(item)
+        )
+        if any(
+            path and external_paths_equal(path, expected_external_path)
+            for path in paths
+        ):
+            matches.append(item)
+
     if len(matches) > 1:
         raise JellyfinAdapterError(
             "More than one Jellyfin item matches the mapped media path; resolution is ambiguous."
@@ -599,21 +638,16 @@ def _select_media_source_id(
     item: Mapping[str, Any],
     expected_external_path: str,
 ) -> str:
-    raw_sources = item.get("MediaSources")
-    sources = raw_sources if isinstance(raw_sources, Sequence) and not isinstance(raw_sources, (str, bytes)) else ()
+    sources = _media_source_entries(item)
     path_matches: list[str] = []
     all_ids: list[str] = []
     has_declared_path = False
     for source in sources:
-        if not isinstance(source, Mapping):
-            continue
-        source_id = str(source.get("Id") or "").strip()
-        if not source_id:
-            continue
-        all_ids.append(source_id)
         source_path = str(source.get("Path") or "").strip()
         if source_path:
             has_declared_path = True
+        source_id = str(source.get("Id") or "").strip()
+        all_ids.append(source_id)
         if external_paths_equal(source_path, expected_external_path):
             path_matches.append(source_id)
     unique_path_matches = tuple(dict.fromkeys(path_matches))
@@ -650,7 +684,7 @@ def resolve_media_ref(
     return ExternalMediaRef(
         source_key="jellyfin",
         item_id=item_id,
-        path=str(item.get("Path") or ""),
+        path=expected_external_path,
         media_source_id=media_source_id,
         provider_ids=provider_ids,
         source_signature=(f"jellyfin-item:{item_id}:{etag}" if etag else f"jellyfin-item:{item_id}"),
@@ -778,7 +812,7 @@ def fetch_episode_candidates(
             "includeItemTypes": "Episode",
             "parentIndexNumber": season_number,
             "indexNumber": episode_number,
-            "fields": "Path,ProviderIds",
+            "fields": "Path,ProviderIds,MediaSources",
             "enableImages": "false",
             "enableUserData": "false",
             "limit": _MAX_EPISODE_CANDIDATES + 1,
