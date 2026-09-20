@@ -262,6 +262,18 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
         ref = resolve_media_ref([item], expected_external_path=item["Path"])
         self.assertEqual(ref.media_source_id, "media-a")
 
+    def test_single_declared_nonmatching_media_source_does_not_fallback(self):
+        item = self._item()
+        item["MediaSources"] = [
+            {"Id": "media-only", "Path": "/srv/tv/Other/Version.mkv"},
+        ]
+        ref = resolve_media_ref(
+            [item],
+            expected_external_path=item["Path"],
+        )
+        self.assertIsNotNone(ref)
+        self.assertEqual(ref.media_source_id, "")
+
     def test_episode_candidate_query_is_bounded_read_only_and_token_safe(self):
         payload = json.dumps(
             {
@@ -282,7 +294,7 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
             return_value=opener,
         ) as builder:
             items = fetch_episode_candidates(
-                "http://jellyfin.local:8096",
+                "https://jellyfin.local:8096",
                 "top-secret",
                 season=1,
                 episode=2,
@@ -308,6 +320,34 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
         self.assertEqual(len(proxy_handlers), 1)
         self.assertEqual(proxy_handlers[0].proxies, {})
 
+    def test_episode_candidate_query_rejects_malformed_entries(self):
+        payload = json.dumps(
+            {
+                "Items": [
+                    {
+                        "Id": "11111111111111111111111111111111",
+                        "Path": "/srv/tv/Show/Season 01/Episode.mkv",
+                    },
+                    "malformed",
+                ],
+                "TotalRecordCount": 2,
+            }
+        ).encode("utf-8")
+        opener = DummyOpener(
+            DummyResponse(payload, content_type="application/json")
+        )
+        with patch(
+            "app.media_identity.sources.jellyfin.urllib.request.build_opener",
+            return_value=opener,
+        ):
+            with self.assertRaisesRegex(JellyfinAdapterError, "malformed candidate"):
+                fetch_episode_candidates(
+                    "https://jellyfin.local:8096",
+                    "token",
+                    season=1,
+                    episode=2,
+                )
+
     def test_configured_source_resolves_exact_mapped_episode_and_enumerates_trickplay(self):
         item_id = "11111111111111111111111111111111"
         media_source_id = "22222222222222222222222222222222"
@@ -319,7 +359,7 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
                 [PathMapping("jellyfin", "/srv/tv", str(local_root))]
             )
             source = JellyfinTrickplaySource(
-                "http://jellyfin.local:8096",
+                "https://jellyfin.local:8096",
                 "jf-secret",
                 mapper,
             )
@@ -384,7 +424,7 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
                 frames = source.preview_frames(media)
 
             candidates.assert_called_once_with(
-                "http://jellyfin.local:8096",
+                "https://jellyfin.local:8096",
                 "jf-secret",
                 season=1,
                 episode=2,
@@ -406,7 +446,7 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
                 [PathMapping("jellyfin", "/srv/tv", str(local_root))]
             )
             source = JellyfinTrickplaySource(
-                "http://jellyfin.local:8096",
+                "https://jellyfin.local:8096",
                 "jf-secret",
                 mapper,
             )
@@ -440,7 +480,7 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
                 [PathMapping("jellyfin", "/srv/tv", str(local_root))]
             )
             source = JellyfinTrickplaySource(
-                "http://jellyfin.local:8096",
+                "https://jellyfin.local:8096",
                 "jf-secret",
                 mapper,
                 enabled=False,
@@ -507,11 +547,36 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
 
     def test_tile_url_uses_read_only_route_and_media_source_query(self):
         frame = self._network_frame()
-        url = trickplay_tile_url("http://jellyfin.local:8096/base", frame)
+        url = trickplay_tile_url("https://jellyfin.local:8096/base", frame)
         self.assertEqual(
             url,
-            "http://jellyfin.local:8096/base/Videos/11111111111111111111111111111111/Trickplay/8/0.jpg?mediaSourceId=22222222222222222222222222222222",
+            "https://jellyfin.local:8096/base/Videos/11111111111111111111111111111111/Trickplay/8/0.jpg?mediaSourceId=22222222222222222222222222222222",
         )
+
+    def test_credential_bearing_requests_reject_plain_http_by_default(self):
+        frame = self._network_frame()
+        with patch(
+            "app.media_identity.sources.jellyfin.urllib.request.build_opener"
+        ) as builder:
+            with self.assertRaisesRegex(JellyfinAdapterError, "plain HTTP"):
+                fetch_trickplay_tile(
+                    "http://jellyfin.local:8096",
+                    "top-secret",
+                    frame,
+                )
+        builder.assert_not_called()
+
+        with patch(
+            "app.media_identity.sources.jellyfin.urllib.request.build_opener"
+        ) as builder:
+            with self.assertRaisesRegex(JellyfinAdapterError, "plain HTTP"):
+                fetch_episode_candidates(
+                    "http://jellyfin.local:8096",
+                    "top-secret",
+                    season=1,
+                    episode=2,
+                )
+        builder.assert_not_called()
 
     def test_tile_fetch_uses_header_token_no_proxy_and_no_token_in_url(self):
         frame = self._network_frame()
@@ -521,7 +586,7 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
             return_value=opener,
         ) as builder:
             payload = fetch_trickplay_tile(
-                "http://jellyfin.local:8096",
+                "https://jellyfin.local:8096",
                 "top-secret",
                 frame,
                 timeout=3,
@@ -546,7 +611,7 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
             return_value=opener,
         ):
             preview = read_trickplay_preview(
-                "http://jellyfin.local:8096",
+                "https://jellyfin.local:8096",
                 "token",
                 frame,
             )
@@ -586,7 +651,7 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(JellyfinAdapterError, pattern):
                     fetch_trickplay_tile(
-                        "http://jellyfin.local:8096",
+                        "https://jellyfin.local:8096",
                         "token",
                         frame,
                     )
@@ -599,7 +664,7 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
             (404, "did not have"),
         ):
             error = urllib.error.HTTPError(
-                "http://jellyfin.local/test",
+                "https://jellyfin.local/test",
                 code,
                 "error",
                 {},
@@ -612,7 +677,7 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(JellyfinAdapterError, pattern):
                     fetch_trickplay_tile(
-                        "http://jellyfin.local:8096",
+                        "https://jellyfin.local:8096",
                         "token",
                         frame,
                     )
@@ -644,7 +709,7 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
             height=frame.height,
         )
         with self.assertRaisesRegex(JellyfinAdapterError, "tile bounds"):
-            trickplay_tile_url("http://jellyfin.local:8096", bad_frame)
+            trickplay_tile_url("https://jellyfin.local:8096", bad_frame)
 
         invalid_item = type(frame)(
             source_key=frame.source_key,
@@ -656,7 +721,7 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
             height=frame.height,
         )
         with self.assertRaisesRegex(JellyfinAdapterError, "valid Jellyfin GUID"):
-            trickplay_tile_url("http://jellyfin.local:8096", invalid_item)
+            trickplay_tile_url("https://jellyfin.local:8096", invalid_item)
 
     def test_ambiguous_media_source_path_fails_closed(self):
         item = self._item()
