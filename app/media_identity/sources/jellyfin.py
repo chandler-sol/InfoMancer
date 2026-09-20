@@ -22,7 +22,7 @@ from ..external import (
 from ..models import AnalyzerContext
 
 
-_MAX_THUMBNAILS = 1_000_000
+_MAX_THUMBNAILS = 50_000
 _MAX_DIMENSION = 16_384
 _MAX_TILE_AXIS = 1_024
 _MAX_INTERVAL_MS = 86_400_000
@@ -846,10 +846,12 @@ class JellyfinTrickplaySource:
             source_key=self.source_key,
             available=True,
             capabilities=frozenset({ExternalCapability.PREVIEW_FRAMES}),
-            detail="Jellyfin Trickplay preview frames are available for Episode Identity.",
+            detail="Jellyfin Trickplay preview reuse is enabled for Episode Identity.",
         )
 
     def resolve_media(self, context: AnalyzerContext) -> ExternalMediaRef | None:
+        if not self.status().available:
+            return None
         translation = self.mapper.reverse_translate(
             self.source_key,
             context.media.path,
@@ -895,6 +897,8 @@ class JellyfinTrickplaySource:
         self,
         media: ExternalMediaRef,
     ) -> tuple[PreviewFrameRef, ...]:
+        if not self.status().available:
+            return ()
         if str(media.source_key or "").strip().casefold() != self.source_key:
             return ()
         if not media.item_id or not media.path or not media.media_source_id:
@@ -934,6 +938,10 @@ class JellyfinTrickplaySource:
         )
 
     def read_preview(self, frame: PreviewFrameRef) -> bytes:
+        if not self.status().available:
+            raise JellyfinAdapterError(
+                "Jellyfin Trickplay preview reuse is not currently available."
+            )
         return read_trickplay_preview(
             self.server_url,
             self._token,
