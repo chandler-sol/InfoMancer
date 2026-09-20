@@ -72,6 +72,34 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         ) = self.original
         self.temporary.cleanup()
 
+    def test_integrations_page_reports_jellyfin_trickplay_readiness(self):
+        local_root = Path(self.temporary.name) / "media"
+        source = main.external_source_config.save_source(
+            "jellyfin",
+            enabled=True,
+            server_url="http://jellyfin.local:8096",
+            credential_generation="jellyfin-generation",
+        )
+        main.external_source_config.add_mapping(
+            "jellyfin",
+            "/srv/tv",
+            str(local_root),
+        )
+        main.provider_secrets.update({
+            "jellyfin_token": "jellyfin-token",
+            "jellyfin_token_endpoint": source.server_url,
+            "jellyfin_token_generation": "jellyfin-generation",
+        })
+
+        response = self.client.get("/settings/integrations")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Trickplay previews", response.text)
+        self.assertIn(
+            "Jellyfin Trickplay preview frames are available for Episode Identity.",
+            response.text,
+        )
+
     def test_whitespace_in_server_url_is_rejected_without_500(self):
         response = self.client.post(
             "/settings/integrations/plex",
