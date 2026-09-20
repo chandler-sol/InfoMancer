@@ -57,6 +57,7 @@ class PlexBifIndex:
     file_size: int
     source_mtime_ns: int
     index_digest: str
+    frame_digests: tuple[str, ...] = ()
 
 
 def _header_fields(header: bytes) -> tuple[int, int, int]:
@@ -594,7 +595,7 @@ def fetch_plex_episode_candidates(
     items: list[Mapping[str, Any]] = []
     expected_total: int | None = None
     start = 0
-    while expected_total is None or start < expected_total:
+    while True:
         payload = _read_plex_json(
             server_url,
             token,
@@ -621,43 +622,54 @@ def fetch_plex_episode_candidates(
                 "Plex episode search returned a malformed candidate entry."
             )
         try:
-            total = int(container.get("totalSize", len(raw_items)))
             returned_offset = int(container.get("offset", start))
             returned_size = int(container.get("size", len(raw_items)))
+            raw_total = container.get("totalSize")
+            total = int(raw_total) if raw_total is not None else None
         except (TypeError, ValueError) as exc:
             raise PlexBifError(
                 "Plex episode search returned invalid pagination metadata."
             ) from exc
-        if total < 0 or total > _MAX_EPISODE_CANDIDATES:
-            raise PlexBifError(
-                "Plex returned too many episode candidates to resolve safely."
-            )
         if returned_offset != start or returned_size != len(raw_items):
             raise PlexBifError(
                 "Plex episode search returned inconsistent pagination metadata."
             )
-        if expected_total is None:
-            expected_total = total
-        elif total != expected_total:
+        if len(raw_items) > _PLEX_PAGE_SIZE:
             raise PlexBifError(
-                "Plex episode search changed while candidates were being paged."
+                "Plex episode search returned more items than the requested page size."
             )
+        if total is not None:
+            if total < 0 or total > _MAX_EPISODE_CANDIDATES:
+                raise PlexBifError(
+                    "Plex returned too many episode candidates to resolve safely."
+                )
+            if expected_total is None:
+                expected_total = total
+            elif total != expected_total:
+                raise PlexBifError(
+                    "Plex episode search changed while candidates were being paged."
+                )
         if len(items) + len(raw_items) > _MAX_EPISODE_CANDIDATES:
             raise PlexBifError(
                 "Plex returned too many episode candidates to resolve safely."
             )
         items.extend(raw_items)
-        if len(items) == expected_total:
+
+        if expected_total is not None:
+            if len(items) > expected_total:
+                raise PlexBifError(
+                    "Plex episode search returned more candidates than declared."
+                )
+            if len(items) == expected_total:
+                break
+            if not raw_items:
+                raise PlexBifError(
+                    "Plex episode search ended before all candidates were returned."
+                )
+        elif not raw_items:
             break
-        if not raw_items:
-            raise PlexBifError(
-                "Plex episode search ended before all candidates were returned."
-            )
+
         start += len(raw_items)
-        if start > expected_total:
-            raise PlexBifError(
-                "Plex episode search returned more candidates than declared."
-            )
 
     return tuple(items)
 
@@ -823,9 +835,16 @@ def fetch_plex_bif_index(
         payload[:index_size],
         file_size=len(payload),
     )
+    frame_digests = tuple(
+        hashlib.sha256(
+            payload[frame.offset : frame.offset + frame.length]
+        ).hexdigest()
+        for frame in parsed.frames
+    )
     return replace(
         parsed,
         index_digest=hashlib.sha256(payload).hexdigest(),
+        frame_digests=frame_digests,
     )
 
 
@@ -851,6 +870,10 @@ def enumerate_plex_http_preview_frames(
 ) -> tuple[PreviewFrameRef, ...]:
     normalized_item = _plex_numeric_id(item_id, "Plex rating key")
     normalized_part = _plex_numeric_id(part_id, "Plex part id")
+    if len(index.frame_digests) != len(index.frames):
+        raise PlexBifError(
+            "Plex HTTP BIF frame digests are unavailable for safe preview reads."
+        )
     signature = _http_bif_signature(normalized_part, index)
     return tuple(
         PreviewFrameRef(
@@ -864,6 +887,7 @@ def enumerate_plex_http_preview_frames(
                     "timestamp_ms": frame.timestamp_ms,
                     "offset": frame.offset,
                     "length": frame.length,
+                    "sha256": index.frame_digests[position],
                 },
                 ensure_ascii=True,
                 sort_keys=True,
@@ -871,7 +895,7 @@ def enumerate_plex_http_preview_frames(
             ),
             source_signature=signature,
         )
-        for frame in index.frames
+        for position, frame in enumerate(index.frames)
     )
 
 
@@ -1124,47 +1148,35 @@ class PlexBifSource:
             part_id = _plex_numeric_id(asset.get("part_id"), "Plex part id")
             try:
                 timestamp_ms = int(asset.get("timestamp_ms"))
-                expected_offset = int(asset.get("offset"))
                 expected_length = int(asset.get("length"))
             except (TypeError, ValueError) as exc:
                 raise PlexBifError("Plex preview frame reference is invalid.") from exc
+            expected_sha256 = str(asset.get("sha256") or "").strip().casefold()
+            if (
+                len(expected_sha256) != 64
+                or any(character not in "0123456789abcdef" for character in expected_sha256)
+            ):
+                raise PlexBifError("Plex preview frame digest is invalid.")
             if timestamp_ms != int(frame.timestamp_ms):
                 raise PlexBifError(
                     "Plex preview asset timestamp does not match its frame."
                 )
-            current_index = fetch_plex_bif_index(
-                self.server_url,
-                self._token,
-                part_id,
-                allow_insecure_http=self.allow_insecure_http,
-            )
-            if _http_bif_signature(part_id, current_index) != frame.source_signature:
-                raise PlexBifError(
-                    "Plex BIF changed after preview frames were enumerated."
-                )
-            current_range = next(
-                (
-                    candidate
-                    for candidate in current_index.frames
-                    if candidate.timestamp_ms == timestamp_ms
-                ),
-                None,
-            )
-            if (
-                current_range is None
-                or current_range.offset != expected_offset
-                or current_range.length != expected_length
-            ):
-                raise PlexBifError(
-                    "Plex BIF frame range changed after preview enumeration."
-                )
-            return fetch_plex_bif_image(
+            payload = fetch_plex_bif_image(
                 self.server_url,
                 self._token,
                 part_id,
                 timestamp_ms,
                 allow_insecure_http=self.allow_insecure_http,
             )
+            if len(payload) != expected_length:
+                raise PlexBifError(
+                    "Plex BIF frame length changed after preview enumeration."
+                )
+            if hashlib.sha256(payload).hexdigest() != expected_sha256:
+                raise PlexBifError(
+                    "Plex BIF frame content changed after preview enumeration."
+                )
+            return payload
         if kind == "plex_bif":
             if not self.metadata_root:
                 raise PlexBifError(
