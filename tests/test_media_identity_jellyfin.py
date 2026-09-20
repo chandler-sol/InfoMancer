@@ -262,6 +262,40 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
         ref = resolve_media_ref([item], expected_external_path=item["Path"])
         self.assertEqual(ref.media_source_id, "media-a")
 
+    def test_alternate_media_source_path_resolves_exact_version(self):
+        item = self._item()
+        expected = "/srv/tv/Show/Season 01/Alternate.mkv"
+        item["Path"] = "/srv/tv/Show/Season 01/Primary.mkv"
+        item["MediaSources"] = [
+            {"Id": "media-primary", "Path": item["Path"]},
+            {"Id": "media-alt", "Path": expected},
+        ]
+
+        ref = resolve_media_ref([item], expected_external_path=expected)
+
+        self.assertIsNotNone(ref)
+        self.assertEqual(ref.path, expected)
+        self.assertEqual(ref.media_source_id, "media-alt")
+
+    def test_malformed_media_source_entry_fails_closed(self):
+        item = self._item()
+        item["MediaSources"] = ["malformed"]
+        with self.assertRaisesRegex(
+            JellyfinAdapterError, "malformed media source entry"
+        ):
+            resolve_media_ref([item], expected_external_path=item["Path"])
+
+    def test_media_source_without_id_fails_closed_before_fallback(self):
+        item = self._item()
+        item["MediaSources"] = [
+            {"Path": "/srv/tv/Show/Season 01/Other.mkv"},
+            {"Id": "media-only"},
+        ]
+        with self.assertRaisesRegex(
+            JellyfinAdapterError, "without a stable id"
+        ):
+            resolve_media_ref([item], expected_external_path=item["Path"])
+
     def test_single_declared_nonmatching_media_source_does_not_fallback(self):
         item = self._item()
         item["MediaSources"] = [
@@ -309,6 +343,7 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
         self.assertEqual(query["includeItemTypes"], ["Episode"])
         self.assertEqual(query["parentIndexNumber"], ["1"])
         self.assertEqual(query["indexNumber"], ["2"])
+        self.assertEqual(query["fields"], ["Path,ProviderIds,MediaSources"])
         self.assertEqual(query["limit"], ["4097"])
         self.assertNotIn("top-secret", opener.request.full_url)
         self.assertEqual(opener.request.get_header("X-emby-token"), "top-secret")
@@ -439,6 +474,87 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
                 [frame.timestamp_ms for frame in frames],
                 [0, 1000, 2000, 3000],
             )
+
+    def test_configured_source_resolves_alternate_media_version_path(self):
+        item_id = "11111111111111111111111111111111"
+        primary_id = "22222222222222222222222222222222"
+        alternate_id = "33333333333333333333333333333333"
+        primary_path = "/srv/tv/Show/Season 01/Primary.mkv"
+        external_path = "/srv/tv/Show/Season 01/Alternate.mkv"
+        with tempfile.TemporaryDirectory() as temporary:
+            local_root = Path(temporary) / "tv"
+            local_path = local_root / "Show" / "Season 01" / "Alternate.mkv"
+            mapper = ExternalPathMapper(
+                [PathMapping("jellyfin", "/srv/tv", str(local_root))]
+            )
+            source = JellyfinTrickplaySource(
+                "https://jellyfin.local:8096",
+                "jf-secret",
+                mapper,
+            )
+            context = AnalyzerContext(
+                media=MediaIdentityFile(
+                    file_id=1,
+                    title_id=1,
+                    path=str(local_path),
+                    size_bytes=1,
+                    modified_at=1.0,
+                ),
+                claimed_identity=IdentityReference(
+                    identity_kind="episode",
+                    season=1,
+                    episode=2,
+                    display_name="Episode",
+                ),
+                profile=IdentityProfile.DEEP,
+            )
+            media_sources = [
+                {"Id": primary_id, "Path": primary_path},
+                {"Id": alternate_id, "Path": external_path},
+            ]
+            candidate = {
+                "Id": item_id,
+                "Path": primary_path,
+                "MediaSources": media_sources,
+            }
+            detail = {
+                "Id": item_id,
+                "Etag": "etag-alt",
+                "Path": primary_path,
+                "ProviderIds": {"Tvdb": "12345"},
+                "MediaSources": media_sources,
+                "Trickplay": {
+                    alternate_id: {
+                        "8": {
+                            "Width": 8,
+                            "Height": 6,
+                            "TileWidth": 2,
+                            "TileHeight": 2,
+                            "ThumbnailCount": 4,
+                            "Interval": 1000,
+                            "Bandwidth": 1000,
+                        }
+                    }
+                },
+            }
+
+            with (
+                patch(
+                    "app.media_identity.sources.jellyfin.fetch_episode_candidates",
+                    return_value=(candidate,),
+                ),
+                patch(
+                    "app.media_identity.sources.jellyfin.fetch_item",
+                    return_value=detail,
+                ),
+            ):
+                media = source.resolve_media(context)
+                self.assertIsNotNone(media)
+                frames = source.preview_frames(media)
+
+            self.assertEqual(media.path, external_path)
+            self.assertEqual(media.media_source_id, alternate_id)
+            self.assertEqual(len(frames), 4)
 
     def test_configured_source_resolution_fails_closed_on_external_error(self):
         with tempfile.TemporaryDirectory() as temporary:
