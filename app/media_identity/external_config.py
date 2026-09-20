@@ -525,6 +525,9 @@ def build_configured_source_registry(
                     metadata_root=source.metadata_root,
                     enabled=source.enabled,
                     last_test_status=source.last_test_status,
+                    allow_insecure_http=bool(
+                        source.config.get("allow_insecure_http", False)
+                    ),
                     advertise_preview_frames=False,
                 )
             )
@@ -558,6 +561,15 @@ def test_external_connection(
             f"Enter a {key.title()} access token before testing the connection."
         )
 
+    if (
+        urllib.parse.urlsplit(base).scheme.casefold() == "http"
+        and not allow_insecure_http
+    ):
+        raise ExternalSourceConfigError(
+            f"{key.title()} credentials will not be sent over plain HTTP. "
+            "Use HTTPS or explicitly allow insecure HTTP for this integration."
+        )
+
     if key == "plex":
         url = base + "/"
         headers = {
@@ -567,14 +579,6 @@ def test_external_connection(
             "X-Plex-Client-Identifier": "infomancer-episode-identity",
         }
     else:
-        if (
-            urllib.parse.urlsplit(base).scheme.casefold() == "http"
-            and not allow_insecure_http
-        ):
-            raise ExternalSourceConfigError(
-                "Jellyfin credentials will not be sent over plain HTTP. "
-                "Use HTTPS or explicitly allow insecure HTTP for this integration."
-            )
         url = base + "/System/Info"
         headers = {
             "Accept": "application/json",
