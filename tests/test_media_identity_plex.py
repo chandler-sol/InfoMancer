@@ -23,6 +23,7 @@ from app.path_mapping import ExternalPathMapper, PathMapping
 from app.media_identity.sources.plex import (
     PlexBifError,
     PlexBifSource,
+    PlexPreviewUnavailable,
     enumerate_bif_preview_frames,
     enumerate_plex_http_preview_frames,
     fetch_plex_bif_image,
@@ -856,7 +857,242 @@ class PlexBifFoundationTests(unittest.TestCase):
             asset = json.loads(frames[1].asset_ref)
             self.assertEqual(asset["kind"], "plex_bif")
             self.assertEqual(Path(asset["path"]), bif_path)
+            self.assertEqual(asset["part_id"], "501")
+            self.assertEqual(asset["expected_external_path"], expected)
+            self.assertEqual(Path(asset["metadata_root"]), root)
             self.assertEqual(image, b"\xff\xd8frame-one\xff\xd9")
+
+    def test_blank_metadata_root_auto_detects_local_plex_fallback(self):
+        expected = "/srv/tv/Show/Season 01/Episode.mkv"
+        candidate = plex_episode_item(
+            rating_key="101",
+            path=expected,
+            part_id="501",
+        )
+        media_hash = "a" + "b" * 39
+        bif = build_bif()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "Plex Media Server"
+            database_path = (
+                root
+                / "Plug-in Support"
+                / "Databases"
+                / "com.plexapp.plugins.library.db"
+            )
+            database_path.parent.mkdir(parents=True)
+            with sqlite3.connect(database_path) as connection:
+                connection.execute(
+                    "CREATE TABLE media_parts (id INTEGER PRIMARY KEY, hash TEXT, file TEXT)"
+                )
+                connection.execute(
+                    "INSERT INTO media_parts(id,hash,file) VALUES (?,?,?)",
+                    (501, media_hash, expected),
+                )
+            bif_path = (
+                root
+                / "Media"
+                / "localhost"
+                / media_hash[0]
+                / f"{media_hash[1:]}.bundle"
+                / "Contents"
+                / "Indexes"
+                / "index-sd.bif"
+            )
+            bif_path.parent.mkdir(parents=True)
+            bif_path.write_bytes(bif)
+
+            local_root = Path(temporary) / "tv"
+            source = PlexBifSource(
+                "https://plex.local:32400",
+                "secret",
+                ExternalPathMapper(
+                    [PathMapping("plex", "/srv/tv", str(local_root))]
+                ),
+                metadata_root="",
+            )
+            from app.media_identity.external import ExternalMediaRef
+            media = ExternalMediaRef(
+                source_key="plex",
+                item_id="101",
+                path=expected,
+                media_source_id="501",
+            )
+
+            with (
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_item",
+                    return_value=candidate,
+                ),
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_bif_index",
+                    side_effect=PlexPreviewUnavailable("HTTP BIF unavailable"),
+                ),
+                patch(
+                    "app.media_identity.sources.plex.detect_plex_metadata_root",
+                    return_value=root,
+                ),
+            ):
+                frames = source.preview_frames(media)
+                image = source.read_preview(frames[0])
+
+            self.assertEqual(len(frames), 2)
+            asset = json.loads(frames[0].asset_ref)
+            self.assertEqual(Path(asset["metadata_root"]), root)
+            self.assertEqual(image, b"\xff\xd8frame-zero\xff\xd9")
+
+    def test_optional_preview_unavailable_without_local_fallback_returns_no_frames(self):
+        expected = "/srv/tv/Show/Season 01/Episode.mkv"
+        candidate = plex_episode_item(path=expected, part_id="501")
+        with tempfile.TemporaryDirectory() as temporary:
+            local_root = Path(temporary) / "tv"
+            source = PlexBifSource(
+                "https://plex.local:32400",
+                "secret",
+                ExternalPathMapper(
+                    [PathMapping("plex", "/srv/tv", str(local_root))]
+                ),
+            )
+            from app.media_identity.external import ExternalMediaRef
+            media = ExternalMediaRef(
+                source_key="plex",
+                item_id="101",
+                path=expected,
+                media_source_id="501",
+            )
+            with (
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_item",
+                    return_value=candidate,
+                ),
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_bif_index",
+                    side_effect=PlexPreviewUnavailable("missing BIF"),
+                ),
+                patch(
+                    "app.media_identity.sources.plex.detect_plex_metadata_root",
+                    return_value=None,
+                ),
+            ):
+                frames = source.preview_frames(media)
+
+            self.assertEqual(frames, ())
+
+    def test_corrupt_local_fallback_is_optional_when_http_preview_is_unavailable(self):
+        expected = "/srv/tv/Show/Season 01/Episode.mkv"
+        candidate = plex_episode_item(path=expected, part_id="501")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "Plex Media Server"
+            local_root = Path(temporary) / "tv"
+            source = PlexBifSource(
+                "https://plex.local:32400",
+                "secret",
+                ExternalPathMapper(
+                    [PathMapping("plex", "/srv/tv", str(local_root))]
+                ),
+                metadata_root=str(root),
+            )
+            from app.media_identity.external import ExternalMediaRef
+            media = ExternalMediaRef(
+                source_key="plex",
+                item_id="101",
+                path=expected,
+                media_source_id="501",
+            )
+            with (
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_item",
+                    return_value=candidate,
+                ),
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_bif_index",
+                    side_effect=PlexPreviewUnavailable("unsupported HTTP BIF"),
+                ),
+                patch(
+                    "app.media_identity.sources.plex.resolve_local_bif_path",
+                    side_effect=PlexBifError("unsupported local database layout"),
+                ),
+            ):
+                frames = source.preview_frames(media)
+
+            self.assertEqual(frames, ())
+
+    def test_local_preview_reanchors_part_and_path_before_read(self):
+        expected = "/srv/tv/Show/Season 01/Episode.mkv"
+        candidate = plex_episode_item(
+            rating_key="101",
+            path=expected,
+            part_id="501",
+        )
+        media_hash = "a" + "b" * 39
+        bif = build_bif()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "Plex Media Server"
+            database_path = (
+                root
+                / "Plug-in Support"
+                / "Databases"
+                / "com.plexapp.plugins.library.db"
+            )
+            database_path.parent.mkdir(parents=True)
+            with sqlite3.connect(database_path) as connection:
+                connection.execute(
+                    "CREATE TABLE media_parts (id INTEGER PRIMARY KEY, hash TEXT, file TEXT)"
+                )
+                connection.execute(
+                    "INSERT INTO media_parts(id,hash,file) VALUES (?,?,?)",
+                    (501, media_hash, expected),
+                )
+            bif_path = (
+                root
+                / "Media"
+                / "localhost"
+                / media_hash[0]
+                / f"{media_hash[1:]}.bundle"
+                / "Contents"
+                / "Indexes"
+                / "index-sd.bif"
+            )
+            bif_path.parent.mkdir(parents=True)
+            bif_path.write_bytes(bif)
+
+            local_root = Path(temporary) / "tv"
+            source = PlexBifSource(
+                "https://plex.local:32400",
+                "secret",
+                ExternalPathMapper(
+                    [PathMapping("plex", "/srv/tv", str(local_root))]
+                ),
+                metadata_root=str(root),
+            )
+            from app.media_identity.external import ExternalMediaRef
+            media = ExternalMediaRef(
+                source_key="plex",
+                item_id="101",
+                path=expected,
+                media_source_id="501",
+            )
+            with (
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_item",
+                    return_value=candidate,
+                ),
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_bif_index",
+                    side_effect=PlexPreviewUnavailable("HTTP BIF unavailable"),
+                ),
+            ):
+                frames = source.preview_frames(media)
+
+            with sqlite3.connect(database_path) as connection:
+                connection.execute(
+                    "UPDATE media_parts SET file=? WHERE id=?",
+                    ("/srv/tv/Other/Episode.mkv", 501),
+                )
+
+            with self.assertRaisesRegex(
+                PlexBifError, "identity anchor changed"
+            ):
+                source.read_preview(frames[0])
 
     def test_local_bif_change_is_rejected_before_preview_read(self):
         expected = "/srv/tv/Show/Season 01/Episode.mkv"
@@ -988,11 +1224,12 @@ class PlexBifFoundationTests(unittest.TestCase):
                 ),
                 patch(
                     "app.media_identity.sources.plex.fetch_plex_bif_index",
-                    side_effect=PlexBifError("HTTP BIF unavailable"),
+                    side_effect=PlexPreviewUnavailable("HTTP BIF unavailable"),
                 ),
             ):
-                with self.assertRaisesRegex(PlexBifError, "does not match"):
-                    source.preview_frames(media)
+                frames = source.preview_frames(media)
+
+            self.assertEqual(frames, ())
 
     def test_stale_plex_media_version_disables_preview_reuse(self):
         expected = "/srv/tv/Show/Season 01/Episode.mkv"
