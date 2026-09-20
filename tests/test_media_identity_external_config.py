@@ -402,6 +402,34 @@ class ExternalSourceConfigTests(unittest.TestCase):
         self.assertEqual(adopted.config_revision, source.config_revision + 1)
         self.assertEqual(adopted.credential_generation, "generation-new")
 
+    def test_plex_metadata_root_change_bumps_revision(self):
+        first_root = self.data / "plex-a"
+        second_root = self.data / "plex-b"
+        source = self.service.save_source(
+            "plex",
+            enabled=True,
+            server_url="http://plex.local:32400",
+            metadata_root=str(first_root),
+            credential_generation="generation-1",
+        )
+        changed = self.service.save_source(
+            "plex",
+            enabled=True,
+            server_url=source.server_url,
+            metadata_root=str(second_root),
+        )
+        self.assertEqual(changed.config_revision, source.config_revision + 1)
+        self.assertEqual(changed.metadata_root, str(second_root))
+
+    def test_plex_metadata_root_must_be_absolute(self):
+        with self.assertRaisesRegex(ExternalSourceConfigError, "absolute"):
+            self.service.save_source(
+                "plex",
+                enabled=False,
+                server_url="http://plex.local:32400",
+                metadata_root="relative/plex-data",
+            )
+
     def test_connection_revision_increments_when_transport_policy_changes(self):
         source = self.service.save_source(
             "jellyfin",
