@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends
 from ..access import require_librarian
 from ..file_protection import FileProtectionService, MediaWriteBlocked
 from ..operation_history import OperationHistoryService
+from ..media_identity.provider_cache import ProviderEpisodeCache, ProviderEpisodeRefreshError
 from ..season_folders import SeasonFolderError, SeasonFolderService
 from ..safe_file_rename import SafeFileRenameError, SafeFileRenameService
 from .context import RouteContext
@@ -36,6 +37,7 @@ def build_router(ctx: RouteContext):
     media_info_lock = ctx.live("media_info_lock")
     merged_episode_name = ctx.live("merged_episode_name")
     operation_history = OperationHistoryService(db)
+    identity_provider_cache = ProviderEpisodeCache(db)
     season_folders = SeasonFolderService(db)
     safe_renames = SafeFileRenameService(db)
     file_protection = FileProtectionService(app_settings)
@@ -462,26 +464,81 @@ def build_router(ctx: RouteContext):
 
     @librarian_post("/titles/{title_id}/metadata/enrich")
     def enrich_title_metadata(title_id: int):
+        with db.connect() as conn:
+            title = conn.execute(
+                "SELECT kind,tvdb_id FROM titles WHERE id=?", (int(title_id),)
+            ).fetchone()
+        if not title:
+            raise HTTPException(404, "Title not found")
+
+        matched_tv = title["kind"] == "tv" and title["tvdb_id"] is not None
+        prior_identity_cache = (
+            identity_provider_cache.cache_status("tvdb", str(title["tvdb_id"]))
+            if matched_tv
+            else None
+        )
         service = TitleMetadataService(
             db, tvdb, poster_from=poster_from, plex_movie_ids=plex_movie_ids,
             localized_title=localized_tvdb_title, match_confidence=match_confidence,
         )
+        identity_refresh = None
         try:
             changed = service.enrich(title_id)
-        except TVDBError as exc:
+            if matched_tv:
+                identity_refresh = identity_provider_cache.refresh_tvdb_title(
+                    title_id, tvdb
+                )
+        except (TVDBError, ProviderEpisodeRefreshError) as exc:
             record_event(
-                "metadata", "Title metadata enrichment could not reach TVDB.",
-                level="warning", detail=str(exc), context={"title_id": title_id},
+                "metadata", "TVDB metadata refresh could not finish.",
+                level="warning", detail=str(exc),
+                context={
+                    "title_id": title_id,
+                    "episode_identity_cache_preserved": bool(prior_identity_cache),
+                },
             )
-            return redirect(f"/titles/{title_id}", "TVDB metadata refresh could not finish. Try again later.")
+            if prior_identity_cache:
+                return redirect(
+                    f"/titles/{title_id}",
+                    "TVDB metadata refresh could not finish. Existing Episode Identity "
+                    "provider data was preserved for offline reuse.",
+                )
+            return redirect(
+                f"/titles/{title_id}",
+                "TVDB metadata refresh could not finish. Episode Identity provider "
+                "evidence is unavailable until a refresh succeeds.",
+            )
         except ValueError:
             raise HTTPException(404, "Title not found")
+
         if changed:
-            record_event("metadata", "Title metadata was refreshed from TVDB.", context={"title_id": title_id})
-        return redirect(
-            f"/titles/{title_id}",
-            "Metadata refreshed." if changed else "No missing TVDB metadata needed to be refreshed.",
-        )
+            record_event(
+                "metadata", "Title metadata was refreshed from TVDB.",
+                context={"title_id": title_id},
+            )
+        if identity_refresh is not None:
+            record_event(
+                "metadata",
+                "Episode Identity provider metadata was refreshed from TVDB.",
+                context={
+                    "title_id": title_id,
+                    "provider_series_id": identity_refresh.provider_series_id,
+                    "episode_count": identity_refresh.episode_count,
+                    "mapping_count": identity_refresh.mapping_count,
+                },
+            )
+            message = (
+                "Metadata and Episode Identity provider data refreshed."
+                if changed
+                else "Episode Identity provider data refreshed."
+            )
+        else:
+            message = (
+                "Metadata refreshed."
+                if changed
+                else "No missing TVDB metadata needed to be refreshed."
+            )
+        return redirect(f"/titles/{title_id}", message)
 
     @router.get("/titles/{title_id}", response_class=HTMLResponse)
     def title_detail(request: Request, title_id: int):
