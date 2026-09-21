@@ -141,12 +141,15 @@ def episodes_for_order(
     max_response_bytes: int = TVDB_ORDER_RESPONSE_MAX_BYTES,
     max_pages: int = TVDB_ORDER_MAX_PAGES,
     max_episodes: int = TVDB_ORDER_MAX_EPISODES,
+    allow_missing_first_page: bool = True,
 ) -> list[dict]:
     """Fetch one complete bounded TVDB order snapshot.
 
-    A missing first page means the order is unsupported. Once TVDB advertises a
-    continuation, a missing or malformed later page is a refresh failure rather
-    than evidence that the order ended.
+    Callers doing speculative namespace discovery may treat a missing first page
+    as unsupported. Provider-cache refreshes pass allow_missing_first_page=False
+    because every requested namespace was just advertised and must be complete.
+    Once TVDB advertises a continuation, a missing or malformed later page is
+    always a refresh failure.
     """
     namespace = str(order_namespace or "").strip().casefold()
     if not namespace:
@@ -176,6 +179,10 @@ def episodes_for_order(
             if continuation_expected:
                 raise TVDBOrderError(
                     "TVDB omitted an advertised episode-order continuation page."
+                )
+            if page == 0 and not allow_missing_first_page:
+                raise TVDBOrderError(
+                    "TVDB omitted the first page for an advertised episode-order namespace."
                 )
             return []
 
