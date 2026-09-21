@@ -60,12 +60,16 @@ class FFprobePackagingTests(unittest.TestCase):
         self.assertEqual(set(ASSETS), expected)
         self.assertEqual(set(FFMPEG_ASSETS), expected)
         sha256 = re.compile(r"^[0-9a-f]{64}$")
-        for target, asset in {**ASSETS, **FFMPEG_ASSETS}.items():
-            with self.subTest(target=target):
-                self.assertTrue(asset["slug"])
-                self.assertRegex(asset["archive_sha256"], sha256)
-                self.assertRegex(asset["binary_sha256"], sha256)
-                self.assertRegex(asset["license_sha256"], sha256)
+        for tool_name, assets in (
+            ("ffprobe", ASSETS),
+            ("ffmpeg", FFMPEG_ASSETS),
+        ):
+            for target, asset in assets.items():
+                with self.subTest(tool=tool_name, target=target):
+                    self.assertTrue(asset["slug"])
+                    self.assertRegex(asset["archive_sha256"], sha256)
+                    self.assertRegex(asset["binary_sha256"], sha256)
+                    self.assertRegex(asset["license_sha256"], sha256)
 
     def test_native_packaging_runs_packaged_ffmpeg_self_check(self):
         stage = (ROOT / "scripts" / "stage_ffmpeg.py").read_text(encoding="utf-8")
