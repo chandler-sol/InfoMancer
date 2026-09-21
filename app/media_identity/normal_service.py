@@ -314,9 +314,10 @@ class NormalIdentityService:
             for item in usable
             if item.confidence is not None
         ]
+        if not confidences:
+            return False
         if (
-            confidences
-            and (sum(confidences) / len(confidences))
+            (sum(confidences) / len(confidences))
             < NORMAL_EARLY_STOP_MIN_OCR_CONFIDENCE
         ):
             return False
