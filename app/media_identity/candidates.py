@@ -10,6 +10,7 @@ from .models import IdentityCandidate, IdentityReference
 
 MAX_FAST_CANDIDATES = 80
 MAX_FAST_SPECIALS = 24
+MAX_FAST_MAPPINGS_PER_CANDIDATE = 32
 
 
 @dataclass(frozen=True)
@@ -176,21 +177,50 @@ def _provider_candidates(
 
     placeholders = ",".join("?" for _ in selected_ids)
     rows = conn.execute(
-        f"""SELECT i.provider_episode_id,i.name,i.overview,i.aired,i.metadata_json,
+        f"""WITH ranked_mappings AS (
+              SELECT m.*,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY m.provider_episode_id
+                       ORDER BY
+                         CASE
+                           WHEN m.season=? AND m.episode BETWEEN ? AND ? THEN 0
+                           WHEN m.order_namespace='default' THEN 1
+                           ELSE 2
+                         END,
+                         m.order_namespace,m.season,m.episode,m.absolute_number,m.id
+                     ) mapping_rank
+              FROM provider_episode_mappings m
+              WHERE m.provider='tvdb' AND m.provider_series_id=?
+                AND m.language=? AND m.provider_episode_id IN ({placeholders})
+            )
+            SELECT i.provider_episode_id,i.name,i.overview,i.aired,i.metadata_json,
                    m.order_namespace,m.order_name,m.season,m.episode,m.absolute_number,
                    m.coordinate_key,e.id expected_episode_id
             FROM provider_episode_identities i
-            LEFT JOIN provider_episode_mappings m
+            LEFT JOIN ranked_mappings m
               ON m.provider=i.provider
              AND m.provider_series_id=i.provider_series_id
              AND m.provider_episode_id=i.provider_episode_id
              AND m.language=i.language
+             AND m.mapping_rank<=?
             LEFT JOIN expected_episodes e
               ON e.title_id=? AND CAST(e.tvdb_episode_id AS TEXT)=i.provider_episode_id
             WHERE i.provider='tvdb' AND i.provider_series_id=? AND i.language=?
               AND i.provider_episode_id IN ({placeholders})
-            ORDER BY i.provider_episode_id,m.order_namespace,m.season,m.episode,m.id""",
-        (title_id, provider_series_id, language, *selected_ids),
+            ORDER BY i.provider_episode_id,m.mapping_rank""",
+        (
+            season,
+            episode_start,
+            episode_end,
+            provider_series_id,
+            language,
+            *selected_ids,
+            MAX_FAST_MAPPINGS_PER_CANDIDATE,
+            title_id,
+            provider_series_id,
+            language,
+            *selected_ids,
+        ),
     ).fetchall()
 
     grouped: dict[str, dict[str, Any]] = {}
