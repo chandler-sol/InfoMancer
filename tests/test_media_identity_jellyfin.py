@@ -12,6 +12,10 @@ from pathlib import Path
 
 from PIL import Image
 
+from app.media_identity.external import (
+    ExternalPreviewUnavailable,
+    ExternalSourceFailure,
+)
 from app.media_identity.models import (
     AnalyzerContext,
     IdentityProfile,
@@ -22,6 +26,8 @@ from app.path_mapping import ExternalPathMapper, PathMapping
 
 from app.media_identity.sources.jellyfin import (
     JellyfinAdapterError,
+    JellyfinPreviewUnavailable,
+    JellyfinSourceFailure,
     JellyfinTrickplaySource,
     crop_trickplay_frame,
     enumerate_preview_frames,
@@ -354,6 +360,36 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
         ]
         self.assertEqual(len(proxy_handlers), 1)
         self.assertEqual(proxy_handlers[0].proxies, {})
+
+    def test_episode_candidate_query_rejects_incomplete_result_set(self):
+        payload = json.dumps(
+            {
+                "Items": [
+                    {
+                        "Id": "11111111111111111111111111111111",
+                        "Path": "/srv/tv/Show/Season 01/Episode.mkv",
+                    }
+                ],
+                "TotalRecordCount": 2,
+                "StartIndex": 0,
+            }
+        ).encode("utf-8")
+        opener = DummyOpener(
+            DummyResponse(payload, content_type="application/json")
+        )
+        with patch(
+            "app.media_identity.sources.jellyfin.urllib.request.build_opener",
+            return_value=opener,
+        ):
+            with self.assertRaises(JellyfinSourceFailure) as caught:
+                fetch_episode_candidates(
+                    "https://jellyfin.local:8096",
+                    "token",
+                    season=1,
+                    episode=2,
+                )
+        self.assertIsInstance(caught.exception, ExternalSourceFailure)
+        self.assertIn("incomplete candidate set", str(caught.exception))
 
     def test_episode_candidate_query_rejects_malformed_entries(self):
         payload = json.dumps(
@@ -773,6 +809,34 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
                         frame,
                     )
 
+    def test_preview_absence_and_source_failure_use_distinct_shared_types(self):
+        frame = self._network_frame()
+        cases = (
+            (404, JellyfinPreviewUnavailable, ExternalPreviewUnavailable),
+            (401, JellyfinSourceFailure, ExternalSourceFailure),
+        )
+        for code, adapter_type, shared_type in cases:
+            with self.subTest(code=code):
+                error = urllib.error.HTTPError(
+                    "https://jellyfin.local/test",
+                    code,
+                    "error",
+                    {},
+                    None,
+                )
+                opener = DummyOpener(error=error)
+                with patch(
+                    "app.media_identity.sources.jellyfin.urllib.request.build_opener",
+                    return_value=opener,
+                ):
+                    with self.assertRaises(adapter_type) as caught:
+                        fetch_trickplay_tile(
+                            "https://jellyfin.local:8096",
+                            "token",
+                            frame,
+                        )
+                self.assertIsInstance(caught.exception, shared_type)
+
     def test_fetch_rejects_redirect_auth_and_missing_tile(self):
         frame = self._network_frame()
         for code, pattern in (
@@ -798,6 +862,81 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
                         "token",
                         frame,
                     )
+
+    def test_saved_preview_revalidates_etag_manifest_and_media_source(self):
+        frame = self._network_frame()
+        media_source_id = json.loads(frame.asset_ref)["media_source_id"]
+        base_item = {
+            "Id": frame.item_id,
+            "Etag": "etag-network",
+            "MediaSources": [
+                {
+                    "Id": media_source_id,
+                    "Path": "/srv/tv/Show/Season 01/Episode.mkv",
+                }
+            ],
+            "Trickplay": {
+                media_source_id: {
+                    "8": {
+                        "Width": 8,
+                        "Height": 6,
+                        "TileWidth": 2,
+                        "TileHeight": 2,
+                        "ThumbnailCount": 4,
+                        "Interval": 1000,
+                        "Bandwidth": 1000,
+                    }
+                }
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as temporary:
+            source = JellyfinTrickplaySource(
+                "https://jellyfin.local:8096",
+                "token",
+                ExternalPathMapper(
+                    [PathMapping("jellyfin", "/srv/tv", temporary)]
+                ),
+            )
+
+            changed_etag = json.loads(json.dumps(base_item))
+            changed_etag["Etag"] = "etag-new"
+
+            changed_manifest = json.loads(json.dumps(base_item))
+            changed_manifest["Trickplay"][media_source_id]["8"]["Interval"] = 2000
+
+            changed_source = json.loads(json.dumps(base_item))
+            changed_source["MediaSources"] = [
+                {
+                    "Id": "33333333333333333333333333333333",
+                    "Path": "/srv/tv/Show/Season 01/Episode.mkv",
+                }
+            ]
+
+            for item, pattern in (
+                (changed_etag, "item or Trickplay manifest changed"),
+                (changed_manifest, "timing changed"),
+                (changed_source, "media source changed"),
+            ):
+                with self.subTest(pattern=pattern), (
+                    patch(
+                        "app.media_identity.sources.jellyfin.fetch_item",
+                        return_value=item,
+                    ),
+                    patch(
+                        "app.media_identity.sources.jellyfin.read_trickplay_preview"
+                    ) as preview_read,
+                ):
+                    with self.assertRaisesRegex(
+                        JellyfinPreviewUnavailable,
+                        pattern,
+                    ) as caught:
+                        source.read_preview(frame)
+                    self.assertIsInstance(
+                        caught.exception,
+                        ExternalPreviewUnavailable,
+                    )
+                    preview_read.assert_not_called()
 
     def test_manifest_rejects_unsafe_total_tile_sheet_size(self):
         item = self._item()
