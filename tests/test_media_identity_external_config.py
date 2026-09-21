@@ -238,7 +238,7 @@ class ExternalSourceConfigTests(unittest.TestCase):
 
         with (
             patch(
-                "app.media_identity.sources.plex.fetch_plex_episode_candidates",
+                "app.media_identity.sources.plex.fetch_plex_path_candidates",
                 return_value=(candidate,),
             ) as candidates,
             patch(
@@ -255,8 +255,7 @@ class ExternalSourceConfigTests(unittest.TestCase):
         candidates.assert_called_once_with(
             "https://plex.local:32400",
             "secret",
-            season=1,
-            episode=2,
+            path=external_path,
             allow_insecure_http=False,
         )
         item_fetch.assert_called_once_with(
