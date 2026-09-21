@@ -9,6 +9,7 @@ on:
       - desktop/**
       - app/**
       - scripts/stage_ffprobe.py
+      - scripts/stage_ffmpeg.py
       - requirements.txt
       - .github/workflows/windows-desktop.yml
 
@@ -42,9 +43,12 @@ jobs:
         shell: pwsh
         run: |
           python scripts/stage_ffprobe.py
-          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
+          python scripts/stage_ffmpeg.py
+          python -m PyInstaller --noconfirm --clean --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." --add-data "build/ffmpeg/FFMPEG_LICENSE.txt;third-party/ffmpeg" --add-data "build/ffmpeg/FFMPEG_NOTICE.txt;third-party/ffmpeg" --add-binary "build/ffmpeg/ffmpeg.exe;." desktop/sidecar.py
           & .\dist\infomancer-core.exe --check-ffprobe
           if ($LASTEXITCODE -ne 0) { throw "Bundled FFprobe self-check failed: $LASTEXITCODE" }
+          & .\dist\infomancer-core.exe --check-ffmpeg
+          if ($LASTEXITCODE -ne 0) { throw "Bundled FFmpeg self-check failed: $LASTEXITCODE" }
           $triple = (rustc --print host-tuple).Trim()
           New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
           Copy-Item dist/infomancer-core.exe "desktop/src-tauri/binaries/infomancer-core-$triple.exe"
