@@ -16,6 +16,8 @@ from ...path_mapping import ExternalPathMapper, PathMappingError, parse_absolute
 from ..external import (
     ExternalCapability,
     ExternalMediaRef,
+    ExternalPreviewUnavailable,
+    ExternalSourceFailure,
     ExternalSourceStatus,
     PreviewFrameRef,
 )
@@ -34,7 +36,15 @@ _MAX_EPISODE_CANDIDATES = 4096
 
 
 class JellyfinAdapterError(ValueError):
-    """Raised when Jellyfin metadata is ambiguous or cannot be trusted safely."""
+    """Base Jellyfin adapter error retained for adapter-specific callers."""
+
+
+class JellyfinSourceFailure(ExternalSourceFailure, JellyfinAdapterError):
+    """Jellyfin could not be queried or returned untrustworthy source metadata."""
+
+
+class JellyfinPreviewUnavailable(ExternalPreviewUnavailable, JellyfinAdapterError):
+    """Optional Jellyfin Trickplay evidence is absent, stale, or unusable."""
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -441,7 +451,7 @@ def fetch_trickplay_tile(
             timeout=max(1.0, min(float(timeout), 15.0)),
         ) as response:
             if response.status != 200:
-                raise JellyfinAdapterError(
+                raise JellyfinSourceFailure(
                     f"Jellyfin returned HTTP {response.status} for the Trickplay tile."
                 )
             headers = response.headers
@@ -450,7 +460,7 @@ def fetch_trickplay_tile(
             else:
                 content_type = str(headers.get("Content-Type") or "").split(";", 1)[0].strip().casefold()
             if content_type not in {"image/jpeg", "image/jpg"}:
-                raise JellyfinAdapterError(
+                raise JellyfinPreviewUnavailable(
                     "Jellyfin Trickplay response was not a JPEG image."
                 )
             raw_length = headers.get("Content-Length")
@@ -458,11 +468,11 @@ def fetch_trickplay_tile(
                 try:
                     content_length = int(raw_length)
                 except (TypeError, ValueError) as exc:
-                    raise JellyfinAdapterError(
+                    raise JellyfinSourceFailure(
                         "Jellyfin Trickplay response had an invalid Content-Length."
                     ) from exc
                 if content_length < 0 or content_length > limit:
-                    raise JellyfinAdapterError(
+                    raise JellyfinPreviewUnavailable(
                         "Jellyfin Trickplay tile exceeded the safe response-size limit."
                     )
             payload = response.read(limit + 1)
@@ -475,19 +485,19 @@ def fetch_trickplay_tile(
             detail = "Jellyfin did not have the requested Trickplay tile."
         else:
             detail = f"Jellyfin returned HTTP {exc.code} for the Trickplay tile."
-        raise JellyfinAdapterError(detail) from exc
+        raise JellyfinSourceFailure(detail) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         reason = getattr(exc, "reason", exc)
-        raise JellyfinAdapterError(
+        raise JellyfinSourceFailure(
             f"InfoMancer could not read the Jellyfin Trickplay tile: {reason}"
         ) from exc
 
     if len(payload) > limit:
-        raise JellyfinAdapterError(
+        raise JellyfinPreviewUnavailable(
             "Jellyfin Trickplay tile exceeded the safe response-size limit."
         )
     if not payload.startswith(b"\xff\xd8"):
-        raise JellyfinAdapterError("Jellyfin Trickplay response was not a JPEG image.")
+        raise JellyfinPreviewUnavailable("Jellyfin Trickplay response was not a JPEG image.")
     return payload
 
 
@@ -498,15 +508,15 @@ def crop_trickplay_frame(tile_jpeg: bytes, frame: PreviewFrameRef) -> bytes:
     try:
         with Image.open(BytesIO(tile_jpeg)) as image:
             if image.format != "JPEG":
-                raise JellyfinAdapterError(
+                raise JellyfinPreviewUnavailable(
                     "Jellyfin Trickplay tile did not decode as JPEG."
                 )
             if image.size != (expected_width, expected_height):
-                raise JellyfinAdapterError(
+                raise JellyfinPreviewUnavailable(
                     "Jellyfin Trickplay tile dimensions do not match its manifest."
                 )
             if image.width * image.height > _MAX_TILE_SHEET_PIXELS:
-                raise JellyfinAdapterError(
+                raise JellyfinPreviewUnavailable(
                     "Jellyfin Trickplay tile exceeds the safe decode-pixel limit."
                 )
             image.load()
@@ -515,7 +525,7 @@ def crop_trickplay_frame(tile_jpeg: bytes, frame: PreviewFrameRef) -> bytes:
             right = left + asset.width
             bottom = top + asset.height
             if right > image.width or bottom > image.height:
-                raise JellyfinAdapterError(
+                raise JellyfinPreviewUnavailable(
                     "Jellyfin Trickplay cell lies outside the decoded tile."
                 )
             cropped = image.crop((left, top, right, bottom)).convert("RGB")
@@ -530,7 +540,7 @@ def crop_trickplay_frame(tile_jpeg: bytes, frame: PreviewFrameRef) -> bytes:
     except JellyfinAdapterError:
         raise
     except (Image.DecompressionBombError, UnidentifiedImageError, OSError, ValueError) as exc:
-        raise JellyfinAdapterError(
+        raise JellyfinPreviewUnavailable(
             "Jellyfin Trickplay tile could not be decoded safely."
         ) from exc
 
@@ -737,7 +747,7 @@ def _read_jellyfin_json(
             timeout=max(1.0, min(float(timeout), 15.0)),
         ) as response:
             if response.status != 200:
-                raise JellyfinAdapterError(
+                raise JellyfinSourceFailure(
                     f"Jellyfin returned HTTP {response.status} while reading library metadata."
                 )
             raw_length = response.headers.get("Content-Length")
@@ -745,11 +755,11 @@ def _read_jellyfin_json(
                 try:
                     content_length = int(raw_length)
                 except (TypeError, ValueError) as exc:
-                    raise JellyfinAdapterError(
+                    raise JellyfinSourceFailure(
                         "Jellyfin metadata response had an invalid Content-Length."
                     ) from exc
                 if content_length < 0 or content_length > limit:
-                    raise JellyfinAdapterError(
+                    raise JellyfinSourceFailure(
                         "Jellyfin metadata response exceeded the safe response-size limit."
                     )
             payload = response.read(limit + 1)
@@ -764,25 +774,25 @@ def _read_jellyfin_json(
             detail = "Jellyfin did not have the requested library item."
         else:
             detail = f"Jellyfin returned HTTP {exc.code} while reading library metadata."
-        raise JellyfinAdapterError(detail) from exc
+        raise (JellyfinPreviewUnavailable(detail) if exc.code == 404 else JellyfinSourceFailure(detail)) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         reason = getattr(exc, "reason", exc)
-        raise JellyfinAdapterError(
+        raise JellyfinSourceFailure(
             f"InfoMancer could not read Jellyfin library metadata: {reason}"
         ) from exc
 
     if len(payload) > limit:
-        raise JellyfinAdapterError(
+        raise JellyfinSourceFailure(
             "Jellyfin metadata response exceeded the safe response-size limit."
         )
     try:
         parsed = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise JellyfinAdapterError(
+        raise JellyfinSourceFailure(
             "Jellyfin returned malformed JSON library metadata."
         ) from exc
     if not isinstance(parsed, Mapping):
-        raise JellyfinAdapterError(
+        raise JellyfinSourceFailure(
             "Jellyfin returned an unexpected library metadata payload."
         )
     return parsed
