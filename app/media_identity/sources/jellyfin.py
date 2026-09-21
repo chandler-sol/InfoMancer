@@ -485,6 +485,8 @@ def fetch_trickplay_tile(
             detail = "Jellyfin did not have the requested Trickplay tile."
         else:
             detail = f"Jellyfin returned HTTP {exc.code} for the Trickplay tile."
+        if exc.code == 404:
+            raise JellyfinPreviewUnavailable(detail) from exc
         raise JellyfinSourceFailure(detail) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         reason = getattr(exc, "reason", exc)
