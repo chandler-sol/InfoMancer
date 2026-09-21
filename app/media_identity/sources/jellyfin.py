@@ -600,19 +600,19 @@ def _media_source_entries(
     if not isinstance(raw_sources, Sequence) or isinstance(
         raw_sources, (str, bytes)
     ):
-        raise JellyfinAdapterError(
+        raise JellyfinSourceFailure(
             "Jellyfin returned an invalid media source list."
         )
 
     sources: list[Mapping[str, Any]] = []
     for source in raw_sources:
         if not isinstance(source, Mapping):
-            raise JellyfinAdapterError(
+            raise JellyfinSourceFailure(
                 "Jellyfin returned a malformed media source entry."
             )
         source_id = str(source.get("Id") or "").strip()
         if not source_id:
-            raise JellyfinAdapterError(
+            raise JellyfinSourceFailure(
                 "Jellyfin returned a media source without a stable id."
             )
         sources.append(source)
@@ -626,7 +626,7 @@ def _select_item_by_path(
     matches: list[Mapping[str, Any]] = []
     for item in items:
         if not isinstance(item, Mapping):
-            raise JellyfinAdapterError(
+            raise JellyfinSourceFailure(
                 "Jellyfin returned a malformed episode candidate."
             )
         paths = [str(item.get("Path") or "").strip()]
@@ -641,7 +641,7 @@ def _select_item_by_path(
             matches.append(item)
 
     if len(matches) > 1:
-        raise JellyfinAdapterError(
+        raise JellyfinSourceFailure(
             "More than one Jellyfin item matches the mapped media path; resolution is ambiguous."
         )
     return matches[0] if matches else None
@@ -665,7 +665,7 @@ def _select_media_source_id(
             path_matches.append(source_id)
     unique_path_matches = tuple(dict.fromkeys(path_matches))
     if len(unique_path_matches) > 1:
-        raise JellyfinAdapterError(
+        raise JellyfinSourceFailure(
             "More than one Jellyfin media source matches the mapped media path; resolution is ambiguous."
         )
     if unique_path_matches:
@@ -685,7 +685,7 @@ def resolve_media_ref(
         return None
     item_id = str(item.get("Id") or "").strip()
     if not item_id:
-        raise JellyfinAdapterError("The matching Jellyfin item has no stable item id.")
+        raise JellyfinSourceFailure("The matching Jellyfin item has no stable item id.")
     provider_ids_raw = item.get("ProviderIds")
     provider_ids = {
         str(key): str(value)
@@ -1034,7 +1034,7 @@ class JellyfinTrickplaySource:
             return None
         item_id = str(matched.get("Id") or "").strip()
         if not item_id:
-            raise JellyfinAdapterError(
+            raise JellyfinSourceFailure(
                 "The matching Jellyfin episode has no stable item id."
             )
 
@@ -1053,7 +1053,7 @@ class JellyfinTrickplaySource:
             or _jellyfin_guid(resolved.item_id, "Jellyfin item id")
             != _jellyfin_guid(item_id, "Jellyfin item id")
         ):
-            raise JellyfinAdapterError(
+            raise JellyfinSourceFailure(
                 "The Jellyfin episode changed while it was being resolved."
             )
         return resolved
