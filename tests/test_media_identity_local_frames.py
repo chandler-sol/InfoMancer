@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from io import BytesIO
+import os
 import subprocess
 import tempfile
 import unittest
@@ -201,6 +203,52 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
                 "changed during",
             ):
                 source.read_preview(frame)
+
+    def test_same_size_same_mtime_file_replacement_is_rejected_when_inode_is_available(self):
+        with patch(
+            "app.media_identity.local_frames.shutil.which",
+            return_value="/usr/bin/ffmpeg",
+        ):
+            source = self.source()
+            if source._inode_id is None:
+                self.skipTest("filesystem does not expose a stable inode identity")
+
+            original_stat = self.media.stat()
+            replacement = self.root / "replacement.mkv"
+            replacement.write_bytes(b"x" * original_stat.st_size)
+            os.utime(
+                replacement,
+                ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+            )
+            os.replace(replacement, self.media)
+
+            status = source.status()
+
+        self.assertFalse(status.available)
+        self.assertIn("snapshot", status.detail)
+
+    def test_tampered_generated_frame_reference_is_rejected_before_ffmpeg(self):
+        with (
+            patch(
+                "app.media_identity.local_frames.shutil.which",
+                return_value="/usr/bin/ffmpeg",
+            ),
+            patch(
+                "app.media_identity.local_frames.subprocess.run",
+            ) as run,
+        ):
+            source = self.source()
+            media = source.resolve_media(self.context)
+            frame = source.preview_frames(media)[0]
+            with self.assertRaisesRegex(
+                LocalFrameSourceFailure,
+                "extraction policy",
+            ):
+                source.read_preview(
+                    replace(frame, asset_ref="ffmpeg:tampered")
+                )
+
+        run.assert_not_called()
 
     def test_generated_image_dimensions_are_revalidated(self):
         oversized = jpeg_bytes(width=1400, height=720)
