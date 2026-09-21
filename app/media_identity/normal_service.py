@@ -54,6 +54,7 @@ class NormalScanResult:
     text_observation_count: int
     reused_artifact_count: int
     evidence_count: int
+    highest_observed_stage: NormalSamplingStage | None
     failures: tuple[str, ...]
     budget_exhausted: bool
 
@@ -703,6 +704,10 @@ class NormalIdentityService:
                 1 for item in run.observations if item.reused
             ),
             evidence_count=evidence_count,
+            highest_observed_stage=max(
+                (item.stage for item in run.observations),
+                default=None,
+            ),
             failures=run.failures,
             budget_exhausted=run.budget_exhausted,
         )
