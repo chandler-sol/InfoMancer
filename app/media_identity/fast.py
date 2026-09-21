@@ -888,7 +888,7 @@ class FastIdentityService:
                     file_row["modified_at"],
                     file_sha256,
                     metadata_signature,
-                    requested_by,
+                    requested_by if requested_by and int(requested_by) > 0 else None,
                 ),
             )
             scan_id = int(cursor.lastrowid)
