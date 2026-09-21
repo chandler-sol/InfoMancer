@@ -40,8 +40,14 @@ class WorkflowTVDB:
     api_key = "testing-key"
     pin = ""
 
-    def __init__(self, *, fail: bool = False, updated: str = "2026-09-20T12:00:00Z"):
+    def __init__(
+        self, *,
+        fail: bool = False,
+        omit_default: bool = False,
+        updated: str = "2026-09-20T12:00:00Z",
+    ):
         self.fail = fail
+        self.omit_default = omit_default
         self.updated = updated
         self.calls: list[tuple[str, int | None]] = []
 
@@ -61,6 +67,8 @@ class WorkflowTVDB:
                 }
             }
         if path == "/series/9001/episodes/default/eng" and int(page or 0) == 0:
+            if self.omit_default and allow_not_found:
+                return {}
             return deepcopy(_episode_payload())
         if allow_not_found:
             return {}
@@ -192,6 +200,29 @@ class EpisodeIdentityProviderWorkflowTests(unittest.TestCase):
         self.assertEqual(failed.status_code, 303)
         self.assertIn("preserved for offline reuse", self._message(failed))
 
+        after = cache.cache_status("tvdb", "9001")
+        self.assertIsNotNone(after)
+        assert after is not None
+        self.assertEqual(after["source_signature"], before["source_signature"])
+        self.assertEqual(after["episode_count"], before["episode_count"])
+        self.assertEqual(after["mapping_count"], before["mapping_count"])
+
+    def test_incomplete_advertised_order_returns_preserved_cache_message_not_500(self) -> None:
+        cache = ProviderEpisodeCache(self.database)
+        first = self.client.post("/titles/1/metadata/enrich")
+        self.assertEqual(first.status_code, 303)
+        before = cache.cache_status("tvdb", "9001")
+        self.assertIsNotNone(before)
+        assert before is not None
+
+        main.tvdb = WorkflowTVDB(
+            omit_default=True,
+            updated="2026-09-21T12:00:00Z",
+        )
+        failed = self.client.post("/titles/1/metadata/enrich")
+
+        self.assertEqual(failed.status_code, 303)
+        self.assertIn("preserved for offline reuse", self._message(failed))
         after = cache.cache_status("tvdb", "9001")
         self.assertIsNotNone(after)
         assert after is not None
