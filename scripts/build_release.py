@@ -30,6 +30,7 @@ FILES = (
     "infomancer-lockup.svg",
     "README.md",
     "requirements.txt",
+    "requirements-ocr.txt",
     "SECURITY.md",
     "START-HERE.txt",
     "Setup-InfoMancer.cmd",
