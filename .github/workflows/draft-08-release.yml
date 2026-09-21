@@ -11,6 +11,7 @@ on:
       - desktop/**
       - app/**
       - scripts/stage_ffprobe.py
+      - scripts/stage_ffmpeg.py
       - scripts/verify_macos_minos.py
       - requirements.txt
   pull_request:
@@ -223,6 +224,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-ffprobe-
 
+      - name: Restore verified FFmpeg stage
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: build/ffmpeg
+          key: ${{ runner.os }}-${{ runner.arch }}-ffmpeg-${{ hashFiles('scripts/stage_ffmpeg.py') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-ffmpeg-
+
       - name: Install Linux desktop build dependencies
         if: runner.os == 'Linux'
         shell: bash
@@ -311,9 +320,12 @@ jobs:
         shell: pwsh
         run: |
           python scripts/stage_ffprobe.py
-          python -m PyInstaller --noconfirm --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." desktop/sidecar.py
+          python scripts/stage_ffmpeg.py
+          python -m PyInstaller --noconfirm --onefile --noconsole --name infomancer-core --add-data "app/templates;app/templates" --add-data "app/static;app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt;third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt;third-party/ffprobe" --add-binary "build/ffprobe/ffprobe.exe;." --add-data "build/ffmpeg/FFMPEG_LICENSE.txt;third-party/ffmpeg" --add-data "build/ffmpeg/FFMPEG_NOTICE.txt;third-party/ffmpeg" --add-binary "build/ffmpeg/ffmpeg.exe;." desktop/sidecar.py
           & .\dist\infomancer-core.exe --check-ffprobe
           if ($LASTEXITCODE -ne 0) { throw "Bundled FFprobe self-check failed: $LASTEXITCODE" }
+          & .\dist\infomancer-core.exe --check-ffmpeg
+          if ($LASTEXITCODE -ne 0) { throw "Bundled FFmpeg self-check failed: $LASTEXITCODE" }
           $triple = (rustc --print host-tuple).Trim()
           New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
           Copy-Item dist/infomancer-core.exe "desktop/src-tauri/binaries/infomancer-core-$triple.exe"
@@ -323,8 +335,10 @@ jobs:
         shell: bash
         run: |
           python scripts/stage_ffprobe.py
-          python -m PyInstaller --noconfirm --onefile --name infomancer-core --add-data "app/templates:app/templates" --add-data "app/static:app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt:third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt:third-party/ffprobe" --add-binary "build/ffprobe/ffprobe:." desktop/sidecar.py
+          python scripts/stage_ffmpeg.py
+          python -m PyInstaller --noconfirm --onefile --name infomancer-core --add-data "app/templates:app/templates" --add-data "app/static:app/static" --add-data "build/ffprobe/FFPROBE_LICENSE.txt:third-party/ffprobe" --add-data "build/ffprobe/FFPROBE_NOTICE.txt:third-party/ffprobe" --add-binary "build/ffprobe/ffprobe:." --add-data "build/ffmpeg/FFMPEG_LICENSE.txt:third-party/ffmpeg" --add-data "build/ffmpeg/FFMPEG_NOTICE.txt:third-party/ffmpeg" --add-binary "build/ffmpeg/ffmpeg:." desktop/sidecar.py
           ./dist/infomancer-core --check-ffprobe
+          ./dist/infomancer-core --check-ffmpeg
           triple="$(rustc --print host-tuple)"
           mkdir -p desktop/src-tauri/binaries
           cp dist/infomancer-core "desktop/src-tauri/binaries/infomancer-core-$triple"
@@ -399,6 +413,7 @@ jobs:
               --max-version "$MACOSX_DEPLOYMENT_TARGET" \
               ./dist/infomancer-core \
               ./build/ffprobe/ffprobe \
+              ./build/ffmpeg/ffmpeg \
               "$pyi_tmp"
           fi
 
