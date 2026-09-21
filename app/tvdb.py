@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+import json
 import re
 import unicodedata
 from urllib.parse import quote, urlparse
@@ -73,6 +74,77 @@ class TVDBClient:
             return {}
         self._check(response)
         return response.json()
+
+    def _get_bounded(
+        self, path: str, params: dict | None = None, *,
+        allow_not_found: bool = False, _retry_auth: bool = True,
+        max_bytes: int,
+    ) -> dict:
+        """Stream one TVDB JSON response with a hard byte ceiling.
+
+        Episode Identity uses this path for provider-cache construction so an
+        unexpectedly large provider response cannot be buffered without bound.
+        Ordinary metadata callers keep the legacy _get contract.
+        """
+        if int(max_bytes) <= 0:
+            raise ValueError("TVDB response byte limit must be positive")
+
+        token = self._token or self._login()
+        retry_auth = False
+        not_found = False
+        body = bytearray()
+        try:
+            with httpx.stream(
+                "GET",
+                f"{BASE_URL}{path}",
+                params=params,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=30,
+            ) as response:
+                if response.status_code == 401 and _retry_auth:
+                    retry_auth = True
+                elif allow_not_found and response.status_code == 404:
+                    not_found = True
+                else:
+                    try:
+                        response.raise_for_status()
+                    except httpx.HTTPStatusError as exc:
+                        raise TVDBError(
+                            f"TVDB returned {response.status_code} while reading provider metadata"
+                        ) from exc
+                    for chunk in response.iter_bytes(chunk_size=64 * 1024):
+                        if len(body) + len(chunk) > int(max_bytes):
+                            raise TVDBError(
+                                "TVDB provider metadata response exceeded the Episode "
+                                "Identity safety limit."
+                            )
+                        body.extend(chunk)
+        except httpx.RequestError as exc:
+            raise TVDBError(
+                "TheTVDB disconnected before the metadata request finished. "
+                "Try again shortly."
+            ) from exc
+
+        if retry_auth:
+            self._token = ""
+            return self._get_bounded(
+                path,
+                params,
+                allow_not_found=allow_not_found,
+                _retry_auth=False,
+                max_bytes=max_bytes,
+            )
+        if not_found:
+            return {}
+        if not body:
+            return {}
+        try:
+            payload = json.loads(body)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise TVDBError("TVDB returned invalid JSON provider metadata.") from exc
+        if not isinstance(payload, dict):
+            raise TVDBError("TVDB returned an invalid provider metadata payload.")
+        return payload
 
     @staticmethod
     def _check(response: httpx.Response) -> None:
