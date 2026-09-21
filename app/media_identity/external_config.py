@@ -41,6 +41,16 @@ class ExternalSourceConfig:
 
 
 @dataclass(frozen=True)
+class ValidatedExternalSourceSettings:
+    source_key: str
+    enabled: bool
+    server_url: str
+    metadata_root: str
+    config: dict[str, Any]
+    config_json: str
+
+
+@dataclass(frozen=True)
 class ExternalConnectionResult:
     source_key: str
     ok: bool
@@ -177,7 +187,7 @@ class ExternalSourceConfigService:
     def sources(self) -> tuple[ExternalSourceConfig, ...]:
         return tuple(self.source(key) for key in sorted(SUPPORTED_EXTERNAL_SOURCES))
 
-    def save_source(
+    def validate_source_settings(
         self,
         source_key: str,
         *,
@@ -185,8 +195,8 @@ class ExternalSourceConfigService:
         server_url: str,
         metadata_root: str = "",
         config: dict[str, Any] | None = None,
-        credential_generation: str | None = None,
-    ) -> ExternalSourceConfig:
+    ) -> ValidatedExternalSourceSettings:
+        """Validate and normalize every non-secret setting before credentials change."""
         key = self._source_key(source_key)
         url = normalize_server_url(server_url)
         root = str(metadata_root or "").strip()
@@ -201,7 +211,45 @@ class ExternalSourceConfigService:
             raise ExternalSourceConfigError(
                 "Enter the media server URL before enabling this integration."
             )
-        payload = json.dumps(config or {}, sort_keys=True, separators=(",", ":"))
+        normalized_config = dict(config or {})
+        try:
+            payload = json.dumps(
+                normalized_config, sort_keys=True, separators=(",", ":")
+            )
+        except (TypeError, ValueError) as exc:
+            raise ExternalSourceConfigError(
+                "External integration settings contain an unsupported value."
+            ) from exc
+        return ValidatedExternalSourceSettings(
+            source_key=key,
+            enabled=bool(enabled),
+            server_url=url,
+            metadata_root=root,
+            config=normalized_config,
+            config_json=payload,
+        )
+
+    def save_source(
+        self,
+        source_key: str,
+        *,
+        enabled: bool,
+        server_url: str,
+        metadata_root: str = "",
+        config: dict[str, Any] | None = None,
+        credential_generation: str | None = None,
+    ) -> ExternalSourceConfig:
+        validated = self.validate_source_settings(
+            source_key,
+            enabled=enabled,
+            server_url=server_url,
+            metadata_root=metadata_root,
+            config=config,
+        )
+        key = validated.source_key
+        url = validated.server_url
+        root = validated.metadata_root
+        payload = validated.config_json
         apply_credential_generation = credential_generation is not None
         generation = str(credential_generation or "").strip()
         with self.database.connect() as conn:
