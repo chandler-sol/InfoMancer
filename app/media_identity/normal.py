@@ -369,6 +369,9 @@ class NormalPreviewOcrExecutor:
         context: AnalyzerContext,
         *,
         max_stage: NormalSamplingStage = NormalSamplingStage.FINAL,
+        stage_sufficient: Callable[
+            [NormalPreviewOcrRun, NormalSamplingStage], bool
+        ] | None = None,
     ) -> NormalPreviewOcrRun:
         if not IdentityProfile.parse(context.profile).permits(IdentityProfile.NORMAL):
             raise NormalIdentityError(
@@ -380,6 +383,7 @@ class NormalPreviewOcrExecutor:
             )
 
         failures: list[str] = []
+        empty_result: NormalPreviewOcrRun | None = None
         for source in self.registry.available_for(ExternalCapability.PREVIEW_FRAMES):
             try:
                 media = source.resolve_media(context)
@@ -414,10 +418,24 @@ class NormalPreviewOcrExecutor:
                     "modified_at": context.media.modified_at,
                     "sha256": context.media.sha256 or "",
                 },
+                stage_sufficient=stage_sufficient,
             )
-            if result.observations or result.budget_exhausted:
-                return result
             failures = list(result.failures)
+            if result.has_text or result.budget_exhausted:
+                return result
+            if result.observations and empty_result is None:
+                empty_result = result
+                failures.append(f"{source.source_key}:ocr:no-visual-text")
+
+        if empty_result is not None:
+            return NormalPreviewOcrRun(
+                source_key=empty_result.source_key,
+                observations=empty_result.observations,
+                failures=tuple(failures),
+                total_image_bytes=empty_result.total_image_bytes,
+                total_text_chars=empty_result.total_text_chars,
+                budget_exhausted=empty_result.budget_exhausted,
+            )
         return NormalPreviewOcrRun(failures=tuple(failures))
 
     def _run_source(
@@ -427,14 +445,39 @@ class NormalPreviewOcrExecutor:
         prior_failures: Sequence[str],
         *,
         cache_parameters: Mapping[str, Any],
+        stage_sufficient: Callable[
+            [NormalPreviewOcrRun, NormalSamplingStage], bool
+        ] | None,
     ) -> NormalPreviewOcrRun:
         observations: list[PreviewOcrObservation] = []
         failures = list(prior_failures)
         total_image_bytes = 0
         total_text_chars = 0
         budget_exhausted = False
+        current_stage: NormalSamplingStage | None = None
+
+        def current_run() -> NormalPreviewOcrRun:
+            return NormalPreviewOcrRun(
+                source_key=str(getattr(source, "source_key", "") or ""),
+                observations=tuple(observations),
+                failures=tuple(failures),
+                total_image_bytes=total_image_bytes,
+                total_text_chars=total_text_chars,
+                budget_exhausted=budget_exhausted,
+            )
 
         for sample in samples:
+            if current_stage is None:
+                current_stage = sample.stage
+            elif sample.stage != current_stage:
+                partial = current_run()
+                if (
+                    stage_sufficient is not None
+                    and partial.has_text
+                    and stage_sufficient(partial, current_stage)
+                ):
+                    return partial
+                current_stage = sample.stage
             cache_key = ocr_preview_cache_key(
                 sample.frame,
                 self.engine,
@@ -554,11 +597,4 @@ class NormalPreviewOcrExecutor:
                 failures.append(f"{source.source_key}:total-ocr-text-limit")
                 break
 
-        return NormalPreviewOcrRun(
-            source_key=str(getattr(source, "source_key", "") or ""),
-            observations=tuple(observations),
-            failures=tuple(failures),
-            total_image_bytes=total_image_bytes,
-            total_text_chars=total_text_chars,
-            budget_exhausted=budget_exhausted,
-        )
+        return current_run()
