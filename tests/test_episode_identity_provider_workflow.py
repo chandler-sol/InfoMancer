@@ -104,7 +104,7 @@ class EpisodeIdentityProviderWorkflowTests(unittest.TestCase):
                 """INSERT INTO files(
                      id,title_id,path,filename,extension,size_bytes,modified_at,
                      season,episode_start,episode_end,parsed_title,seen_scan
-                   ) VALUES (1,1,?,?,?,?,1,1,1,'Example Show','fixture-scan')""",
+                   ) VALUES (1,1,?,?,?,?,?,1,1,1,'Example Show','fixture-scan')""",
                 (
                     str(media_path),
                     media_path.name,
