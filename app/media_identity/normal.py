@@ -6,7 +6,15 @@ import hashlib
 import json
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
-from .external import PreviewFrameRef
+from .external import (
+    ExternalAnalysisError,
+    ExternalCapability,
+    ExternalPreviewUnavailable,
+    ExternalSourceFailure,
+    ExternalSourceRegistry,
+    PreviewFrameRef,
+)
+from .models import AnalyzerContext, IdentityProfile
 
 
 NORMAL_OCR_CACHE_VERSION = 1
@@ -299,3 +307,193 @@ def ocr_preview_cache_key(
         "parameters": dict(parameters or {}),
     }
     return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class PreviewOcrObservation:
+    source_key: str
+    item_id: str
+    timestamp_ms: int
+    stage: NormalSamplingStage
+    ordinal: int
+    cache_key: str
+    source_signature: str
+    text: str
+    confidence: float | None
+    image_bytes: int
+    details: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class NormalPreviewOcrRun:
+    source_key: str = ""
+    observations: tuple[PreviewOcrObservation, ...] = ()
+    failures: tuple[str, ...] = ()
+    total_image_bytes: int = 0
+    total_text_chars: int = 0
+    budget_exhausted: bool = False
+
+    @property
+    def has_text(self) -> bool:
+        return any(item.text.strip() for item in self.observations)
+
+
+class NormalPreviewOcrExecutor:
+    """Run bounded OCR against the first usable external preview source.
+
+    External sources are tried in registry order. A source may be unavailable or
+    have no previews without making Normal verification fail. Once a source yields
+    preview frames, this executor stays on that source for the run so the same
+    visual moment is not double-counted across Plex and Jellyfin.
+    """
+
+    def __init__(
+        self,
+        registry: ExternalSourceRegistry,
+        engine: OcrEngine,
+        *,
+        limits: NormalResourceLimits | None = None,
+    ) -> None:
+        self.registry = registry
+        self.engine = engine
+        self.limits = limits or NormalResourceLimits()
+
+    def run(
+        self,
+        context: AnalyzerContext,
+        *,
+        max_stage: NormalSamplingStage = NormalSamplingStage.FINAL,
+    ) -> NormalPreviewOcrRun:
+        if not IdentityProfile.parse(context.profile).permits(IdentityProfile.NORMAL):
+            raise NormalIdentityError(
+                "External preview OCR requires the Normal or Deep identity profile."
+            )
+        if not self.engine.available():
+            return NormalPreviewOcrRun(
+                failures=("ocr-engine-unavailable",),
+            )
+
+        failures: list[str] = []
+        for source in self.registry.available_for(ExternalCapability.PREVIEW_FRAMES):
+            try:
+                media = source.resolve_media(context)
+            except ExternalAnalysisError as exc:
+                failures.append(f"{source.source_key}:resolve:{exc}")
+                continue
+            if media is None:
+                continue
+            try:
+                frames = tuple(source.preview_frames(media))
+            except ExternalAnalysisError as exc:
+                failures.append(f"{source.source_key}:preview-list:{exc}")
+                continue
+            if not frames:
+                continue
+
+            samples = tuple(
+                sample
+                for sample in select_staged_preview_frames(
+                    frames,
+                    limits=self.limits,
+                )
+                if sample.stage <= max_stage
+            )
+            return self._run_source(source, samples, failures)
+        return NormalPreviewOcrRun(failures=tuple(failures))
+
+    def _run_source(
+        self,
+        source: Any,
+        samples: Sequence[PreviewFrameSample],
+        prior_failures: Sequence[str],
+    ) -> NormalPreviewOcrRun:
+        observations: list[PreviewOcrObservation] = []
+        failures = list(prior_failures)
+        total_image_bytes = 0
+        total_text_chars = 0
+        budget_exhausted = False
+
+        for sample in samples:
+            try:
+                payload = bytes(source.read_preview(sample.frame))
+            except ExternalPreviewUnavailable as exc:
+                failures.append(
+                    f"{source.source_key}:preview:{sample.ordinal}:{exc}"
+                )
+                continue
+            except ExternalSourceFailure as exc:
+                failures.append(f"{source.source_key}:source:{exc}")
+                break
+            except ExternalAnalysisError as exc:
+                failures.append(
+                    f"{source.source_key}:preview:{sample.ordinal}:{exc}"
+                )
+                continue
+
+            frame_bytes = len(payload)
+            if frame_bytes <= 0:
+                failures.append(
+                    f"{source.source_key}:preview:{sample.ordinal}:empty"
+                )
+                continue
+            if frame_bytes > self.limits.max_preview_bytes_per_frame:
+                failures.append(
+                    f"{source.source_key}:preview:{sample.ordinal}:frame-byte-limit"
+                )
+                continue
+            if (
+                total_image_bytes + frame_bytes
+                > self.limits.max_preview_bytes_total
+            ):
+                budget_exhausted = True
+                failures.append(f"{source.source_key}:total-preview-byte-limit")
+                break
+
+            total_image_bytes += frame_bytes
+            try:
+                result = self.engine.recognize(payload)
+            except NormalIdentityError as exc:
+                failures.append(
+                    f"{source.source_key}:ocr:{sample.ordinal}:{exc}"
+                )
+                continue
+
+            remaining_chars = self.limits.max_ocr_text_chars - total_text_chars
+            if remaining_chars <= 0:
+                budget_exhausted = True
+                failures.append(f"{source.source_key}:total-ocr-text-limit")
+                break
+
+            text = str(result.text or "")
+            if len(text) > remaining_chars:
+                text = text[:remaining_chars]
+                budget_exhausted = True
+            total_text_chars += len(text)
+
+            observations.append(
+                PreviewOcrObservation(
+                    source_key=str(sample.frame.source_key),
+                    item_id=str(sample.frame.item_id),
+                    timestamp_ms=int(sample.frame.timestamp_ms),
+                    stage=sample.stage,
+                    ordinal=sample.ordinal,
+                    cache_key=ocr_preview_cache_key(sample.frame, self.engine),
+                    source_signature=str(sample.frame.source_signature),
+                    text=text,
+                    confidence=result.confidence,
+                    image_bytes=frame_bytes,
+                    details=dict(result.details),
+                )
+            )
+            if budget_exhausted:
+                failures.append(f"{source.source_key}:total-ocr-text-limit")
+                break
+
+        return NormalPreviewOcrRun(
+            source_key=str(getattr(source, "source_key", "") or ""),
+            observations=tuple(observations),
+            failures=tuple(failures),
+            total_image_bytes=total_image_bytes,
+            total_text_chars=total_text_chars,
+            budget_exhausted=budget_exhausted,
+        )
