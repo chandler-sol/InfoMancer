@@ -10,6 +10,7 @@ from ..media_identity.external_config import (
     build_configured_source_registry,
 )
 from ..media_identity.fast import FastIdentityScanError, FastIdentityService
+from ..media_identity.local_frames import LOCAL_FRAME_SOURCE_KEY
 from ..media_identity.models import IdentityProfile
 from ..media_identity.normal_service import (
     NormalIdentityScanError,
@@ -182,8 +183,15 @@ def build_router(ctx: RouteContext):
         )
 
         if result.completed_profile == IdentityProfile.NORMAL:
+            source_label = (
+                "generated local FFmpeg frames"
+                if result.source_key == LOCAL_FRAME_SOURCE_KEY
+                else f"{result.source_key.title()} preview frames"
+                if result.source_key
+                else "preview frames"
+            )
             message = (
-                "Normal verification completed using bounded preview OCR. "
+                f"Normal verification completed using {source_label}. "
                 f"{result.observation_count} preview frame(s) were analyzed"
             )
             if result.reused_artifact_count:
@@ -197,11 +205,22 @@ def build_router(ctx: RouteContext):
                 "remains at Fast evidence. Install the optional CPU OCR component and try again."
             )
         else:
-            message = (
-                "No usable configured Plex or Jellyfin preview frames were available, "
-                "so the scan remains at Fast evidence. Generated local-frame fallback "
-                "is not enabled yet."
+            local_failure = next(
+                (
+                    item.split(":unavailable:", 1)[1]
+                    for item in result.failures
+                    if item.startswith(
+                        f"{LOCAL_FRAME_SOURCE_KEY}:unavailable:"
+                    )
+                ),
+                "",
             )
+            message = (
+                "Normal could not obtain usable Plex/Jellyfin previews or generated "
+                "local FFmpeg frames, so the scan remains at Fast evidence."
+            )
+            if local_failure:
+                message += f" Local fallback: {local_failure}"
         if result.budget_exhausted:
             message += " Normal stopped at its configured resource limit."
         if not findings_refreshed:
