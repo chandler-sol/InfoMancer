@@ -584,15 +584,16 @@ class ExternalSourceConfigTests(unittest.TestCase):
     def test_enabled_source_requires_url_but_disabled_shell_can_be_saved(self):
         with self.assertRaisesRegex(ExternalSourceConfigError, "URL"):
             self.service.save_source("plex", enabled=True, server_url="")
+        metadata_root = self.data / "plex-disabled"
         saved = self.service.save_source(
             "plex",
             enabled=False,
             server_url="https://plex.local:32400",
-            metadata_root="/var/lib/plex",
+            metadata_root=str(metadata_root),
         )
         self.assertFalse(saved.enabled)
         self.assertEqual(saved.server_url, "https://plex.local:32400")
-        self.assertEqual(saved.metadata_root, "/var/lib/plex")
+        self.assertEqual(Path(saved.metadata_root), metadata_root)
 
     def test_mapping_translates_windows_external_path_and_finds_catalog_file(self):
         local_root = self.data / "media" / "tv"
