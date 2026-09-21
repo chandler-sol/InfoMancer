@@ -1,0 +1,285 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import IntEnum
+import hashlib
+import json
+from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
+
+from .external import PreviewFrameRef
+
+
+NORMAL_OCR_CACHE_VERSION = 1
+
+
+class NormalIdentityError(ValueError):
+    """Raised when Normal-profile OCR inputs cannot be handled safely."""
+
+
+class NormalSamplingStage(IntEnum):
+    INITIAL = 1
+    EXPANDED = 2
+    FINAL = 3
+
+
+@dataclass(frozen=True)
+class NormalResourceLimits:
+    """Conservative per-scan ceilings for Normal visual analysis."""
+
+    initial_preview_frames: int = 5
+    expanded_preview_frames: int = 9
+    max_preview_frames: int = 12
+    max_preview_bytes_per_frame: int = 8 * 1024 * 1024
+    max_preview_bytes_total: int = 48 * 1024 * 1024
+    max_ocr_text_chars: int = 64_000
+
+    def __post_init__(self) -> None:
+        values = (
+            self.initial_preview_frames,
+            self.expanded_preview_frames,
+            self.max_preview_frames,
+            self.max_preview_bytes_per_frame,
+            self.max_preview_bytes_total,
+            self.max_ocr_text_chars,
+        )
+        if any(int(value) <= 0 for value in values):
+            raise NormalIdentityError("Normal OCR resource limits must be positive.")
+        if self.initial_preview_frames > self.expanded_preview_frames:
+            raise NormalIdentityError(
+                "Normal OCR initial frame limit cannot exceed the expanded limit."
+            )
+        if self.expanded_preview_frames > self.max_preview_frames:
+            raise NormalIdentityError(
+                "Normal OCR expanded frame limit cannot exceed the final limit."
+            )
+        if self.max_preview_bytes_per_frame > self.max_preview_bytes_total:
+            raise NormalIdentityError(
+                "Normal OCR per-frame byte limit cannot exceed its total byte budget."
+            )
+
+
+@dataclass(frozen=True)
+class OcrTextResult:
+    text: str
+    confidence: float | None = None
+    details: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.confidence is not None and not 0.0 <= float(self.confidence) <= 1.0:
+            raise NormalIdentityError("OCR confidence must be between 0 and 1.")
+
+
+@runtime_checkable
+class OcrEngine(Protocol):
+    """Optional scene-text engine used by Normal/Deep identity analysis."""
+
+    key: str
+    version: str
+
+    def available(self) -> bool:
+        """Return whether the optional OCR runtime/model is currently usable."""
+        ...
+
+    def recognize(self, image: bytes) -> OcrTextResult:
+        """Extract scene text from one bounded image without deciding identity."""
+        ...
+
+
+@dataclass(frozen=True)
+class PreviewFrameSample:
+    frame: PreviewFrameRef
+    stage: NormalSamplingStage
+    ordinal: int
+
+
+_INITIAL_FRACTIONS = (0.05, 0.25, 0.50, 0.75, 0.95)
+_EXPANDED_FRACTIONS = (0.125, 0.375, 0.625, 0.875)
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _frame_identity(frame: PreviewFrameRef) -> tuple[str, str, int, str, str]:
+    return (
+        str(frame.source_key or "").strip().casefold(),
+        str(frame.item_id or "").strip(),
+        int(frame.timestamp_ms),
+        str(frame.asset_ref or ""),
+        str(frame.source_signature or ""),
+    )
+
+
+def _normalized_frames(
+    frames: Sequence[PreviewFrameRef],
+) -> tuple[PreviewFrameRef, ...]:
+    unique: dict[tuple[str, str, int, str, str], PreviewFrameRef] = {}
+    for frame in frames:
+        if int(frame.timestamp_ms) < 0:
+            raise NormalIdentityError("Preview frame timestamps cannot be negative.")
+        identity = _frame_identity(frame)
+        if not identity[0] or not identity[1] or not identity[3] or not identity[4]:
+            raise NormalIdentityError(
+                "Preview frames require source, item, asset, and source-signature provenance."
+            )
+        unique.setdefault(identity, frame)
+    return tuple(
+        sorted(
+            unique.values(),
+            key=lambda frame: (
+                int(frame.timestamp_ms),
+                str(frame.source_key).casefold(),
+                str(frame.item_id),
+                str(frame.asset_ref),
+                str(frame.source_signature),
+            ),
+        )
+    )
+
+
+def _nearest_fraction_index(count: int, fraction: float) -> int:
+    if count <= 1:
+        return 0
+    return max(0, min(count - 1, int(round(float(fraction) * (count - 1)))))
+
+
+def _even_fill_indices(
+    count: int,
+    desired_total: int,
+    selected: set[int],
+) -> list[int]:
+    if desired_total <= len(selected) or count <= len(selected):
+        return []
+    candidates = [index for index in range(count) if index not in selected]
+    needed = min(desired_total - len(selected), len(candidates))
+    if needed <= 0:
+        return []
+    if needed == len(candidates):
+        return candidates
+
+    chosen: list[int] = []
+    available = set(candidates)
+    for slot in range(needed):
+        target = ((slot + 0.5) / needed) * max(count - 1, 1)
+        index = min(
+            available,
+            key=lambda candidate: (abs(candidate - target), candidate),
+        )
+        chosen.append(index)
+        available.remove(index)
+    return sorted(chosen)
+
+
+def select_staged_preview_frames(
+    frames: Sequence[PreviewFrameRef],
+    *,
+    limits: NormalResourceLimits | None = None,
+) -> tuple[PreviewFrameSample, ...]:
+    """Select deterministic, progressively denser preview samples.
+
+    The stages are nested conceptually but returned only once per frame. H2 can
+    process INITIAL first, stop when evidence is sufficient, then continue into
+    EXPANDED and FINAL without changing frame identities or cache keys.
+    """
+    policy = limits or NormalResourceLimits()
+    ordered = _normalized_frames(frames)
+    if not ordered:
+        return ()
+
+    selected: set[int] = set()
+    staged: list[tuple[int, NormalSamplingStage]] = []
+
+    def add_indices(indices: Sequence[int], stage: NormalSamplingStage) -> None:
+        for index in sorted(set(int(value) for value in indices)):
+            if index in selected:
+                continue
+            if len(selected) >= policy.max_preview_frames:
+                return
+            selected.add(index)
+            staged.append((index, stage))
+
+    initial = [
+        _nearest_fraction_index(len(ordered), fraction)
+        for fraction in _INITIAL_FRACTIONS
+    ]
+    add_indices(initial, NormalSamplingStage.INITIAL)
+    add_indices(
+        _even_fill_indices(
+            len(ordered),
+            min(policy.initial_preview_frames, len(ordered)),
+            selected,
+        ),
+        NormalSamplingStage.INITIAL,
+    )
+
+    expanded = [
+        _nearest_fraction_index(len(ordered), fraction)
+        for fraction in _EXPANDED_FRACTIONS
+    ]
+    add_indices(expanded, NormalSamplingStage.EXPANDED)
+    add_indices(
+        _even_fill_indices(
+            len(ordered),
+            min(policy.expanded_preview_frames, len(ordered)),
+            selected,
+        ),
+        NormalSamplingStage.EXPANDED,
+    )
+
+    add_indices(
+        _even_fill_indices(
+            len(ordered),
+            min(policy.max_preview_frames, len(ordered)),
+            selected,
+        ),
+        NormalSamplingStage.FINAL,
+    )
+
+    samples = [
+        PreviewFrameSample(
+            frame=ordered[index],
+            stage=stage,
+            ordinal=ordinal,
+        )
+        for ordinal, (index, stage) in enumerate(staged, start=1)
+    ]
+    return tuple(samples)
+
+
+def ocr_preview_cache_key(
+    frame: PreviewFrameRef,
+    engine: OcrEngine,
+    *,
+    parameters: Mapping[str, Any] | None = None,
+) -> str:
+    """Return a deterministic artifact key for derived OCR text.
+
+    Source preview bytes themselves are not copied merely for inspection. The
+    reusable boundary is the OCR result tied to the exact external asset
+    signature, engine version, and OCR parameters.
+    """
+    key = str(getattr(engine, "key", "") or "").strip().casefold()
+    version = str(getattr(engine, "version", "") or "").strip()
+    if not key or not version:
+        raise NormalIdentityError("OCR engines require stable key and version values.")
+
+    payload = {
+        "cache_version": NORMAL_OCR_CACHE_VERSION,
+        "engine": {"key": key, "version": version},
+        "frame": {
+            "source_key": str(frame.source_key or "").strip().casefold(),
+            "item_id": str(frame.item_id or "").strip(),
+            "timestamp_ms": int(frame.timestamp_ms),
+            "asset_ref": str(frame.asset_ref or ""),
+            "source_signature": str(frame.source_signature or ""),
+            "width": frame.width,
+            "height": frame.height,
+        },
+        "parameters": dict(parameters or {}),
+    }
+    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
