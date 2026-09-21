@@ -34,6 +34,11 @@ NORMAL_OCR_ARTIFACT_VERSION = "1"
 NORMAL_OCR_EVIDENCE_KEY = "preview-ocr-synopsis"
 NORMAL_OCR_EVIDENCE_VERSION = "1"
 NORMAL_OCR_SUPPORT_THRESHOLD = 0.30
+NORMAL_INITIAL_STOP_SIMILARITY = 0.55
+NORMAL_INITIAL_STOP_MARGIN = 0.18
+NORMAL_EXPANDED_STOP_SIMILARITY = 0.45
+NORMAL_EXPANDED_STOP_MARGIN = 0.14
+NORMAL_EARLY_STOP_MIN_OCR_CONFIDENCE = 0.60
 
 
 class NormalIdentityScanError(RuntimeError):
@@ -291,6 +296,56 @@ class NormalIdentityService:
             )
         return artifact_ids
 
+    @staticmethod
+    def _visual_stage_sufficient(
+        candidates: list[dict[str, Any]],
+        run: NormalPreviewOcrRun,
+        stage: NormalSamplingStage,
+    ) -> bool:
+        if stage >= NormalSamplingStage.FINAL:
+            return False
+        usable = [item for item in run.observations if item.text.strip()]
+        if not usable:
+            return False
+
+        confidences = [
+            float(item.confidence)
+            for item in usable
+            if item.confidence is not None
+        ]
+        if (
+            confidences
+            and (sum(confidences) / len(confidences))
+            < NORMAL_EARLY_STOP_MIN_OCR_CONFIDENCE
+        ):
+            return False
+
+        corpus = text_corpus("\n".join(item.text for item in usable))
+        scores: list[float] = []
+        for candidate in candidates:
+            details = _json_object(candidate.get("details_json"))
+            overview = str(details.get("overview") or "").strip()
+            if overview:
+                scores.append(
+                    synopsis_similarity_from_corpus(corpus, overview)
+                )
+        if not scores:
+            return False
+
+        scores.sort(reverse=True)
+        best = scores[0]
+        second = scores[1] if len(scores) > 1 else 0.0
+        margin = max(0.0, best - second)
+        if stage == NormalSamplingStage.INITIAL:
+            return (
+                best >= NORMAL_INITIAL_STOP_SIMILARITY
+                and margin >= NORMAL_INITIAL_STOP_MARGIN
+            )
+        return (
+            best >= NORMAL_EXPANDED_STOP_SIMILARITY
+            and margin >= NORMAL_EXPANDED_STOP_MARGIN
+        )
+
     def _persist_visual_evidence(
         self,
         conn: sqlite3.Connection,
@@ -486,10 +541,19 @@ class NormalIdentityService:
             limits=self.limits,
             cache_lookup=cache_lookup,
         )
-        run = executor.run(context, max_stage=max_stage)
+        stage_sufficient = lambda current_run, stage: self._visual_stage_sufficient(
+            candidates,
+            current_run,
+            stage,
+        )
+        run = executor.run(
+            context,
+            max_stage=max_stage,
+            stage_sufficient=stage_sufficient,
+        )
 
         if (
-            not run.observations
+            not run.has_text
             and not run.budget_exhausted
             and "ocr-engine-unavailable" not in set(run.failures)
         ):
@@ -514,15 +578,38 @@ class NormalIdentityService:
                 local_run = local_executor.run(
                     context,
                     max_stage=max_stage,
+                    stage_sufficient=stage_sufficient,
                 )
-            run = NormalPreviewOcrRun(
-                source_key=local_run.source_key,
-                observations=local_run.observations,
-                failures=tuple(run.failures) + tuple(local_run.failures),
-                total_image_bytes=local_run.total_image_bytes,
-                total_text_chars=local_run.total_text_chars,
-                budget_exhausted=local_run.budget_exhausted,
+
+            external_run = run
+            combined_failures = (
+                tuple(external_run.failures)
+                + tuple(local_run.failures)
             )
+            if (
+                local_run.has_text
+                or (
+                    not external_run.observations
+                    and bool(local_run.observations)
+                )
+            ):
+                run = NormalPreviewOcrRun(
+                    source_key=local_run.source_key,
+                    observations=local_run.observations,
+                    failures=combined_failures,
+                    total_image_bytes=local_run.total_image_bytes,
+                    total_text_chars=local_run.total_text_chars,
+                    budget_exhausted=local_run.budget_exhausted,
+                )
+            else:
+                run = NormalPreviewOcrRun(
+                    source_key=external_run.source_key,
+                    observations=external_run.observations,
+                    failures=combined_failures,
+                    total_image_bytes=external_run.total_image_bytes,
+                    total_text_chars=external_run.total_text_chars,
+                    budget_exhausted=external_run.budget_exhausted,
+                )
 
         with self.database.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -560,6 +647,10 @@ class NormalIdentityService:
                 "engine_key": str(self.engine.key),
                 "engine_version": str(self.engine.version),
                 "max_stage": int(max_stage),
+                "highest_observed_stage": max(
+                    (int(item.stage) for item in run.observations),
+                    default=0,
+                ),
                 "observation_cache_keys": [
                     item.cache_key for item in run.observations
                 ],
