@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -85,6 +86,28 @@ class ServerSetupHelperContracts(unittest.TestCase):
             capture_output=True,
             text=True,
             check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_windows_helper_has_valid_powershell_syntax_when_parser_is_available(self):
+        powershell = shutil.which("pwsh") or shutil.which("powershell")
+        if not powershell:
+            self.skipTest("PowerShell is not available on this runner")
+        env = os.environ.copy()
+        env["INFOMANCER_SETUP_PS1"] = str(ROOT / "Setup-InfoMancer.ps1")
+        command = (
+            "$errors=$null; "
+            "[System.Management.Automation.Language.Parser]::ParseFile("
+            "$env:INFOMANCER_SETUP_PS1,[ref]$null,[ref]$errors) | Out-Null; "
+            "if ($errors.Count -gt 0) { "
+            "$errors | ForEach-Object { Write-Error $_.Message }; exit 1 }"
+        )
+        result = subprocess.run(
+            [powershell, "-NoProfile", "-Command", command],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
