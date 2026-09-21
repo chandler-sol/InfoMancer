@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
@@ -1167,7 +1168,7 @@ class PlexBifFoundationTests(unittest.TestCase):
                 / "com.plexapp.plugins.library.db"
             )
             database_path.parent.mkdir(parents=True)
-            with sqlite3.connect(database_path) as connection:
+            with closing(sqlite3.connect(database_path)) as connection, connection:
                 connection.execute(
                     "CREATE TABLE media_parts (id INTEGER PRIMARY KEY, hash TEXT, file TEXT)"
                 )
@@ -1218,7 +1219,7 @@ class PlexBifFoundationTests(unittest.TestCase):
                 / "com.plexapp.plugins.library.db"
             )
             database_path.parent.mkdir(parents=True)
-            with sqlite3.connect(database_path) as connection:
+            with closing(sqlite3.connect(database_path)) as connection, connection:
                 connection.execute(
                     "CREATE TABLE media_parts (id INTEGER PRIMARY KEY, hash TEXT, file TEXT)"
                 )
@@ -1289,7 +1290,7 @@ class PlexBifFoundationTests(unittest.TestCase):
             self.assertEqual(len(frames), 2)
             asset = json.loads(frames[1].asset_ref)
             self.assertEqual(asset["kind"], "plex_bif")
-            self.assertEqual(Path(asset["path"]), bif_path)
+            self.assertEqual(Path(asset["path"]).resolve(), bif_path.resolve())
             self.assertEqual(asset["part_id"], "501")
             self.assertEqual(asset["expected_external_path"], expected)
             self.assertEqual(Path(asset["metadata_root"]), root)
@@ -1313,7 +1314,7 @@ class PlexBifFoundationTests(unittest.TestCase):
                 / "com.plexapp.plugins.library.db"
             )
             database_path.parent.mkdir(parents=True)
-            with sqlite3.connect(database_path) as connection:
+            with closing(sqlite3.connect(database_path)) as connection, connection:
                 connection.execute(
                     "CREATE TABLE media_parts (id INTEGER PRIMARY KEY, hash TEXT, file TEXT)"
                 )
@@ -1508,7 +1509,7 @@ class PlexBifFoundationTests(unittest.TestCase):
                 / "com.plexapp.plugins.library.db"
             )
             database_path.parent.mkdir(parents=True)
-            with sqlite3.connect(database_path) as connection:
+            with closing(sqlite3.connect(database_path)) as connection, connection:
                 connection.execute(
                     "CREATE TABLE media_parts (id INTEGER PRIMARY KEY, hash TEXT, file TEXT)"
                 )
@@ -1557,7 +1558,7 @@ class PlexBifFoundationTests(unittest.TestCase):
             ):
                 frames = source.preview_frames(media)
 
-            with sqlite3.connect(database_path) as connection:
+            with closing(sqlite3.connect(database_path)) as connection, connection:
                 connection.execute(
                     "UPDATE media_parts SET file=? WHERE id=?",
                     ("/srv/tv/Other/Episode.mkv", 501),
@@ -1592,7 +1593,7 @@ class PlexBifFoundationTests(unittest.TestCase):
                 / "com.plexapp.plugins.library.db"
             )
             database_path.parent.mkdir(parents=True)
-            with sqlite3.connect(database_path) as connection:
+            with closing(sqlite3.connect(database_path)) as connection, connection:
                 connection.execute(
                     "CREATE TABLE media_parts (id INTEGER PRIMARY KEY, hash TEXT, file TEXT)"
                 )
@@ -1666,7 +1667,7 @@ class PlexBifFoundationTests(unittest.TestCase):
                 / "com.plexapp.plugins.library.db"
             )
             database_path.parent.mkdir(parents=True)
-            with sqlite3.connect(database_path) as connection:
+            with closing(sqlite3.connect(database_path)) as connection, connection:
                 connection.execute(
                     "CREATE TABLE media_parts (id INTEGER PRIMARY KEY, hash TEXT, file TEXT)"
                 )
