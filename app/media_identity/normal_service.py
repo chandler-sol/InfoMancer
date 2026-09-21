@@ -1,0 +1,558 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import hashlib
+import json
+import sqlite3
+from typing import Any, Mapping
+
+from ..db import Database
+from .external import ExternalSourceRegistry, PreviewFrameRef
+from .models import (
+    AnalyzerContext,
+    EvidenceCategory,
+    EvidenceRelation,
+    IdentityProfile,
+    IdentityReference,
+    MediaIdentityFile,
+)
+from .normal import (
+    NormalPreviewOcrExecutor,
+    NormalPreviewOcrRun,
+    NormalResourceLimits,
+    NormalSamplingStage,
+    OcrEngine,
+    OcrTextResult,
+)
+from .service import MediaIdentityDecisionService
+from .text import synopsis_similarity_from_corpus, text_corpus
+
+
+NORMAL_OCR_ARTIFACT_KEY = "external-preview-ocr"
+NORMAL_OCR_ARTIFACT_VERSION = "1"
+NORMAL_OCR_EVIDENCE_KEY = "preview-ocr-synopsis"
+NORMAL_OCR_EVIDENCE_VERSION = "1"
+NORMAL_OCR_SUPPORT_THRESHOLD = 0.30
+
+
+class NormalIdentityScanError(RuntimeError):
+    """Raised when a Normal OCR scan cannot be persisted safely."""
+
+
+@dataclass(frozen=True)
+class NormalScanResult:
+    scan_id: int
+    completed_profile: IdentityProfile
+    source_key: str
+    observation_count: int
+    text_observation_count: int
+    reused_artifact_count: int
+    evidence_count: int
+    failures: tuple[str, ...]
+    budget_exhausted: bool
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    try:
+        loaded = json.loads(str(value or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _same_modified_at(first: Any, second: Any) -> bool:
+    if first is None or second is None:
+        return first is None and second is None
+    return float(first) == float(second)
+
+
+class NormalIdentityService:
+    """Extend one fresh Fast scan with bounded external-preview OCR evidence."""
+
+    def __init__(
+        self,
+        database: Database,
+        registry: ExternalSourceRegistry,
+        engine: OcrEngine,
+        *,
+        limits: NormalResourceLimits | None = None,
+    ) -> None:
+        self.database = database
+        self.registry = registry
+        self.engine = engine
+        self.limits = limits or NormalResourceLimits()
+
+    @staticmethod
+    def _scan_rows(
+        conn: sqlite3.Connection,
+        scan_id: int,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+        scan_row = conn.execute(
+            "SELECT * FROM media_identity_scans WHERE id=?",
+            (int(scan_id),),
+        ).fetchone()
+        if not scan_row:
+            raise NormalIdentityScanError("Episode Identity scan was not found.")
+        scan = dict(scan_row)
+        candidates = [
+            dict(row)
+            for row in conn.execute(
+                """SELECT * FROM media_identity_candidates
+                   WHERE scan_id=? ORDER BY rank,candidate_key""",
+                (int(scan_id),),
+            ).fetchall()
+        ]
+        evidence = [
+            dict(row)
+            for row in conn.execute(
+                """SELECT * FROM media_identity_evidence
+                   WHERE scan_id=? ORDER BY id""",
+                (int(scan_id),),
+            ).fetchall()
+        ]
+        return scan, candidates, evidence
+
+    @staticmethod
+    def _context(
+        scan: Mapping[str, Any],
+        file_row: Mapping[str, Any],
+    ) -> AnalyzerContext:
+        claimed = _json_object(scan.get("claimed_identity_json"))
+        try:
+            season = int(claimed["season"])
+            episode = int(claimed["episode_start"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise NormalIdentityScanError(
+                "The Fast scan does not contain a usable claimed episode identity."
+            ) from exc
+        return AnalyzerContext(
+            media=MediaIdentityFile(
+                file_id=int(scan["file_id"]),
+                title_id=int(file_row["title_id"]),
+                path=str(file_row["path"]),
+                size_bytes=int(scan["file_size_bytes"] or 0),
+                modified_at=scan["file_modified_at"],
+                sha256=str(scan["file_sha256"] or "") or None,
+            ),
+            claimed_identity=IdentityReference(
+                identity_kind="episode",
+                season=season,
+                episode=episode,
+            ),
+            profile=IdentityProfile.NORMAL,
+            metadata_signature=str(scan["metadata_signature"] or ""),
+        )
+
+    def _cached_ocr(
+        self,
+        scan: Mapping[str, Any],
+        frame: PreviewFrameRef,
+        cache_key: str,
+    ) -> OcrTextResult | None:
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT text_value,payload_json,source_signature,
+                          file_size_bytes,file_modified_at
+                   FROM media_identity_artifacts
+                   WHERE file_id=? AND artifact_type='visual_text'
+                     AND analyzer_key=? AND analyzer_version=?
+                     AND cache_key=? AND status='complete'
+                   ORDER BY id DESC LIMIT 1""",
+                (
+                    int(scan["file_id"]),
+                    NORMAL_OCR_ARTIFACT_KEY,
+                    NORMAL_OCR_ARTIFACT_VERSION,
+                    str(cache_key),
+                ),
+            ).fetchone()
+        if not row:
+            return None
+        if str(row["source_signature"] or "") != str(frame.source_signature or ""):
+            return None
+        if int(row["file_size_bytes"] or 0) != int(scan["file_size_bytes"] or 0):
+            return None
+        if not _same_modified_at(
+            row["file_modified_at"],
+            scan["file_modified_at"],
+        ):
+            return None
+
+        payload = _json_object(row["payload_json"])
+        confidence = payload.get("confidence")
+        try:
+            normalized_confidence = (
+                None if confidence is None else float(confidence)
+            )
+        except (TypeError, ValueError):
+            normalized_confidence = None
+        details = payload.get("details")
+        return OcrTextResult(
+            text=str(row["text_value"] or ""),
+            confidence=normalized_confidence,
+            details=details if isinstance(details, Mapping) else {},
+        )
+
+    @staticmethod
+    def _aggregate_cache_key(run: NormalPreviewOcrRun) -> str:
+        payload = {
+            "source_key": run.source_key,
+            "observations": [
+                {
+                    "cache_key": item.cache_key,
+                    "source_signature": item.source_signature,
+                    "timestamp_ms": item.timestamp_ms,
+                }
+                for item in run.observations
+            ],
+        }
+        return hashlib.sha256(
+            _canonical_json(payload).encode("utf-8")
+        ).hexdigest()
+
+    def _persist_artifacts(
+        self,
+        conn: sqlite3.Connection,
+        scan: Mapping[str, Any],
+        run: NormalPreviewOcrRun,
+    ) -> list[int]:
+        artifact_ids: list[int] = []
+        for item in run.observations:
+            payload = {
+                "confidence": item.confidence,
+                "stage": int(item.stage),
+                "ordinal": int(item.ordinal),
+                "image_bytes": int(item.image_bytes),
+                "reused": bool(item.reused),
+                "item_id": item.item_id,
+                "engine_key": str(self.engine.key),
+                "engine_version": str(self.engine.version),
+                "details": dict(item.details),
+            }
+            conn.execute(
+                """INSERT OR IGNORE INTO media_identity_artifacts(
+                     file_id,artifact_type,analyzer_key,analyzer_version,
+                     cache_key,status,profile,source_kind,source_ref,
+                     source_signature,file_size_bytes,file_modified_at,
+                     start_ms,end_ms,text_value,payload_json
+                   ) VALUES (
+                     ?,'visual_text',?,? ,?,'complete','normal',?,?,?,
+                     ?,?,?,?,?,?
+                   )""",
+                (
+                    int(scan["file_id"]),
+                    NORMAL_OCR_ARTIFACT_KEY,
+                    NORMAL_OCR_ARTIFACT_VERSION,
+                    item.cache_key,
+                    item.source_key,
+                    item.asset_ref,
+                    item.source_signature,
+                    int(scan["file_size_bytes"] or 0),
+                    scan["file_modified_at"],
+                    int(item.timestamp_ms),
+                    int(item.timestamp_ms),
+                    item.text,
+                    _canonical_json(payload),
+                ),
+            )
+            row = conn.execute(
+                """SELECT id FROM media_identity_artifacts
+                   WHERE file_id=? AND artifact_type='visual_text'
+                     AND analyzer_key=? AND analyzer_version=? AND cache_key=?
+                   ORDER BY id DESC LIMIT 1""",
+                (
+                    int(scan["file_id"]),
+                    NORMAL_OCR_ARTIFACT_KEY,
+                    NORMAL_OCR_ARTIFACT_VERSION,
+                    item.cache_key,
+                ),
+            ).fetchone()
+            if not row:
+                raise NormalIdentityScanError(
+                    "InfoMancer could not persist the OCR artifact safely."
+                )
+            artifact_id = int(row["id"])
+            artifact_ids.append(artifact_id)
+            conn.execute(
+                """UPDATE media_identity_artifacts
+                   SET last_used_at=CURRENT_TIMESTAMP
+                   WHERE id=?""",
+                (artifact_id,),
+            )
+        return artifact_ids
+
+    def _persist_visual_evidence(
+        self,
+        conn: sqlite3.Connection,
+        scan: Mapping[str, Any],
+        candidates: list[dict[str, Any]],
+        run: NormalPreviewOcrRun,
+        artifact_ids: list[int],
+    ) -> int:
+        conn.execute(
+            """DELETE FROM media_identity_evidence
+               WHERE scan_id=? AND analyzer_key=?""",
+            (int(scan["id"]), NORMAL_OCR_EVIDENCE_KEY),
+        )
+
+        correlation = (
+            f"visual-text:{int(scan['file_id'])}:{run.source_key or 'unavailable'}"
+        )
+        usable = [item for item in run.observations if item.text.strip()]
+        combined_text = "\n".join(item.text for item in usable)
+        aggregate_cache_key = (
+            self._aggregate_cache_key(run) if run.observations else ""
+        )
+        evidence_rows: list[tuple[Any, ...]] = []
+
+        if usable:
+            corpus = text_corpus(combined_text)
+            confidences = [
+                float(item.confidence)
+                for item in usable
+                if item.confidence is not None
+            ]
+            quality = (
+                sum(confidences) / len(confidences)
+                if confidences
+                else 0.75
+            )
+            comparable = 0
+            for candidate in candidates:
+                details = _json_object(candidate.get("details_json"))
+                overview = str(details.get("overview") or "").strip()
+                if not overview:
+                    continue
+                comparable += 1
+                similarity = synopsis_similarity_from_corpus(corpus, overview)
+                strength = round(
+                    max(0.0, min(1.0, similarity * quality)),
+                    6,
+                )
+                relation = (
+                    EvidenceRelation.SUPPORTS.value
+                    if similarity >= NORMAL_OCR_SUPPORT_THRESHOLD
+                    else EvidenceRelation.NEUTRAL.value
+                )
+                evidence_rows.append((
+                    int(scan["id"]),
+                    str(candidate["candidate_key"]),
+                    NORMAL_OCR_EVIDENCE_KEY,
+                    NORMAL_OCR_EVIDENCE_VERSION,
+                    EvidenceCategory.VISUAL_TEXT.value,
+                    correlation,
+                    relation,
+                    strength if relation == EvidenceRelation.SUPPORTS.value else 0.0,
+                    "external_preview_ocr",
+                    f"{run.source_key}:{usable[0].item_id}",
+                    None,
+                    f"synopsis similarity {similarity:.3f}",
+                    _canonical_json({
+                        "similarity": similarity,
+                        "support_threshold": NORMAL_OCR_SUPPORT_THRESHOLD,
+                        "ocr_quality": round(quality, 6),
+                        "artifact_ids": artifact_ids,
+                        "timestamps_ms": [item.timestamp_ms for item in usable],
+                        "source_signatures": sorted({
+                            item.source_signature for item in usable
+                        }),
+                        "engine_key": str(self.engine.key),
+                        "engine_version": str(self.engine.version),
+                        "text_excerpt": combined_text[:4000],
+                    }),
+                    aggregate_cache_key,
+                    IdentityProfile.NORMAL.value,
+                ))
+
+            if comparable == 0:
+                evidence_rows.append((
+                    int(scan["id"]),
+                    "",
+                    NORMAL_OCR_EVIDENCE_KEY,
+                    NORMAL_OCR_EVIDENCE_VERSION,
+                    EvidenceCategory.VISUAL_TEXT.value,
+                    correlation,
+                    EvidenceRelation.NEUTRAL.value,
+                    0.0,
+                    "external_preview_ocr",
+                    f"{run.source_key}:{usable[0].item_id}",
+                    None,
+                    "OCR text was available, but candidate synopses were unavailable.",
+                    _canonical_json({
+                        "artifact_ids": artifact_ids,
+                        "engine_key": str(self.engine.key),
+                        "engine_version": str(self.engine.version),
+                    }),
+                    aggregate_cache_key,
+                    IdentityProfile.NORMAL.value,
+                ))
+        else:
+            evidence_rows.append((
+                int(scan["id"]),
+                "",
+                NORMAL_OCR_EVIDENCE_KEY,
+                NORMAL_OCR_EVIDENCE_VERSION,
+                EvidenceCategory.VISUAL_TEXT.value,
+                correlation,
+                EvidenceRelation.NEUTRAL.value,
+                0.0,
+                "external_preview_ocr",
+                run.source_key,
+                None,
+                "No usable visual text was produced by Normal OCR.",
+                _canonical_json({
+                    "failures": list(run.failures),
+                    "observation_count": len(run.observations),
+                    "engine_key": str(self.engine.key),
+                    "engine_version": str(self.engine.version),
+                }),
+                aggregate_cache_key,
+                IdentityProfile.NORMAL.value,
+            ))
+
+        conn.executemany(
+            """INSERT INTO media_identity_evidence(
+                 scan_id,candidate_key,analyzer_key,analyzer_version,
+                 evidence_category,correlation_group,relation,strength,
+                 source_kind,source_ref,timestamp_ms,value_text,details_json,
+                 cache_key,profile
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            evidence_rows,
+        )
+        return len(evidence_rows)
+
+    def run_scan(
+        self,
+        scan_id: int,
+        *,
+        max_stage: NormalSamplingStage = NormalSamplingStage.FINAL,
+    ) -> NormalScanResult:
+        with self.database.connect() as conn:
+            scan, candidates, evidence = self._scan_rows(conn, int(scan_id))
+            if scan["status"] != "complete":
+                raise NormalIdentityScanError(
+                    "Normal OCR requires a complete Fast identity scan."
+                )
+            current, file_row = MediaIdentityDecisionService._scan_snapshot_is_current(
+                conn,
+                scan,
+                evidence,
+            )
+            if not current or file_row is None:
+                raise NormalIdentityScanError(
+                    "The Fast identity snapshot is stale. Verify the file again before Normal OCR."
+                )
+            context = self._context(scan, file_row)
+
+        executor = NormalPreviewOcrExecutor(
+            self.registry,
+            self.engine,
+            limits=self.limits,
+            cache_lookup=lambda frame, cache_key: self._cached_ocr(
+                scan,
+                frame,
+                cache_key,
+            ),
+        )
+        run = executor.run(context, max_stage=max_stage)
+
+        with self.database.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            current_scan, candidates, evidence = self._scan_rows(conn, int(scan_id))
+            current, _ = MediaIdentityDecisionService._scan_snapshot_is_current(
+                conn,
+                current_scan,
+                evidence,
+            )
+            if not current:
+                raise NormalIdentityScanError(
+                    "Episode Identity inputs changed during Normal OCR. Retry verification."
+                )
+            if str(current_scan["metadata_signature"] or "") != str(
+                scan["metadata_signature"] or ""
+            ):
+                raise NormalIdentityScanError(
+                    "Episode Identity metadata changed during Normal OCR. Retry verification."
+                )
+
+            artifact_ids = self._persist_artifacts(conn, current_scan, run)
+            evidence_count = self._persist_visual_evidence(
+                conn,
+                current_scan,
+                candidates,
+                run,
+                artifact_ids,
+            )
+
+            claimed = _json_object(current_scan["claimed_identity_json"])
+            completed_normal = bool(run.observations)
+            claimed["normal_ocr"] = {
+                "version": 1,
+                "source_key": run.source_key,
+                "engine_key": str(self.engine.key),
+                "engine_version": str(self.engine.version),
+                "max_stage": int(max_stage),
+                "observation_cache_keys": [
+                    item.cache_key for item in run.observations
+                ],
+                "reused_artifact_count": sum(
+                    1 for item in run.observations if item.reused
+                ),
+                "failures": list(run.failures),
+                "budget_exhausted": bool(run.budget_exhausted),
+            }
+            conn.execute(
+                """UPDATE media_identity_scans
+                   SET requested_profile='normal',
+                       completed_profile=?,
+                       stage=?,
+                       claimed_identity_json=?,
+                       result_state=NULL,
+                       best_candidate_key=NULL,
+                       completed_at=CURRENT_TIMESTAMP,
+                       error=''
+                   WHERE id=?""",
+                (
+                    (
+                        IdentityProfile.NORMAL.value
+                        if completed_normal
+                        else IdentityProfile.FAST.value
+                    ),
+                    (
+                        "normal_ocr_complete"
+                        if completed_normal
+                        else "normal_ocr_unavailable"
+                    ),
+                    _canonical_json(claimed),
+                    int(scan_id),
+                ),
+            )
+
+        return NormalScanResult(
+            scan_id=int(scan_id),
+            completed_profile=(
+                IdentityProfile.NORMAL
+                if run.observations
+                else IdentityProfile.FAST
+            ),
+            source_key=run.source_key,
+            observation_count=len(run.observations),
+            text_observation_count=sum(
+                1 for item in run.observations if item.text.strip()
+            ),
+            reused_artifact_count=sum(
+                1 for item in run.observations if item.reused
+            ),
+            evidence_count=evidence_count,
+            failures=run.failures,
+            budget_exhausted=run.budget_exhausted,
+        )
