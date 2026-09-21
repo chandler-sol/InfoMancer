@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from app import main
 from app.db import Database
 from app.media_identity.provider_cache import ProviderEpisodeCache
+from app.mie import MediaIntelligenceEngine
 from app.request_security import LOCAL_CSRF_COOKIE
 from app.tvdb import TVDBError
 
@@ -116,8 +117,10 @@ class EpisodeIdentityProviderWorkflowTests(unittest.TestCase):
 
         self.original_db = main.db
         self.original_tvdb = main.tvdb
+        self.original_mie = main.mie
         main.db = self.database
         main.tvdb = WorkflowTVDB()
+        main.mie = MediaIntelligenceEngine(self.database)
         self.auth_patch = mock.patch.object(
             main, "settings", replace(main.settings, auth_mode="disabled")
         )
@@ -131,6 +134,7 @@ class EpisodeIdentityProviderWorkflowTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.client.close()
         self.auth_patch.stop()
+        main.mie = self.original_mie
         main.tvdb = self.original_tvdb
         main.db = self.original_db
         self.temporary.cleanup()
