@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 import hashlib
 import json
-from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
+from typing import Any, Callable, Mapping, Protocol, Sequence, runtime_checkable
 
 from .external import (
     ExternalAnalysisError,
@@ -318,9 +318,11 @@ class PreviewOcrObservation:
     ordinal: int
     cache_key: str
     source_signature: str
+    asset_ref: str
     text: str
     confidence: float | None
     image_bytes: int
+    reused: bool = False
     details: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -353,10 +355,14 @@ class NormalPreviewOcrExecutor:
         engine: OcrEngine,
         *,
         limits: NormalResourceLimits | None = None,
+        cache_lookup: Callable[
+            [PreviewFrameRef, str], OcrTextResult | None
+        ] | None = None,
     ) -> None:
         self.registry = registry
         self.engine = engine
         self.limits = limits or NormalResourceLimits()
+        self.cache_lookup = cache_lookup
 
     def run(
         self,
@@ -417,6 +423,45 @@ class NormalPreviewOcrExecutor:
         budget_exhausted = False
 
         for sample in samples:
+            cache_key = ocr_preview_cache_key(sample.frame, self.engine)
+            cached = (
+                self.cache_lookup(sample.frame, cache_key)
+                if self.cache_lookup is not None
+                else None
+            )
+            if cached is not None:
+                remaining_chars = self.limits.max_ocr_text_chars - total_text_chars
+                if remaining_chars <= 0:
+                    budget_exhausted = True
+                    failures.append(f"{source.source_key}:total-ocr-text-limit")
+                    break
+                text = str(cached.text or "")
+                if len(text) > remaining_chars:
+                    text = text[:remaining_chars]
+                    budget_exhausted = True
+                total_text_chars += len(text)
+                observations.append(
+                    PreviewOcrObservation(
+                        source_key=str(sample.frame.source_key),
+                        item_id=str(sample.frame.item_id),
+                        timestamp_ms=int(sample.frame.timestamp_ms),
+                        stage=sample.stage,
+                        ordinal=sample.ordinal,
+                        cache_key=cache_key,
+                        source_signature=str(sample.frame.source_signature),
+                        asset_ref=str(sample.frame.asset_ref),
+                        text=text,
+                        confidence=cached.confidence,
+                        image_bytes=0,
+                        reused=True,
+                        details=dict(cached.details),
+                    )
+                )
+                if budget_exhausted:
+                    failures.append(f"{source.source_key}:total-ocr-text-limit")
+                    break
+                continue
+
             try:
                 payload = bytes(source.read_preview(sample.frame))
             except ExternalPreviewUnavailable as exc:
@@ -480,8 +525,9 @@ class NormalPreviewOcrExecutor:
                     timestamp_ms=int(sample.frame.timestamp_ms),
                     stage=sample.stage,
                     ordinal=sample.ordinal,
-                    cache_key=ocr_preview_cache_key(sample.frame, self.engine),
+                    cache_key=cache_key,
                     source_signature=str(sample.frame.source_signature),
+                    asset_ref=str(sample.frame.asset_ref),
                     text=text,
                     confidence=result.confidence,
                     image_bytes=frame_bytes,
