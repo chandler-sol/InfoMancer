@@ -31,7 +31,7 @@ class SettingsUiContractTests(unittest.TestCase):
         nav = (ROOT / "app/templates/_settings_nav.html").read_text(encoding="utf-8")
         self.assertIn("/settings/integrations", nav)
         self.assertIn("Episode Identity integrations", template)
-        self.assertIn("Plex and Jellyfin are optional, read-only analysis accelerators.", template)
+        self.assertIn("Plex and Jellyfin are optional, read-only Episode Identity accelerators.", template)
         self.assertIn("Test path mapping", template)
         self.assertIn("BIF adapter", template)
         self.assertIn("Trickplay adapter", template)
