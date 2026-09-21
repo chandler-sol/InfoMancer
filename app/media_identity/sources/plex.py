@@ -983,14 +983,26 @@ def fetch_plex_path_candidates(
         raise PlexBifError("Plex path lookup returned an invalid item list.")
     if any(not isinstance(item, Mapping) for item in raw_items):
         raise PlexBifError("Plex path lookup returned a malformed candidate entry.")
+    if "totalSize" not in container:
+        raise PlexSourceFailure(
+            "Plex path lookup did not report a complete result count."
+        )
     try:
-        total = int(container.get("totalSize", len(raw_items)))
+        total = int(container["totalSize"])
+        returned_offset = int(container.get("offset", 0))
+        returned_size = int(container.get("size", len(raw_items)))
     except (TypeError, ValueError) as exc:
-        raise PlexBifError("Plex path lookup returned an invalid result count.") from exc
+        raise PlexSourceFailure(
+            "Plex path lookup returned invalid pagination metadata."
+        ) from exc
     if total < 0 or total > _MAX_EPISODE_CANDIDATES:
         raise PlexBifError("Plex path lookup returned too many candidates safely.")
     if len(raw_items) > _MAX_EPISODE_CANDIDATES:
         raise PlexBifError("Plex path lookup returned too many candidates safely.")
+    if returned_offset != 0 or returned_size != len(raw_items) or total != len(raw_items):
+        raise PlexSourceFailure(
+            "Plex path lookup returned an incomplete candidate set."
+        )
     return tuple(raw_items)
 
 
