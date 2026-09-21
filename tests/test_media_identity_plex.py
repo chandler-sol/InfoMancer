@@ -512,25 +512,44 @@ class PlexBifFoundationTests(unittest.TestCase):
         self.assertEqual(resolved.item_id, "102")
         self.assertEqual(resolved.media_source_id, "502")
 
-    def test_plex_path_lookup_rejects_incomplete_declared_candidate_set(self):
+    def test_plex_path_lookup_rejects_missing_continuation_page(self):
         expected = "/srv/tv/Show/Season 01/Episode.mkv"
-        payload = json.dumps(
-            {
-                "MediaContainer": {
-                    "offset": 0,
-                    "size": 1,
-                    "totalSize": 2,
-                    "Metadata": [plex_episode_item(path=expected)],
+        starts = []
+
+        def paged_read(
+            _server,
+            _token,
+            _path,
+            *,
+            query,
+            timeout,
+            allow_insecure_http,
+        ):
+            start = int(query["X-Plex-Container-Start"])
+            starts.append(start)
+            if start == 0:
+                return {
+                    "MediaContainer": {
+                        "offset": 0,
+                        "size": 1,
+                        "totalSize": 2,
+                        "Metadata": [plex_episode_item(path=expected)],
+                    }
                 }
-            }
-        ).encode("utf-8")
-        opener = DummyOpener(
-            DummyResponse(payload, content_type="application/json")
-        )
+            if start == 1:
+                return {
+                    "MediaContainer": {
+                        "offset": 1,
+                        "size": 0,
+                        "totalSize": 2,
+                        "Metadata": [],
+                    }
+                }
+            self.fail(f"unexpected page start {start}")
 
         with patch(
-            "app.media_identity.sources.plex.urllib.request.build_opener",
-            return_value=opener,
+            "app.media_identity.sources.plex._read_plex_json",
+            side_effect=paged_read,
         ):
             with self.assertRaises(PlexSourceFailure) as caught:
                 fetch_plex_path_candidates(
@@ -538,8 +557,9 @@ class PlexBifFoundationTests(unittest.TestCase):
                     "secret",
                     path=expected,
                 )
+        self.assertEqual(starts, [0, 1])
         self.assertIsInstance(caught.exception, ExternalSourceFailure)
-        self.assertIn("incomplete candidate set", str(caught.exception))
+        self.assertIn("ended before all candidates", str(caught.exception))
 
     def test_plex_episode_candidates_page_until_empty_without_total_size(self):
         page = [
