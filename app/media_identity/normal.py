@@ -404,7 +404,17 @@ class NormalPreviewOcrExecutor:
                 )
                 if sample.stage <= max_stage
             )
-            result = self._run_source(source, samples, failures)
+            result = self._run_source(
+                source,
+                samples,
+                failures,
+                cache_parameters={
+                    "file_id": int(context.media.file_id),
+                    "size_bytes": int(context.media.size_bytes),
+                    "modified_at": context.media.modified_at,
+                    "sha256": context.media.sha256 or "",
+                },
+            )
             if result.observations or result.budget_exhausted:
                 return result
             failures = list(result.failures)
@@ -415,6 +425,8 @@ class NormalPreviewOcrExecutor:
         source: Any,
         samples: Sequence[PreviewFrameSample],
         prior_failures: Sequence[str],
+        *,
+        cache_parameters: Mapping[str, Any],
     ) -> NormalPreviewOcrRun:
         observations: list[PreviewOcrObservation] = []
         failures = list(prior_failures)
@@ -423,7 +435,11 @@ class NormalPreviewOcrExecutor:
         budget_exhausted = False
 
         for sample in samples:
-            cache_key = ocr_preview_cache_key(sample.frame, self.engine)
+            cache_key = ocr_preview_cache_key(
+                sample.frame,
+                self.engine,
+                parameters=cache_parameters,
+            )
             cached = (
                 self.cache_lookup(sample.frame, cache_key)
                 if self.cache_lookup is not None
