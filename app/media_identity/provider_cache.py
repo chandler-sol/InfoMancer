@@ -10,6 +10,7 @@ from .tvdb_orders import (
     TVDB_ORDER_MAX_EPISODES,
     TVDB_ORDER_MAX_PAGES,
     TVDB_ORDER_RESPONSE_MAX_BYTES,
+    TVDBOrderError,
     TVDBOrderTransport,
     episode_orders,
     episodes_for_order,
@@ -123,11 +124,16 @@ class ProviderEpisodeCache:
         """Fetch a complete TVDB order snapshot before atomically replacing cache rows."""
         provider_series_id = str(int(series_id))
         language = _clean_text(language).casefold() or "eng"
-        order_info = episode_orders(
-            client,
-            series_id,
-            max_response_bytes=self.limits.max_response_bytes,
-        )
+        try:
+            order_info = episode_orders(
+                client,
+                series_id,
+                max_response_bytes=self.limits.max_response_bytes,
+            )
+        except TVDBOrderError as exc:
+            raise ProviderEpisodeRefreshError(
+                f"TVDB episode-order refresh was incomplete: {exc}"
+            ) from exc
         orders = list(order_info.get("orders") or [])
         if len(orders) > self.limits.max_orders:
             raise ProviderEpisodeRefreshError(
@@ -148,15 +154,21 @@ class ProviderEpisodeCache:
             if not namespace:
                 continue
             order_name = _clean_text(order.get("name")) or namespace
-            episodes = episodes_for_order(
-                client,
-                series_id,
-                namespace,
-                language=language,
-                max_response_bytes=self.limits.max_response_bytes,
-                max_pages=self.limits.max_pages_per_order,
-                max_episodes=self.limits.max_episodes_per_order,
-            )
+            try:
+                episodes = episodes_for_order(
+                    client,
+                    series_id,
+                    namespace,
+                    language=language,
+                    max_response_bytes=self.limits.max_response_bytes,
+                    max_pages=self.limits.max_pages_per_order,
+                    max_episodes=self.limits.max_episodes_per_order,
+                    allow_missing_first_page=False,
+                )
+            except TVDBOrderError as exc:
+                raise ProviderEpisodeRefreshError(
+                    f"TVDB episode-order refresh was incomplete for {namespace}: {exc}"
+                ) from exc
             total_records += len(episodes)
             if total_records > self.limits.max_records:
                 raise ProviderEpisodeRefreshError(
