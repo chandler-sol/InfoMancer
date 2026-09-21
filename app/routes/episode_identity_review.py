@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from ..access import require_librarian
 from ..media_identity.fast import FastIdentityScanError, FastIdentityService
@@ -17,7 +17,6 @@ def build_router(ctx: RouteContext):
     router = APIRouter()
     db = ctx.live("db")
     templates = ctx.live("templates")
-    Request = ctx.get("Request")
     HTMLResponse = ctx.get("HTMLResponse")
     HTTPException = ctx.get("HTTPException")
     redirect = ctx.live("redirect")
@@ -96,6 +95,12 @@ def build_router(ctx: RouteContext):
         message = (
             "Episode Identity verification completed. Review the evidence before making any correction."
         )
+        if not scan.provider_cache_used:
+            message += (
+                " TVDB episode identity metadata was unavailable, so this scan used "
+                "reduced evidence. Refresh TVDB metadata and verify again to include "
+                "provider synopsis and episode-order evidence."
+            )
         if not findings_refreshed:
             message += " Library Health will catch up on the next successful analysis."
         return redirect(
