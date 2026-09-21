@@ -33,6 +33,7 @@ _MAX_TILE_SHEET_PIXELS = 64_000_000
 _MAX_TILE_JPEG_BYTES = 32 * 1024 * 1024
 _MAX_JSON_BYTES = 8 * 1024 * 1024
 _MAX_EPISODE_CANDIDATES = 4096
+_JELLYFIN_PAGE_SIZE = 256
 
 
 class JellyfinAdapterError(ValueError):
@@ -815,56 +816,86 @@ def fetch_episode_candidates(
         raise JellyfinAdapterError(
             "Jellyfin episode coordinates cannot be negative."
         )
-    payload = _read_jellyfin_json(
-        server_url,
-        token,
-        "/Items",
-        query={
-            "recursive": "true",
-            "includeItemTypes": "Episode",
-            "parentIndexNumber": season_number,
-            "indexNumber": episode_number,
-            "fields": "Path,ProviderIds,MediaSources",
-            "enableImages": "false",
-            "enableUserData": "false",
-            "limit": _MAX_EPISODE_CANDIDATES + 1,
-        },
-        timeout=timeout,
-        allow_insecure_http=allow_insecure_http,
-    )
-    raw_items = payload.get("Items")
-    if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes)):
-        raise JellyfinAdapterError(
-            "Jellyfin episode search returned an invalid item list."
+
+    items: list[Mapping[str, Any]] = []
+    expected_total: int | None = None
+    start_index = 0
+    while True:
+        payload = _read_jellyfin_json(
+            server_url,
+            token,
+            "/Items",
+            query={
+                "recursive": "true",
+                "includeItemTypes": "Episode",
+                "parentIndexNumber": season_number,
+                "indexNumber": episode_number,
+                "fields": "Path,ProviderIds,MediaSources",
+                "enableImages": "false",
+                "enableUserData": "false",
+                "startIndex": start_index,
+                "limit": _JELLYFIN_PAGE_SIZE,
+            },
+            timeout=timeout,
+            allow_insecure_http=allow_insecure_http,
         )
-    if "TotalRecordCount" not in payload:
-        raise JellyfinSourceFailure(
-            "Jellyfin episode search did not report a complete result count."
-        )
-    try:
-        total = int(payload["TotalRecordCount"])
-        start_index = int(payload.get("StartIndex", 0))
-    except (TypeError, ValueError) as exc:
-        raise JellyfinSourceFailure(
-            "Jellyfin episode search returned invalid pagination metadata."
-        ) from exc
-    if start_index != 0:
-        raise JellyfinSourceFailure(
-            "Jellyfin episode search returned an unexpected result offset."
-        )
-    if total > _MAX_EPISODE_CANDIDATES or len(raw_items) > _MAX_EPISODE_CANDIDATES:
-        raise JellyfinAdapterError(
-            "Jellyfin returned too many episode candidates to resolve safely."
-        )
-    if total != len(raw_items):
-        raise JellyfinSourceFailure(
-            "Jellyfin episode search returned an incomplete candidate set."
-        )
-    if any(not isinstance(item, Mapping) for item in raw_items):
-        raise JellyfinAdapterError(
-            "Jellyfin episode search returned a malformed candidate entry."
-        )
-    return tuple(raw_items)
+        raw_items = payload.get("Items")
+        if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes)):
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search returned an invalid item list."
+            )
+        if any(not isinstance(item, Mapping) for item in raw_items):
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search returned a malformed candidate entry."
+            )
+        if "TotalRecordCount" not in payload:
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search did not report a complete result count."
+            )
+        try:
+            total = int(payload["TotalRecordCount"])
+            returned_start = int(payload.get("StartIndex", start_index))
+        except (TypeError, ValueError) as exc:
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search returned invalid pagination metadata."
+            ) from exc
+        if total < 0 or total > _MAX_EPISODE_CANDIDATES:
+            raise JellyfinSourceFailure(
+                "Jellyfin returned too many episode candidates to resolve safely."
+            )
+        if returned_start != start_index:
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search returned an unexpected result offset."
+            )
+        if len(raw_items) > _JELLYFIN_PAGE_SIZE:
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search returned more items than the requested page size."
+            )
+        if expected_total is None:
+            expected_total = total
+        elif total != expected_total:
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search changed while candidates were being paged."
+            )
+        if len(items) + len(raw_items) > _MAX_EPISODE_CANDIDATES:
+            raise JellyfinSourceFailure(
+                "Jellyfin returned too many episode candidates to resolve safely."
+            )
+        items.extend(raw_items)
+
+        if len(items) > expected_total:
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search returned more candidates than declared."
+            )
+        if len(items) == expected_total:
+            break
+        if not raw_items:
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search ended before all candidates were returned."
+            )
+        start_index += len(raw_items)
+
+    return tuple(items)
 
 
 def fetch_item(
