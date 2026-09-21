@@ -835,15 +835,28 @@ def fetch_episode_candidates(
         raise JellyfinAdapterError(
             "Jellyfin episode search returned an invalid item list."
         )
+    if "TotalRecordCount" not in payload:
+        raise JellyfinSourceFailure(
+            "Jellyfin episode search did not report a complete result count."
+        )
     try:
-        total = int(payload.get("TotalRecordCount", len(raw_items)))
+        total = int(payload["TotalRecordCount"])
+        start_index = int(payload.get("StartIndex", 0))
     except (TypeError, ValueError) as exc:
-        raise JellyfinAdapterError(
-            "Jellyfin episode search returned an invalid result count."
+        raise JellyfinSourceFailure(
+            "Jellyfin episode search returned invalid pagination metadata."
         ) from exc
+    if start_index != 0:
+        raise JellyfinSourceFailure(
+            "Jellyfin episode search returned an unexpected result offset."
+        )
     if total > _MAX_EPISODE_CANDIDATES or len(raw_items) > _MAX_EPISODE_CANDIDATES:
         raise JellyfinAdapterError(
             "Jellyfin returned too many episode candidates to resolve safely."
+        )
+    if total != len(raw_items):
+        raise JellyfinSourceFailure(
+            "Jellyfin episode search returned an incomplete candidate set."
         )
     if any(not isinstance(item, Mapping) for item in raw_items):
         raise JellyfinAdapterError(
