@@ -381,6 +381,74 @@ class NormalPreviewOcrExecutorTests(unittest.TestCase):
             "abcdefghij",
         )
 
+    def test_strong_initial_stage_can_stop_before_expansion(self):
+        source_frames = frames("jellyfin", 40)
+        source = PreviewSource(
+            "jellyfin",
+            frames=source_frames,
+            payloads={frame.timestamp_ms: b"strong text" for frame in source_frames},
+        )
+        engine = FakeOcr()
+        stages = []
+
+        def sufficient(run, stage):
+            stages.append((stage, len(run.observations)))
+            return stage == NormalSamplingStage.INITIAL
+
+        result = NormalPreviewOcrExecutor(
+            ExternalSourceRegistry([source]),
+            engine,
+        ).run(
+            context(),
+            stage_sufficient=sufficient,
+        )
+
+        self.assertEqual(len(result.observations), 5)
+        self.assertEqual(len(engine.calls), 5)
+        self.assertEqual(
+            stages,
+            [(NormalSamplingStage.INITIAL, 5)],
+        )
+        self.assertTrue(
+            all(
+                item.stage == NormalSamplingStage.INITIAL
+                for item in result.observations
+            )
+        )
+
+    def test_textless_preview_source_falls_through_to_source_with_text(self):
+        class ConditionalOcr(FakeOcr):
+            def recognize(self, image: bytes) -> OcrTextResult:
+                self.calls.append(bytes(image))
+                if image == b"blank":
+                    return OcrTextResult(text="", confidence=0.9)
+                return OcrTextResult(text="useful visual text", confidence=0.9)
+
+        blank_frames = frames("aaa", 2)
+        useful_frames = frames("zzz", 2)
+        blank = PreviewSource(
+            "aaa",
+            frames=blank_frames,
+            payloads={frame.timestamp_ms: b"blank" for frame in blank_frames},
+        )
+        useful = PreviewSource(
+            "zzz",
+            frames=useful_frames,
+            payloads={frame.timestamp_ms: b"useful" for frame in useful_frames},
+        )
+        result = NormalPreviewOcrExecutor(
+            ExternalSourceRegistry([useful, blank]),
+            ConditionalOcr(),
+        ).run(context())
+
+        self.assertEqual(result.source_key, "zzz")
+        self.assertTrue(result.has_text)
+        self.assertTrue(blank.read_calls)
+        self.assertTrue(useful.read_calls)
+        self.assertTrue(
+            any("aaa:ocr:no-visual-text" in item for item in result.failures)
+        )
+
     def test_cache_key_changes_when_preview_signature_changes(self):
         source_frames = frames("jellyfin", 1)
         source = PreviewSource(
