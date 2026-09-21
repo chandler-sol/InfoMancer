@@ -212,6 +212,42 @@ class ConservativeResolverTests(unittest.TestCase):
             resolution.state, IdentityResultState.EPISODE_ORDER_CONFLICT
         )
 
+    def test_alternate_order_near_tie_is_inconclusive_before_actionable_state(self) -> None:
+        claimed = _candidate(
+            "same-content",
+            claimed=True,
+            episode=1,
+            mappings=[
+                {
+                    "order_namespace": "production",
+                    "order_name": "Production",
+                    "season": 1,
+                    "episode": 1,
+                },
+                {
+                    "order_namespace": "default",
+                    "order_name": "Default",
+                    "season": 1,
+                    "episode": 4,
+                },
+            ],
+        )
+        other = _candidate("other", episode=2)
+        resolution = resolve_identity(
+            [claimed, other],
+            [
+                _evidence("same-content", "claimed_identity", 0.35, "claim"),
+                _evidence("same-content", "container_metadata", 0.18, "runtime"),
+                _evidence("same-content", "subtitle_text", 0.90, "dialogue"),
+                _evidence("other", "container_metadata", 0.18, "runtime"),
+                _evidence("other", "subtitle_text", 0.89, "dialogue"),
+            ],
+            self.CLAIM,
+        )
+        self.assertEqual(resolution.best_candidate_key, "same-content")
+        self.assertLess(resolution.margin, 0.12)
+        self.assertEqual(resolution.state, IdentityResultState.INCONCLUSIVE)
+
     def test_correct_heavy_cohort_produces_no_mismatch_states(self) -> None:
         mismatch_states = {
             IdentityResultState.POSSIBLE_MISMATCH,
