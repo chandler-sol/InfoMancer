@@ -190,6 +190,10 @@ def episodes_for_order(
             not isinstance(item, dict) for item in page_rows
         ):
             raise TVDBOrderError("TVDB returned malformed episode-order rows.")
+        if continuation_expected and not page_rows:
+            raise TVDBOrderError(
+                "TVDB returned an empty advertised episode-order continuation page."
+            )
         if len(episodes) + len(page_rows) > int(max_episodes):
             raise TVDBOrderError(
                 "TVDB episode order exceeded the Episode Identity record limit."
@@ -200,6 +204,10 @@ def episodes_for_order(
         if not isinstance(links, dict):
             raise TVDBOrderError("TVDB returned invalid episode pagination metadata.")
         continuation_expected = bool(links.get("next"))
+        if not page_rows and continuation_expected:
+            raise TVDBOrderError(
+                "TVDB advertised episode-order continuation from an empty page."
+            )
         if not continuation_expected:
             break
         page += 1
