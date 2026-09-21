@@ -72,7 +72,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         ) = self.original
         self.temporary.cleanup()
 
-    def test_integrations_page_reports_plex_adapter_without_claiming_analysis_ready(self):
+    def test_integrations_page_reports_plex_adapter_ready_for_normal(self):
         local_root = Path(self.temporary.name) / "media"
         main.external_source_config.add_mapping(
             "plex",
@@ -84,23 +84,28 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("BIF adapter", response.text)
-        self.assertIn("Installed", response.text)
         self.assertIn(
-            "Plex BIF adapter is configured and validated.",
+            "<strong>Ready</strong><span>BIF adapter</span>",
             response.text,
         )
         self.assertIn(
+            "Plex BIF preview frames are ready for Episode Identity.",
+            response.text,
+        )
+        self.assertIn(
+            "existing preview frames are available to Normal verification",
+            response.text,
+        )
+        self.assertNotIn(
             "Preview-frame analysis becomes available when a consuming analyzer is installed.",
             response.text,
         )
-        self.assertNotIn(">Ready</span><span>BIF adapter", response.text)
-        self.assertNotIn(">Pending</strong><span>Preview adapter", response.text)
         self.assertIn("Allow this Plex token over plain HTTP", response.text)
         self.assertIn('placeholder="https://plex.local:32400"', response.text)
         self.assertIn("Auto-detect, or enter a custom Plex data root", response.text)
         self.assertIn("Leave blank for Auto detection", response.text)
 
-    def test_integrations_page_reports_jellyfin_adapter_without_claiming_analysis_ready(self):
+    def test_integrations_page_reports_jellyfin_adapter_ready_for_normal(self):
         local_root = Path(self.temporary.name) / "media"
         source = main.external_source_config.save_source(
             "jellyfin",
@@ -123,12 +128,18 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("Trickplay adapter", response.text)
-        self.assertIn("Installed", response.text)
         self.assertIn(
-            "Preview-frame analysis becomes available when a consuming analyzer is installed.",
+            "<strong>Ready</strong><span>Trickplay adapter</span>",
             response.text,
         )
-        self.assertNotIn(">Ready</span><span>Trickplay adapter", response.text)
+        self.assertIn(
+            "Jellyfin Trickplay preview frames are ready for Episode Identity.",
+            response.text,
+        )
+        self.assertIn(
+            "existing preview frames are available to Normal verification",
+            response.text,
+        )
 
     def test_plex_plain_http_requires_explicit_opt_in(self):
         response = self.client.post(
