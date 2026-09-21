@@ -398,7 +398,10 @@ class NormalPreviewOcrExecutor:
                 )
                 if sample.stage <= max_stage
             )
-            return self._run_source(source, samples, failures)
+            result = self._run_source(source, samples, failures)
+            if result.observations or result.budget_exhausted:
+                return result
+            failures = list(result.failures)
         return NormalPreviewOcrRun(failures=tuple(failures))
 
     def _run_source(
