@@ -403,6 +403,62 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
             "trusted-generation",
         )
 
+    def test_empty_enabled_server_url_cannot_replace_saved_token(self):
+        response = self.client.post(
+            "/settings/integrations/plex",
+            data={
+                "enabled": "1",
+                "server_url": "",
+                "metadata_root": "",
+                "token": "replacement-token",
+                "clear_token": "",
+            },
+        )
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("server+URL", response.headers["location"])
+
+        source = main.external_source_config.source("plex")
+        secrets = main.provider_secrets.load()
+        self.assertEqual(source.server_url, "https://trusted-plex.local:32400")
+        self.assertEqual(source.credential_generation, "trusted-generation")
+        self.assertEqual(secrets["plex_token"], "trusted-token")
+        self.assertEqual(
+            secrets["plex_token_endpoint"],
+            "https://trusted-plex.local:32400",
+        )
+        self.assertEqual(
+            secrets["plex_token_generation"],
+            "trusted-generation",
+        )
+
+    def test_empty_enabled_server_url_cannot_delete_saved_token(self):
+        response = self.client.post(
+            "/settings/integrations/plex",
+            data={
+                "enabled": "1",
+                "server_url": "",
+                "metadata_root": "",
+                "token": "",
+                "clear_token": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("server+URL", response.headers["location"])
+
+        source = main.external_source_config.source("plex")
+        secrets = main.provider_secrets.load()
+        self.assertEqual(source.server_url, "https://trusted-plex.local:32400")
+        self.assertEqual(source.credential_generation, "trusted-generation")
+        self.assertEqual(secrets["plex_token"], "trusted-token")
+        self.assertEqual(
+            secrets["plex_token_endpoint"],
+            "https://trusted-plex.local:32400",
+        )
+        self.assertEqual(
+            secrets["plex_token_generation"],
+            "trusted-generation",
+        )
+
     def test_changed_server_url_cannot_reuse_hidden_saved_token(self):
         response = self.client.post(
             "/settings/integrations/plex",
