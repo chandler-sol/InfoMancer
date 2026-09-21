@@ -135,6 +135,33 @@ class FastSidecarFreshnessTests(unittest.TestCase):
             self.assertNotEqual(refreshed.inode_id, identity.inode_id)
             self.assertNotEqual(refreshed.cache_key, identity.cache_key)
 
+    def test_case_distinct_media_only_discovers_exact_case_sidecar_on_sensitive_fs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            upper_media = root / "Episode.mkv"
+            lower_media = root / "episode.mkv"
+            upper_media.write_bytes(b"upper")
+            lower_media.write_bytes(b"lower")
+            try:
+                if os.path.samefile(upper_media, lower_media):
+                    self.skipTest("filesystem does not preserve case-distinct sibling files")
+            except OSError:
+                self.skipTest("filesystem cannot verify case-distinct sibling files")
+
+            upper_sidecar = root / "Episode.en.srt"
+            lower_sidecar = root / "episode.en.srt"
+            upper_sidecar.write_bytes(b"upper subtitle")
+            lower_sidecar.write_bytes(b"lower subtitle")
+
+            self.assertEqual(
+                discover_sidecar_subtitles(upper_media),
+                [upper_sidecar],
+            )
+            self.assertEqual(
+                discover_sidecar_subtitles(lower_media),
+                [lower_sidecar],
+            )
+
     def test_sidecar_discovery_caps_matching_file_count(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
