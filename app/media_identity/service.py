@@ -7,9 +7,15 @@ from typing import Any, Mapping
 
 from ..db import Database
 from ..naming import contained_destination, plex_episode_filename
+from .candidates import generate_episode_candidates
+from .fast import (
+    SCAN_INPUT_SIGNATURE_VERSION,
+    combined_scan_input_signature,
+    scan_input_signatures,
+)
 from .models import IdentityResultState
 from .scoring import IdentityResolution, resolve_identity
-from .text import sidecar_identity
+from .text import discover_sidecar_subtitles, sidecar_identity
 
 
 SUGGESTED_CONFIRM_STATES = {
@@ -318,30 +324,90 @@ class MediaIdentityDecisionService:
         ):
             return False, file_row
 
-        checked_sidecars: dict[str, str] = {}
-        for item in evidence:
-            if str(item.get("source_kind") or "") != "sidecar_subtitle":
-                continue
-            source_ref = str(item.get("source_ref") or "")
-            expected_signature = str(
-                (item.get("details") or {}).get("source_signature") or ""
+        # Pre-repair scans do not contain enough information to prove that provider
+        # metadata, title identity, technical metadata, streams, and the complete
+        # subtitle selection are still the same. They remain reviewable but are
+        # deliberately non-actionable until a new verification creates v2 inputs.
+        try:
+            signature_version = int(claimed.get("input_signature_version") or 0)
+        except (TypeError, ValueError):
+            return False, file_row
+        expected_signatures = claimed.get("input_signatures")
+        if (
+            signature_version != SCAN_INPUT_SIGNATURE_VERSION
+            or not isinstance(expected_signatures, dict)
+            or not expected_signatures
+        ):
+            return False, file_row
+
+        full_row = conn.execute(
+            """SELECT f.*,t.kind AS title_kind,t.tvdb_id,
+                      COALESCE(t.metadata_title,t.title) AS title_name
+               FROM files f
+               JOIN titles t ON t.id=f.title_id
+               WHERE f.id=?""",
+            (int(scan["file_id"]),),
+        ).fetchone()
+        if not full_row:
+            return False, file_row
+        full_file = dict(full_row)
+        streams = [
+            dict(row)
+            for row in conn.execute(
+                """SELECT stream_index,stream_type,codec,language,title,channels,
+                          channel_layout,sample_rate,default_flag,forced_flag,
+                          hearing_impaired,visual_impaired,commentary,disposition_json
+                   FROM media_streams
+                   WHERE file_id=? ORDER BY stream_index""",
+                (int(scan["file_id"]),),
+            ).fetchall()
+        ]
+
+        language = str(claimed.get("scan_language") or "eng").strip().casefold() or "eng"
+        expanded_specials = bool(claimed.get("expanded_specials"))
+        try:
+            candidate_set = generate_episode_candidates(
+                conn,
+                title_id=int(full_file["title_id"]),
+                season=int(full_file["season"]),
+                episode_start=int(full_file["episode_start"]),
+                episode_end=int(
+                    full_file["episode_end"] or full_file["episode_start"]
+                ),
+                include_specials=(
+                    int(full_file["season"]) == 0 or expanded_specials
+                ),
+                language=language,
             )
-            if not source_ref and not expected_signature:
-                # A zero-similarity subtitle comparison records no selected source.
-                # It contributed no sidecar asset to the decision, so there is
-                # nothing to freshness-check for that evidence row.
-                continue
-            if not source_ref or not expected_signature:
+        except (TypeError, ValueError, sqlite3.Error):
+            return False, file_row
+
+        sidecar_identities = []
+        for path in discover_sidecar_subtitles(str(full_file["path"])):
+            identity = sidecar_identity(path)
+            if identity is None:
                 return False, file_row
-            previous = checked_sidecars.get(source_ref)
-            if previous is not None:
-                if previous != expected_signature:
-                    return False, file_row
-                continue
-            identity = sidecar_identity(Path(source_ref))
-            if identity is None or identity.source_signature != expected_signature:
-                return False, file_row
-            checked_sidecars[source_ref] = expected_signature
+            sidecar_identities.append(identity)
+
+        current_signatures = scan_input_signatures(
+            full_file,
+            streams,
+            candidate_set,
+            sidecar_identities,
+            language=language,
+            expanded_specials=expanded_specials,
+        )
+        normalized_expected = {
+            str(key): str(value)
+            for key, value in expected_signatures.items()
+        }
+        if current_signatures != normalized_expected:
+            return False, file_row
+        if (
+            combined_scan_input_signature(current_signatures)
+            != str(scan.get("metadata_signature") or "")
+        ):
+            return False, file_row
 
         return True, file_row
 
@@ -361,6 +427,20 @@ class MediaIdentityDecisionService:
                 modified_at=confirmation["confirmed_modified_at"],
                 sha256=confirmation["confirmed_sha256"],
             )
+            source_scan_id = confirmation.get("source_scan_id")
+            if current and source_scan_id is not None:
+                try:
+                    scan, _, evidence = self._scan_snapshot(
+                        conn, int(source_scan_id)
+                    )
+                except MediaIdentityDecisionError:
+                    current = False
+                else:
+                    current, _ = self._scan_snapshot_is_current(
+                        conn,
+                        scan,
+                        evidence,
+                    )
         confirmation["freshness"] = "current" if current else "stale"
         confirmation["current"] = current
         return confirmation
