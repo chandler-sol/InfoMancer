@@ -146,6 +146,8 @@ class ServerSetupHelperContracts(unittest.TestCase):
         self.assertIn("https://docs.docker.com/desktop/setup/install/mac-install/", guide)
         self.assertIn("https://docs.docker.com/engine/install/", guide)
         self.assertIn("Double-click:\n\n`Setup-InfoMancer.cmd`", guide)
+        self.assertIn("Optional Episode Identity CPU OCR", guide)
+        self.assertIn("RapidOCR and ONNX Runtime CPU support", guide)
         self.assertIn("`Setup-InfoMancer.command`", guide)
         self.assertIn("./setup-infomancer.sh", guide)
         self.assertIn("[Manual Server Setup](SERVER_MANUAL.md)", guide)
