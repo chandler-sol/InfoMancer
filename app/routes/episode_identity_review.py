@@ -5,7 +5,18 @@ import sqlite3
 from fastapi import APIRouter, Depends, Request
 
 from ..access import require_librarian
+from ..media_identity.external_config import (
+    ExternalSourceConfigService,
+    build_configured_source_registry,
+)
 from ..media_identity.fast import FastIdentityScanError, FastIdentityService
+from ..media_identity.models import IdentityProfile
+from ..media_identity.normal_service import (
+    NormalIdentityScanError,
+    NormalIdentityService,
+)
+from ..media_identity.ocr import RapidOcrCpuEngine
+from ..provider_secrets import ProviderSecretError
 from ..media_identity.service import (
     MediaIdentityDecisionError,
     MediaIdentityDecisionService,
@@ -24,6 +35,7 @@ def build_router(ctx: RouteContext):
     analyze_library_health_with_activity = ctx.live(
         "analyze_library_health_with_activity"
     )
+    provider_secrets = ctx.live("provider_secrets")
 
     fast = FastIdentityService(db)
     decisions = MediaIdentityDecisionService(db)
@@ -105,6 +117,97 @@ def build_router(ctx: RouteContext):
             message += " Library Health will catch up on the next successful analysis."
         return redirect(
             f"/episode-identity/scans/{scan.scan_id}",
+            message,
+        )
+
+    @librarian_post("/episode-identity/scans/{scan_id}/normal")
+    def run_normal_episode_identity(request: Request, scan_id: int):
+        try:
+            detail = decisions.scan_detail(int(scan_id))
+        except MediaIdentityDecisionError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        file_row = detail.get("file") or {}
+        title_id = int(file_row.get("title_id") or 0)
+        try:
+            secrets = provider_secrets.load()
+            registry = build_configured_source_registry(
+                ExternalSourceConfigService(db),
+                secrets,
+            )
+            normal = NormalIdentityService(
+                db,
+                registry,
+                RapidOcrCpuEngine(),
+            )
+            result = normal.run_scan(int(scan_id))
+            resolution = decisions.resolve_scan(int(scan_id))
+            findings_refreshed = _refresh_findings(request.state.user.id)
+        except ProviderSecretError as exc:
+            return redirect(
+                f"/episode-identity/scans/{scan_id}",
+                f"Normal verification could not read integration credentials: {exc}",
+            )
+        except (NormalIdentityScanError, MediaIdentityDecisionError) as exc:
+            record_event(
+                "mie",
+                f"Episode Identity Normal verification could not complete for scan {scan_id}.",
+                level="warning",
+                detail=str(exc),
+                context={
+                    "scan_id": int(scan_id),
+                    "title_id": title_id or None,
+                    "profile": "normal",
+                },
+                user_id=request.state.user.id,
+            )
+            return redirect(
+                f"/episode-identity/scans/{scan_id}",
+                f"Normal verification could not complete: {exc}",
+            )
+
+        record_event(
+            "mie",
+            f"Episode Identity Normal verification completed for scan {scan_id}.",
+            context={
+                "scan_id": int(scan_id),
+                "title_id": title_id or None,
+                "profile": "normal",
+                "completed_profile": result.completed_profile.value,
+                "source_key": result.source_key,
+                "observation_count": result.observation_count,
+                "reused_artifact_count": result.reused_artifact_count,
+                "result_state": resolution.state.value,
+            },
+            user_id=request.state.user.id,
+        )
+
+        if result.completed_profile == IdentityProfile.NORMAL:
+            message = (
+                "Normal verification completed using bounded preview OCR. "
+                f"{result.observation_count} preview frame(s) were analyzed"
+            )
+            if result.reused_artifact_count:
+                message += (
+                    f", including {result.reused_artifact_count} cached OCR artifact(s)"
+                )
+            message += ". Review the updated evidence before making any correction."
+        elif "ocr-engine-unavailable" in set(result.failures):
+            message = (
+                "Normal OCR is not installed or available on this server, so the scan "
+                "remains at Fast evidence. Install the optional CPU OCR component and try again."
+            )
+        else:
+            message = (
+                "No usable configured Plex or Jellyfin preview frames were available, "
+                "so the scan remains at Fast evidence. Generated local-frame fallback "
+                "is not enabled yet."
+            )
+        if result.budget_exhausted:
+            message += " Normal stopped at its configured resource limit."
+        if not findings_refreshed:
+            message += " Library Health will catch up on the next successful analysis."
+        return redirect(
+            f"/episode-identity/scans/{scan_id}",
             message,
         )
 
@@ -205,6 +308,7 @@ def build_router(ctx: RouteContext):
         "episode_identity_fast": fast,
         "episode_identity_decisions": decisions,
         "verify_episode_identity": verify_episode_identity,
+        "run_normal_episode_identity": run_normal_episode_identity,
         "episode_identity_detail": episode_identity_detail,
         "episode_identity_rename_preview": episode_identity_rename_preview,
         "confirm_current_identity": confirm_current_identity,
