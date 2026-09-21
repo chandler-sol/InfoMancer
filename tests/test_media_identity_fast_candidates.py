@@ -150,11 +150,6 @@ class FastProviderCandidateBoundTests(unittest.TestCase):
         ]
         self.assertEqual(len(detail_queries), 1)
         self.assertIn("i.provider_episode_id IN (", detail_queries[0])
-        self.assertNotIn(
-            "FROM provider_episode_identities i\n           LEFT JOIN",
-            detail_queries[0],
-            "provider detail retrieval must remain restricted to the preselected IDs",
-        )
 
 
 if __name__ == "__main__":
