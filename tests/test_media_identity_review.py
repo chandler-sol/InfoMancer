@@ -3,14 +3,19 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
+from fastapi.testclient import TestClient
 from jinja2 import Environment, FileSystemLoader
 
+from app import main
 from app.db import Database
 from app.duplicates import DuplicateService
 from app.mie import MediaIntelligenceEngine
 from app.review_queue import ReviewQueue
+from app.request_security import LOCAL_CSRF_COOKIE
 from app.routes.health_action_routing import health_finding_href
 
 
@@ -123,6 +128,69 @@ class EpisodeIdentityReviewAdapterTests(unittest.TestCase):
             }),
             "/episode-identity/scans/42",
         )
+
+
+class EpisodeIdentityHttpBindingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.database = Database(Path(self.temporary.name) / "http-binding.db")
+        self.database.initialize()
+        self.original_db = main.db
+        main.db = self.database
+        self.auth_patch = patch.object(
+            main, "settings", replace(main.settings, auth_mode="disabled")
+        )
+        self.auth_patch.start()
+        self.client = TestClient(main.app, follow_redirects=False)
+        self.client.get("/")
+        csrf_token = self.client.cookies.get(LOCAL_CSRF_COOKIE)
+        self.assertTrue(csrf_token)
+        self.client.headers.update({"X-CSRF-Token": csrf_token})
+
+    def tearDown(self) -> None:
+        self.client.close()
+        self.auth_patch.stop()
+        main.db = self.original_db
+        self.temporary.cleanup()
+
+    def test_all_episode_identity_routes_receive_request_from_fastapi(self) -> None:
+        requests = [
+            ("POST", "/files/999999/episode-identity/fast"),
+            ("GET", "/episode-identity/scans/999999"),
+            ("GET", "/episode-identity/scans/999999/rename-preview"),
+            ("POST", "/episode-identity/scans/999999/confirm-current"),
+            ("POST", "/episode-identity/scans/999999/confirm-best"),
+        ]
+        responses = []
+        for method, url in requests:
+            response = self.client.request(method, url)
+            responses.append(response)
+            self.assertNotEqual(
+                response.status_code,
+                422,
+                f"{method} {url} treated request as a query parameter: {response.text}",
+            )
+        self.assertEqual([response.status_code for response in responses[:3]], [404, 404, 404])
+        self.assertEqual([response.status_code for response in responses[3:]], [303, 303])
+
+        target_paths = {
+            "/files/{file_id}/episode-identity/fast",
+            "/episode-identity/scans/{scan_id}",
+            "/episode-identity/scans/{scan_id}/rename-preview",
+            "/episode-identity/scans/{scan_id}/confirm-current",
+            "/episode-identity/scans/{scan_id}/confirm-best",
+        }
+        checked = set()
+        for route in main.app.routes:
+            if getattr(route, "path", None) not in target_paths:
+                continue
+            checked.add(route.path)
+            query_names = {
+                parameter.name
+                for parameter in getattr(route, "dependant").query_params
+            }
+            self.assertNotIn("request", query_names, route.path)
+        self.assertEqual(checked, target_paths)
 
 
 class EpisodeIdentityReviewContractTests(unittest.TestCase):
