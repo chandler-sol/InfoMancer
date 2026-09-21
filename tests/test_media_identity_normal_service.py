@@ -14,7 +14,7 @@ from app.media_identity.external import (
     PreviewFrameRef,
 )
 from app.media_identity.fast import FastIdentityService
-from app.media_identity.models import OcrTextResult
+from app.media_identity.normal import OcrTextResult
 from app.media_identity.normal_service import NormalIdentityService
 
 
