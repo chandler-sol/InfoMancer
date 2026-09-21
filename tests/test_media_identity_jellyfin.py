@@ -918,25 +918,26 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
                 (changed_manifest, "timing changed"),
                 (changed_source, "media source changed"),
             ):
-                with self.subTest(pattern=pattern), (
-                    patch(
-                        "app.media_identity.sources.jellyfin.fetch_item",
-                        return_value=item,
-                    ),
-                    patch(
-                        "app.media_identity.sources.jellyfin.read_trickplay_preview"
-                    ) as preview_read,
-                ):
-                    with self.assertRaisesRegex(
-                        JellyfinPreviewUnavailable,
-                        pattern,
-                    ) as caught:
-                        source.read_preview(frame)
-                    self.assertIsInstance(
-                        caught.exception,
-                        ExternalPreviewUnavailable,
-                    )
-                    preview_read.assert_not_called()
+                with self.subTest(pattern=pattern):
+                    with (
+                        patch(
+                            "app.media_identity.sources.jellyfin.fetch_item",
+                            return_value=item,
+                        ),
+                        patch(
+                            "app.media_identity.sources.jellyfin.read_trickplay_preview"
+                        ) as preview_read,
+                    ):
+                        with self.assertRaisesRegex(
+                            JellyfinPreviewUnavailable,
+                            pattern,
+                        ) as caught:
+                            source.read_preview(frame)
+                        self.assertIsInstance(
+                            caught.exception,
+                            ExternalPreviewUnavailable,
+                        )
+                        preview_read.assert_not_called()
 
     def test_manifest_rejects_unsafe_total_tile_sheet_size(self):
         item = self._item()
