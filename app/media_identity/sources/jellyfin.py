@@ -1063,9 +1063,85 @@ class JellyfinTrickplaySource:
 
     def read_preview(self, frame: PreviewFrameRef) -> bytes:
         if not self.status().available:
-            raise JellyfinAdapterError(
+            raise JellyfinSourceFailure(
                 "Jellyfin Trickplay preview reuse is not currently available."
             )
+        if str(frame.source_key or "").strip().casefold() != self.source_key:
+            raise JellyfinAdapterError("Preview frame does not belong to Jellyfin.")
+
+        asset = _parse_trickplay_asset(frame)
+        item = fetch_item(
+            self.server_url,
+            self._token,
+            frame.item_id,
+            allow_insecure_http=self.allow_insecure_http,
+        )
+
+        source_ids = []
+        for source in _media_source_entries(item):
+            try:
+                source_ids.append(
+                    _jellyfin_guid(
+                        str(source.get("Id") or ""),
+                        "Jellyfin media source id",
+                    )
+                )
+            except JellyfinAdapterError as exc:
+                raise JellyfinSourceFailure(
+                    "Jellyfin returned an invalid media source while revalidating Trickplay."
+                ) from exc
+        expected_source_id = _jellyfin_guid(
+            asset.media_source_id,
+            "Jellyfin media source id",
+        )
+        if source_ids.count(expected_source_id) != 1:
+            raise JellyfinPreviewUnavailable(
+                "Jellyfin media source changed after preview enumeration."
+            )
+
+        variant = select_trickplay_variant(
+            parse_trickplay_variants(item),
+            media_source_id=asset.media_source_id,
+        )
+        if variant is None:
+            raise JellyfinPreviewUnavailable(
+                "Jellyfin Trickplay manifest is no longer available for this media source."
+            )
+        if (
+            asset.width != variant.width
+            or asset.height != variant.height
+            or asset.tile_width != variant.tile_width
+            or asset.tile_height != variant.tile_height
+        ):
+            raise JellyfinPreviewUnavailable(
+                "Jellyfin Trickplay manifest changed after preview enumeration."
+            )
+
+        thumbnail_index = (
+            asset.tile_index * variant.thumbnails_per_tile
+            + asset.row * variant.tile_width
+            + asset.column
+        )
+        if asset.tile_index >= variant.tile_count or thumbnail_index >= variant.thumbnail_count:
+            raise JellyfinPreviewUnavailable(
+                "Jellyfin Trickplay frame no longer exists in the current manifest."
+            )
+        expected_timestamp = thumbnail_index * variant.interval_ms
+        if expected_timestamp != int(frame.timestamp_ms):
+            raise JellyfinPreviewUnavailable(
+                "Jellyfin Trickplay timing changed after preview enumeration."
+            )
+
+        current_signature = trickplay_source_signature(
+            frame.item_id,
+            str(item.get("Etag") or "").strip(),
+            variant,
+        )
+        if current_signature != str(frame.source_signature or ""):
+            raise JellyfinPreviewUnavailable(
+                "Jellyfin item or Trickplay manifest changed after preview enumeration."
+            )
+
         return read_trickplay_preview(
             self.server_url,
             self._token,
