@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from io import BytesIO
 from pathlib import Path
 import hashlib
 import json
@@ -13,7 +14,13 @@ import urllib.parse
 import urllib.request
 from unittest.mock import patch
 
-from app.media_identity.external import ExternalCapability
+from PIL import Image
+
+from app.media_identity.external import (
+    ExternalCapability,
+    ExternalPreviewUnavailable,
+    ExternalSourceFailure,
+)
 from app.media_identity.models import (
     AnalyzerContext,
     IdentityProfile,
@@ -25,6 +32,7 @@ from app.media_identity.sources.plex import (
     PlexBifError,
     PlexBifSource,
     PlexPreviewUnavailable,
+    PlexSourceFailure,
     enumerate_bif_preview_frames,
     enumerate_plex_http_preview_frames,
     fetch_plex_bif_image,
@@ -112,10 +120,25 @@ def plex_episode_item(
 
 
 
+def jpeg_frame(color: tuple[int, int, int]) -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (8, 6), color).save(
+        output,
+        format="JPEG",
+        quality=90,
+        subsampling=0,
+    )
+    return output.getvalue()
+
+
+FRAME_ZERO = jpeg_frame((220, 30, 30))
+FRAME_ONE = jpeg_frame((30, 180, 60))
+
+
 def build_bif(
     frames: tuple[tuple[int, bytes], ...] = (
-        (0, b"\xff\xd8frame-zero\xff\xd9"),
-        (10, b"\xff\xd8frame-one\xff\xd9"),
+        (0, FRAME_ZERO),
+        (10, FRAME_ONE),
     ),
     *,
     multiplier: int = 1000,
@@ -180,8 +203,8 @@ class PlexBifFoundationTests(unittest.TestCase):
         )
         self.assertEqual(
             sum(frame.length for frame in parsed.frames),
-            len(b"\xff\xd8frame-zero\xff\xd9")
-            + len(b"\xff\xd8frame-one\xff\xd9"),
+            len(FRAME_ZERO)
+            + len(FRAME_ONE),
         )
 
     def test_zero_multiplier_uses_roku_default_1000ms(self):
@@ -710,14 +733,14 @@ class PlexBifFoundationTests(unittest.TestCase):
         self.assertEqual(first["timestamp_ms"], 0)
         self.assertEqual(
             first["sha256"],
-            hashlib.sha256(b"\xff\xd8frame-zero\xff\xd9").hexdigest(),
+            hashlib.sha256(FRAME_ZERO).hexdigest(),
         )
         self.assertTrue(
             frames[0].source_signature.startswith("plex-bif-http:")
         )
 
     def test_fetch_plex_bif_image_reads_only_requested_timestamp(self):
-        jpeg = b"\xff\xd8requested-frame\xff\xd9"
+        jpeg = jpeg_frame((80, 90, 200))
         opener = DummyOpener(
             DummyResponse(jpeg, content_type="image/jpeg")
         )
@@ -810,7 +833,7 @@ class PlexBifFoundationTests(unittest.TestCase):
                 ) as bif_fetch,
                 patch(
                     "app.media_identity.sources.plex.fetch_plex_bif_image",
-                    return_value=b"\xff\xd8frame-one\xff\xd9",
+                    return_value=FRAME_ONE,
                 ) as image_fetch,
             ):
                 media = source.resolve_media(context)
@@ -828,7 +851,7 @@ class PlexBifFoundationTests(unittest.TestCase):
             self.assertEqual(media.item_id, "101")
             self.assertEqual(media.media_source_id, "501")
             self.assertEqual(len(frames), 2)
-            self.assertEqual(image, b"\xff\xd8frame-one\xff\xd9")
+            self.assertEqual(image, FRAME_ONE)
             bif_fetch.assert_called_once_with(
                 "https://plex.local:32400",
                 "secret",
@@ -967,8 +990,8 @@ class PlexBifFoundationTests(unittest.TestCase):
             )
 
     def test_http_frame_hash_rejects_changed_jpeg_without_refetching_bif(self):
-        original = b"\xff\xd8AAAA\xff\xd9"
-        changed = b"\xff\xd8BBBB\xff\xd9"
+        original = jpeg_frame((10, 10, 10))
+        changed = jpeg_frame((20, 20, 20))
         bif = build_bif(frames=((0, original),))
         frames = enumerate_plex_http_preview_frames(
             item_id="101",
@@ -1145,7 +1168,7 @@ class PlexBifFoundationTests(unittest.TestCase):
             self.assertEqual(asset["part_id"], "501")
             self.assertEqual(asset["expected_external_path"], expected)
             self.assertEqual(Path(asset["metadata_root"]), root)
-            self.assertEqual(image, b"\xff\xd8frame-one\xff\xd9")
+            self.assertEqual(image, FRAME_ONE)
 
     def test_blank_metadata_root_auto_detects_local_plex_fallback(self):
         expected = "/srv/tv/Show/Season 01/Episode.mkv"
@@ -1223,7 +1246,7 @@ class PlexBifFoundationTests(unittest.TestCase):
             self.assertEqual(len(frames), 2)
             asset = json.loads(frames[0].asset_ref)
             self.assertEqual(Path(asset["metadata_root"]), root)
-            self.assertEqual(image, b"\xff\xd8frame-zero\xff\xd9")
+            self.assertEqual(image, FRAME_ZERO)
 
     def test_source_failure_does_not_fall_back_to_local_preview(self):
         expected = "/srv/tv/Show/Season 01/Episode.mkv"
@@ -1431,8 +1454,8 @@ class PlexBifFoundationTests(unittest.TestCase):
         original_bif = build_bif()
         changed_bif = build_bif(
             frames=(
-                (0, b"\xff\xd8frame-zero\xff\xd9"),
-                (11, b"\xff\xd8frame-one\xff\xd9"),
+                (0, FRAME_ZERO),
+                (11, FRAME_ONE),
             )
         )
         with tempfile.TemporaryDirectory() as temporary:
