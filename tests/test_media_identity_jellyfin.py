@@ -33,6 +33,7 @@ from app.media_identity.sources.jellyfin import (
     enumerate_preview_frames,
     external_paths_equal,
     fetch_episode_candidates,
+    fetch_item,
     fetch_trickplay_tile,
     parse_trickplay_variants,
     resolve_media_ref,
@@ -437,6 +438,28 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
                     season=1,
                     episode=2,
                 )
+
+    def test_fetch_item_rejects_different_returned_item_id(self):
+        requested = "11111111111111111111111111111111"
+        returned = "22222222222222222222222222222222"
+        payload = json.dumps({"Id": returned}).encode("utf-8")
+        opener = DummyOpener(
+            DummyResponse(payload, content_type="application/json")
+        )
+        with patch(
+            "app.media_identity.sources.jellyfin.urllib.request.build_opener",
+            return_value=opener,
+        ):
+            with self.assertRaisesRegex(
+                JellyfinSourceFailure,
+                "different item",
+            ) as caught:
+                fetch_item(
+                    "https://jellyfin.local:8096",
+                    "token",
+                    requested,
+                )
+        self.assertIsInstance(caught.exception, ExternalSourceFailure)
 
     def test_configured_source_resolves_exact_mapped_episode_and_enumerates_trickplay(self):
         item_id = "11111111111111111111111111111111"
