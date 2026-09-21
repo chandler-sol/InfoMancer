@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 from ..db import Database
 from .external import ExternalSourceRegistry, PreviewFrameRef
+from .local_frames import LOCAL_FRAME_SOURCE_KEY, LocalFfmpegFrameSource
 from .models import (
     AnalyzerContext,
     EvidenceCategory,
@@ -352,7 +353,11 @@ class NormalIdentityService:
                     correlation,
                     relation,
                     strength if relation == EvidenceRelation.SUPPORTS.value else 0.0,
-                    "external_preview_ocr",
+                    (
+                        "generated_preview_ocr"
+                        if run.source_key == LOCAL_FRAME_SOURCE_KEY
+                        else "external_preview_ocr"
+                    ),
                     f"{run.source_key}:{usable[0].item_id}",
                     None,
                     f"synopsis similarity {similarity:.3f}",
@@ -383,7 +388,11 @@ class NormalIdentityService:
                     correlation,
                     EvidenceRelation.NEUTRAL.value,
                     0.0,
-                    "external_preview_ocr",
+                    (
+                        "generated_preview_ocr"
+                        if run.source_key == LOCAL_FRAME_SOURCE_KEY
+                        else "external_preview_ocr"
+                    ),
                     f"{run.source_key}:{usable[0].item_id}",
                     None,
                     "OCR text was available, but candidate synopses were unavailable.",
@@ -405,7 +414,11 @@ class NormalIdentityService:
                 correlation,
                 EvidenceRelation.NEUTRAL.value,
                 0.0,
-                "external_preview_ocr",
+                (
+                    "generated_preview_ocr"
+                    if run.source_key == LOCAL_FRAME_SOURCE_KEY
+                    else "external_preview_ocr"
+                ),
                 run.source_key,
                 None,
                 "No usable visual text was produced by Normal OCR.",
@@ -452,18 +465,56 @@ class NormalIdentityService:
                     "The Fast identity snapshot is stale. Verify the file again before Normal OCR."
                 )
             context = self._context(scan, file_row)
+            runtime_row = conn.execute(
+                "SELECT runtime_seconds FROM files WHERE id=?",
+                (int(scan["file_id"]),),
+            ).fetchone()
+            runtime_seconds = (
+                runtime_row["runtime_seconds"]
+                if runtime_row is not None
+                else None
+            )
 
+        cache_lookup = lambda frame, cache_key: self._cached_ocr(
+            scan,
+            frame,
+            cache_key,
+        )
         executor = NormalPreviewOcrExecutor(
             self.registry,
             self.engine,
             limits=self.limits,
-            cache_lookup=lambda frame, cache_key: self._cached_ocr(
-                scan,
-                frame,
-                cache_key,
-            ),
+            cache_lookup=cache_lookup,
         )
         run = executor.run(context, max_stage=max_stage)
+
+        if (
+            not run.observations
+            and not run.budget_exhausted
+            and "ocr-engine-unavailable" not in set(run.failures)
+        ):
+            local_source = LocalFfmpegFrameSource(
+                context,
+                runtime_seconds,
+            )
+            local_executor = NormalPreviewOcrExecutor(
+                ExternalSourceRegistry([local_source]),
+                self.engine,
+                limits=self.limits,
+                cache_lookup=cache_lookup,
+            )
+            local_run = local_executor.run(
+                context,
+                max_stage=max_stage,
+            )
+            run = NormalPreviewOcrRun(
+                source_key=local_run.source_key,
+                observations=local_run.observations,
+                failures=tuple(run.failures) + tuple(local_run.failures),
+                total_image_bytes=local_run.total_image_bytes,
+                total_text_chars=local_run.total_text_chars,
+                budget_exhausted=local_run.budget_exhausted,
+            )
 
         with self.database.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
