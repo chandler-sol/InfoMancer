@@ -299,6 +299,52 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             1,
         )
 
+    def test_uncalibrated_visual_text_does_not_stop_normal_early(self):
+        class ManyFrameSource(FakePreviewSource):
+            def preview_frames(self, _media):
+                return tuple(
+                    PreviewFrameRef(
+                        source_key=self.source_key,
+                        item_id="episode-1",
+                        timestamp_ms=index * 10_000,
+                        asset_ref=f"tile:{index}",
+                        source_signature="preview-uncalibrated-v1",
+                        width=320,
+                        height=180,
+                    )
+                    for index in range(40)
+                )
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"bronze harbor lantern meadow quartz thunder"
+
+        class UncalibratedOcr(FakeOcr):
+            def recognize(self, image: bytes) -> OcrTextResult:
+                self.calls += 1
+                return OcrTextResult(
+                    text=image.decode("utf-8"),
+                    confidence=None,
+                )
+
+        source = ManyFrameSource()
+        engine = UncalibratedOcr()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            engine,
+        )
+
+        result = service.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(result.observation_count, 12)
+        self.assertEqual(source.read_calls, 12)
+        self.assertEqual(engine.calls, 12)
+        self.assertEqual(
+            result.highest_observed_stage.name,
+            "FINAL",
+        )
+
     def test_second_normal_run_reuses_derived_ocr_without_rereading_preview(self):
         source = FakePreviewSource()
         engine = FakeOcr()
