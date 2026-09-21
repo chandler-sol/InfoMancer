@@ -6,11 +6,30 @@ import json
 from typing import Any
 
 from ..db import Database
-from .tvdb_orders import TVDBOrderTransport, episode_orders, episodes_for_order
+from .tvdb_orders import (
+    TVDB_ORDER_MAX_EPISODES,
+    TVDB_ORDER_MAX_PAGES,
+    TVDB_ORDER_RESPONSE_MAX_BYTES,
+    TVDBOrderTransport,
+    episode_orders,
+    episodes_for_order,
+)
 
 
 class ProviderEpisodeRefreshError(RuntimeError):
     """Raised when a provider refresh is not safe to commit as a complete snapshot."""
+
+
+@dataclass(frozen=True)
+class ProviderEpisodeLimits:
+    max_orders: int = 32
+    max_records: int = 25_000
+    max_identities: int = 10_000
+    max_mappings: int = 30_000
+    max_text_chars: int = 16_000_000
+    max_episodes_per_order: int = TVDB_ORDER_MAX_EPISODES
+    max_pages_per_order: int = TVDB_ORDER_MAX_PAGES
+    max_response_bytes: int = TVDB_ORDER_RESPONSE_MAX_BYTES
 
 
 @dataclass(frozen=True)
@@ -51,8 +70,14 @@ def _first_present(record: dict[str, Any], *keys: str) -> Any:
 class ProviderEpisodeCache:
     """Store provider episode identity separately from numbering/order mappings."""
 
-    def __init__(self, database: Database):
+    def __init__(
+        self, database: Database, *, limits: ProviderEpisodeLimits | None = None,
+    ):
         self.database = database
+        self.limits = limits or ProviderEpisodeLimits()
+        for field in self.limits.__dataclass_fields__:
+            if int(getattr(self.limits, field)) <= 0:
+                raise ValueError("Episode Identity provider-cache limits must be positive")
 
     @staticmethod
     def _coordinate_key(
@@ -98,8 +123,16 @@ class ProviderEpisodeCache:
         """Fetch a complete TVDB order snapshot before atomically replacing cache rows."""
         provider_series_id = str(int(series_id))
         language = _clean_text(language).casefold() or "eng"
-        order_info = episode_orders(client, series_id)
+        order_info = episode_orders(
+            client,
+            series_id,
+            max_response_bytes=self.limits.max_response_bytes,
+        )
         orders = list(order_info.get("orders") or [])
+        if len(orders) > self.limits.max_orders:
+            raise ProviderEpisodeRefreshError(
+                "TVDB advertised too many episode-order namespaces for a safe refresh."
+            )
         if not orders:
             orders = [{"namespace": "default", "name": "Default", "default": True}]
 
@@ -107,6 +140,8 @@ class ProviderEpisodeCache:
         mappings: list[dict[str, Any]] = []
         seen_mappings: set[tuple[str, str, str]] = set()
         order_summaries: list[dict[str, Any]] = []
+        total_records = 0
+        total_text_chars = 0
 
         for order in orders:
             namespace = _clean_text(order.get("namespace")).casefold()
@@ -114,8 +149,19 @@ class ProviderEpisodeCache:
                 continue
             order_name = _clean_text(order.get("name")) or namespace
             episodes = episodes_for_order(
-                client, series_id, namespace, language=language,
+                client,
+                series_id,
+                namespace,
+                language=language,
+                max_response_bytes=self.limits.max_response_bytes,
+                max_pages=self.limits.max_pages_per_order,
+                max_episodes=self.limits.max_episodes_per_order,
             )
+            total_records += len(episodes)
+            if total_records > self.limits.max_records:
+                raise ProviderEpisodeRefreshError(
+                    "TVDB episode metadata exceeded the Episode Identity aggregate record limit."
+                )
             order_summaries.append({
                 "namespace": namespace,
                 "name": order_name,
@@ -123,6 +169,20 @@ class ProviderEpisodeCache:
                 "episode_count": len(episodes),
             })
             for record in episodes:
+                total_text_chars += sum(
+                    len(_clean_text(value))
+                    for value in (
+                        record.get("name"),
+                        record.get("overview"),
+                        record.get("aired"),
+                        _first_present(record, "seasonName", "season_name"),
+                    )
+                )
+                if total_text_chars > self.limits.max_text_chars:
+                    raise ProviderEpisodeRefreshError(
+                        "TVDB episode metadata exceeded the Episode Identity text budget."
+                    )
+
                 provider_episode_id = _clean_text(record.get("id"))
                 if not provider_episode_id:
                     continue
@@ -130,6 +190,10 @@ class ProviderEpisodeCache:
                     _first_present(record, "absoluteNumber", "absolute_number")
                 )
                 existing = identities.get(provider_episode_id)
+                if existing is None and len(identities) >= self.limits.max_identities:
+                    raise ProviderEpisodeRefreshError(
+                        "TVDB episode metadata exceeded the Episode Identity identity limit."
+                    )
                 current = {
                     "provider_episode_id": provider_episode_id,
                     "name": _clean_text(record.get("name")),
@@ -157,6 +221,10 @@ class ProviderEpisodeCache:
                 dedupe_key = (provider_episode_id, namespace, coordinate_key)
                 if dedupe_key in seen_mappings:
                     continue
+                if len(mappings) >= self.limits.max_mappings:
+                    raise ProviderEpisodeRefreshError(
+                        "TVDB episode metadata exceeded the Episode Identity mapping limit."
+                    )
                 seen_mappings.add(dedupe_key)
                 mappings.append({
                     "provider_episode_id": provider_episode_id,
