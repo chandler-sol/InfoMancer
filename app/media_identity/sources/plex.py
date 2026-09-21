@@ -961,49 +961,87 @@ def fetch_plex_path_candidates(
     except PathMappingError as exc:
         raise PlexBifError("Plex path lookup requires an absolute media path.") from exc
 
-    payload = _read_plex_json(
-        server_url,
-        token,
-        "/library/all",
-        query={
-            "type": 4,
-            "path": expected_path,
-            "includeGuids": 1,
-            "X-Plex-Container-Start": 0,
-            "X-Plex-Container-Size": _MAX_EPISODE_CANDIDATES + 1,
-        },
-        timeout=timeout,
-        allow_insecure_http=allow_insecure_http,
-    )
-    container = payload.get("MediaContainer")
-    if not isinstance(container, Mapping):
-        raise PlexBifError("Plex path lookup returned an invalid container.")
-    raw_items = container.get("Metadata", ())
-    if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes)):
-        raise PlexBifError("Plex path lookup returned an invalid item list.")
-    if any(not isinstance(item, Mapping) for item in raw_items):
-        raise PlexBifError("Plex path lookup returned a malformed candidate entry.")
-    if "totalSize" not in container:
-        raise PlexSourceFailure(
-            "Plex path lookup did not report a complete result count."
+    items: list[Mapping[str, Any]] = []
+    expected_total: int | None = None
+    start = 0
+    while True:
+        payload = _read_plex_json(
+            server_url,
+            token,
+            "/library/all",
+            query={
+                "type": 4,
+                "path": expected_path,
+                "includeGuids": 1,
+                "X-Plex-Container-Start": start,
+                "X-Plex-Container-Size": _PLEX_PAGE_SIZE,
+            },
+            timeout=timeout,
+            allow_insecure_http=allow_insecure_http,
         )
-    try:
-        total = int(container["totalSize"])
-        returned_offset = int(container.get("offset", 0))
-        returned_size = int(container.get("size", len(raw_items)))
-    except (TypeError, ValueError) as exc:
-        raise PlexSourceFailure(
-            "Plex path lookup returned invalid pagination metadata."
-        ) from exc
-    if total < 0 or total > _MAX_EPISODE_CANDIDATES:
-        raise PlexBifError("Plex path lookup returned too many candidates safely.")
-    if len(raw_items) > _MAX_EPISODE_CANDIDATES:
-        raise PlexBifError("Plex path lookup returned too many candidates safely.")
-    if returned_offset != 0 or returned_size != len(raw_items) or total != len(raw_items):
-        raise PlexSourceFailure(
-            "Plex path lookup returned an incomplete candidate set."
-        )
-    return tuple(raw_items)
+        container = payload.get("MediaContainer")
+        if not isinstance(container, Mapping):
+            raise PlexSourceFailure(
+                "Plex path lookup returned an invalid container."
+            )
+        raw_items = container.get("Metadata", ())
+        if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes)):
+            raise PlexSourceFailure(
+                "Plex path lookup returned an invalid item list."
+            )
+        if any(not isinstance(item, Mapping) for item in raw_items):
+            raise PlexSourceFailure(
+                "Plex path lookup returned a malformed candidate entry."
+            )
+        if "totalSize" not in container:
+            raise PlexSourceFailure(
+                "Plex path lookup did not report a complete result count."
+            )
+        try:
+            total = int(container["totalSize"])
+            returned_offset = int(container.get("offset", start))
+            returned_size = int(container.get("size", len(raw_items)))
+        except (TypeError, ValueError) as exc:
+            raise PlexSourceFailure(
+                "Plex path lookup returned invalid pagination metadata."
+            ) from exc
+        if total < 0 or total > _MAX_EPISODE_CANDIDATES:
+            raise PlexSourceFailure(
+                "Plex path lookup returned too many candidates safely."
+            )
+        if returned_offset != start or returned_size != len(raw_items):
+            raise PlexSourceFailure(
+                "Plex path lookup returned inconsistent pagination metadata."
+            )
+        if len(raw_items) > _PLEX_PAGE_SIZE:
+            raise PlexSourceFailure(
+                "Plex path lookup returned more items than the requested page size."
+            )
+        if expected_total is None:
+            expected_total = total
+        elif total != expected_total:
+            raise PlexSourceFailure(
+                "Plex path lookup changed while candidates were being paged."
+            )
+        if len(items) + len(raw_items) > _MAX_EPISODE_CANDIDATES:
+            raise PlexSourceFailure(
+                "Plex path lookup returned too many candidates safely."
+            )
+        items.extend(raw_items)
+
+        if len(items) > expected_total:
+            raise PlexSourceFailure(
+                "Plex path lookup returned more candidates than declared."
+            )
+        if len(items) == expected_total:
+            break
+        if not raw_items:
+            raise PlexSourceFailure(
+                "Plex path lookup ended before all candidates were returned."
+            )
+        start += len(raw_items)
+
+    return tuple(items)
 
 
 def _iter_plex_parts(
