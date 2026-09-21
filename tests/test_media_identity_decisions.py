@@ -8,7 +8,13 @@ import unittest
 from pathlib import Path
 
 from app.db import Database
-from app.media_identity.fast import FastIdentityService
+from app.media_identity.candidates import generate_episode_candidates
+from app.media_identity.fast import (
+    SCAN_INPUT_SIGNATURE_VERSION,
+    FastIdentityService,
+    combined_scan_input_signature,
+    scan_input_signatures,
+)
 from app.media_identity.models import IdentityReference, IdentityResultState
 from app.media_identity.scoring import resolve_identity
 from app.media_identity.service import MediaIdentityDecisionService
@@ -390,6 +396,46 @@ class DecisionServiceTests(unittest.TestCase):
                         "container_metadata", "runtime", 0.30,
                     ),
                 ],
+            )
+            file_row = FastIdentityService._file_row(conn, 1)
+            streams = FastIdentityService._stream_rows(conn, 1)
+            candidate_set = generate_episode_candidates(
+                conn,
+                title_id=1,
+                season=1,
+                episode_start=1,
+                episode_end=1,
+                include_specials=False,
+                language="eng",
+            )
+            signatures = scan_input_signatures(
+                file_row,
+                streams,
+                candidate_set,
+                [],
+                language="eng",
+                expanded_specials=False,
+            )
+            claimed_identity = {
+                "identity_kind": "episode",
+                "season": 1,
+                "episode_start": 1,
+                "episode_end": 1,
+                "filename": self.media.name,
+                "scan_language": "eng",
+                "expanded_specials": False,
+                "input_signature_version": SCAN_INPUT_SIGNATURE_VERSION,
+                "input_signatures": signatures,
+            }
+            conn.execute(
+                """UPDATE media_identity_scans
+                   SET claimed_identity_json=?,metadata_signature=?
+                   WHERE id=?""",
+                (
+                    json.dumps(claimed_identity, sort_keys=True),
+                    combined_scan_input_signature(signatures),
+                    scan_id,
+                ),
             )
         return scan_id
 
