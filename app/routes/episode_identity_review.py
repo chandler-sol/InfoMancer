@@ -189,6 +189,11 @@ def build_router(ctx: RouteContext):
                 "source_key": result.source_key,
                 "observation_count": result.observation_count,
                 "reused_artifact_count": result.reused_artifact_count,
+                "sampling_stage": (
+                    result.highest_observed_stage.name.casefold()
+                    if result.highest_observed_stage is not None
+                    else ""
+                ),
                 "result_state": resolution.state.value,
             },
             user_id=request.state.user.id,
@@ -202,9 +207,15 @@ def build_router(ctx: RouteContext):
                 if result.source_key
                 else "preview frames"
             )
+            stage_label = (
+                result.highest_observed_stage.name.title()
+                if result.highest_observed_stage is not None
+                else "Unknown"
+            )
             message = (
                 f"Normal verification completed using {source_label}. "
-                f"{result.observation_count} preview frame(s) were analyzed"
+                f"{result.observation_count} preview frame(s) were analyzed "
+                f"through the {stage_label} sampling stage"
             )
             if result.reused_artifact_count:
                 message += (
