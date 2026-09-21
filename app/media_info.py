@@ -30,6 +30,21 @@ class MediaInspectionError(RuntimeError):
         return f"{self.user_message}\n\nFFprobe output:\n{self.technical_detail}"
 
 
+def ffmpeg_executable() -> str:
+    """Resolve FFmpeg from an override, native bundle, or the host PATH."""
+    override = os.environ.get("INFOMANCER_FFMPEG", "").strip()
+    if override:
+        return override
+
+    bundle_dir = getattr(sys, "_MEIPASS", "")
+    if bundle_dir:
+        candidate = Path(bundle_dir) / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+        if candidate.is_file():
+            return str(candidate)
+
+    return shutil.which("ffmpeg") or "ffmpeg"
+
+
 def ffprobe_executable() -> str:
     """Resolve FFprobe from an override, native bundle, or the host PATH."""
     override = os.environ.get("INFOMANCER_FFPROBE", "").strip()
