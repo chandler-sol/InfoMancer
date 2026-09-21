@@ -7,6 +7,18 @@ from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 from .models import AnalyzerContext, IdentityReference
 
 
+class ExternalAnalysisError(ValueError):
+    """Base error for read-only external analysis adapters."""
+
+
+class ExternalSourceFailure(ExternalAnalysisError):
+    """The external source itself could not be queried or trusted."""
+
+
+class ExternalPreviewUnavailable(ExternalAnalysisError):
+    """Optional preview evidence is absent, stale, or unusable for this item."""
+
+
 class ExternalCapability(str, Enum):
     PREVIEW_FRAMES = "preview_frames"
     SUBTITLES = "subtitles"

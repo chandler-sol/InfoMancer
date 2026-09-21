@@ -33,7 +33,8 @@ class SettingsUiContractTests(unittest.TestCase):
         self.assertIn("Episode Identity integrations", template)
         self.assertIn("Plex and Jellyfin are optional, read-only analysis accelerators.", template)
         self.assertIn("Test path mapping", template)
-        self.assertIn("Preview adapter", template)
+        self.assertIn("BIF adapter", template)
+        self.assertIn("Trickplay adapter", template)
         self.assertIn('type="password"', template)
         self.assertNotIn('value="{{ source.token', template)
 

@@ -8,7 +8,13 @@ import unittest
 from pathlib import Path
 
 from app.db import Database
-from app.media_identity.fast import FastIdentityService
+from app.media_identity.candidates import generate_episode_candidates
+from app.media_identity.fast import (
+    SCAN_INPUT_SIGNATURE_VERSION,
+    FastIdentityService,
+    combined_scan_input_signature,
+    scan_input_signatures,
+)
 from app.media_identity.models import IdentityReference, IdentityResultState
 from app.media_identity.scoring import resolve_identity
 from app.media_identity.service import MediaIdentityDecisionService
@@ -206,6 +212,42 @@ class ConservativeResolverTests(unittest.TestCase):
             resolution.state, IdentityResultState.EPISODE_ORDER_CONFLICT
         )
 
+    def test_alternate_order_near_tie_is_inconclusive_before_actionable_state(self) -> None:
+        claimed = _candidate(
+            "same-content",
+            claimed=True,
+            episode=1,
+            mappings=[
+                {
+                    "order_namespace": "production",
+                    "order_name": "Production",
+                    "season": 1,
+                    "episode": 1,
+                },
+                {
+                    "order_namespace": "default",
+                    "order_name": "Default",
+                    "season": 1,
+                    "episode": 4,
+                },
+            ],
+        )
+        other = _candidate("other", episode=2)
+        resolution = resolve_identity(
+            [claimed, other],
+            [
+                _evidence("same-content", "claimed_identity", 0.35, "claim"),
+                _evidence("same-content", "container_metadata", 0.18, "runtime"),
+                _evidence("same-content", "subtitle_text", 0.90, "dialogue"),
+                _evidence("other", "container_metadata", 0.18, "runtime"),
+                _evidence("other", "subtitle_text", 0.89, "dialogue"),
+            ],
+            self.CLAIM,
+        )
+        self.assertEqual(resolution.best_candidate_key, "same-content")
+        self.assertLess(resolution.margin, 0.12)
+        self.assertEqual(resolution.state, IdentityResultState.INCONCLUSIVE)
+
     def test_correct_heavy_cohort_produces_no_mismatch_states(self) -> None:
         mismatch_states = {
             IdentityResultState.POSSIBLE_MISMATCH,
@@ -390,6 +432,46 @@ class DecisionServiceTests(unittest.TestCase):
                         "container_metadata", "runtime", 0.30,
                     ),
                 ],
+            )
+            file_row = FastIdentityService._file_row(conn, 1)
+            streams = FastIdentityService._stream_rows(conn, 1)
+            candidate_set = generate_episode_candidates(
+                conn,
+                title_id=1,
+                season=1,
+                episode_start=1,
+                episode_end=1,
+                include_specials=False,
+                language="eng",
+            )
+            signatures = scan_input_signatures(
+                file_row,
+                streams,
+                candidate_set,
+                [],
+                language="eng",
+                expanded_specials=False,
+            )
+            claimed_identity = {
+                "identity_kind": "episode",
+                "season": 1,
+                "episode_start": 1,
+                "episode_end": 1,
+                "filename": self.media.name,
+                "scan_language": "eng",
+                "expanded_specials": False,
+                "input_signature_version": SCAN_INPUT_SIGNATURE_VERSION,
+                "input_signatures": signatures,
+            }
+            conn.execute(
+                """UPDATE media_identity_scans
+                   SET claimed_identity_json=?,metadata_signature=?
+                   WHERE id=?""",
+                (
+                    json.dumps(claimed_identity, sort_keys=True),
+                    combined_scan_input_signature(signatures),
+                    scan_id,
+                ),
             )
         return scan_id
 
@@ -650,6 +732,108 @@ class DecisionServiceTests(unittest.TestCase):
         stale_preview = self.service.rename_preview(scan.scan_id)
         self.assertFalse(stale_preview["available"])
         self.assertEqual(stale_preview["status"], "stale")
+
+    def _resolved_real_fast_scan(self):
+        sidecar = self._seed_real_fast_mismatch_inputs()
+        scan = FastIdentityService(self.database).scan_file(1)
+        self.service.resolve_scan(scan.scan_id)
+        self.assertTrue(self.service.scan_detail(scan.scan_id)["snapshot_current"])
+        return scan, sidecar
+
+    def test_provider_snapshot_change_invalidates_action_and_confirmation(self) -> None:
+        scan, _ = self._resolved_real_fast_scan()
+        confirmation = self.service.confirm_best(scan.scan_id, None)
+        self.assertTrue(confirmation["current"])
+
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE provider_episode_series_cache
+                   SET source_signature='provider-v2'
+                   WHERE provider='tvdb' AND provider_series_id='4242'
+                     AND language='eng'"""
+            )
+
+        detail = self.service.scan_detail(scan.scan_id)
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+        stale_confirmation = self.service.confirmation_status(1)
+        self.assertIsNotNone(stale_confirmation)
+        self.assertFalse(stale_confirmation["current"])
+        with self.assertRaisesRegex(ValueError, "changed after this identity scan"):
+            self.service.confirm_best(scan.scan_id, None)
+        self.assertEqual(self.service.rename_preview(scan.scan_id)["status"], "stale")
+
+    def test_title_provider_identity_change_invalidates_scan(self) -> None:
+        scan, _ = self._resolved_real_fast_scan()
+        with self.database.connect() as conn:
+            conn.execute("UPDATE titles SET tvdb_id=9999 WHERE id=1")
+
+        detail = self.service.scan_detail(scan.scan_id)
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+
+    def test_runtime_metadata_change_invalidates_scan(self) -> None:
+        scan, _ = self._resolved_real_fast_scan()
+        with self.database.connect() as conn:
+            conn.execute(
+                "UPDATE files SET runtime_seconds=1500 WHERE id=1"
+            )
+
+        detail = self.service.scan_detail(scan.scan_id)
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+
+    def test_stream_selection_change_invalidates_scan(self) -> None:
+        scan, _ = self._resolved_real_fast_scan()
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO media_streams(
+                     file_id,stream_index,stream_type,codec,language,title,
+                     channels,default_flag,forced_flag,disposition_json
+                   ) VALUES (1,7,'audio','AAC','eng','Added Track',2,0,0,'{}')"""
+            )
+
+        detail = self.service.scan_detail(scan.scan_id)
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+
+    def test_unselected_new_sidecar_invalidates_full_subtitle_selection(self) -> None:
+        scan, sidecar = self._resolved_real_fast_scan()
+        extra = self.media.with_suffix(".commentary.srt")
+        extra.write_text(
+            "1\n00:00:00,000 --> 00:00:03,000\n"
+            "unrelated commentary subtitle that was not in the scan\n",
+            encoding="utf-8",
+        )
+        self.assertTrue(sidecar.exists())
+
+        detail = self.service.scan_detail(scan.scan_id)
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+        self.assertEqual(self.service.rename_preview(scan.scan_id)["status"], "stale")
+
+    def test_legacy_scan_without_complete_input_manifest_is_non_actionable(self) -> None:
+        self.service.resolve_scan(self.scan_id)
+        with self.database.connect() as conn:
+            scan = conn.execute(
+                "SELECT claimed_identity_json FROM media_identity_scans WHERE id=?",
+                (self.scan_id,),
+            ).fetchone()
+            claimed = json.loads(scan["claimed_identity_json"])
+            claimed.pop("input_signature_version", None)
+            claimed.pop("input_signatures", None)
+            conn.execute(
+                """UPDATE media_identity_scans
+                   SET claimed_identity_json=?,metadata_signature='legacy'
+                   WHERE id=?""",
+                (json.dumps(claimed), self.scan_id),
+            )
+
+        detail = self.service.scan_detail(self.scan_id)
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+        self.assertEqual(self.service.mie_findings(), [])
+        self.assertEqual(self.service.rename_preview(self.scan_id)["status"], "stale")
 
     def test_file_change_blocks_confirmation(self) -> None:
         self.service.resolve_scan(self.scan_id)

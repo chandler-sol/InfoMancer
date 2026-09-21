@@ -4,6 +4,8 @@ import json
 import os
 import stat
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -95,6 +97,50 @@ class ProviderSecretStoreTests(unittest.TestCase):
             decoded = json.loads(payload.decode("utf-8"))
             self.assertNotIn("plex_token", decoded)
             self.assertEqual(decoded["tvdb_api_key"], "keep-me")
+
+    def test_concurrent_updates_preserve_unrelated_secrets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "providers.enc"
+
+            class SlowLoadStore(ProviderSecretStore):
+                def _load_unlocked(self):
+                    values = super()._load_unlocked()
+                    time.sleep(0.05)
+                    return values
+
+            first = SlowLoadStore(path, "concurrent-secret")
+            second = SlowLoadStore(path, "concurrent-secret")
+            start = threading.Barrier(3)
+            errors: list[BaseException] = []
+
+            def write(store, values):
+                try:
+                    start.wait()
+                    store.update(values)
+                except BaseException as exc:
+                    errors.append(exc)
+
+            threads = [
+                threading.Thread(
+                    target=write,
+                    args=(first, {"plex_token": "plex-value"}),
+                ),
+                threading.Thread(
+                    target=write,
+                    args=(second, {"jellyfin_token": "jellyfin-value"}),
+                ),
+            ]
+            for thread in threads:
+                thread.start()
+            start.wait()
+            for thread in threads:
+                thread.join(timeout=5)
+
+            self.assertFalse(any(thread.is_alive() for thread in threads))
+            self.assertEqual(errors, [])
+            values = ProviderSecretStore(path, "concurrent-secret").load()
+            self.assertEqual(values["plex_token"], "plex-value")
+            self.assertEqual(values["jellyfin_token"], "jellyfin-value")
 
     def test_wrong_application_secret_fails_closed(self):
         with tempfile.TemporaryDirectory() as temporary:

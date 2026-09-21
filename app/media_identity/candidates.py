@@ -10,6 +10,7 @@ from .models import IdentityCandidate, IdentityReference
 
 MAX_FAST_CANDIDATES = 80
 MAX_FAST_SPECIALS = 24
+MAX_FAST_MAPPINGS_PER_CANDIDATE = 32
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,97 @@ def _json_object(value: Any) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
+def _provider_candidate_ids(
+    conn: sqlite3.Connection,
+    *,
+    provider_series_id: str,
+    season: int,
+    episode_start: int,
+    episode_end: int,
+    include_specials: bool,
+    language: str,
+) -> list[str]:
+    """Select the bounded provider identity set before materializing mappings."""
+    regular_rows = conn.execute(
+        """SELECT m.provider_episode_id,
+                  MIN(
+                    CASE
+                      WHEN m.season=? AND m.episode BETWEEN ? AND ? THEN 0
+                      WHEN m.order_namespace='default' AND m.season=?
+                       AND m.episode IS NOT NULL
+                       AND MIN(ABS(m.episode-?),ABS(m.episode-?))<=2 THEN 1
+                      WHEN m.order_namespace='default' AND m.season=?
+                       AND m.episode IS NOT NULL THEN 2
+                      ELSE 9
+                    END
+                  ) priority,
+                  MIN(
+                    CASE
+                      WHEN m.season=? AND m.episode IS NOT NULL
+                      THEN MIN(ABS(m.episode-?),ABS(m.episode-?))
+                      ELSE 10000
+                    END
+                  ) distance
+           FROM provider_episode_mappings m
+           WHERE m.provider='tvdb' AND m.provider_series_id=? AND m.language=?
+             AND (
+               (m.season=? AND m.episode BETWEEN ? AND ?)
+               OR (
+                 m.order_namespace='default' AND m.season=?
+                 AND m.episode IS NOT NULL
+               )
+             )
+           GROUP BY m.provider_episode_id
+           ORDER BY priority,distance,m.provider_episode_id
+           LIMIT ?""",
+        (
+            season,
+            episode_start,
+            episode_end,
+            season,
+            episode_start,
+            episode_end,
+            season,
+            season,
+            episode_start,
+            episode_end,
+            provider_series_id,
+            language,
+            season,
+            episode_start,
+            episode_end,
+            season,
+            MAX_FAST_CANDIDATES,
+        ),
+    ).fetchall()
+    regular_ids = [str(row["provider_episode_id"]) for row in regular_rows]
+
+    special_ids: list[str] = []
+    if include_specials and season != 0:
+        parameters: list[Any] = [provider_series_id, language]
+        exclusion = ""
+        if regular_ids:
+            placeholders = ",".join("?" for _ in regular_ids)
+            exclusion = f" AND m.provider_episode_id NOT IN ({placeholders})"
+            parameters.extend(regular_ids)
+        parameters.append(MAX_FAST_SPECIALS)
+        special_rows = conn.execute(
+            f"""SELECT m.provider_episode_id
+                FROM provider_episode_mappings m
+                WHERE m.provider='tvdb' AND m.provider_series_id=?
+                  AND m.language=? AND m.order_namespace='default'
+                  AND m.season=0{exclusion}
+                GROUP BY m.provider_episode_id
+                ORDER BY m.provider_episode_id
+                LIMIT ?""",
+            parameters,
+        ).fetchall()
+        special_ids = [str(row["provider_episode_id"]) for row in special_rows]
+
+    regular_limit = max(0, MAX_FAST_CANDIDATES - len(special_ids))
+    return regular_ids[:regular_limit] + special_ids
+
+
 def _provider_candidates(
     conn: sqlite3.Connection,
     *,
@@ -69,21 +161,71 @@ def _provider_candidates(
     if not status:
         return CandidateSet((), provider_series_id, "", False)
 
+    selected_ids = _provider_candidate_ids(
+        conn,
+        provider_series_id=provider_series_id,
+        season=season,
+        episode_start=episode_start,
+        episode_end=episode_end,
+        include_specials=include_specials,
+        language=language,
+    )
+    if not selected_ids:
+        return CandidateSet(
+            (), provider_series_id, str(status["source_signature"] or ""), True
+        )
+
+    placeholders = ",".join("?" for _ in selected_ids)
     rows = conn.execute(
-        """SELECT i.provider_episode_id,i.name,i.overview,i.aired,i.metadata_json,
-                  m.order_namespace,m.order_name,m.season,m.episode,m.absolute_number,
-                  m.coordinate_key,e.id expected_episode_id
-           FROM provider_episode_identities i
-           LEFT JOIN provider_episode_mappings m
-             ON m.provider=i.provider
-            AND m.provider_series_id=i.provider_series_id
-            AND m.provider_episode_id=i.provider_episode_id
-            AND m.language=i.language
-           LEFT JOIN expected_episodes e
-             ON e.title_id=? AND CAST(e.tvdb_episode_id AS TEXT)=i.provider_episode_id
-           WHERE i.provider='tvdb' AND i.provider_series_id=? AND i.language=?
-           ORDER BY i.provider_episode_id,m.order_namespace,m.season,m.episode,m.id""",
-        (title_id, provider_series_id, language),
+        f"""WITH ranked_mappings AS (
+              SELECT m.*,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY m.provider_episode_id
+                       ORDER BY
+                         CASE
+                           WHEN m.season=? AND m.episode BETWEEN ? AND ?
+                            AND m.order_namespace='default' THEN 0
+                           WHEN m.season=? AND m.episode BETWEEN ? AND ? THEN 1
+                           WHEN m.order_namespace='default' THEN 2
+                           ELSE 3
+                         END,
+                         m.order_namespace,m.season,m.episode,m.absolute_number,m.id
+                     ) mapping_rank
+              FROM provider_episode_mappings m
+              WHERE m.provider='tvdb' AND m.provider_series_id=?
+                AND m.language=? AND m.provider_episode_id IN ({placeholders})
+            )
+            SELECT i.provider_episode_id,i.name,i.overview,i.aired,i.metadata_json,
+                   m.order_namespace,m.order_name,m.season,m.episode,m.absolute_number,
+                   m.coordinate_key,e.id expected_episode_id
+            FROM provider_episode_identities i
+            LEFT JOIN ranked_mappings m
+              ON m.provider=i.provider
+             AND m.provider_series_id=i.provider_series_id
+             AND m.provider_episode_id=i.provider_episode_id
+             AND m.language=i.language
+             AND m.mapping_rank<=?
+            LEFT JOIN expected_episodes e
+              ON e.title_id=? AND CAST(e.tvdb_episode_id AS TEXT)=i.provider_episode_id
+            WHERE i.provider='tvdb' AND i.provider_series_id=? AND i.language=?
+              AND i.provider_episode_id IN ({placeholders})
+            ORDER BY i.provider_episode_id,m.mapping_rank""",
+        (
+            season,
+            episode_start,
+            episode_end,
+            season,
+            episode_start,
+            episode_end,
+            provider_series_id,
+            language,
+            *selected_ids,
+            MAX_FAST_MAPPINGS_PER_CANDIDATE,
+            title_id,
+            provider_series_id,
+            language,
+            *selected_ids,
+        ),
     ).fetchall()
 
     grouped: dict[str, dict[str, Any]] = {}

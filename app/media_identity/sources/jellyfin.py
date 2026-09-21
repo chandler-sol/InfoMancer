@@ -16,6 +16,8 @@ from ...path_mapping import ExternalPathMapper, PathMappingError, parse_absolute
 from ..external import (
     ExternalCapability,
     ExternalMediaRef,
+    ExternalPreviewUnavailable,
+    ExternalSourceFailure,
     ExternalSourceStatus,
     PreviewFrameRef,
 )
@@ -31,10 +33,19 @@ _MAX_TILE_SHEET_PIXELS = 64_000_000
 _MAX_TILE_JPEG_BYTES = 32 * 1024 * 1024
 _MAX_JSON_BYTES = 8 * 1024 * 1024
 _MAX_EPISODE_CANDIDATES = 4096
+_JELLYFIN_PAGE_SIZE = 256
 
 
 class JellyfinAdapterError(ValueError):
-    """Raised when Jellyfin metadata is ambiguous or cannot be trusted safely."""
+    """Base Jellyfin adapter error retained for adapter-specific callers."""
+
+
+class JellyfinSourceFailure(ExternalSourceFailure, JellyfinAdapterError):
+    """Jellyfin could not be queried or returned untrustworthy source metadata."""
+
+
+class JellyfinPreviewUnavailable(ExternalPreviewUnavailable, JellyfinAdapterError):
+    """Optional Jellyfin Trickplay evidence is absent, stale, or unusable."""
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -441,7 +452,7 @@ def fetch_trickplay_tile(
             timeout=max(1.0, min(float(timeout), 15.0)),
         ) as response:
             if response.status != 200:
-                raise JellyfinAdapterError(
+                raise JellyfinSourceFailure(
                     f"Jellyfin returned HTTP {response.status} for the Trickplay tile."
                 )
             headers = response.headers
@@ -450,7 +461,7 @@ def fetch_trickplay_tile(
             else:
                 content_type = str(headers.get("Content-Type") or "").split(";", 1)[0].strip().casefold()
             if content_type not in {"image/jpeg", "image/jpg"}:
-                raise JellyfinAdapterError(
+                raise JellyfinPreviewUnavailable(
                     "Jellyfin Trickplay response was not a JPEG image."
                 )
             raw_length = headers.get("Content-Length")
@@ -458,11 +469,11 @@ def fetch_trickplay_tile(
                 try:
                     content_length = int(raw_length)
                 except (TypeError, ValueError) as exc:
-                    raise JellyfinAdapterError(
+                    raise JellyfinSourceFailure(
                         "Jellyfin Trickplay response had an invalid Content-Length."
                     ) from exc
                 if content_length < 0 or content_length > limit:
-                    raise JellyfinAdapterError(
+                    raise JellyfinPreviewUnavailable(
                         "Jellyfin Trickplay tile exceeded the safe response-size limit."
                     )
             payload = response.read(limit + 1)
@@ -475,19 +486,21 @@ def fetch_trickplay_tile(
             detail = "Jellyfin did not have the requested Trickplay tile."
         else:
             detail = f"Jellyfin returned HTTP {exc.code} for the Trickplay tile."
-        raise JellyfinAdapterError(detail) from exc
+        if exc.code == 404:
+            raise JellyfinPreviewUnavailable(detail) from exc
+        raise JellyfinSourceFailure(detail) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         reason = getattr(exc, "reason", exc)
-        raise JellyfinAdapterError(
+        raise JellyfinSourceFailure(
             f"InfoMancer could not read the Jellyfin Trickplay tile: {reason}"
         ) from exc
 
     if len(payload) > limit:
-        raise JellyfinAdapterError(
+        raise JellyfinPreviewUnavailable(
             "Jellyfin Trickplay tile exceeded the safe response-size limit."
         )
     if not payload.startswith(b"\xff\xd8"):
-        raise JellyfinAdapterError("Jellyfin Trickplay response was not a JPEG image.")
+        raise JellyfinPreviewUnavailable("Jellyfin Trickplay response was not a JPEG image.")
     return payload
 
 
@@ -498,15 +511,15 @@ def crop_trickplay_frame(tile_jpeg: bytes, frame: PreviewFrameRef) -> bytes:
     try:
         with Image.open(BytesIO(tile_jpeg)) as image:
             if image.format != "JPEG":
-                raise JellyfinAdapterError(
+                raise JellyfinPreviewUnavailable(
                     "Jellyfin Trickplay tile did not decode as JPEG."
                 )
             if image.size != (expected_width, expected_height):
-                raise JellyfinAdapterError(
+                raise JellyfinPreviewUnavailable(
                     "Jellyfin Trickplay tile dimensions do not match its manifest."
                 )
             if image.width * image.height > _MAX_TILE_SHEET_PIXELS:
-                raise JellyfinAdapterError(
+                raise JellyfinPreviewUnavailable(
                     "Jellyfin Trickplay tile exceeds the safe decode-pixel limit."
                 )
             image.load()
@@ -515,7 +528,7 @@ def crop_trickplay_frame(tile_jpeg: bytes, frame: PreviewFrameRef) -> bytes:
             right = left + asset.width
             bottom = top + asset.height
             if right > image.width or bottom > image.height:
-                raise JellyfinAdapterError(
+                raise JellyfinPreviewUnavailable(
                     "Jellyfin Trickplay cell lies outside the decoded tile."
                 )
             cropped = image.crop((left, top, right, bottom)).convert("RGB")
@@ -530,7 +543,7 @@ def crop_trickplay_frame(tile_jpeg: bytes, frame: PreviewFrameRef) -> bytes:
     except JellyfinAdapterError:
         raise
     except (Image.DecompressionBombError, UnidentifiedImageError, OSError, ValueError) as exc:
-        raise JellyfinAdapterError(
+        raise JellyfinPreviewUnavailable(
             "Jellyfin Trickplay tile could not be decoded safely."
         ) from exc
 
@@ -587,19 +600,19 @@ def _media_source_entries(
     if not isinstance(raw_sources, Sequence) or isinstance(
         raw_sources, (str, bytes)
     ):
-        raise JellyfinAdapterError(
+        raise JellyfinSourceFailure(
             "Jellyfin returned an invalid media source list."
         )
 
     sources: list[Mapping[str, Any]] = []
     for source in raw_sources:
         if not isinstance(source, Mapping):
-            raise JellyfinAdapterError(
+            raise JellyfinSourceFailure(
                 "Jellyfin returned a malformed media source entry."
             )
         source_id = str(source.get("Id") or "").strip()
         if not source_id:
-            raise JellyfinAdapterError(
+            raise JellyfinSourceFailure(
                 "Jellyfin returned a media source without a stable id."
             )
         sources.append(source)
@@ -613,7 +626,7 @@ def _select_item_by_path(
     matches: list[Mapping[str, Any]] = []
     for item in items:
         if not isinstance(item, Mapping):
-            raise JellyfinAdapterError(
+            raise JellyfinSourceFailure(
                 "Jellyfin returned a malformed episode candidate."
             )
         paths = [str(item.get("Path") or "").strip()]
@@ -628,7 +641,7 @@ def _select_item_by_path(
             matches.append(item)
 
     if len(matches) > 1:
-        raise JellyfinAdapterError(
+        raise JellyfinSourceFailure(
             "More than one Jellyfin item matches the mapped media path; resolution is ambiguous."
         )
     return matches[0] if matches else None
@@ -652,7 +665,7 @@ def _select_media_source_id(
             path_matches.append(source_id)
     unique_path_matches = tuple(dict.fromkeys(path_matches))
     if len(unique_path_matches) > 1:
-        raise JellyfinAdapterError(
+        raise JellyfinSourceFailure(
             "More than one Jellyfin media source matches the mapped media path; resolution is ambiguous."
         )
     if unique_path_matches:
@@ -672,7 +685,7 @@ def resolve_media_ref(
         return None
     item_id = str(item.get("Id") or "").strip()
     if not item_id:
-        raise JellyfinAdapterError("The matching Jellyfin item has no stable item id.")
+        raise JellyfinSourceFailure("The matching Jellyfin item has no stable item id.")
     provider_ids_raw = item.get("ProviderIds")
     provider_ids = {
         str(key): str(value)
@@ -737,7 +750,7 @@ def _read_jellyfin_json(
             timeout=max(1.0, min(float(timeout), 15.0)),
         ) as response:
             if response.status != 200:
-                raise JellyfinAdapterError(
+                raise JellyfinSourceFailure(
                     f"Jellyfin returned HTTP {response.status} while reading library metadata."
                 )
             raw_length = response.headers.get("Content-Length")
@@ -745,11 +758,11 @@ def _read_jellyfin_json(
                 try:
                     content_length = int(raw_length)
                 except (TypeError, ValueError) as exc:
-                    raise JellyfinAdapterError(
+                    raise JellyfinSourceFailure(
                         "Jellyfin metadata response had an invalid Content-Length."
                     ) from exc
                 if content_length < 0 or content_length > limit:
-                    raise JellyfinAdapterError(
+                    raise JellyfinSourceFailure(
                         "Jellyfin metadata response exceeded the safe response-size limit."
                     )
             payload = response.read(limit + 1)
@@ -764,25 +777,25 @@ def _read_jellyfin_json(
             detail = "Jellyfin did not have the requested library item."
         else:
             detail = f"Jellyfin returned HTTP {exc.code} while reading library metadata."
-        raise JellyfinAdapterError(detail) from exc
+        raise JellyfinSourceFailure(detail) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         reason = getattr(exc, "reason", exc)
-        raise JellyfinAdapterError(
+        raise JellyfinSourceFailure(
             f"InfoMancer could not read Jellyfin library metadata: {reason}"
         ) from exc
 
     if len(payload) > limit:
-        raise JellyfinAdapterError(
+        raise JellyfinSourceFailure(
             "Jellyfin metadata response exceeded the safe response-size limit."
         )
     try:
         parsed = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise JellyfinAdapterError(
+        raise JellyfinSourceFailure(
             "Jellyfin returned malformed JSON library metadata."
         ) from exc
     if not isinstance(parsed, Mapping):
-        raise JellyfinAdapterError(
+        raise JellyfinSourceFailure(
             "Jellyfin returned an unexpected library metadata payload."
         )
     return parsed
@@ -803,43 +816,86 @@ def fetch_episode_candidates(
         raise JellyfinAdapterError(
             "Jellyfin episode coordinates cannot be negative."
         )
-    payload = _read_jellyfin_json(
-        server_url,
-        token,
-        "/Items",
-        query={
-            "recursive": "true",
-            "includeItemTypes": "Episode",
-            "parentIndexNumber": season_number,
-            "indexNumber": episode_number,
-            "fields": "Path,ProviderIds,MediaSources",
-            "enableImages": "false",
-            "enableUserData": "false",
-            "limit": _MAX_EPISODE_CANDIDATES + 1,
-        },
-        timeout=timeout,
-        allow_insecure_http=allow_insecure_http,
-    )
-    raw_items = payload.get("Items")
-    if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes)):
-        raise JellyfinAdapterError(
-            "Jellyfin episode search returned an invalid item list."
+
+    items: list[Mapping[str, Any]] = []
+    expected_total: int | None = None
+    start_index = 0
+    while True:
+        payload = _read_jellyfin_json(
+            server_url,
+            token,
+            "/Items",
+            query={
+                "recursive": "true",
+                "includeItemTypes": "Episode",
+                "parentIndexNumber": season_number,
+                "indexNumber": episode_number,
+                "fields": "Path,ProviderIds,MediaSources",
+                "enableImages": "false",
+                "enableUserData": "false",
+                "startIndex": start_index,
+                "limit": _JELLYFIN_PAGE_SIZE,
+            },
+            timeout=timeout,
+            allow_insecure_http=allow_insecure_http,
         )
-    try:
-        total = int(payload.get("TotalRecordCount", len(raw_items)))
-    except (TypeError, ValueError) as exc:
-        raise JellyfinAdapterError(
-            "Jellyfin episode search returned an invalid result count."
-        ) from exc
-    if total > _MAX_EPISODE_CANDIDATES or len(raw_items) > _MAX_EPISODE_CANDIDATES:
-        raise JellyfinAdapterError(
-            "Jellyfin returned too many episode candidates to resolve safely."
-        )
-    if any(not isinstance(item, Mapping) for item in raw_items):
-        raise JellyfinAdapterError(
-            "Jellyfin episode search returned a malformed candidate entry."
-        )
-    return tuple(raw_items)
+        raw_items = payload.get("Items")
+        if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes)):
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search returned an invalid item list."
+            )
+        if any(not isinstance(item, Mapping) for item in raw_items):
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search returned a malformed candidate entry."
+            )
+        if "TotalRecordCount" not in payload:
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search did not report a complete result count."
+            )
+        try:
+            total = int(payload["TotalRecordCount"])
+            returned_start = int(payload.get("StartIndex", start_index))
+        except (TypeError, ValueError) as exc:
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search returned invalid pagination metadata."
+            ) from exc
+        if total < 0 or total > _MAX_EPISODE_CANDIDATES:
+            raise JellyfinSourceFailure(
+                "Jellyfin returned too many episode candidates to resolve safely."
+            )
+        if returned_start != start_index:
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search returned an unexpected result offset."
+            )
+        if len(raw_items) > _JELLYFIN_PAGE_SIZE:
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search returned more items than the requested page size."
+            )
+        if expected_total is None:
+            expected_total = total
+        elif total != expected_total:
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search changed while candidates were being paged."
+            )
+        if len(items) + len(raw_items) > _MAX_EPISODE_CANDIDATES:
+            raise JellyfinSourceFailure(
+                "Jellyfin returned too many episode candidates to resolve safely."
+            )
+        items.extend(raw_items)
+
+        if len(items) > expected_total:
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search returned more candidates than declared."
+            )
+        if len(items) == expected_total:
+            break
+        if not raw_items:
+            raise JellyfinSourceFailure(
+                "Jellyfin episode search ended before all candidates were returned."
+            )
+        start_index += len(raw_items)
+
+    return tuple(items)
 
 
 def fetch_item(
@@ -851,13 +907,32 @@ def fetch_item(
     allow_insecure_http: bool = False,
 ) -> Mapping[str, Any]:
     normalized_id = _jellyfin_guid(item_id, "Jellyfin item id")
-    return _read_jellyfin_json(
+    item = _read_jellyfin_json(
         server_url,
         token,
         f"/Items/{urllib.parse.quote(normalized_id, safe='')}",
         timeout=timeout,
         allow_insecure_http=allow_insecure_http,
     )
+    returned_id = str(item.get("Id") or "").strip()
+    if not returned_id:
+        raise JellyfinSourceFailure(
+            "Jellyfin item lookup returned no stable item id."
+        )
+    try:
+        normalized_returned_id = _jellyfin_guid(
+            returned_id,
+            "Jellyfin returned item id",
+        )
+    except JellyfinAdapterError as exc:
+        raise JellyfinSourceFailure(
+            "Jellyfin item lookup returned an invalid item id."
+        ) from exc
+    if normalized_returned_id != normalized_id:
+        raise JellyfinSourceFailure(
+            "Jellyfin returned a different item than the one requested."
+        )
+    return item
 
 
 class JellyfinTrickplaySource:
@@ -978,7 +1053,7 @@ class JellyfinTrickplaySource:
             return None
         item_id = str(matched.get("Id") or "").strip()
         if not item_id:
-            raise JellyfinAdapterError(
+            raise JellyfinSourceFailure(
                 "The matching Jellyfin episode has no stable item id."
             )
 
@@ -997,7 +1072,7 @@ class JellyfinTrickplaySource:
             or _jellyfin_guid(resolved.item_id, "Jellyfin item id")
             != _jellyfin_guid(item_id, "Jellyfin item id")
         ):
-            raise JellyfinAdapterError(
+            raise JellyfinSourceFailure(
                 "The Jellyfin episode changed while it was being resolved."
             )
         return resolved
@@ -1053,9 +1128,85 @@ class JellyfinTrickplaySource:
 
     def read_preview(self, frame: PreviewFrameRef) -> bytes:
         if not self.status().available:
-            raise JellyfinAdapterError(
+            raise JellyfinSourceFailure(
                 "Jellyfin Trickplay preview reuse is not currently available."
             )
+        if str(frame.source_key or "").strip().casefold() != self.source_key:
+            raise JellyfinAdapterError("Preview frame does not belong to Jellyfin.")
+
+        asset = _parse_trickplay_asset(frame)
+        item = fetch_item(
+            self.server_url,
+            self._token,
+            frame.item_id,
+            allow_insecure_http=self.allow_insecure_http,
+        )
+
+        source_ids = []
+        for source in _media_source_entries(item):
+            try:
+                source_ids.append(
+                    _jellyfin_guid(
+                        str(source.get("Id") or ""),
+                        "Jellyfin media source id",
+                    )
+                )
+            except JellyfinAdapterError as exc:
+                raise JellyfinSourceFailure(
+                    "Jellyfin returned an invalid media source while revalidating Trickplay."
+                ) from exc
+        expected_source_id = _jellyfin_guid(
+            asset.media_source_id,
+            "Jellyfin media source id",
+        )
+        if source_ids.count(expected_source_id) != 1:
+            raise JellyfinPreviewUnavailable(
+                "Jellyfin media source changed after preview enumeration."
+            )
+
+        variant = select_trickplay_variant(
+            parse_trickplay_variants(item),
+            media_source_id=asset.media_source_id,
+        )
+        if variant is None:
+            raise JellyfinPreviewUnavailable(
+                "Jellyfin Trickplay manifest is no longer available for this media source."
+            )
+        if (
+            asset.width != variant.width
+            or asset.height != variant.height
+            or asset.tile_width != variant.tile_width
+            or asset.tile_height != variant.tile_height
+        ):
+            raise JellyfinPreviewUnavailable(
+                "Jellyfin Trickplay manifest changed after preview enumeration."
+            )
+
+        thumbnail_index = (
+            asset.tile_index * variant.thumbnails_per_tile
+            + asset.row * variant.tile_width
+            + asset.column
+        )
+        if asset.tile_index >= variant.tile_count or thumbnail_index >= variant.thumbnail_count:
+            raise JellyfinPreviewUnavailable(
+                "Jellyfin Trickplay frame no longer exists in the current manifest."
+            )
+        expected_timestamp = thumbnail_index * variant.interval_ms
+        if expected_timestamp != int(frame.timestamp_ms):
+            raise JellyfinPreviewUnavailable(
+                "Jellyfin Trickplay timing changed after preview enumeration."
+            )
+
+        current_signature = trickplay_source_signature(
+            frame.item_id,
+            str(item.get("Etag") or "").strip(),
+            variant,
+        )
+        if current_signature != str(frame.source_signature or ""):
+            raise JellyfinPreviewUnavailable(
+                "Jellyfin item or Trickplay manifest changed after preview enumeration."
+            )
+
         return read_trickplay_preview(
             self.server_url,
             self._token,

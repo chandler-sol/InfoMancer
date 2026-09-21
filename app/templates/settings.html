@@ -65,7 +65,7 @@
   <section class="panel settings-card full-width">
     <p class="eyebrow">MEDIA SERVERS</p>
     <h2>Episode Identity integrations</h2>
-    <p class="muted">Plex and Jellyfin are optional, read-only analysis accelerators. The Jellyfin Trickplay adapter can be configured now, but preview frames are not advertised as analysis-ready until a consuming analyzer is installed. Plex preview-image ingestion remains unavailable until its dedicated adapter is installed.</p>
+    <p class="muted">Plex and Jellyfin are optional, read-only analysis accelerators. Their preview adapters can be configured now, but preview frames are not advertised as analysis-ready until a consuming analyzer is installed.</p>
     {% if integration_secret_error %}<div class="form-error">{{ integration_secret_error }}</div>{% endif %}
   </section>
 
@@ -82,7 +82,7 @@
       {% if source.source_key == 'jellyfin' %}
       <div><strong>{{ 'Ready' if source.preview_frames_available else 'Installed' if source.source_status.available else 'Unavailable' }}</strong><span>Trickplay adapter</span></div>
       {% else %}
-      <div><strong>Pending</strong><span>Preview adapter</span></div>
+      <div><strong>{{ 'Ready' if source.preview_frames_available else 'Installed' if source.source_status.available else 'Unavailable' }}</strong><span>BIF adapter</span></div>
       {% endif %}
       <div><strong>Read-only</strong><span>Source access</span></div>
     </div>
@@ -98,7 +98,7 @@
     <form class="settings-form" method="post" action="/settings/integrations/{{ source.source_key }}">
       <div class="settings-form-grid">
         <label>Server URL
-          <input name="server_url" type="url" value="{{ source.server_url }}" placeholder="{{ 'http://plex.local:32400' if source.source_key == 'plex' else 'https://jellyfin.local:8096' }}">
+          <input name="server_url" type="url" value="{{ source.server_url }}" placeholder="{{ 'https://plex.local:32400' if source.source_key == 'plex' else 'https://jellyfin.local:8096' }}">
           <small>Use the URL reachable from the InfoMancer server. Redirects are not followed during connection tests.</small>
         </label>
         <label>Access token
@@ -107,15 +107,15 @@
         </label>
         {% if source.source_key == 'plex' %}
         <label>Plex metadata root
-          <input name="metadata_root" value="{{ source.metadata_root }}" placeholder="Optional custom Plex data root">
-          <small>Optional for now. PR G will use this for read-only BIF discovery when automatic detection is insufficient.</small>
+          <input name="metadata_root" value="{{ source.metadata_root }}" placeholder="Auto-detect, or enter a custom Plex data root">
+          <small>Leave blank for Auto detection of common local Plex data roots. Set a custom absolute path when Plex metadata lives somewhere else. HTTP BIF reuse remains the preferred path.</small>
         </label>
         {% endif %}
       </div>
       <label class="checkbox-label"><input type="checkbox" name="enabled" value="1" {% if source.enabled %}checked{% endif %}> Enable {{ source.label }} as an Episode Identity external source</label>
-      {% if source.source_key == 'jellyfin' %}
-      <label class="checkbox-label"><input type="checkbox" name="allow_insecure_http" value="1" {% if source.allow_insecure_http %}checked{% endif %}> Allow this Jellyfin token over plain HTTP</label>
-      <small class="muted">Off by default. Prefer HTTPS. Enable only when you intentionally use a trusted local HTTP-only Jellyfin connection.</small>
+      {% if source.source_key in ['plex', 'jellyfin'] %}
+      <label class="checkbox-label"><input type="checkbox" name="allow_insecure_http" value="1" {% if source.allow_insecure_http %}checked{% endif %}> Allow this {{ source.label }} token over plain HTTP</label>
+      <small class="muted">Off by default. Prefer HTTPS. Enable only when you intentionally use a trusted local HTTP-only {{ source.label }} connection.</small>
       {% endif %}
       {% if source.token_configured %}<label class="checkbox-label"><input type="checkbox" name="clear_token" value="1"> Remove the saved {{ source.label }} token</label>{% endif %}
       <div class="actions">
