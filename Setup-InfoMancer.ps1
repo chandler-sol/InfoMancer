@@ -242,7 +242,9 @@ if (-not (Test-Path -LiteralPath 'data')) {
 }
 
 $currentOcr = ''
-$ocrLine = Get-Content -LiteralPath '.env' | Where-Object { $_ -match '^INFOMANCER_INSTALL_OCR=' } | Select-Object -First 1
+$ocrLine = Get-Content -LiteralPath '.env' |
+    Where-Object { $_ -match '^INFOMANCER_INSTALL_OCR=' } |
+    Select-Object -First 1
 if ($ocrLine) {
     $currentOcr = ($ocrLine -split '=', 2)[1].Trim().ToLowerInvariant()
 }
@@ -483,7 +485,8 @@ Write-Host 'Do not port-forward port 8787 to the public Internet.' -ForegroundCo
 Write-Host 'Setup complete.' -ForegroundColor Green
 
 }
-Set-EnvValue 'INFOMANCER_INSTALL_OCR' ($(if ($ocrEnabled) { 'true' } else { 'false' }))
+$ocrValue = if ($ocrEnabled) { 'true' } else { 'false' }
+Set-EnvValue 'INFOMANCER_INSTALL_OCR' $ocrValue
 if ($ocrEnabled) {
     Write-Host 'Episode Identity CPU OCR will be included in the Server image.' -ForegroundColor Green
 } else {
