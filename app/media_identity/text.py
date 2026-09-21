@@ -95,24 +95,47 @@ def normalize_subtitle_text(text: str, extension: str = "") -> str:
     return _SPACE.sub(" ", " ".join(dialogue)).strip().casefold()
 
 
+
+
+def _case_sensitive_media_name(media: Path) -> bool:
+    """Best-effort detection for case-distinct sibling names.
+
+    On case-insensitive filesystems an alternate-cased spelling of the same media
+    path resolves to the same inode. Otherwise require exact basename casing so
+    POSIX directories can safely contain Episode.mkv and episode.mkv side by side.
+    """
+    alternate_name = media.name.swapcase()
+    if alternate_name == media.name:
+        return os.name != "nt"
+    alternate = media.with_name(alternate_name)
+    try:
+        if alternate.exists():
+            return not os.path.samefile(media, alternate)
+    except OSError:
+        pass
+    return os.name != "nt"
+
+
 def discover_sidecar_subtitles(media_path: str | Path) -> list[Path]:
     """Return bounded, same-basename subtitle sidecars without following symlinks."""
     media = Path(media_path)
     parent = media.parent
-    prefix = media.stem.casefold()
+    case_sensitive = _case_sensitive_media_name(media)
+    prefix = media.stem if case_sensitive else media.stem.casefold()
     pool: list[tuple[tuple[str, str], Path]] = []
     try:
         for candidate in parent.iterdir():
             suffix = candidate.suffix.casefold()
             if suffix not in SIDECAR_EXTENSIONS:
                 continue
-            folded_name = candidate.name.casefold()
+            comparable_name = candidate.name if case_sensitive else candidate.name.casefold()
+            comparable_suffix = candidate.suffix if case_sensitive else suffix
             if not (
-                folded_name == f"{prefix}{suffix}"
-                or folded_name.startswith(prefix + ".")
+                comparable_name == f"{prefix}{comparable_suffix}"
+                or comparable_name.startswith(prefix + ".")
             ):
                 continue
-            sort_key = (folded_name, candidate.name)
+            sort_key = (candidate.name.casefold(), candidate.name)
             if len(pool) < MAX_SIDECAR_SELECTION_POOL:
                 pool.append((sort_key, candidate))
                 pool.sort(key=lambda item: item[0])
