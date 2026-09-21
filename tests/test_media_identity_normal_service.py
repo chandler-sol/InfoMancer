@@ -252,6 +252,53 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             )
         )
 
+    def test_strong_visual_separation_stops_normal_after_initial_five_frames(self):
+        class ManyFrameSource(FakePreviewSource):
+            def preview_frames(self, _media):
+                return tuple(
+                    PreviewFrameRef(
+                        source_key=self.source_key,
+                        item_id="episode-1",
+                        timestamp_ms=index * 10_000,
+                        asset_ref=f"tile:{index}",
+                        source_signature="preview-many-v1",
+                        width=320,
+                        height=180,
+                    )
+                    for index in range(40)
+                )
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"bronze harbor lantern meadow quartz thunder"
+
+        source = ManyFrameSource()
+        engine = FakeOcr()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            engine,
+        )
+
+        result = service.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(result.observation_count, 5)
+        self.assertEqual(result.text_observation_count, 5)
+        self.assertEqual(source.read_calls, 5)
+        self.assertEqual(engine.calls, 5)
+        with self.database.connect() as conn:
+            claimed = json.loads(
+                conn.execute(
+                    """SELECT claimed_identity_json
+                       FROM media_identity_scans WHERE id=?""",
+                    (self.fast_scan.scan_id,),
+                ).fetchone()["claimed_identity_json"]
+            )
+        self.assertEqual(
+            claimed["normal_ocr"]["highest_observed_stage"],
+            1,
+        )
+
     def test_second_normal_run_reuses_derived_ocr_without_rereading_preview(self):
         source = FakePreviewSource()
         engine = FakeOcr()
