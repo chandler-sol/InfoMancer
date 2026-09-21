@@ -14,6 +14,7 @@ on:
       - scripts/stage_ffmpeg.py
       - scripts/verify_macos_minos.py
       - requirements.txt
+      - requirements-ocr.txt
   pull_request:
     branches:
       - testing/0.8-beta
