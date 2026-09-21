@@ -31,10 +31,12 @@ from app.media_identity.sources.plex import (
     fetch_plex_bif_index,
     fetch_plex_episode_candidates,
     fetch_plex_item,
+    fetch_plex_path_candidates,
     normalize_plex_metadata_root,
     parse_bif_index,
     plex_bif_path_for_bundle,
     read_bif_index,
+    resolve_local_bif_path,
     resolve_plex_media_ref,
 )
 
@@ -232,6 +234,16 @@ class PlexBifFoundationTests(unittest.TestCase):
                 with self.assertRaisesRegex(PlexBifError, pattern):
                     parse_bif_index(index_prefix(bif), file_size=len(bif))
 
+    def test_rejects_duplicate_bif_timestamps(self):
+        bif = build_bif(
+            frames=(
+                (10, b"\xff\xd8first\xff\xd9"),
+                (10, b"\xff\xd8second\xff\xd9"),
+            )
+        )
+        with self.assertRaisesRegex(PlexBifError, "strictly increasing"):
+            parse_bif_index(index_prefix(bif), file_size=len(bif))
+
     def test_rejects_truncated_index_and_bad_end_marker(self):
         bif = build_bif()
         prefix = index_prefix(bif)
@@ -332,6 +344,40 @@ class PlexBifFoundationTests(unittest.TestCase):
                 (first, second),
                 expected_external_path=expected,
             )
+
+    def test_plex_path_candidate_query_uses_exact_full_path(self):
+        expected = "/srv/tv/Show/Season 99/Wrong Number.mkv"
+        payload = json.dumps(
+            {
+                "MediaContainer": {
+                    "totalSize": 1,
+                    "Metadata": [plex_episode_item(path=expected)],
+                }
+            }
+        ).encode("utf-8")
+        opener = DummyOpener(
+            DummyResponse(payload, content_type="application/json")
+        )
+
+        with patch(
+            "app.media_identity.sources.plex.urllib.request.build_opener",
+            return_value=opener,
+        ):
+            items = fetch_plex_path_candidates(
+                "https://plex.local:32400",
+                "secret",
+                path=expected,
+            )
+
+        self.assertEqual(len(items), 1)
+        parsed = urllib.parse.urlsplit(opener.request.full_url)
+        query = urllib.parse.parse_qs(parsed.query)
+        self.assertEqual(parsed.path, "/library/all")
+        self.assertEqual(query["type"], ["4"])
+        self.assertEqual(query["path"], [expected])
+        self.assertEqual(query["includeGuids"], ["1"])
+        self.assertNotIn("parentIndex", query)
+        self.assertNotIn("index", query)
 
     def test_plex_episode_candidate_query_is_bounded_and_token_safe(self):
         payload = json.dumps(
@@ -748,9 +794,12 @@ class PlexBifFoundationTests(unittest.TestCase):
 
             with (
                 patch(
-                    "app.media_identity.sources.plex.fetch_plex_episode_candidates",
+                    "app.media_identity.sources.plex.fetch_plex_path_candidates",
                     return_value=(candidate,),
-                ),
+                ) as path_candidates,
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_episode_candidates"
+                ) as episode_candidates,
                 patch(
                     "app.media_identity.sources.plex.fetch_plex_item",
                     return_value=candidate,
@@ -769,6 +818,13 @@ class PlexBifFoundationTests(unittest.TestCase):
                 frames = source.preview_frames(media)
                 image = source.read_preview(frames[1])
 
+            path_candidates.assert_called_once_with(
+                "https://plex.local:32400",
+                "secret",
+                path=expected_external,
+                allow_insecure_http=False,
+            )
+            episode_candidates.assert_not_called()
             self.assertEqual(media.item_id, "101")
             self.assertEqual(media.media_source_id, "501")
             self.assertEqual(len(frames), 2)
@@ -795,6 +851,61 @@ class PlexBifFoundationTests(unittest.TestCase):
                 ExternalCapability.PREVIEW_FRAMES,
                 source.status().capabilities,
             )
+
+    def test_path_first_resolution_ignores_wrong_claimed_episode_coordinates(self):
+        expected_external = "/srv/tv/Show/Season 01/Actually Episode 05.mkv"
+        candidate = plex_episode_item(
+            rating_key="105",
+            path=expected_external,
+            part_id="505",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            local_root = Path(temporary) / "tv"
+            local_path = local_root / "Show" / "Season 01" / "Actually Episode 05.mkv"
+            source = PlexBifSource(
+                "https://plex.local:32400",
+                "secret",
+                ExternalPathMapper(
+                    [PathMapping("plex", "/srv/tv", str(local_root))]
+                ),
+            )
+            context = AnalyzerContext(
+                media=MediaIdentityFile(
+                    file_id=1,
+                    title_id=1,
+                    path=str(local_path),
+                    size_bytes=1,
+                    modified_at=1.0,
+                ),
+                claimed_identity=IdentityReference(
+                    identity_kind="episode",
+                    season=9,
+                    episode=99,
+                    display_name="Wrong claimed coordinates",
+                ),
+                profile=IdentityProfile.NORMAL,
+            )
+
+            with (
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_path_candidates",
+                    return_value=(candidate,),
+                ) as path_candidates,
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_episode_candidates"
+                ) as episode_candidates,
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_item",
+                    return_value=candidate,
+                ),
+            ):
+                resolved = source.resolve_media(context)
+
+            self.assertIsNotNone(resolved)
+            self.assertEqual(resolved.item_id, "105")
+            self.assertEqual(resolved.media_source_id, "505")
+            path_candidates.assert_called_once()
+            episode_candidates.assert_not_called()
 
     def test_http_frame_hash_rejects_changed_jpeg_without_refetching_bif(self):
         original = b"\xff\xd8AAAA\xff\xd9"
@@ -836,6 +947,51 @@ class PlexBifFoundationTests(unittest.TestCase):
                 0,
                 allow_insecure_http=False,
             )
+
+    def test_local_bif_discovery_rejects_symlink_escape(self):
+        expected = "/srv/tv/Show/Season 01/Episode.mkv"
+        media_hash = "a" + "b" * 39
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "Plex Media Server"
+            database_path = (
+                root
+                / "Plug-in Support"
+                / "Databases"
+                / "com.plexapp.plugins.library.db"
+            )
+            database_path.parent.mkdir(parents=True)
+            with sqlite3.connect(database_path) as connection:
+                connection.execute(
+                    "CREATE TABLE media_parts (id INTEGER PRIMARY KEY, hash TEXT, file TEXT)"
+                )
+                connection.execute(
+                    "INSERT INTO media_parts(id,hash,file) VALUES (?,?,?)",
+                    (501, media_hash, expected),
+                )
+
+            bundle = (
+                root
+                / "Media"
+                / "localhost"
+                / media_hash[0]
+                / f"{media_hash[1:]}.bundle"
+            )
+            outside = Path(temporary) / "outside-bundle"
+            outside_index = outside / "Contents" / "Indexes" / "index-sd.bif"
+            outside_index.parent.mkdir(parents=True)
+            outside_index.write_bytes(build_bif())
+            bundle.parent.mkdir(parents=True)
+            try:
+                bundle.symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"directory symlinks unavailable: {exc}")
+
+            with self.assertRaisesRegex(PlexBifError, "escapes"):
+                resolve_local_bif_path(
+                    root,
+                    part_id="501",
+                    expected_external_path=expected,
+                )
 
     def test_custom_metadata_root_falls_back_to_exact_local_bif(self):
         expected = "/srv/tv/Show/Season 01/Episode.mkv"
