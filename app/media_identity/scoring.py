@@ -219,11 +219,18 @@ def resolve_identity(
     best_is_claimed = best.candidate_key in claimed_keys
     best_row = by_key.get(best.candidate_key, {})
 
+    ambiguous = len(resolved) > 1 and margin < 0.12
+
     if end > start:
         state = IdentityResultState.INCONCLUSIVE
         explanation = (
             "Fast resolution remains inconclusive for a multi-episode file because "
             "one candidate identity cannot prove the complete episode range."
+        )
+    elif ambiguous:
+        state = IdentityResultState.INCONCLUSIVE
+        explanation = (
+            "The leading candidates are too close to distinguish safely."
         )
     elif (
         best_is_claimed
@@ -271,12 +278,7 @@ def resolve_identity(
                 "but there is not enough independent content evidence to verify it."
             )
     else:
-        if margin < 0.12:
-            state = IdentityResultState.INCONCLUSIVE
-            explanation = (
-                "The leading candidates are too close to distinguish safely."
-            )
-        elif (
+        if (
             not best.content_support
             or best.support_groups < 2
             or best.conflict_strength > 0.25
