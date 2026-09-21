@@ -62,11 +62,11 @@ class RapidOcrCpuEngine:
         )
 
     @staticmethod
-    def _cpu_params() -> dict[str, Any]:
+    def _cpu_params(engine_type: Any = "onnxruntime") -> dict[str, Any]:
         return {
-            "Det.engine_type": "onnxruntime",
-            "Cls.engine_type": "onnxruntime",
-            "Rec.engine_type": "onnxruntime",
+            "Det.engine_type": engine_type,
+            "Cls.engine_type": engine_type,
+            "Rec.engine_type": engine_type,
             "EngineConfig.onnxruntime.use_cuda": False,
             "EngineConfig.onnxruntime.use_dml": False,
             "EngineConfig.onnxruntime.use_cann": False,
@@ -82,13 +82,15 @@ class RapidOcrCpuEngine:
                 "Install the optional RapidOCR and ONNX Runtime component first."
             )
         try:
-            from rapidocr import RapidOCR
+            from rapidocr import EngineType, RapidOCR
         except Exception as exc:
             raise RapidOcrUnavailableError(
                 "RapidOCR CPU analysis could not be imported."
             ) from exc
         try:
-            return RapidOCR(params=self._cpu_params())
+            return RapidOCR(
+                params=self._cpu_params(EngineType.ONNXRUNTIME)
+            )
         except Exception as exc:
             raise RapidOcrUnavailableError(
                 "RapidOCR CPU analysis could not initialize its ONNX models."
