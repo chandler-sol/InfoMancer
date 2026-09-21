@@ -886,12 +886,12 @@ def fetch_plex_episode_candidates(
         )
         container = payload.get("MediaContainer")
         if not isinstance(container, Mapping):
-            raise PlexBifError("Plex episode search returned an invalid container.")
+            raise PlexSourceFailure("Plex episode search returned an invalid container.")
         raw_items = container.get("Metadata", ())
         if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes)):
-            raise PlexBifError("Plex episode search returned an invalid item list.")
+            raise PlexSourceFailure("Plex episode search returned an invalid item list.")
         if any(not isinstance(item, Mapping) for item in raw_items):
-            raise PlexBifError(
+            raise PlexSourceFailure(
                 "Plex episode search returned a malformed candidate entry."
             )
         try:
@@ -900,15 +900,15 @@ def fetch_plex_episode_candidates(
             raw_total = container.get("totalSize")
             total = int(raw_total) if raw_total is not None else None
         except (TypeError, ValueError) as exc:
-            raise PlexBifError(
+            raise PlexSourceFailure(
                 "Plex episode search returned invalid pagination metadata."
             ) from exc
         if returned_offset != start or returned_size != len(raw_items):
-            raise PlexBifError(
+            raise PlexSourceFailure(
                 "Plex episode search returned inconsistent pagination metadata."
             )
         if len(raw_items) > _PLEX_PAGE_SIZE:
-            raise PlexBifError(
+            raise PlexSourceFailure(
                 "Plex episode search returned more items than the requested page size."
             )
         if total is not None:
@@ -919,7 +919,7 @@ def fetch_plex_episode_candidates(
             if expected_total is None:
                 expected_total = total
             elif total != expected_total:
-                raise PlexBifError(
+                raise PlexSourceFailure(
                     "Plex episode search changed while candidates were being paged."
                 )
         if len(items) + len(raw_items) > _MAX_EPISODE_CANDIDATES:
@@ -936,7 +936,7 @@ def fetch_plex_episode_candidates(
             if len(items) == expected_total:
                 break
             if not raw_items:
-                raise PlexBifError(
+                raise PlexSourceFailure(
                     "Plex episode search ended before all candidates were returned."
                 )
         elif not raw_items:
@@ -1049,17 +1049,17 @@ def _iter_plex_parts(
 ) -> tuple[tuple[Mapping[str, Any], Mapping[str, Any]], ...]:
     raw_media = item.get("Media", ())
     if not isinstance(raw_media, Sequence) or isinstance(raw_media, (str, bytes)):
-        raise PlexBifError("Plex returned an invalid Media list.")
+        raise PlexSourceFailure("Plex returned an invalid Media list.")
     parts: list[tuple[Mapping[str, Any], Mapping[str, Any]]] = []
     for media in raw_media:
         if not isinstance(media, Mapping):
-            raise PlexBifError("Plex returned a malformed Media entry.")
+            raise PlexSourceFailure("Plex returned a malformed Media entry.")
         raw_parts = media.get("Part", ())
         if not isinstance(raw_parts, Sequence) or isinstance(raw_parts, (str, bytes)):
-            raise PlexBifError("Plex returned an invalid Part list.")
+            raise PlexSourceFailure("Plex returned an invalid Part list.")
         for part in raw_parts:
             if not isinstance(part, Mapping):
-                raise PlexBifError("Plex returned a malformed Part entry.")
+                raise PlexSourceFailure("Plex returned a malformed Part entry.")
             _plex_numeric_id(part.get("id"), "Plex part id")
             parts.append((media, part))
     return tuple(parts)
@@ -1156,7 +1156,7 @@ def fetch_plex_item(
     )
     container = payload.get("MediaContainer")
     if not isinstance(container, Mapping):
-        raise PlexBifError("Plex item lookup returned an invalid container.")
+        raise PlexSourceFailure("Plex item lookup returned an invalid container.")
     raw_items = container.get("Metadata", ())
     if (
         not isinstance(raw_items, Sequence)
@@ -1164,10 +1164,10 @@ def fetch_plex_item(
         or len(raw_items) != 1
         or not isinstance(raw_items[0], Mapping)
     ):
-        raise PlexBifError("Plex item lookup did not return exactly one item.")
+        raise PlexSourceFailure("Plex item lookup did not return exactly one item.")
     returned_id = _plex_numeric_id(raw_items[0].get("ratingKey"), "Plex rating key")
     if returned_id != normalized_id:
-        raise PlexBifError("Plex returned a different item than the one requested.")
+        raise PlexSourceFailure("Plex returned a different item than the one requested.")
     return raw_items[0]
 
 
