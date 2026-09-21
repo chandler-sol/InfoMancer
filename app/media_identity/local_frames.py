@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat as stat_module
 import subprocess
 from typing import Any
 
@@ -55,7 +56,13 @@ def _canonical_json(value: Any) -> str:
     )
 
 
-def _media_signature(context: AnalyzerContext, runtime_seconds: float) -> str:
+def _media_signature(
+    context: AnalyzerContext,
+    runtime_seconds: float,
+    *,
+    device_id: int | None,
+    inode_id: int | None,
+) -> str:
     payload = {
         "version": LOCAL_FRAME_SOURCE_VERSION,
         "file_id": int(context.media.file_id),
@@ -64,21 +71,43 @@ def _media_signature(context: AnalyzerContext, runtime_seconds: float) -> str:
         "modified_at": context.media.modified_at,
         "sha256": context.media.sha256 or "",
         "runtime_seconds": round(float(runtime_seconds), 6),
+        "device_id": device_id,
+        "inode_id": inode_id,
     }
     return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
 
 
-def _stat_matches(path: Path, context: AnalyzerContext) -> bool:
+def _stat_identity(path: Path) -> tuple[os.stat_result, int | None, int | None] | None:
     try:
-        stat = path.stat()
+        result = path.stat()
     except OSError:
+        return None
+    if not stat_module.S_ISREG(result.st_mode):
+        return None
+    device_id = int(getattr(result, "st_dev", 0) or 0) or None
+    inode_id = int(getattr(result, "st_ino", 0) or 0) or None
+    return result, device_id, inode_id
+
+
+def _stat_matches(
+    path: Path,
+    context: AnalyzerContext,
+    *,
+    device_id: int | None = None,
+    inode_id: int | None = None,
+) -> bool:
+    identity = _stat_identity(path)
+    if identity is None:
         return False
-    if not path.is_file():
-        return False
-    if int(stat.st_size) != int(context.media.size_bytes):
+    result, current_device, current_inode = identity
+    if int(result.st_size) != int(context.media.size_bytes):
         return False
     expected_mtime = context.media.modified_at
-    if expected_mtime is not None and float(stat.st_mtime) != float(expected_mtime):
+    if expected_mtime is not None and float(result.st_mtime) != float(expected_mtime):
+        return False
+    if device_id is not None and current_device != device_id:
+        return False
+    if inode_id is not None and current_inode != inode_id:
         return False
     return True
 
@@ -159,8 +188,19 @@ class LocalFfmpegFrameSource:
         self.runtime_seconds = runtime
         self.executable = str(executable or ffmpeg_executable())
         self.timeout_seconds = max(1, min(int(timeout_seconds), 60))
+        path_identity = _stat_identity(Path(context.media.path))
+        if path_identity is None:
+            self._device_id = None
+            self._inode_id = None
+        else:
+            _, self._device_id, self._inode_id = path_identity
         self._signature = (
-            _media_signature(context, runtime)
+            _media_signature(
+                context,
+                runtime,
+                device_id=self._device_id,
+                inode_id=self._inode_id,
+            )
             if runtime > 0
             else ""
         )
@@ -173,7 +213,12 @@ class LocalFfmpegFrameSource:
                 available=False,
                 detail="A positive cataloged runtime is required for generated frames.",
             )
-        if not _stat_matches(path, self.context):
+        if not _stat_matches(
+            path,
+            self.context,
+            device_id=self._device_id,
+            inode_id=self._inode_id,
+        ):
             return ExternalSourceStatus(
                 source_key=self.source_key,
                 available=False,
@@ -242,8 +287,31 @@ class LocalFfmpegFrameSource:
             raise LocalFrameUnavailable(
                 "Generated preview reference is stale for the current media snapshot."
             )
+        expected_item_id = f"file:{int(self.context.media.file_id)}"
+        if frame.item_id != expected_item_id:
+            raise LocalFrameSourceFailure(
+                "Generated preview frame belongs to a different media item."
+            )
+        duration_ms = max(1, int(round(self.runtime_seconds * 1000.0)))
+        if int(frame.timestamp_ms) < 0 or int(frame.timestamp_ms) >= duration_ms:
+            raise LocalFrameUnavailable(
+                "Generated preview timestamp is outside the verified media runtime."
+            )
+        expected_asset_ref = (
+            f"ffmpeg:{LOCAL_FRAME_SOURCE_VERSION}:"
+            f"{int(frame.timestamp_ms)}:{_MAX_WIDTH}x{_MAX_HEIGHT}"
+        )
+        if frame.asset_ref != expected_asset_ref:
+            raise LocalFrameSourceFailure(
+                "Generated preview reference does not match its extraction policy."
+            )
         path = Path(self.context.media.path)
-        if not _stat_matches(path, self.context):
+        if not _stat_matches(
+            path,
+            self.context,
+            device_id=self._device_id,
+            inode_id=self._inode_id,
+        ):
             raise LocalFrameSourceFailure(
                 "The local media file changed before FFmpeg frame extraction."
             )
@@ -301,7 +369,12 @@ class LocalFfmpegFrameSource:
                 "InfoMancer could not start FFmpeg for generated preview frames."
             ) from exc
 
-        if not _stat_matches(path, self.context):
+        if not _stat_matches(
+            path,
+            self.context,
+            device_id=self._device_id,
+            inode_id=self._inode_id,
+        ):
             raise LocalFrameSourceFailure(
                 "The local media file changed during FFmpeg frame extraction."
             )
