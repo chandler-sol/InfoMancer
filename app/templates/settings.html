@@ -65,7 +65,7 @@
   <section class="panel settings-card full-width">
     <p class="eyebrow">MEDIA SERVERS</p>
     <h2>Episode Identity integrations</h2>
-    <p class="muted">Plex and Jellyfin are optional, read-only analysis accelerators. Their preview adapters can be configured now, but preview frames are not advertised as analysis-ready until a consuming analyzer is installed.</p>
+    <p class="muted">Plex and Jellyfin are optional, read-only Episode Identity accelerators. When configured and mapped, their existing preview frames are available to Normal verification before InfoMancer falls back to local frame generation.</p>
     {% if integration_secret_error %}<div class="form-error">{{ integration_secret_error }}</div>{% endif %}
   </section>
 
