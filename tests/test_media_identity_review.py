@@ -15,6 +15,7 @@ from app import main
 from app.db import Database
 from app.duplicates import DuplicateService
 from app.media_identity.models import IdentityProfile, IdentityResultState
+from app.media_identity.normal import NormalSamplingStage
 from app.media_identity.normal_service import NormalIdentityService
 from app.mie import MediaIntelligenceEngine
 from app.review_queue import ReviewQueue
@@ -213,6 +214,7 @@ class EpisodeIdentityNormalRouteTests(EpisodeIdentityHttpBindingTests):
             source_key="jellyfin",
             observation_count=5,
             reused_artifact_count=2,
+            highest_observed_stage=NormalSamplingStage.INITIAL,
             failures=(),
             budget_exhausted=False,
         )
@@ -271,6 +273,7 @@ class EpisodeIdentityNormalRouteTests(EpisodeIdentityHttpBindingTests):
             source_key="local-ffmpeg",
             observation_count=5,
             reused_artifact_count=0,
+            highest_observed_stage=NormalSamplingStage.INITIAL,
             failures=(),
             budget_exhausted=False,
         )
@@ -316,6 +319,7 @@ class EpisodeIdentityNormalRouteTests(EpisodeIdentityHttpBindingTests):
             source_key="",
             observation_count=0,
             reused_artifact_count=0,
+            highest_observed_stage=None,
             failures=("ocr-engine-unavailable",),
             budget_exhausted=False,
         )
