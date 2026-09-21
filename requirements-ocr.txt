@@ -1,0 +1,12 @@
+# Optional InfoMancer 0.9 Episode Identity Normal OCR component.
+#
+# Keep this separate from requirements.txt so Fast verification and the base
+# InfoMancer install do not require a machine-learning inference runtime.
+#
+# Install after the normal application requirements:
+#   python -m pip install -r requirements-ocr.txt
+#
+# Verify RapidOCR itself with:
+#   rapidocr check
+rapidocr==3.9.2
+onnxruntime==1.30.0
