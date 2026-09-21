@@ -59,7 +59,11 @@ def build_router(ctx: RouteContext):
                     "Choose either a replacement token or Remove saved token, not both."
                 )
             normalized_url = normalize_server_url(server_url)
-            allow_insecure = bool(allow_insecure_http) if key in {"plex", "jellyfin"} else False
+            allow_insecure = (
+                str(allow_insecure_http or "").strip() == "1"
+                if key in {"plex", "jellyfin"}
+                else False
+            )
             if (
                 key in {"plex", "jellyfin"}
                 and normalized_url.startswith("http://")
