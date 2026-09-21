@@ -142,8 +142,8 @@ def parse_bif_index(
             raise PlexBifError("Plex BIF frame offsets are not strictly increasing.")
         if next_offset > total_size:
             raise PlexBifError("Plex BIF frame range extends beyond the file.")
-        if previous_timestamp is not None and timestamp < previous_timestamp:
-            raise PlexBifError("Plex BIF timestamps are not monotonic.")
+        if previous_timestamp is not None and timestamp <= previous_timestamp:
+            raise PlexBifError("Plex BIF timestamps are not strictly increasing.")
         timestamp_ms = int(timestamp) * int(multiplier)
         if timestamp_ms > _MAX_TIMESTAMP_MS:
             raise PlexBifError("Plex BIF timestamp exceeds the safe range.")
@@ -378,7 +378,24 @@ def resolve_local_bif_path(
             "Plex library database media path does not match the resolved media part."
         )
     bif_path = plex_bif_path_for_media_hash(root, str(media_hash or ""))
-    return bif_path.resolve() if bif_path.is_file() else None
+    try:
+        allowed_root = (root / "Media" / "localhost").resolve(strict=True)
+        resolved_bif = bif_path.resolve(strict=True)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise PlexBifError(
+            f"Plex local BIF path could not be resolved safely: {exc}"
+        ) from exc
+    if (
+        resolved_bif.name != "index-sd.bif"
+        or not resolved_bif.is_relative_to(allowed_root)
+        or not resolved_bif.is_file()
+    ):
+        raise PlexBifError(
+            "Plex local BIF path escapes the configured metadata root."
+        )
+    return resolved_bif
 
 
 def read_bif_preview_range(
@@ -888,6 +905,53 @@ def fetch_plex_episode_candidates(
     return tuple(items)
 
 
+def fetch_plex_path_candidates(
+    server_url: str,
+    token: str,
+    *,
+    path: str,
+    timeout: float = 5.0,
+    allow_insecure_http: bool = False,
+) -> tuple[Mapping[str, Any], ...]:
+    expected_path = str(path or "").strip()
+    try:
+        parse_absolute_path(expected_path)
+    except PathMappingError as exc:
+        raise PlexBifError("Plex path lookup requires an absolute media path.") from exc
+
+    payload = _read_plex_json(
+        server_url,
+        token,
+        "/library/all",
+        query={
+            "type": 4,
+            "path": expected_path,
+            "includeGuids": 1,
+            "X-Plex-Container-Start": 0,
+            "X-Plex-Container-Size": _MAX_EPISODE_CANDIDATES + 1,
+        },
+        timeout=timeout,
+        allow_insecure_http=allow_insecure_http,
+    )
+    container = payload.get("MediaContainer")
+    if not isinstance(container, Mapping):
+        raise PlexBifError("Plex path lookup returned an invalid container.")
+    raw_items = container.get("Metadata", ())
+    if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes)):
+        raise PlexBifError("Plex path lookup returned an invalid item list.")
+    if any(not isinstance(item, Mapping) for item in raw_items):
+        raise PlexBifError("Plex path lookup returned a malformed candidate entry.")
+    try:
+        total = int(container.get("totalSize", len(raw_items)))
+    except (TypeError, ValueError) as exc:
+        raise PlexBifError("Plex path lookup returned an invalid result count.") from exc
+    if total < 0 or total > _MAX_EPISODE_CANDIDATES:
+        raise PlexBifError("Plex path lookup returned too many candidates safely.")
+    if len(raw_items) > _MAX_EPISODE_CANDIDATES:
+        raise PlexBifError("Plex path lookup returned too many candidates safely.")
+    return tuple(raw_items)
+
+
 def _iter_plex_parts(
     item: Mapping[str, Any],
 ) -> tuple[tuple[Mapping[str, Any], Mapping[str, Any]], ...]:
@@ -1280,24 +1344,35 @@ class PlexBifSource:
         )
         if translation is None:
             return None
-        season = context.claimed_identity.season
-        episode = context.claimed_identity.episode
-        if season is None or episode is None:
-            return None
-
-        candidates = fetch_plex_episode_candidates(
+        candidates = fetch_plex_path_candidates(
             self.server_url,
             self._token,
-            season=season,
-            episode=episode,
+            path=translation.external_path,
             allow_insecure_http=self.allow_insecure_http,
         )
         resolved = resolve_plex_media_ref(
             candidates,
             expected_external_path=translation.external_path,
         )
+
         if resolved is None:
-            return None
+            season = context.claimed_identity.season
+            episode = context.claimed_identity.episode
+            if season is None or episode is None:
+                return None
+            candidates = fetch_plex_episode_candidates(
+                self.server_url,
+                self._token,
+                season=season,
+                episode=episode,
+                allow_insecure_http=self.allow_insecure_http,
+            )
+            resolved = resolve_plex_media_ref(
+                candidates,
+                expected_external_path=translation.external_path,
+            )
+            if resolved is None:
+                return None
 
         detail = fetch_plex_item(
             self.server_url,
