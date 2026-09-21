@@ -776,7 +776,7 @@ def _read_jellyfin_json(
             detail = "Jellyfin did not have the requested library item."
         else:
             detail = f"Jellyfin returned HTTP {exc.code} while reading library metadata."
-        raise (JellyfinPreviewUnavailable(detail) if exc.code == 404 else JellyfinSourceFailure(detail)) from exc
+        raise JellyfinSourceFailure(detail) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         reason = getattr(exc, "reason", exc)
         raise JellyfinSourceFailure(
