@@ -215,6 +215,34 @@ class NormalPreviewOcrExecutorTests(unittest.TestCase):
         self.assertEqual(result.source_key, "plex")
         self.assertEqual(len(result.observations), 4)
 
+    def test_source_with_only_unreadable_frames_falls_through_to_next_source(self):
+        class BrokenSource(PreviewSource):
+            def read_preview(self, frame):
+                self.read_calls.append(int(frame.timestamp_ms))
+                raise ExternalPreviewUnavailable("all previews stale")
+
+        jellyfin = BrokenSource(
+            "jellyfin",
+            frames=frames("jellyfin", 3),
+        )
+        plex_frames = frames("plex", 2)
+        plex = PreviewSource(
+            "plex",
+            frames=plex_frames,
+            payloads={f.timestamp_ms: b"plex" for f in plex_frames},
+        )
+        result = NormalPreviewOcrExecutor(
+            ExternalSourceRegistry([plex, jellyfin]),
+            FakeOcr(),
+        ).run(context())
+
+        self.assertEqual(result.source_key, "plex")
+        self.assertEqual(len(result.observations), 2)
+        self.assertTrue(jellyfin.read_calls)
+        self.assertTrue(
+            any("all previews stale" in item for item in result.failures)
+        )
+
     def test_source_listing_failure_falls_through_and_is_recorded(self):
         jellyfin = PreviewSource(
             "jellyfin",
