@@ -907,6 +907,65 @@ class PlexBifFoundationTests(unittest.TestCase):
             path_candidates.assert_called_once()
             episode_candidates.assert_not_called()
 
+    def test_path_lookup_can_fall_back_to_claimed_episode_candidates(self):
+        expected_external = "/srv/tv/Show/Season 01/Episode.mkv"
+        candidate = plex_episode_item(
+            rating_key="101",
+            path=expected_external,
+            part_id="501",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            local_root = Path(temporary) / "tv"
+            local_path = local_root / "Show" / "Season 01" / "Episode.mkv"
+            source = PlexBifSource(
+                "https://plex.local:32400",
+                "secret",
+                ExternalPathMapper(
+                    [PathMapping("plex", "/srv/tv", str(local_root))]
+                ),
+            )
+            context = AnalyzerContext(
+                media=MediaIdentityFile(
+                    file_id=1,
+                    title_id=1,
+                    path=str(local_path),
+                    size_bytes=1,
+                    modified_at=1.0,
+                ),
+                claimed_identity=IdentityReference(
+                    identity_kind="episode",
+                    season=1,
+                    episode=2,
+                    display_name="Episode",
+                ),
+                profile=IdentityProfile.NORMAL,
+            )
+            with (
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_path_candidates",
+                    return_value=(),
+                ) as path_candidates,
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_episode_candidates",
+                    return_value=(candidate,),
+                ) as episode_candidates,
+                patch(
+                    "app.media_identity.sources.plex.fetch_plex_item",
+                    return_value=candidate,
+                ),
+            ):
+                resolved = source.resolve_media(context)
+
+            self.assertIsNotNone(resolved)
+            path_candidates.assert_called_once()
+            episode_candidates.assert_called_once_with(
+                "https://plex.local:32400",
+                "secret",
+                season=1,
+                episode=2,
+                allow_insecure_http=False,
+            )
+
     def test_http_frame_hash_rejects_changed_jpeg_without_refetching_bif(self):
         original = b"\xff\xd8AAAA\xff\xd9"
         changed = b"\xff\xd8BBBB\xff\xd9"
