@@ -49,8 +49,9 @@ class ProviderSecretStore:
             )
         except OSError as exc:
             raise ProviderSecretError(
-                "InfoMancer could not lock the saved provider credentials. Check that "
-                "the application data folder is writable, then try again."
+                "InfoMancer could not save the provider credentials because the "
+                "credential store could not be locked. Check that the application data "
+                "folder is writable, then try again."
             ) from exc
 
         try:
@@ -90,8 +91,9 @@ class ProviderSecretStore:
             raise
         except OSError as exc:
             raise ProviderSecretError(
-                "InfoMancer could not lock the saved provider credentials. Check that "
-                "the application data folder is writable, then try again."
+                "InfoMancer could not save the provider credentials because the "
+                "credential store could not be locked. Check that the application data "
+                "folder is writable, then try again."
             ) from exc
 
     def _application_cipher(self) -> Fernet:
