@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from io import BytesIO
 import hashlib
 import json
 import os
@@ -14,10 +15,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from PIL import Image, UnidentifiedImageError
+
 from ...path_mapping import ExternalPathMapper, PathMappingError, parse_absolute_path
 from ..external import (
     ExternalCapability,
     ExternalMediaRef,
+    ExternalPreviewUnavailable,
+    ExternalSourceFailure,
     ExternalSourceStatus,
     PreviewFrameRef,
 )
@@ -34,6 +39,8 @@ _MAX_TIMESTAMP_MS = (1 << 63) - 1
 _MAX_PLEX_JSON_BYTES = 8 * 1024 * 1024
 _MAX_PLEX_BIF_BYTES = 128 * 1024 * 1024
 _MAX_PLEX_JPEG_BYTES = 8 * 1024 * 1024
+_MAX_PLEX_JPEG_DIMENSION = 16_384
+_MAX_PLEX_JPEG_PIXELS = 64_000_000
 _MAX_EPISODE_CANDIDATES = 4096
 _PLEX_PAGE_SIZE = 256
 _PLEX_MEDIA_HASH = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -43,18 +50,57 @@ class PlexBifError(ValueError):
     """Raised when a Plex source operation is malformed, unsafe, or unavailable."""
 
 
-class PlexPreviewUnavailable(PlexBifError):
+class PlexSourceFailure(ExternalSourceFailure, PlexBifError):
+    """Plex could not be queried or returned untrustworthy source metadata."""
+
+
+class PlexPreviewUnavailable(ExternalPreviewUnavailable, PlexBifError):
     """Raised when optional Plex preview evidence is unavailable for an item."""
 
 
-class _PlexHttpError(PlexBifError):
+class _PlexHttpError(PlexSourceFailure):
     def __init__(self, status_code: int, detail: str) -> None:
         super().__init__(detail)
         self.status_code = int(status_code)
 
 
-class _PlexResponseTooLarge(PlexBifError):
+class _PlexResponseTooLarge(PlexSourceFailure):
     """Raised when a bounded Plex response exceeds its caller's safe limit."""
+
+
+def _validate_plex_jpeg(payload: bytes) -> bytes:
+    """Decode one preview image with explicit dimension and pixel ceilings."""
+    if (
+        len(payload) < 4
+        or not payload.startswith(b"\xff\xd8")
+        or not payload.endswith(b"\xff\xd9")
+    ):
+        raise PlexPreviewUnavailable("Plex returned an invalid JPEG preview image.")
+    try:
+        with Image.open(BytesIO(payload)) as image:
+            if image.format != "JPEG":
+                raise PlexPreviewUnavailable(
+                    "Plex preview image did not decode as JPEG."
+                )
+            width, height = image.size
+            if (
+                width <= 0
+                or height <= 0
+                or width > _MAX_PLEX_JPEG_DIMENSION
+                or height > _MAX_PLEX_JPEG_DIMENSION
+                or width * height > _MAX_PLEX_JPEG_PIXELS
+            ):
+                raise PlexPreviewUnavailable(
+                    "Plex preview image dimensions exceed safe decode limits."
+                )
+            image.load()
+    except PlexPreviewUnavailable:
+        raise
+    except (Image.DecompressionBombError, UnidentifiedImageError, OSError, ValueError) as exc:
+        raise PlexPreviewUnavailable(
+            "Plex preview image could not be decoded safely."
+        ) from exc
+    return payload
 
 
 @dataclass(frozen=True)
@@ -423,13 +469,12 @@ def read_bif_preview_range(
         raise PlexBifError(f"Plex BIF preview could not be read: {exc}") from exc
     if len(payload) != count:
         raise PlexBifError("Plex BIF preview byte range was truncated.")
-    if (
-        len(payload) < 4
-        or not payload.startswith(b"\xff\xd8")
-        or not payload.endswith(b"\xff\xd9")
-    ):
-        raise PlexBifError("Plex BIF preview range is not a valid JPEG.")
-    return payload
+    try:
+        return _validate_plex_jpeg(payload)
+    except PlexPreviewUnavailable as exc:
+        raise PlexPreviewUnavailable(
+            f"Plex local BIF preview range is unusable: {exc}"
+        ) from exc
 
 
 def bif_source_signature(path: str | Path, index: PlexBifIndex) -> str:
@@ -547,15 +592,12 @@ def read_verified_bif_preview(
         )
     if len(payload) != count:
         raise PlexPreviewUnavailable("Plex local BIF preview range was truncated.")
-    if (
-        len(payload) < 4
-        or not payload.startswith(b"\xff\xd8")
-        or not payload.endswith(b"\xff\xd9")
-    ):
+    try:
+        return _validate_plex_jpeg(payload)
+    except PlexPreviewUnavailable as exc:
         raise PlexPreviewUnavailable(
-            "Plex local BIF preview range is not a valid JPEG."
-        )
-    return payload
+            f"Plex local BIF preview range is unusable: {exc}"
+        ) from exc
 
 
 def enumerate_bif_preview_frames(
@@ -768,7 +810,7 @@ def _read_plex_bytes(
         raise _PlexHttpError(exc.code, detail) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         reason = getattr(exc, "reason", exc)
-        raise PlexBifError(f"InfoMancer could not read Plex: {reason}") from exc
+        raise PlexSourceFailure(f"InfoMancer could not read Plex: {reason}") from exc
 
     if len(payload) > limit:
         raise _PlexResponseTooLarge("Plex response exceeded the safe size limit.")
@@ -799,13 +841,13 @@ def _read_plex_json(
         "text/json",
         "text/plain",
     }:
-        raise PlexBifError("Plex returned an unexpected metadata content type.")
+        raise PlexSourceFailure("Plex returned an unexpected metadata content type.")
     try:
         parsed = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise PlexBifError("Plex returned malformed JSON metadata.") from exc
+        raise PlexSourceFailure("Plex returned malformed JSON metadata.") from exc
     if not isinstance(parsed, Mapping):
-        raise PlexBifError("Plex returned an unexpected metadata payload.")
+        raise PlexSourceFailure("Plex returned an unexpected metadata payload.")
     return parsed
 
 
@@ -1232,13 +1274,7 @@ def fetch_plex_bif_image(
         raise PlexPreviewUnavailable(
             "Plex returned an unsupported preview-image content type."
         )
-    if (
-        len(payload) < 4
-        or not payload.startswith(b"\xff\xd8")
-        or not payload.endswith(b"\xff\xd9")
-    ):
-        raise PlexPreviewUnavailable("Plex returned an invalid JPEG preview image.")
-    return payload
+    return _validate_plex_jpeg(payload)
 
 
 class PlexBifSource:
