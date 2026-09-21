@@ -497,16 +497,24 @@ class NormalIdentityService:
                 context,
                 runtime_seconds,
             )
-            local_executor = NormalPreviewOcrExecutor(
-                ExternalSourceRegistry([local_source]),
-                self.engine,
-                limits=self.limits,
-                cache_lookup=cache_lookup,
-            )
-            local_run = local_executor.run(
-                context,
-                max_stage=max_stage,
-            )
+            local_status = local_source.status()
+            if not local_status.available:
+                local_run = NormalPreviewOcrRun(
+                    failures=(
+                        f"{LOCAL_FRAME_SOURCE_KEY}:unavailable:{local_status.detail}",
+                    ),
+                )
+            else:
+                local_executor = NormalPreviewOcrExecutor(
+                    ExternalSourceRegistry([local_source]),
+                    self.engine,
+                    limits=self.limits,
+                    cache_lookup=cache_lookup,
+                )
+                local_run = local_executor.run(
+                    context,
+                    max_stage=max_stage,
+                )
             run = NormalPreviewOcrRun(
                 source_key=local_run.source_key,
                 observations=local_run.observations,
