@@ -150,6 +150,30 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         )
         self.assertFalse(source.config.get("allow_insecure_http", False))
 
+    def test_plex_plain_http_rejects_non_checkbox_truthy_strings(self):
+        for submitted in ("false", "0", "yes", "on"):
+            with self.subTest(submitted=submitted):
+                response = self.client.post(
+                    "/settings/integrations/plex",
+                    data={
+                        "enabled": "1",
+                        "server_url": "http://plex.local:32400",
+                        "metadata_root": "",
+                        "token": "replacement-token",
+                        "clear_token": "",
+                        "allow_insecure_http": submitted,
+                    },
+                )
+                self.assertEqual(response.status_code, 303)
+                self.assertIn("plain+HTTP", response.headers["location"])
+                source = main.external_source_config.source("plex")
+                secrets = main.provider_secrets.load()
+                self.assertEqual(
+                    source.server_url,
+                    "https://trusted-plex.local:32400",
+                )
+                self.assertEqual(secrets["plex_token"], "trusted-token")
+
     def test_plex_plain_http_can_be_explicitly_allowed(self):
         response = self.client.post(
             "/settings/integrations/plex",
