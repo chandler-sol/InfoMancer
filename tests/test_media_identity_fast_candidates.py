@@ -5,6 +5,7 @@ import unittest
 
 from app.media_identity.candidates import (
     MAX_FAST_CANDIDATES,
+    MAX_FAST_MAPPINGS_PER_CANDIDATE,
     _provider_candidate_ids,
     generate_episode_candidates,
 )
@@ -119,6 +120,21 @@ class FastProviderCandidateBoundTests(unittest.TestCase):
                     for episode in range(1, 201)
                 ],
             )
+            conn.executemany(
+                """INSERT INTO provider_episode_mappings(
+                     provider,provider_series_id,provider_episode_id,language,
+                     order_namespace,order_name,season,episode,absolute_number,coordinate_key
+                   ) VALUES ('tvdb','4242','1100','eng',?,?,1,100,?,?)""",
+                [
+                    (
+                        f"alternate-{variant:03d}",
+                        f"Alternate {variant:03d}",
+                        1000 + variant,
+                        f"[1,100,{1000 + variant}]",
+                    )
+                    for variant in range(1, 81)
+                ],
+            )
 
             selected_ids = _provider_candidate_ids(
                 conn,
@@ -143,6 +159,24 @@ class FastProviderCandidateBoundTests(unittest.TestCase):
             conn.close()
 
         self.assertEqual(len(candidate_set.candidates), MAX_FAST_CANDIDATES)
+        claimed = next(
+            candidate
+            for candidate in candidate_set.candidates
+            if candidate.identity.provider_item_id == "1100"
+        )
+        self.assertLessEqual(
+            len(claimed.details["mappings"]),
+            MAX_FAST_MAPPINGS_PER_CANDIDATE,
+        )
+        self.assertTrue(
+            any(
+                mapping["order_namespace"] == "default"
+                and mapping["season"] == 1
+                and mapping["episode"] == 100
+                for mapping in claimed.details["mappings"]
+            ),
+            "the mapping cap must retain the claimed default coordinate",
+        )
         detail_queries = [
             statement
             for statement in statements
