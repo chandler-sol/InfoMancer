@@ -51,7 +51,7 @@
       <strong>{{ (identity.completed_profile or identity.requested_profile)|title }}</strong>
       <h3>Completed tier</h3>
       {% if identity.completed_profile == 'normal' %}
-      <p>Normal includes the Fast evidence plus bounded visual text extracted from existing media-server preview frames.</p>
+      <p>Normal includes the Fast evidence plus bounded visual text from media-server previews or local FFmpeg-generated fallback frames.</p>
       {% else %}
       <p>Fast uses local catalog, provider metadata, stream facts, and available subtitle text.</p>
       {% endif %}
@@ -70,7 +70,7 @@
     <div>
       <p class="eyebrow">NORMAL VERIFICATION</p>
       <h2>Run deeper visual analysis</h2>
-      <p>Normal keeps the Fast evidence, then samples existing Plex or Jellyfin preview frames and runs bounded CPU OCR when the optional OCR component is installed. It does not generate new video frames yet.</p>
+      <p>Normal keeps the Fast evidence, prefers existing Plex or Jellyfin preview frames, then falls back to bounded local FFmpeg frame extraction when needed. The optional OCR component runs on CPU.</p>
     </div>
   </header>
   {% if identity.snapshot_current %}
