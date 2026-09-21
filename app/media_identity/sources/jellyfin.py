@@ -907,13 +907,32 @@ def fetch_item(
     allow_insecure_http: bool = False,
 ) -> Mapping[str, Any]:
     normalized_id = _jellyfin_guid(item_id, "Jellyfin item id")
-    return _read_jellyfin_json(
+    item = _read_jellyfin_json(
         server_url,
         token,
         f"/Items/{urllib.parse.quote(normalized_id, safe='')}",
         timeout=timeout,
         allow_insecure_http=allow_insecure_http,
     )
+    returned_id = str(item.get("Id") or "").strip()
+    if not returned_id:
+        raise JellyfinSourceFailure(
+            "Jellyfin item lookup returned no stable item id."
+        )
+    try:
+        normalized_returned_id = _jellyfin_guid(
+            returned_id,
+            "Jellyfin returned item id",
+        )
+    except JellyfinAdapterError as exc:
+        raise JellyfinSourceFailure(
+            "Jellyfin item lookup returned an invalid item id."
+        ) from exc
+    if normalized_returned_id != normalized_id:
+        raise JellyfinSourceFailure(
+            "Jellyfin returned a different item than the one requested."
+        )
+    return item
 
 
 class JellyfinTrickplaySource:
