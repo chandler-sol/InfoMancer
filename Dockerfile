@@ -3,6 +3,7 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 ARG INFOMANCER_UID=1000
 ARG INFOMANCER_GID=1000
+ARG INFOMANCER_INSTALL_OCR=false
 RUN test "${INFOMANCER_UID}" != "0" && test "${INFOMANCER_GID}" != "0" \
     || (echo "INFOMANCER_UID and INFOMANCER_GID must be non-root values" >&2; exit 1)
 RUN apt-get update \
@@ -10,8 +11,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 RUN groupadd --gid "${INFOMANCER_GID}" infomancer \
     && useradd --uid "${INFOMANCER_UID}" --gid infomancer --create-home --shell /bin/false infomancer
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements-ocr.txt ./
+RUN pip install --no-cache-dir -r requirements.txt \
+    && if [ "$INFOMANCER_INSTALL_OCR" = "true" ]; then \
+         pip install --no-cache-dir -r requirements-ocr.txt; \
+       fi
 COPY --chown=infomancer:infomancer app app
 RUN mkdir -p /app/data && chown -R infomancer:infomancer /app/data
 USER infomancer
