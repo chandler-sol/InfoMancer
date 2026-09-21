@@ -50,7 +50,11 @@
     <article>
       <strong>{{ (identity.completed_profile or identity.requested_profile)|title }}</strong>
       <h3>Completed tier</h3>
+      {% if identity.completed_profile == 'normal' %}
+      <p>Normal includes the Fast evidence plus bounded visual text extracted from existing media-server preview frames.</p>
+      {% else %}
       <p>Fast uses local catalog, provider metadata, stream facts, and available subtitle text.</p>
+      {% endif %}
     </article>
     <article>
       <strong>{{ identity.confirmation.freshness|title if identity.confirmation else 'None' }}</strong>
