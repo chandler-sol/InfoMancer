@@ -105,6 +105,9 @@ def _provider_candidate_ids(
             season,
             episode_start,
             episode_end,
+            season,
+            episode_start,
+            episode_end,
             provider_series_id,
             language,
             season,
@@ -183,9 +186,11 @@ def _provider_candidates(
                        PARTITION BY m.provider_episode_id
                        ORDER BY
                          CASE
-                           WHEN m.season=? AND m.episode BETWEEN ? AND ? THEN 0
-                           WHEN m.order_namespace='default' THEN 1
-                           ELSE 2
+                           WHEN m.season=? AND m.episode BETWEEN ? AND ?
+                            AND m.order_namespace='default' THEN 0
+                           WHEN m.season=? AND m.episode BETWEEN ? AND ? THEN 1
+                           WHEN m.order_namespace='default' THEN 2
+                           ELSE 3
                          END,
                          m.order_namespace,m.season,m.episode,m.absolute_number,m.id
                      ) mapping_rank
