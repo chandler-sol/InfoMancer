@@ -5,13 +5,15 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app.db import Database
 from app.media_identity.provider_cache import (
     ProviderEpisodeCache,
+    ProviderEpisodeLimits,
     ProviderEpisodeRefreshError,
 )
-from app.media_identity.tvdb_orders import episode_orders, episodes_for_order
+from app.media_identity.tvdb_orders import TVDBOrderError, episode_orders, episodes_for_order
 from app.tvdb import TVDBClient, TVDBError
 
 
@@ -271,6 +273,144 @@ class ProviderEpisodeCacheTests(unittest.TestCase):
         self.assertEqual(status["source_signature"], baseline.source_signature)
         self.assertEqual(status["episode_count"], baseline.episode_count)
         self.assertEqual(status["provider_updated_at"], "2026-09-17T12:00:00Z")
+
+    def test_missing_advertised_continuation_preserves_every_previous_cache_row(self) -> None:
+        self.cache.refresh_tvdb_series(9001, self.rich_transport())
+        with self.database.connect() as conn:
+            before_series = [
+                tuple(row) for row in conn.execute(
+                    """SELECT provider,provider_series_id,language,provider_updated_at,
+                              source_signature,episode_count,mapping_count,order_namespaces_json
+                       FROM provider_episode_series_cache
+                       WHERE provider='tvdb' AND provider_series_id='9001'
+                       ORDER BY language"""
+                )
+            ]
+            before_identities = [
+                tuple(row) for row in conn.execute(
+                    """SELECT provider_series_id,provider_episode_id,language,name,
+                              overview,aired,metadata_json
+                       FROM provider_episode_identities
+                       WHERE provider='tvdb' AND provider_series_id='9001'
+                       ORDER BY provider_episode_id,language"""
+                )
+            ]
+            before_mappings = [
+                tuple(row) for row in conn.execute(
+                    """SELECT provider_series_id,provider_episode_id,language,
+                              order_namespace,order_name,season,episode,absolute_number,
+                              coordinate_key,details_json
+                       FROM provider_episode_mappings
+                       WHERE provider='tvdb' AND provider_series_id='9001'
+                       ORDER BY provider_episode_id,order_namespace,coordinate_key"""
+                )
+            ]
+
+        incomplete = self.rich_transport(last_updated="2026-09-20T00:00:00Z")
+        incomplete.pages.pop(("/series/9001/episodes/default/eng", 1))
+        with self.assertRaises(TVDBOrderError):
+            self.cache.refresh_tvdb_series(9001, incomplete)
+
+        with self.database.connect() as conn:
+            after_series = [
+                tuple(row) for row in conn.execute(
+                    """SELECT provider,provider_series_id,language,provider_updated_at,
+                              source_signature,episode_count,mapping_count,order_namespaces_json
+                       FROM provider_episode_series_cache
+                       WHERE provider='tvdb' AND provider_series_id='9001'
+                       ORDER BY language"""
+                )
+            ]
+            after_identities = [
+                tuple(row) for row in conn.execute(
+                    """SELECT provider_series_id,provider_episode_id,language,name,
+                              overview,aired,metadata_json
+                       FROM provider_episode_identities
+                       WHERE provider='tvdb' AND provider_series_id='9001'
+                       ORDER BY provider_episode_id,language"""
+                )
+            ]
+            after_mappings = [
+                tuple(row) for row in conn.execute(
+                    """SELECT provider_series_id,provider_episode_id,language,
+                              order_namespace,order_name,season,episode,absolute_number,
+                              coordinate_key,details_json
+                       FROM provider_episode_mappings
+                       WHERE provider='tvdb' AND provider_series_id='9001'
+                       ORDER BY provider_episode_id,order_namespace,coordinate_key"""
+                )
+            ]
+        self.assertEqual(after_series, before_series)
+        self.assertEqual(after_identities, before_identities)
+        self.assertEqual(after_mappings, before_mappings)
+
+    def test_configurable_aggregate_record_limit_preserves_previous_snapshot(self) -> None:
+        baseline = self.cache.refresh_tvdb_series(9001, self.rich_transport())
+        limited = ProviderEpisodeCache(
+            self.database,
+            limits=ProviderEpisodeLimits(max_records=2),
+        )
+        with self.assertRaises(ProviderEpisodeRefreshError):
+            limited.refresh_tvdb_series(
+                9001, self.rich_transport(last_updated="2026-09-20T00:00:00Z")
+            )
+        status = self.cache.cache_status("tvdb", "9001")
+        self.assertEqual(status["source_signature"], baseline.source_signature)
+        self.assertEqual(status["episode_count"], baseline.episode_count)
+        self.assertEqual(status["mapping_count"], baseline.mapping_count)
+
+    def test_configurable_per_order_limit_preserves_previous_snapshot(self) -> None:
+        baseline = self.cache.refresh_tvdb_series(9001, self.rich_transport())
+        limited = ProviderEpisodeCache(
+            self.database,
+            limits=ProviderEpisodeLimits(max_episodes_per_order=2),
+        )
+        with self.assertRaises(TVDBOrderError):
+            limited.refresh_tvdb_series(
+                9001, self.rich_transport(last_updated="2026-09-20T00:00:00Z")
+            )
+        status = self.cache.cache_status("tvdb", "9001")
+        self.assertEqual(status["source_signature"], baseline.source_signature)
+        self.assertEqual(status["episode_count"], baseline.episode_count)
+
+    def test_configurable_text_budget_preserves_previous_snapshot(self) -> None:
+        baseline = self.cache.refresh_tvdb_series(9001, self.rich_transport())
+        limited = ProviderEpisodeCache(
+            self.database,
+            limits=ProviderEpisodeLimits(max_text_chars=10),
+        )
+        with self.assertRaises(ProviderEpisodeRefreshError):
+            limited.refresh_tvdb_series(
+                9001, self.rich_transport(last_updated="2026-09-20T00:00:00Z")
+            )
+        status = self.cache.cache_status("tvdb", "9001")
+        self.assertEqual(status["source_signature"], baseline.source_signature)
+
+    def test_tvdb_bounded_transport_rejects_response_over_byte_limit(self) -> None:
+        class StreamResponse:
+            status_code = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                return False
+
+            def raise_for_status(self):
+                return None
+
+            def iter_bytes(self, chunk_size=65536):
+                yield b'{"data":"'
+                yield b"x" * 64
+                yield b'"}'
+
+        client = TVDBClient("testing-key", _token="already-authenticated")
+        with patch("app.tvdb.httpx.stream", return_value=StreamResponse()):
+            with self.assertRaisesRegex(TVDBError, "safety limit"):
+                client._get_bounded(
+                    "/series/9001/extended",
+                    max_bytes=32,
+                )
 
     def test_database_failure_rolls_back_replacement_and_preserves_old_cache(self) -> None:
         baseline = self.cache.refresh_tvdb_series(9001, self.rich_transport())
