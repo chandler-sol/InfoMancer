@@ -10,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 FFPROBE_STAGE = ROOT / "build" / "ffprobe"
+FFMPEG_STAGE = ROOT / "build" / "ffmpeg"
 DIST = ROOT / "dist"
 TAURI_BINARIES = ROOT / "desktop" / "src-tauri" / "binaries"
 
@@ -68,6 +69,12 @@ def _pyinstaller_command() -> list[str]:
         f"build/ffprobe/FFPROBE_NOTICE.txt{separator}third-party/ffprobe",
         "--add-binary",
         f"build/ffprobe/ffprobe.exe{separator}.",
+        "--add-data",
+        f"build/ffmpeg/FFMPEG_LICENSE.txt{separator}third-party/ffmpeg",
+        "--add-data",
+        f"build/ffmpeg/FFMPEG_NOTICE.txt{separator}third-party/ffmpeg",
+        "--add-binary",
+        f"build/ffmpeg/ffmpeg.exe{separator}.",
         "desktop/sidecar.py",
     ]
 
@@ -75,10 +82,21 @@ def _pyinstaller_command() -> list[str]:
 def build() -> Path:
     _require_windows()
     _run([sys.executable, "scripts/stage_ffprobe.py"])
+    _run([sys.executable, "scripts/stage_ffmpeg.py"])
     ffprobe = FFPROBE_STAGE / "ffprobe.exe"
     license_path = FFPROBE_STAGE / "FFPROBE_LICENSE.txt"
     notice_path = FFPROBE_STAGE / "FFPROBE_NOTICE.txt"
-    for required in (ffprobe, license_path, notice_path):
+    ffmpeg = FFMPEG_STAGE / "ffmpeg.exe"
+    ffmpeg_license = FFMPEG_STAGE / "FFMPEG_LICENSE.txt"
+    ffmpeg_notice = FFMPEG_STAGE / "FFMPEG_NOTICE.txt"
+    for required in (
+        ffprobe,
+        license_path,
+        notice_path,
+        ffmpeg,
+        ffmpeg_license,
+        ffmpeg_notice,
+    ):
         if not required.is_file():
             raise RuntimeError(f"Packaging input was not staged: {required}")
 
@@ -88,6 +106,7 @@ def build() -> Path:
         raise RuntimeError("PyInstaller did not produce dist/infomancer-core.exe.")
 
     _run([str(executable), "--check-ffprobe"])
+    _run([str(executable), "--check-ffmpeg"])
     host_tuple = subprocess.check_output(
         ["rustc", "--print", "host-tuple"], cwd=ROOT, text=True
     ).strip()
