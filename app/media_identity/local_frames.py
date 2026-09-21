@@ -11,7 +11,7 @@ from typing import Any
 
 from PIL import Image, UnidentifiedImageError
 
-from ..media_info import ffmpeg_executable
+from ..media_info import _quiet_subprocess_options, ffmpeg_executable
 from .external import (
     ExternalCapability,
     ExternalMediaRef,
@@ -89,7 +89,9 @@ def _ffmpeg_is_available(executable: str) -> bool:
         return False
     candidate = Path(raw)
     if candidate.is_absolute() or candidate.parent != Path("."):
-        return candidate.is_file()
+        return candidate.is_file() and (
+            os.name == "nt" or os.access(candidate, os.X_OK)
+        )
     return shutil.which(raw) is not None
 
 
@@ -284,6 +286,7 @@ class LocalFfmpegFrameSource:
                 stderr=subprocess.PIPE,
                 timeout=self.timeout_seconds,
                 check=False,
+                **_quiet_subprocess_options(),
             )
         except FileNotFoundError as exc:
             raise LocalFrameSourceFailure(
@@ -303,12 +306,8 @@ class LocalFfmpegFrameSource:
                 "The local media file changed during FFmpeg frame extraction."
             )
         if result.returncode:
-            detail = (result.stderr or b"").decode(
-                "utf-8", errors="replace"
-            ).strip()
             raise LocalFrameUnavailable(
-                "FFmpeg could not extract the requested preview frame"
-                + (f": {detail[:500]}" if detail else ".")
+                "FFmpeg could not extract the requested preview frame."
             )
 
         return _validate_generated_jpeg(bytes(result.stdout or b""))
