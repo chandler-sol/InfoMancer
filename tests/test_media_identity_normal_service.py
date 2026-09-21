@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app.db import Database
 from app.media_identity.external import (
@@ -15,6 +16,7 @@ from app.media_identity.external import (
 )
 from app.media_identity.fast import FastIdentityService
 from app.media_identity.normal import OcrTextResult
+from app.media_identity.local_frames import LOCAL_FRAME_SOURCE_KEY
 from app.media_identity.normal_service import NormalIdentityService
 
 
@@ -275,6 +277,88 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
                    WHERE file_id=1 AND artifact_type='visual_text'"""
             ).fetchone()["count"]
         self.assertEqual(int(artifact_count), 1)
+
+    def test_local_ffmpeg_is_used_only_when_external_previews_are_unusable(self):
+        class EmptyPreviewSource(FakePreviewSource):
+            def preview_frames(self, _media):
+                return ()
+
+        class FakeLocalSource(FakePreviewSource):
+            source_key = LOCAL_FRAME_SOURCE_KEY
+
+            def resolve_media(self, _context):
+                return ExternalMediaRef(
+                    source_key=self.source_key,
+                    item_id="file:1",
+                    path=str(self_path),
+                    source_signature="local-preview-v1",
+                )
+
+            def preview_frames(self, _media):
+                return (
+                    PreviewFrameRef(
+                        source_key=self.source_key,
+                        item_id="file:1",
+                        timestamp_ms=20_000,
+                        asset_ref="ffmpeg:1:20000",
+                        source_signature="local-preview-v1",
+                        width=640,
+                        height=360,
+                    ),
+                )
+
+        self_path = self.media_path
+        external = EmptyPreviewSource()
+        local = FakeLocalSource()
+        engine = FakeOcr()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([external]),
+            engine,
+        )
+
+        with patch(
+            "app.media_identity.normal_service.LocalFfmpegFrameSource",
+            return_value=local,
+        ) as local_factory:
+            result = service.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(result.source_key, LOCAL_FRAME_SOURCE_KEY)
+        self.assertEqual(result.observation_count, 1)
+        self.assertEqual(external.read_calls, 0)
+        self.assertEqual(local.read_calls, 1)
+        local_factory.assert_called_once()
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT source_kind FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key='preview-ocr-synopsis'
+                     AND relation='supports'
+                   ORDER BY id LIMIT 1""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["source_kind"], "generated_preview_ocr")
+
+    def test_local_ffmpeg_is_not_attempted_when_ocr_engine_is_unavailable(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+        )
+
+        with patch(
+            "app.media_identity.normal_service.LocalFfmpegFrameSource"
+        ) as local_factory:
+            result = service.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(result.completed_profile.value, "fast")
+        self.assertIn("ocr-engine-unavailable", result.failures)
+        local_factory.assert_not_called()
 
     def test_file_change_during_ocr_prevents_artifact_or_evidence_commit(self):
         def mutate_file():
