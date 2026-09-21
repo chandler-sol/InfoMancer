@@ -350,7 +350,8 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
         self.assertEqual(query["parentIndexNumber"], ["1"])
         self.assertEqual(query["indexNumber"], ["2"])
         self.assertEqual(query["fields"], ["Path,ProviderIds,MediaSources"])
-        self.assertEqual(query["limit"], ["4097"])
+        self.assertEqual(query["startIndex"], ["0"])
+        self.assertEqual(query["limit"], ["256"])
         self.assertNotIn("top-secret", opener.request.full_url)
         self.assertEqual(opener.request.get_header("X-emby-token"), "top-secret")
         proxy_handlers = [
@@ -361,25 +362,42 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
         self.assertEqual(len(proxy_handlers), 1)
         self.assertEqual(proxy_handlers[0].proxies, {})
 
-    def test_episode_candidate_query_rejects_incomplete_result_set(self):
-        payload = json.dumps(
-            {
-                "Items": [
-                    {
-                        "Id": "11111111111111111111111111111111",
-                        "Path": "/srv/tv/Show/Season 01/Episode.mkv",
-                    }
-                ],
-                "TotalRecordCount": 2,
-                "StartIndex": 0,
-            }
-        ).encode("utf-8")
-        opener = DummyOpener(
-            DummyResponse(payload, content_type="application/json")
-        )
+    def test_episode_candidate_query_rejects_missing_continuation_page(self):
+        starts = []
+
+        def paged_read(
+            _server,
+            _token,
+            _path,
+            *,
+            query,
+            timeout,
+            allow_insecure_http,
+        ):
+            start = int(query["startIndex"])
+            starts.append(start)
+            if start == 0:
+                return {
+                    "Items": [
+                        {
+                            "Id": "11111111111111111111111111111111",
+                            "Path": "/srv/tv/Show/Season 01/Episode.mkv",
+                        }
+                    ],
+                    "TotalRecordCount": 2,
+                    "StartIndex": 0,
+                }
+            if start == 1:
+                return {
+                    "Items": [],
+                    "TotalRecordCount": 2,
+                    "StartIndex": 1,
+                }
+            self.fail(f"unexpected page start {start}")
+
         with patch(
-            "app.media_identity.sources.jellyfin.urllib.request.build_opener",
-            return_value=opener,
+            "app.media_identity.sources.jellyfin._read_jellyfin_json",
+            side_effect=paged_read,
         ):
             with self.assertRaises(JellyfinSourceFailure) as caught:
                 fetch_episode_candidates(
@@ -388,8 +406,9 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
                     season=1,
                     episode=2,
                 )
+        self.assertEqual(starts, [0, 1])
         self.assertIsInstance(caught.exception, ExternalSourceFailure)
-        self.assertIn("incomplete candidate set", str(caught.exception))
+        self.assertIn("ended before all candidates", str(caught.exception))
 
     def test_episode_candidate_query_rejects_malformed_entries(self):
         payload = json.dumps(
