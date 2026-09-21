@@ -13,7 +13,7 @@ from app.media_identity.provider_cache import (
     ProviderEpisodeLimits,
     ProviderEpisodeRefreshError,
 )
-from app.media_identity.tvdb_orders import TVDBOrderError, episode_orders, episodes_for_order
+from app.media_identity.tvdb_orders import episode_orders, episodes_for_order
 from app.tvdb import TVDBClient, TVDBError
 
 
@@ -308,7 +308,7 @@ class ProviderEpisodeCacheTests(unittest.TestCase):
 
         incomplete = self.rich_transport(last_updated="2026-09-20T00:00:00Z")
         incomplete.pages.pop(("/series/9001/episodes/default/eng", 1))
-        with self.assertRaises(TVDBOrderError):
+        with self.assertRaises(ProviderEpisodeRefreshError):
             self.cache.refresh_tvdb_series(9001, incomplete)
 
         with self.database.connect() as conn:
@@ -344,6 +344,27 @@ class ProviderEpisodeCacheTests(unittest.TestCase):
         self.assertEqual(after_identities, before_identities)
         self.assertEqual(after_mappings, before_mappings)
 
+    def test_missing_first_page_for_advertised_order_preserves_previous_snapshot(self) -> None:
+        baseline = self.cache.refresh_tvdb_series(9001, self.rich_transport())
+        incomplete = self.rich_transport(last_updated="2026-09-20T06:00:00Z")
+        incomplete.pages.pop(("/series/9001/episodes/dvd/eng", 0))
+
+        with self.assertRaisesRegex(
+            ProviderEpisodeRefreshError,
+            "advertised episode-order namespace",
+        ):
+            self.cache.refresh_tvdb_series(9001, incomplete)
+
+        status = self.cache.cache_status("tvdb", "9001")
+        self.assertEqual(status["source_signature"], baseline.source_signature)
+        self.assertEqual(status["episode_count"], baseline.episode_count)
+        self.assertEqual(status["mapping_count"], baseline.mapping_count)
+        mappings = self.cache.mappings_for_episode("tvdb", "9001", "101")
+        self.assertTrue(
+            any(row["order_namespace"] == "dvd" for row in mappings),
+            "a transient missing page zero must not erase an existing advertised order",
+        )
+
     def test_configurable_aggregate_record_limit_preserves_previous_snapshot(self) -> None:
         baseline = self.cache.refresh_tvdb_series(9001, self.rich_transport())
         limited = ProviderEpisodeCache(
@@ -365,7 +386,7 @@ class ProviderEpisodeCacheTests(unittest.TestCase):
             self.database,
             limits=ProviderEpisodeLimits(max_episodes_per_order=2),
         )
-        with self.assertRaises(TVDBOrderError):
+        with self.assertRaises(ProviderEpisodeRefreshError):
             limited.refresh_tvdb_series(
                 9001, self.rich_transport(last_updated="2026-09-20T00:00:00Z")
             )
