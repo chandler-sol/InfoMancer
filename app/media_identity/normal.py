@@ -194,11 +194,16 @@ def select_staged_preview_frames(
     selected: set[int] = set()
     staged: list[tuple[int, NormalSamplingStage]] = []
 
-    def add_indices(indices: Sequence[int], stage: NormalSamplingStage) -> None:
+    def add_indices(
+        indices: Sequence[int],
+        stage: NormalSamplingStage,
+        desired_total: int,
+    ) -> None:
+        target_total = min(int(desired_total), policy.max_preview_frames, len(ordered))
         for index in sorted(set(int(value) for value in indices)):
             if index in selected:
                 continue
-            if len(selected) >= policy.max_preview_frames:
+            if len(selected) >= target_total:
                 return
             selected.add(index)
             staged.append((index, stage))
@@ -207,7 +212,11 @@ def select_staged_preview_frames(
         _nearest_fraction_index(len(ordered), fraction)
         for fraction in _INITIAL_FRACTIONS
     ]
-    add_indices(initial, NormalSamplingStage.INITIAL)
+    add_indices(
+        initial,
+        NormalSamplingStage.INITIAL,
+        policy.initial_preview_frames,
+    )
     add_indices(
         _even_fill_indices(
             len(ordered),
@@ -215,13 +224,18 @@ def select_staged_preview_frames(
             selected,
         ),
         NormalSamplingStage.INITIAL,
+        policy.initial_preview_frames,
     )
 
     expanded = [
         _nearest_fraction_index(len(ordered), fraction)
         for fraction in _EXPANDED_FRACTIONS
     ]
-    add_indices(expanded, NormalSamplingStage.EXPANDED)
+    add_indices(
+        expanded,
+        NormalSamplingStage.EXPANDED,
+        policy.expanded_preview_frames,
+    )
     add_indices(
         _even_fill_indices(
             len(ordered),
@@ -229,6 +243,7 @@ def select_staged_preview_frames(
             selected,
         ),
         NormalSamplingStage.EXPANDED,
+        policy.expanded_preview_frames,
     )
 
     add_indices(
@@ -238,6 +253,7 @@ def select_staged_preview_frames(
             selected,
         ),
         NormalSamplingStage.FINAL,
+        policy.max_preview_frames,
     )
 
     samples = [
