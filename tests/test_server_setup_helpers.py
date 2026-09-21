@@ -16,10 +16,30 @@ class ServerSetupHelperContracts(unittest.TestCase):
             "Setup-InfoMancer.command",
             "Setup-InfoMancer.ps1",
             "setup-infomancer.sh",
+            "requirements-ocr.txt",
         ):
             with self.subTest(filename=filename):
                 self.assertIn(f'"{filename}"', builder)
                 self.assertTrue((ROOT / filename).is_file(), filename)
+
+    def test_optional_ocr_is_a_reproducible_server_build_choice(self):
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+        env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+        requirements = (ROOT / "requirements-ocr.txt").read_text(encoding="utf-8")
+        builder = (ROOT / "scripts/build_release.py").read_text(encoding="utf-8")
+
+        self.assertIn("ARG INFOMANCER_INSTALL_OCR=false", dockerfile)
+        self.assertIn('requirements-ocr.txt', dockerfile)
+        self.assertIn('$INFOMANCER_INSTALL_OCR', dockerfile)
+        self.assertIn(
+            "INFOMANCER_INSTALL_OCR: ${INFOMANCER_INSTALL_OCR:-false}",
+            compose,
+        )
+        self.assertIn("INFOMANCER_INSTALL_OCR=false", env_example)
+        self.assertIn("rapidocr==", requirements)
+        self.assertIn("onnxruntime==", requirements)
+        self.assertIn('"requirements-ocr.txt"', builder)
 
     def test_start_here_is_short_and_platform_specific(self):
         text = (ROOT / "START-HERE.txt").read_text(encoding="utf-8")
@@ -46,6 +66,8 @@ class ServerSetupHelperContracts(unittest.TestCase):
             "https://docs.docker.com/engine/install/",
             "INFOMANCER_UID",
             "INFOMANCER_GID",
+            "INFOMANCER_INSTALL_OCR",
+            "Episode Identity CPU OCR",
             "compose.media.yaml",
             "dc up -d --build",
             "data/bootstrap-token",
@@ -79,6 +101,8 @@ class ServerSetupHelperContracts(unittest.TestCase):
             "winget",
             "https://docs.docker.com/desktop/setup/install/windows-install/",
             "docker info",
+            "INFOMANCER_INSTALL_OCR",
+            "Episode Identity CPU OCR",
             "compose.media.yaml",
             "up -d --build",
             "data\\bootstrap-token",
