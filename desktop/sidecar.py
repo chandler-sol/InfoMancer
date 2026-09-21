@@ -301,6 +301,23 @@ def create_recovery_package(data_dir: Path, output: Path) -> None:
     print(str(output), flush=True)
 
 
+def _check_ffmpeg() -> int:
+    """Verify the packaged core can find and execute its frame extractor."""
+    from app.media_info import ffmpeg_executable
+
+    try:
+        result = subprocess.run(
+            [ffmpeg_executable(), "-version"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return 25
+    return 0 if result.returncode == 0 else 25
+
+
 def _check_ffprobe() -> int:
     """Verify the packaged core can find and execute its media inspector."""
     from app.media_info import ffprobe_executable
@@ -329,12 +346,17 @@ def main() -> int:
     parser.add_argument("--data-dir")
     parser.add_argument("--recovery-output")
     parser.add_argument("--check-ffprobe", action="store_true")
+    parser.add_argument("--check-ffmpeg", action="store_true")
     args = parser.parse_args()
 
     if args.check_ffprobe:
         return _check_ffprobe()
+    if args.check_ffmpeg:
+        return _check_ffmpeg()
     if not args.data_dir:
-        parser.error("--data-dir is required unless --check-ffprobe is used")
+        parser.error(
+            "--data-dir is required unless a packaged-media-tool check is used"
+        )
 
     data_dir = Path(args.data_dir).expanduser().resolve()
     _ensure_runtime_streams(data_dir)
