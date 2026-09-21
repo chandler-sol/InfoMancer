@@ -512,6 +512,35 @@ class PlexBifFoundationTests(unittest.TestCase):
         self.assertEqual(resolved.item_id, "102")
         self.assertEqual(resolved.media_source_id, "502")
 
+    def test_plex_path_lookup_rejects_incomplete_declared_candidate_set(self):
+        expected = "/srv/tv/Show/Season 01/Episode.mkv"
+        payload = json.dumps(
+            {
+                "MediaContainer": {
+                    "offset": 0,
+                    "size": 1,
+                    "totalSize": 2,
+                    "Metadata": [plex_episode_item(path=expected)],
+                }
+            }
+        ).encode("utf-8")
+        opener = DummyOpener(
+            DummyResponse(payload, content_type="application/json")
+        )
+
+        with patch(
+            "app.media_identity.sources.plex.urllib.request.build_opener",
+            return_value=opener,
+        ):
+            with self.assertRaises(PlexSourceFailure) as caught:
+                fetch_plex_path_candidates(
+                    "https://plex.local:32400",
+                    "secret",
+                    path=expected,
+                )
+        self.assertIsInstance(caught.exception, ExternalSourceFailure)
+        self.assertIn("incomplete candidate set", str(caught.exception))
+
     def test_plex_episode_candidates_page_until_empty_without_total_size(self):
         page = [
             plex_episode_item(
@@ -648,6 +677,8 @@ class PlexBifFoundationTests(unittest.TestCase):
                 )
 
         self.assertNotIsInstance(caught.exception, PlexPreviewUnavailable)
+        self.assertIsInstance(caught.exception, PlexSourceFailure)
+        self.assertIsInstance(caught.exception, ExternalSourceFailure)
 
     def test_missing_bif_404_is_preview_unavailable(self):
         error = urllib.error.HTTPError(
@@ -664,12 +695,14 @@ class PlexBifFoundationTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(
                 PlexPreviewUnavailable, "no BIF preview asset"
-            ):
+            ) as caught:
                 fetch_plex_bif_index(
                     "https://plex.local:32400",
                     "secret",
                     "501",
                 )
+        self.assertIsInstance(caught.exception, ExternalPreviewUnavailable)
+        self.assertNotIsInstance(caught.exception, ExternalSourceFailure)
 
     def test_fetch_plex_item_requires_exact_requested_rating_key(self):
         payload = json.dumps(
@@ -778,6 +811,78 @@ class PlexBifFoundationTests(unittest.TestCase):
                     "501",
                     0,
                 )
+
+    def test_fetch_plex_bif_image_rejects_marker_wrapped_corrupt_jpeg(self):
+        opener = DummyOpener(
+            DummyResponse(
+                b"\xff\xd8not-really-jpeg\xff\xd9",
+                content_type="image/jpeg",
+            )
+        )
+        with patch(
+            "app.media_identity.sources.plex.urllib.request.build_opener",
+            return_value=opener,
+        ):
+            with self.assertRaisesRegex(
+                PlexPreviewUnavailable, "decoded safely"
+            ) as caught:
+                fetch_plex_bif_image(
+                    "https://plex.local:32400",
+                    "secret",
+                    "501",
+                    0,
+                )
+        self.assertIsInstance(caught.exception, ExternalPreviewUnavailable)
+
+    def test_fetch_plex_bif_image_enforces_dimension_and_pixel_ceilings(self):
+        class FakeImage:
+            format = "JPEG"
+
+            def __init__(self, size):
+                self.size = size
+                self.width, self.height = size
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def load(self):
+                raise AssertionError("unsafe image must be rejected before decode")
+
+        cases = (
+            ((16_385, 1), "dimensions"),
+            ((9_000, 8_000), "dimensions"),
+        )
+        for size, pattern in cases:
+            with self.subTest(size=size):
+                opener = DummyOpener(
+                    DummyResponse(
+                        b"\xff\xd8bounded\xff\xd9",
+                        content_type="image/jpeg",
+                    )
+                )
+                with (
+                    patch(
+                        "app.media_identity.sources.plex.urllib.request.build_opener",
+                        return_value=opener,
+                    ),
+                    patch(
+                        "app.media_identity.sources.plex.Image.open",
+                        return_value=FakeImage(size),
+                    ),
+                ):
+                    with self.assertRaisesRegex(
+                        PlexPreviewUnavailable,
+                        pattern,
+                    ):
+                        fetch_plex_bif_image(
+                            "https://plex.local:32400",
+                            "secret",
+                            "501",
+                            0,
+                        )
 
     def test_configured_plex_source_resolves_and_reads_exact_part_preview(self):
         bif = build_bif()
