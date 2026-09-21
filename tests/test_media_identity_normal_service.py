@@ -340,6 +340,69 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertEqual(row["source_kind"], "generated_preview_ocr")
 
+    def test_textless_external_ocr_falls_back_to_local_generated_frames(self):
+        class BlankExternal(FakePreviewSource):
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"blank"
+
+        class ConditionalOcr(FakeOcr):
+            def recognize(self, image: bytes) -> OcrTextResult:
+                self.calls += 1
+                if image == b"blank":
+                    return OcrTextResult(text="", confidence=0.95)
+                return OcrTextResult(
+                    text=image.decode("utf-8"),
+                    confidence=0.95,
+                )
+
+        class FakeLocalSource(FakePreviewSource):
+            source_key = LOCAL_FRAME_SOURCE_KEY
+
+            def resolve_media(self, _context):
+                return ExternalMediaRef(
+                    source_key=self.source_key,
+                    item_id="file:1",
+                    path=str(self_path),
+                    source_signature="local-preview-v2",
+                )
+
+            def preview_frames(self, _media):
+                return (
+                    PreviewFrameRef(
+                        source_key=self.source_key,
+                        item_id="file:1",
+                        timestamp_ms=30_000,
+                        asset_ref="ffmpeg:1:30000",
+                        source_signature="local-preview-v2",
+                        width=640,
+                        height=360,
+                    ),
+                )
+
+        self_path = self.media_path
+        external = BlankExternal()
+        local = FakeLocalSource()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([external]),
+            ConditionalOcr(),
+        )
+
+        with patch(
+            "app.media_identity.normal_service.LocalFfmpegFrameSource",
+            return_value=local,
+        ):
+            result = service.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(result.source_key, LOCAL_FRAME_SOURCE_KEY)
+        self.assertEqual(result.text_observation_count, 1)
+        self.assertEqual(external.read_calls, 1)
+        self.assertEqual(local.read_calls, 1)
+        self.assertTrue(
+            any("jellyfin:ocr:no-visual-text" in item for item in result.failures)
+        )
+
     def test_local_ffmpeg_is_not_attempted_when_ocr_engine_is_unavailable(self):
         class UnavailableOcr(FakeOcr):
             def available(self):
