@@ -129,8 +129,25 @@ def build_router(ctx: RouteContext):
             raise HTTPException(404, str(exc)) from exc
         file_row = detail.get("file") or {}
         title_id = int(file_row.get("title_id") or 0)
+        credential_warning = ""
         try:
-            secrets = provider_secrets.load()
+            try:
+                secrets = provider_secrets.load()
+            except ProviderSecretError as exc:
+                secrets = {}
+                credential_warning = str(exc)
+                record_event(
+                    "mie",
+                    "Episode Identity Normal could not read external integration credentials; local fallback remains available.",
+                    level="warning",
+                    detail=credential_warning,
+                    context={
+                        "scan_id": int(scan_id),
+                        "title_id": title_id or None,
+                        "profile": "normal",
+                    },
+                    user_id=request.state.user.id,
+                )
             registry = build_configured_source_registry(
                 ExternalSourceConfigService(db),
                 secrets,
@@ -143,11 +160,6 @@ def build_router(ctx: RouteContext):
             result = normal.run_scan(int(scan_id))
             resolution = decisions.resolve_scan(int(scan_id))
             findings_refreshed = _refresh_findings(request.state.user.id)
-        except ProviderSecretError as exc:
-            return redirect(
-                f"/episode-identity/scans/{scan_id}",
-                f"Normal verification could not read integration credentials: {exc}",
-            )
         except (NormalIdentityScanError, MediaIdentityDecisionError) as exc:
             record_event(
                 "mie",
@@ -221,6 +233,11 @@ def build_router(ctx: RouteContext):
             )
             if local_failure:
                 message += f" Local fallback: {local_failure}"
+        if credential_warning:
+            message += (
+                " Plex/Jellyfin credentials could not be read, so external previews "
+                "were skipped and only local fallback was available."
+            )
         if result.budget_exhausted:
             message += " Normal stopped at its configured resource limit."
         if not findings_refreshed:
