@@ -37,6 +37,7 @@ from .fast import TEXT_SUPPORT_THRESHOLD
 from .text import TextCorpus, synopsis_similarity_from_corpus, text_corpus
 from .versions import (
     NORMAL_EVIDENCE_ALGORITHM_VERSION,
+    NORMAL_SPEECH_EVIDENCE_ALGORITHM_VERSION,
     NORMAL_SPEECH_ORCHESTRATION_VERSION,
 )
 
@@ -55,7 +56,7 @@ NORMAL_UNCALIBRATED_OCR_QUALITY = 0.35
 NORMAL_FALLBACK_MIN_SIMILARITY = 0.35
 NORMAL_FALLBACK_MIN_MARGIN = 0.08
 NORMAL_SPEECH_EVIDENCE_KEY = "speech-synopsis"
-NORMAL_SPEECH_EVIDENCE_VERSION = "1"
+NORMAL_SPEECH_EVIDENCE_VERSION = str(NORMAL_SPEECH_EVIDENCE_ALGORITHM_VERSION)
 
 
 class NormalIdentityScanError(RuntimeError):
@@ -1118,6 +1119,7 @@ class NormalIdentityService:
             claimed["normal_speech"] = {
                 "version": 1,
                 "algorithm_version": NORMAL_SPEECH_ORCHESTRATION_VERSION,
+                "evidence_algorithm_version": NORMAL_SPEECH_EVIDENCE_ALGORITHM_VERSION,
                 "escalated": bool(speech_escalated),
                 "planned_windows": len(speech_run.planned_windows),
                 "transcript_count": speech_run.transcript_count,
