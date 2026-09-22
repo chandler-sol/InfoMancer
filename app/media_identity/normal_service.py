@@ -660,6 +660,8 @@ class NormalIdentityService:
                     context,
                     max_stage=max_stage,
                     stage_sufficient=stage_sufficient,
+                    initial_image_bytes=run.total_image_bytes,
+                    initial_text_chars=run.total_text_chars,
                 )
 
             external_run = run
@@ -676,9 +678,9 @@ class NormalIdentityService:
                 source_key=preferred.source_key,
                 observations=preferred.observations,
                 failures=combined_failures,
-                total_image_bytes=preferred.total_image_bytes,
-                total_text_chars=preferred.total_text_chars,
-                budget_exhausted=preferred.budget_exhausted,
+                total_image_bytes=local_run.total_image_bytes,
+                total_text_chars=local_run.total_text_chars,
+                budget_exhausted=local_run.budget_exhausted,
             )
 
         with self.database.connect() as conn:
