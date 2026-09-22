@@ -246,6 +246,35 @@ class NormalPreviewOcrExecutorTests(unittest.TestCase):
             any("all previews stale" in item for item in result.failures)
         )
 
+    def test_malformed_preview_metadata_falls_through_to_next_source(self):
+        broken_frame = replace(
+            frames("aaa", 1)[0],
+            source_signature="",
+        )
+        broken = PreviewSource(
+            "aaa",
+            frames=(broken_frame,),
+            payloads={broken_frame.timestamp_ms: b"broken"},
+        )
+        useful_frames = frames("zzz", 1)
+        useful = PreviewSource(
+            "zzz",
+            frames=useful_frames,
+            payloads={useful_frames[0].timestamp_ms: b"useful"},
+        )
+
+        result = NormalPreviewOcrExecutor(
+            ExternalSourceRegistry([useful, broken]),
+            FakeOcr(),
+        ).run(context())
+
+        self.assertEqual(result.source_key, "zzz")
+        self.assertTrue(result.has_text)
+        self.assertEqual(broken.read_calls, [])
+        self.assertTrue(
+            any("aaa:preview-normalize:" in item for item in result.failures)
+        )
+
     def test_source_listing_failure_falls_through_and_is_recorded(self):
         jellyfin = PreviewSource(
             "jellyfin",
