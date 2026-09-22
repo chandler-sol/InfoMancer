@@ -435,6 +435,41 @@ class NormalSpeechService:
             )
         return None
 
+    def _stable_cached_observation(
+        self,
+        scan: Mapping[str, Any],
+        media: MediaIdentityFile,
+        request: SpeechRequest,
+    ) -> tuple[
+        NormalSpeechObservation | None,
+        _SpeechEngineSnapshot,
+        str,
+    ]:
+        """Reuse only after current bounded audio bytes and runtime identity agree."""
+        first_snapshot = self._engine_snapshot()
+        first_cache_key = speech_transcript_cache_key(
+            request,
+            first_snapshot,
+        )
+        cached = self._cached_observation(
+            scan,
+            media,
+            request.window,
+            request.audio.source_signature,
+            first_snapshot,
+        )
+        if cached is None or cached.cache_key != first_cache_key:
+            return None, first_snapshot, first_cache_key
+
+        second_snapshot = self._engine_snapshot()
+        second_cache_key = speech_transcript_cache_key(
+            request,
+            second_snapshot,
+        )
+        if second_cache_key != first_cache_key:
+            return None, second_snapshot, second_cache_key
+        return cached, second_snapshot, second_cache_key
+
     def _persist_observation(
         self,
         scan_id: int,
@@ -664,8 +699,7 @@ class NormalSpeechService:
         for window in windows:
             self._require_fresh_scan(int(scan_id), scan, media)
             try:
-                source_signature = extractor.source_signature(window)
-                engine_snapshot = self._engine_snapshot()
+                extractor.source_signature(window)
             except SpeechAudioStaleError as exc:
                 raise NormalSpeechStaleError(str(exc)) from exc
             except (SpeechAudioError, SpeechIdentityError, OSError) as exc:
@@ -674,40 +708,15 @@ class NormalSpeechService:
                 )
                 continue
             except Exception as exc:
-                # Runtime/model identity can disappear between available() and
-                # this exact-window snapshot. Treat that as optional speech
-                # unavailability rather than failing the Normal scan.
                 failures.append(
-                    _bounded_failure(f"speech:{window.key}:engine", exc)
+                    _bounded_failure(f"speech:{window.key}:source", exc)
                 )
                 continue
 
-            cached = self._cached_observation(
-                scan,
-                media,
-                window,
-                source_signature,
-                engine_snapshot,
-            )
-            if cached is not None:
-                try:
-                    validate_normal_speech_audio_budget(
-                        [*budget_records, (window, cached.audio_identity)]
-                    )
-                except (SpeechAudioUnavailable, SpeechIdentityError) as exc:
-                    failures.append(
-                        _bounded_failure("speech-audio-budget", exc)
-                    )
-                    return NormalSpeechRun(
-                        planned_windows=windows,
-                        observations=tuple(observations),
-                        failures=tuple(failures),
-                        budget_exhausted=True,
-                    )
-                budget_records.append((window, cached.audio_identity))
-                observations.append(cached)
-                continue
-
+            # Transcript cache reuse is intentionally checked only after
+            # extraction. The cache key is bound to the exact bounded WAV
+            # bytes, so path/size/mtime provenance alone is never sufficient
+            # to reuse a transcript.
             prepared: ExtractedSpeechAudio | None = None
             try:
                 prepared = extractor.extract(window)
@@ -720,28 +729,21 @@ class NormalSpeechService:
                     translate=self.translate,
                     parameters=self.parameters,
                 )
-                cache_key = speech_transcript_cache_key(
-                    request,
-                    engine_snapshot,
+                exact_cached, engine_snapshot, cache_key = (
+                    self._stable_cached_observation(
+                        scan,
+                        media,
+                        request,
+                    )
                 )
-
-                # A concurrent or interrupted prior run may have completed the
-                # exact fragment after our source-level lookup but before this
-                # extraction. Recheck by exact cache identity before invoking
-                # the speech engine.
-                exact_cached = self._cached_observation(
-                    scan,
-                    media,
-                    window,
-                    prepared.identity.source_signature,
-                    engine_snapshot,
-                )
-                if (
-                    exact_cached is not None
-                    and exact_cached.cache_key == cache_key
-                ):
+                if exact_cached is not None:
                     validate_normal_speech_audio_budget(
                         [*budget_records, (window, exact_cached.audio_identity)]
+                    )
+                    self._require_fresh_scan(
+                        int(scan_id),
+                        scan,
+                        media,
                     )
                     budget_records.append(
                         (window, exact_cached.audio_identity)
