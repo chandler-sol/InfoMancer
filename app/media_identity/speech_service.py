@@ -483,7 +483,7 @@ class NormalSpeechService:
                      updated_at,last_used_at
                    ) VALUES (
                      ?,'speech_transcript',?,? ,?,'complete','normal',
-                     'local_speech',?,?,?,?,?,?,?,?,?,
+                     'local_speech',?,?,?,?,?,?,?,?,
                      CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
                    )""",
                 (
