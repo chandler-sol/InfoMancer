@@ -390,6 +390,8 @@ class NormalPreviewOcrExecutor:
         stage_sufficient: Callable[
             [NormalPreviewOcrRun, NormalSamplingStage], bool
         ] | None = None,
+        initial_image_bytes: int = 0,
+        initial_text_chars: int = 0,
     ) -> NormalPreviewOcrRun:
         if not IdentityProfile.parse(context.profile).permits(IdentityProfile.NORMAL):
             raise NormalIdentityError(
@@ -398,6 +400,16 @@ class NormalPreviewOcrExecutor:
         if not self.engine.available():
             return NormalPreviewOcrRun(
                 failures=("ocr-engine-unavailable",),
+            )
+
+        spent_image_bytes = max(0, int(initial_image_bytes))
+        spent_text_chars = max(0, int(initial_text_chars))
+        if (
+            spent_image_bytes > self.limits.max_preview_bytes_total
+            or spent_text_chars > self.limits.max_ocr_text_chars
+        ):
+            raise NormalIdentityError(
+                "Initial Normal OCR resource usage exceeds configured limits."
             )
 
         failures: list[str] = []
@@ -437,7 +449,11 @@ class NormalPreviewOcrExecutor:
                     "sha256": context.media.sha256 or "",
                 },
                 stage_sufficient=stage_sufficient,
+                initial_image_bytes=spent_image_bytes,
+                initial_text_chars=spent_text_chars,
             )
+            spent_image_bytes = result.total_image_bytes
+            spent_text_chars = result.total_text_chars
             failures = list(result.failures)
             if result.has_text or result.budget_exhausted:
                 return result
@@ -450,11 +466,23 @@ class NormalPreviewOcrExecutor:
                 source_key=empty_result.source_key,
                 observations=empty_result.observations,
                 failures=tuple(failures),
-                total_image_bytes=empty_result.total_image_bytes,
-                total_text_chars=empty_result.total_text_chars,
-                budget_exhausted=empty_result.budget_exhausted,
+                total_image_bytes=spent_image_bytes,
+                total_text_chars=spent_text_chars,
+                budget_exhausted=(
+                    empty_result.budget_exhausted
+                    or spent_image_bytes >= self.limits.max_preview_bytes_total
+                    or spent_text_chars >= self.limits.max_ocr_text_chars
+                ),
             )
-        return NormalPreviewOcrRun(failures=tuple(failures))
+        return NormalPreviewOcrRun(
+            failures=tuple(failures),
+            total_image_bytes=spent_image_bytes,
+            total_text_chars=spent_text_chars,
+            budget_exhausted=(
+                spent_image_bytes >= self.limits.max_preview_bytes_total
+                or spent_text_chars >= self.limits.max_ocr_text_chars
+            ),
+        )
 
     def _run_source(
         self,
@@ -466,11 +494,13 @@ class NormalPreviewOcrExecutor:
         stage_sufficient: Callable[
             [NormalPreviewOcrRun, NormalSamplingStage], bool
         ] | None,
+        initial_image_bytes: int,
+        initial_text_chars: int,
     ) -> NormalPreviewOcrRun:
         observations: list[PreviewOcrObservation] = []
         failures = list(prior_failures)
-        total_image_bytes = 0
-        total_text_chars = 0
+        total_image_bytes = int(initial_image_bytes)
+        total_text_chars = int(initial_text_chars)
         budget_exhausted = False
         current_stage: NormalSamplingStage | None = None
 
