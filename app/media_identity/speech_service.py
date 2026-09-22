@@ -524,6 +524,26 @@ class NormalSpeechService:
                     "Episode Identity inputs changed before transcript persistence."
                 )
 
+            transaction_current, transaction_file = (
+                MediaIdentityDecisionService._snapshot_is_current(
+                    conn,
+                    int(transaction_scan["file_id"]),
+                    size_bytes=int(transaction_scan["file_size_bytes"] or 0),
+                    modified_at=transaction_scan["file_modified_at"],
+                    sha256=transaction_scan["file_sha256"],
+                )
+            )
+            if (
+                not transaction_current
+                or transaction_file is None
+                or int(transaction_file["id"]) != int(media.file_id)
+                or int(transaction_file["title_id"]) != int(media.title_id)
+                or str(transaction_file["path"]) != str(media.path)
+            ):
+                raise NormalSpeechStaleError(
+                    "The media binding changed before transcript persistence."
+                )
+
             conn.execute(
                 """INSERT OR IGNORE INTO media_identity_artifacts(
                      file_id,artifact_type,analyzer_key,analyzer_version,
