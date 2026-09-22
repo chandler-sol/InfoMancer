@@ -17,6 +17,7 @@ from .models import (
     IdentityEvidence,
     IdentityProfile,
 )
+from .versions import EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION
 from .text import (
     SidecarIdentity,
     SidecarText,
@@ -959,6 +960,9 @@ class FastIdentityService:
                 "expanded_specials": bool(expanded_specials),
                 "input_signature_version": SCAN_INPUT_SIGNATURE_VERSION,
                 "input_signatures": input_signatures,
+                "decision_algorithm_version": (
+                    EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION
+                ),
             }
             cursor = conn.execute(
                 """INSERT INTO media_identity_scans(
