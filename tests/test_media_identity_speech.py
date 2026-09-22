@@ -312,6 +312,57 @@ class SpeechContractTests(unittest.TestCase):
             speech_transcript_cache_key(second, engine),
         )
 
+    def test_cache_key_ignores_orchestration_purpose_for_identical_audio(self) -> None:
+        engine = FakeSpeechEngine()
+        first = self.request(
+            window=SpeechWindow(30_000, 75_000, "dialogue-gap"),
+        )
+        second = self.request(
+            window=SpeechWindow(30_000, 75_000, "candidate-check"),
+        )
+        self.assertEqual(
+            speech_transcript_cache_key(first, engine),
+            speech_transcript_cache_key(second, engine),
+        )
+
+    def test_binary_and_model_source_metadata_are_stable_text(self) -> None:
+        binary = SpeechBinaryIdentity(
+            "whisper.cpp",
+            "1.9.4",
+            "d" * 64,
+            10,
+            source="  upstream  ",
+            license_id=" MIT ",
+        )
+        model = SpeechModelIdentity(
+            "whisper-base",
+            "fixture",
+            "e" * 64,
+            20,
+            source="  model-source  ",
+            license_id=" MIT ",
+        )
+        self.assertEqual(binary.source, "upstream")
+        self.assertEqual(binary.license_id, "MIT")
+        self.assertEqual(model.source, "model-source")
+        self.assertEqual(model.license_id, "MIT")
+        with self.assertRaisesRegex(SpeechIdentityError, "source"):
+            SpeechBinaryIdentity(
+                "whisper.cpp",
+                "1.9.4",
+                "d" * 64,
+                10,
+                source=object(),
+            )
+        with self.assertRaisesRegex(SpeechIdentityError, "license"):
+            SpeechModelIdentity(
+                "whisper-base",
+                "fixture",
+                "e" * 64,
+                20,
+                license_id=object(),
+            )
+
     def test_cache_key_changes_for_every_output_affecting_identity(self) -> None:
         baseline = speech_transcript_cache_key(
             self.request(),
