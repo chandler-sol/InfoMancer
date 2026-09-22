@@ -472,7 +472,8 @@ class MediaIdentityDecisionService:
                 artifact_rows = conn.execute(
                     f"""SELECT id,file_id,artifact_type,analyzer_key,
                                analyzer_version,cache_key,status,profile,
-                               file_size_bytes,file_modified_at
+                               source_signature,file_size_bytes,file_modified_at,
+                               start_ms,end_ms,payload_json
                         FROM media_identity_artifacts
                         WHERE id IN ({placeholders})""",
                     tuple(artifact_ids),
@@ -481,6 +482,33 @@ class MediaIdentityDecisionService:
                     return False, file_row
                 expected_by_id = dict(zip(artifact_ids, cache_keys))
                 for artifact_row in artifact_rows:
+                    artifact_payload = _json_object(
+                        artifact_row["payload_json"]
+                    )
+                    window_payload = artifact_payload.get("window")
+                    audio_payload = artifact_payload.get("audio_identity")
+                    if (
+                        not isinstance(window_payload, Mapping)
+                        or not isinstance(audio_payload, Mapping)
+                        or not isinstance(artifact_payload.get("engine"), Mapping)
+                        or not isinstance(artifact_payload.get("model"), Mapping)
+                        or not isinstance(artifact_payload.get("request"), Mapping)
+                        or not isinstance(artifact_payload.get("transcript"), Mapping)
+                    ):
+                        return False, file_row
+                    try:
+                        payload_start = int(window_payload["start_ms"])
+                        payload_end = int(window_payload["end_ms"])
+                    except (KeyError, TypeError, ValueError):
+                        return False, file_row
+                    if (
+                        payload_start != int(artifact_row["start_ms"])
+                        or payload_end != int(artifact_row["end_ms"])
+                        or str(audio_payload.get("source_signature") or "")
+                        != str(artifact_row["source_signature"] or "")
+                    ):
+                        return False, file_row
+
                     if (
                         int(artifact_row["file_id"]) != int(scan["file_id"])
                         or str(artifact_row["artifact_type"] or "")
