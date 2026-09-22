@@ -374,8 +374,14 @@ def speech_transcript_cache_key(
     request: SpeechRequest,
     engine: SpeechEngine,
 ) -> str:
-    key = str(getattr(engine, "key", "") or "").strip().casefold()
-    version = str(getattr(engine, "version", "") or "").strip()
+    raw_key = getattr(engine, "key", "")
+    raw_version = getattr(engine, "version", "")
+    if not isinstance(raw_key, str) or not isinstance(raw_version, str):
+        raise SpeechIdentityError(
+            "Speech engines require stable text key and version values."
+        )
+    key = raw_key.strip().casefold()
+    version = raw_version.strip()
     if not key or not version:
         raise SpeechIdentityError(
             "Speech engines require stable key and version values."
