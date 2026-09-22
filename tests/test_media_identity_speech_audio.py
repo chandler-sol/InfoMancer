@@ -318,8 +318,8 @@ class SpeechAudioExtractionTests(unittest.TestCase):
             side_effect=self.completed(payload),
         ):
             with self.assertRaisesRegex(
-                SpeechAudioStaleError,
-                "bounded regular file",
+                SpeechAudioUnavailable,
+                "bounded regular",
             ):
                 self.extractor().extract(SpeechWindow(0, 1000))
 
@@ -419,6 +419,34 @@ class SpeechAudioExtractionTests(unittest.TestCase):
         ):
             extractor.source_signature(SpeechWindow(0, 1000))
 
+    def test_final_audio_revalidation_can_bind_the_pending_request_identity(self) -> None:
+        payload = wav_bytes(duration_ms=1000)
+        with patch(
+            "app.media_identity.speech_audio.subprocess.run",
+            side_effect=self.completed(payload),
+        ):
+            artifact = self.extractor().extract(SpeechWindow(0, 1000))
+
+        try:
+            other = SpeechAudioIdentity(
+                "0" * 64,
+                artifact.identity.size_bytes,
+                artifact.identity.format_key,
+                artifact.identity.sample_rate_hz,
+                artifact.identity.channels,
+            )
+            with self.assertRaisesRegex(
+                SpeechAudioStaleError,
+                "does not match the request",
+            ):
+                artifact.validated_path(other)
+            self.assertEqual(
+                Path(artifact.validated_path(artifact.identity)),
+                artifact.path,
+            )
+        finally:
+            artifact.cleanup()
+
     def test_final_audio_revalidation_detects_same_size_tampering(self) -> None:
         payload = wav_bytes(duration_ms=1000)
         with patch(
@@ -483,6 +511,34 @@ class SpeechAudioExtractionTests(unittest.TestCase):
             "aggregate byte",
         ):
             validate_normal_speech_audio_budget(artifacts)
+
+    def test_preferred_language_must_be_stable_text(self) -> None:
+        with self.assertRaisesRegex(
+            SpeechAudioUnavailable,
+            "must be text",
+        ):
+            select_speech_audio_stream(
+                self.streams,
+                preferred_language=object(),
+            )
+
+    def test_extractor_requires_media_to_exist_at_preparation_time(self) -> None:
+        missing = MediaIdentityFile(
+            file_id=8,
+            title_id=3,
+            path=str(self.root / "missing.mkv"),
+            size_bytes=100,
+            modified_at=1.0,
+        )
+        with self.assertRaisesRegex(
+            SpeechAudioUnavailable,
+            "cataloged media file",
+        ):
+            LocalFfmpegSpeechAudioExtractor(
+                missing,
+                self.streams,
+                executable=str(self.ffmpeg),
+            )
 
     def test_timeout_contract_rejects_invalid_values(self) -> None:
         for value in (0, 121, True, 1.5):
