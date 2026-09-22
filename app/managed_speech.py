@@ -737,9 +737,9 @@ def _runtime_inventory(root: Path) -> list[dict[str, object]]:
             )
         relative = path.relative_to(root).as_posix()
         size = path.stat().st_size
-        if size <= 0:
+        if size < 0:
             raise ManagedSpeechComponentError(
-                "The managed whisper.cpp runtime contains an empty file."
+                "The managed whisper.cpp runtime contains an invalid file size."
             )
         with path.open("rb") as stream:
             digest = _sha256_stream(stream)
@@ -1244,7 +1244,7 @@ class ManagedWhisperCppRuntime:
         )
 
         self.layout.ensure_directories([self.layout.binary_root])
-        staging = Path(
+        staging: Path | None = Path(
             tempfile.mkdtemp(
                 prefix=".install-",
                 dir=self.layout.binary_root,
@@ -1344,7 +1344,7 @@ class ManagedWhisperCppRuntime:
                     )
                 shutil.rmtree(final)
             os.replace(staging, final)
-            staging = Path()
+            staging = None
         except ManagedSpeechComponentError:
             raise
         except OSError as exc:
@@ -1352,7 +1352,7 @@ class ManagedWhisperCppRuntime:
                 "InfoMancer could not save the managed whisper.cpp runtime."
             ) from exc
         finally:
-            if staging and staging.exists():
+            if staging is not None and staging.exists():
                 shutil.rmtree(staging, ignore_errors=True)
 
         resolved = self._managed_candidate()
@@ -1501,7 +1501,7 @@ class ManagedWhisperModel:
         )
 
         self.layout.ensure_directories([self.layout.model_root])
-        staging = Path(
+        staging: Path | None = Path(
             tempfile.mkdtemp(
                 prefix=".install-",
                 dir=self.layout.model_root,
@@ -1513,7 +1513,10 @@ class ManagedWhisperModel:
             path.write_bytes(payload)
             if (
                 path.stat().st_size != self.identity.size_bytes
-                or _sha256_bytes(path.read_bytes()) != self.identity.sha256
+                or (
+                    (lambda stream: _sha256_stream(stream))(path.open("rb"))
+                    != self.identity.sha256
+                )
             ):
                 raise ManagedSpeechComponentError(
                     "The staged Whisper model failed integrity verification."
@@ -1561,7 +1564,7 @@ class ManagedWhisperModel:
                     )
                 shutil.rmtree(final)
             os.replace(staging, final)
-            staging = Path()
+            staging = None
         except ManagedSpeechComponentError:
             raise
         except OSError as exc:
@@ -1569,7 +1572,7 @@ class ManagedWhisperModel:
                 "InfoMancer could not save the managed Whisper model."
             ) from exc
         finally:
-            if staging and staging.exists():
+            if staging is not None and staging.exists():
                 shutil.rmtree(staging, ignore_errors=True)
 
         return self.resolve()
