@@ -87,6 +87,50 @@ class SpeechAudioStream:
     commentary: bool = False
     visual_impaired: bool = False
 
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.index, bool)
+            or not isinstance(self.index, int)
+            or self.index < 0
+        ):
+            raise SpeechAudioUnavailable(
+                "Speech audio stream indices must be non-negative integers."
+            )
+        if not isinstance(self.language, str) or not isinstance(self.title, str):
+            raise SpeechAudioUnavailable(
+                "Speech audio stream language and title must be text."
+            )
+        for label, value in (
+            ("channel count", self.channels),
+            ("sample rate", self.sample_rate_hz),
+        ):
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value <= 0
+            ):
+                raise SpeechAudioUnavailable(
+                    f"Speech audio stream {label} must be a positive integer."
+                )
+        if not all(
+            isinstance(value, bool)
+            for value in (
+                self.default,
+                self.commentary,
+                self.visual_impaired,
+            )
+        ):
+            raise SpeechAudioUnavailable(
+                "Speech audio stream disposition flags must be boolean."
+            )
+
+        object.__setattr__(
+            self,
+            "language",
+            self.language.strip().casefold() or "und",
+        )
+        object.__setattr__(self, "title", self.title.strip())
+
     def cache_identity(self) -> Mapping[str, Any]:
         return {
             "index": self.index,
