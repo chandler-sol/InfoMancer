@@ -168,6 +168,24 @@ def build_router(ctx: RouteContext):
                 speech_model=speech_model_component.identity,
             )
             result = normal.run_scan(int(scan_id))
+            speech_escalated = bool(
+                getattr(result, "speech_escalated", False)
+            )
+            speech_planned_window_count = int(
+                getattr(result, "speech_planned_window_count", 0) or 0
+            )
+            speech_transcript_count = int(
+                getattr(result, "speech_transcript_count", 0) or 0
+            )
+            speech_reused_artifact_count = int(
+                getattr(result, "speech_reused_artifact_count", 0) or 0
+            )
+            speech_failures = tuple(
+                getattr(result, "speech_failures", ()) or ()
+            )
+            speech_budget_exhausted = bool(
+                getattr(result, "speech_budget_exhausted", False)
+            )
             resolution = decisions.resolve_scan(int(scan_id))
             findings_refreshed = _refresh_findings(request.state.user.id)
         except (NormalIdentityScanError, MediaIdentityDecisionError) as exc:
@@ -204,11 +222,11 @@ def build_router(ctx: RouteContext):
                     if result.highest_observed_stage is not None
                     else ""
                 ),
-                "speech_escalated": result.speech_escalated,
-                "speech_planned_window_count": result.speech_planned_window_count,
-                "speech_transcript_count": result.speech_transcript_count,
-                "speech_reused_artifact_count": result.speech_reused_artifact_count,
-                "speech_failures": list(result.speech_failures),
+                "speech_escalated": speech_escalated,
+                "speech_planned_window_count": speech_planned_window_count,
+                "speech_transcript_count": speech_transcript_count,
+                "speech_reused_artifact_count": speech_reused_artifact_count,
+                "speech_failures": list(speech_failures),
                 "result_state": resolution.state.value,
             },
             user_id=request.state.user.id,
@@ -241,24 +259,24 @@ def build_router(ctx: RouteContext):
             else:
                 message = "Normal verification completed without usable visual OCR."
 
-            if result.speech_escalated:
-                if result.speech_transcript_count:
+            if speech_escalated:
+                if speech_transcript_count:
                     message += (
                         f" Local speech analysis transcribed "
-                        f"{result.speech_transcript_count} targeted window(s)"
+                        f"{speech_transcript_count} targeted window(s)"
                     )
-                    if result.speech_reused_artifact_count:
+                    if speech_reused_artifact_count:
                         message += (
-                            f", including {result.speech_reused_artifact_count} "
+                            f", including {speech_reused_artifact_count} "
                             "cached transcript(s)"
                         )
                     message += "."
-                elif "speech-engine-unavailable" in set(result.speech_failures):
+                elif "speech-engine-unavailable" in set(speech_failures):
                     message += (
                         " Local speech escalation was needed, but the optional "
                         "whisper.cpp runtime/model is not currently available."
                     )
-                elif result.speech_failures:
+                elif speech_failures:
                     message += (
                         " Local speech escalation was attempted but produced no "
                         "reusable transcript."
@@ -287,7 +305,7 @@ def build_router(ctx: RouteContext):
             )
             if local_failure:
                 message += f" Local visual fallback: {local_failure}"
-            if result.speech_escalated and result.speech_failures:
+            if speech_escalated and speech_failures:
                 message += " Local speech escalation was unavailable or unsuccessful."
         if credential_warning:
             message += (
@@ -296,7 +314,7 @@ def build_router(ctx: RouteContext):
             )
         if result.budget_exhausted:
             message += " Normal visual analysis stopped at its configured resource limit."
-        if result.speech_budget_exhausted:
+        if speech_budget_exhausted:
             message += " Normal speech analysis stopped at its configured resource limit."
         if not findings_refreshed:
             message += " Library Health will catch up on the next successful analysis."
