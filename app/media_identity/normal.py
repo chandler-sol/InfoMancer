@@ -465,6 +465,20 @@ class NormalPreviewOcrExecutor:
             spent_image_bytes = result.total_image_bytes
             spent_text_chars = result.total_text_chars
             failures = list(result.failures)
+            aggregate_exhausted = (
+                spent_image_bytes >= self.limits.max_preview_bytes_total
+                or spent_text_chars >= self.limits.max_ocr_text_chars
+            )
+            if aggregate_exhausted and not result.budget_exhausted:
+                failures.append("normal:resource-budget-exhausted")
+                result = NormalPreviewOcrRun(
+                    source_key=result.source_key,
+                    observations=result.observations,
+                    failures=tuple(failures),
+                    total_image_bytes=spent_image_bytes,
+                    total_text_chars=spent_text_chars,
+                    budget_exhausted=True,
+                )
             if result.has_text or result.budget_exhausted:
                 return result
             if result.observations and empty_result is None:
