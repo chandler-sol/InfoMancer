@@ -411,6 +411,16 @@ class NormalPreviewOcrExecutor:
             raise NormalIdentityError(
                 "Initial Normal OCR resource usage exceeds configured limits."
             )
+        if (
+            spent_image_bytes >= self.limits.max_preview_bytes_total
+            or spent_text_chars >= self.limits.max_ocr_text_chars
+        ):
+            return NormalPreviewOcrRun(
+                failures=("normal:resource-budget-exhausted",),
+                total_image_bytes=spent_image_bytes,
+                total_text_chars=spent_text_chars,
+                budget_exhausted=True,
+            )
 
         failures: list[str] = []
         empty_result: NormalPreviewOcrRun | None = None
