@@ -70,7 +70,8 @@ class ManagedSpeechLayoutTests(unittest.TestCase):
             / "components"
             / "whispercpp"
             / "whisper.cpp"
-            / "fixture-v1",
+            / "fixture-v1"
+            / binary.sha256,
         )
         self.assertEqual(
             self.layout.model_directory(model),
@@ -79,6 +80,15 @@ class ManagedSpeechLayoutTests(unittest.TestCase):
             / "whisper-models"
             / "ggml-base.en"
             / model.sha256,
+        )
+
+    def test_same_version_binaries_with_different_hashes_do_not_collide(self) -> None:
+        first = self.binary_identity(b"binary-a")
+        second = self.binary_identity(b"binary-b")
+        self.assertNotEqual(first.sha256, second.sha256)
+        self.assertNotEqual(
+            self.layout.binary_directory(first),
+            self.layout.binary_directory(second),
         )
 
     def test_component_segments_reject_path_traversal(self) -> None:
@@ -197,6 +207,18 @@ class ManagedSpeechLayoutTests(unittest.TestCase):
             self.assertIsNone(
                 self.layout.binary_candidate(identity, "whisper-cli")
             )
+
+    def test_junction_or_reparse_component_is_rejected(self) -> None:
+        payload = b"trusted-model"
+        identity = self.model_identity(payload)
+        with patch.object(Path, "is_junction", return_value=True):
+            self.assertIsNone(
+                self.layout.model_candidate(identity, "model.bin")
+            )
+            with self.assertRaises(ManagedSpeechComponentError):
+                self.layout.ensure_directories(
+                    [self.layout.model_directory(identity)]
+                )
 
     @unittest.skipIf(
         os.name == "nt",
