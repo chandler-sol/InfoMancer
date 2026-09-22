@@ -51,7 +51,7 @@
       <strong>{{ (identity.completed_profile or identity.requested_profile)|title }}</strong>
       <h3>Completed tier</h3>
       {% if identity.completed_profile == 'normal' %}
-      <p>Normal includes the Fast evidence plus bounded visual text from media-server previews or local FFmpeg-generated fallback frames.</p>
+      <p>Normal includes the Fast evidence plus bounded visual text and, when cheaper evidence is insufficient, targeted local speech analysis.</p>
       {% else %}
       <p>Fast uses local catalog, provider metadata, stream facts, and available subtitle text.</p>
       {% endif %}
@@ -83,6 +83,73 @@
   <p class="legal-note">Normal remains read-only. OCR observations only add evidence to this scan.</p>
   {% else %}
   <p>Run Fast verification again first because this scan no longer matches the current file and metadata snapshot.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if identity.speech_analysis %}
+<section class="panel">
+  <header>
+    <div>
+      <p class="eyebrow">TARGETED SPEECH ANALYSIS</p>
+      <h2>Local dialogue evidence</h2>
+      <p>Speech is sampled only when cheaper subtitle and visual evidence do not separate the candidates safely. Speech and subtitle matches share one dialogue correlation group, so the resolver counts them as one supporting signal rather than two.</p>
+    </div>
+  </header>
+  <div class="mie-score-grid">
+    <article>
+      <strong>{{ 'Yes' if identity.speech_analysis.escalated else 'No' }}</strong>
+      <h3>Speech escalation</h3>
+      <p>{% if identity.speech_analysis.escalated %}Normal requested targeted local transcription.{% else %}Cheaper evidence was sufficient, so speech was not needed.{% endif %}</p>
+    </article>
+    <article>
+      <strong>{{ identity.speech_analysis.text_transcript_count }} / {{ identity.speech_analysis.planned_windows }}</strong>
+      <h3>Usable windows</h3>
+      <p>{{ identity.speech_analysis.transcript_count }} transcript artifact(s) were validated, including blank windows.</p>
+    </article>
+    <article>
+      <strong>{{ identity.speech_analysis.reused_artifact_count }}</strong>
+      <h3>Cached transcripts</h3>
+      <p>Reusable transcript artifacts still require regeneration and exact hashing of the bounded audio window before reuse.</p>
+    </article>
+    <article>
+      <strong>{% if identity.speech_analysis.evidence_count %}{{ '%.3f'|format(identity.speech_analysis.strongest_similarity) }}{% else %}None{% endif %}</strong>
+      <h3>Strongest synopsis similarity</h3>
+      <p>This is diagnostic lexical overlap, not a confidence percentage.</p>
+    </article>
+  </div>
+
+  {% if identity.speech_analysis.windows %}
+  <details>
+    <summary class="button">Sampled speech windows</summary>
+    <ul>
+      {% for window in identity.speech_analysis.windows %}
+      <li>{{ '%.1f'|format(window.start_ms / 1000) }}s to {{ '%.1f'|format(window.end_ms / 1000) }}s</li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
+  {% if identity.speech_analysis.transcript_excerpt %}
+  <details>
+    <summary class="button">Transcript sample</summary>
+    <pre>{{ identity.speech_analysis.transcript_excerpt }}</pre>
+  </details>
+  {% endif %}
+
+  {% if identity.speech_analysis.failures %}
+  <details>
+    <summary class="button">Speech diagnostics</summary>
+    <ul>
+      {% for failure in identity.speech_analysis.failures %}
+      <li><code>{{ failure }}</code></li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
+  {% if identity.speech_analysis.budget_exhausted %}
+  <p class="legal-note">Speech analysis stopped at its configured resource ceiling. Persisted completed windows remain reusable.</p>
   {% endif %}
 </section>
 {% endif %}
