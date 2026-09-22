@@ -22,6 +22,9 @@ class DummyOcr:
     def available(self) -> bool:
         return True
 
+    def cache_identity(self):
+        return {"fixture": "dummy-v1"}
+
     def recognize(self, image: bytes) -> OcrTextResult:
         return OcrTextResult(text=image.decode("utf-8"), confidence=0.75)
 
@@ -191,6 +194,17 @@ class NormalOcrFoundationTests(unittest.TestCase):
             parameters={"language": "spa", "rotate": False},
         )
         self.assertNotEqual(changed_parameters, baseline)
+
+        class ChangedConfig(DummyOcr):
+            def cache_identity(self):
+                return {"fixture": "dummy-v2"}
+
+        changed_engine_config = ocr_preview_cache_key(
+            original,
+            ChangedConfig(),
+            parameters={"language": "eng", "rotate": False},
+        )
+        self.assertNotEqual(changed_engine_config, baseline)
 
     def test_ocr_cache_key_requires_stable_engine_identity(self) -> None:
         class MissingVersion(DummyOcr):
