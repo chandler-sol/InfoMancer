@@ -8,7 +8,7 @@ from pathlib import Path
 import shutil
 import stat as stat_module
 import subprocess
-from typing import Any
+from typing import Any, Mapping
 
 from PIL import Image, UnidentifiedImageError
 
@@ -62,6 +62,7 @@ def _media_signature(
     *,
     device_id: int | None,
     inode_id: int | None,
+    ffmpeg_identity: Mapping[str, Any] | None,
 ) -> str:
     payload = {
         "version": LOCAL_FRAME_SOURCE_VERSION,
@@ -73,6 +74,7 @@ def _media_signature(
         "runtime_seconds": round(float(runtime_seconds), 6),
         "device_id": device_id,
         "inode_id": inode_id,
+        "ffmpeg_identity": dict(ffmpeg_identity or {}),
     }
     return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
 
@@ -112,16 +114,36 @@ def _stat_matches(
     return True
 
 
-def _ffmpeg_is_available(executable: str) -> bool:
+def _ffmpeg_identity(executable: str) -> dict[str, Any] | None:
     raw = str(executable or "").strip()
     if not raw:
-        return False
+        return None
     candidate = Path(raw)
-    if candidate.is_absolute() or candidate.parent != Path("."):
-        return candidate.is_file() and (
-            os.name == "nt" or os.access(candidate, os.X_OK)
-        )
-    return shutil.which(raw) is not None
+    if not (candidate.is_absolute() or candidate.parent != Path(".")):
+        resolved = shutil.which(raw)
+        if not resolved:
+            return None
+        candidate = Path(resolved)
+    try:
+        candidate = candidate.resolve(strict=True)
+        stat = candidate.stat()
+    except OSError:
+        return None
+    if not stat_module.S_ISREG(stat.st_mode):
+        return None
+    if os.name != "nt" and not os.access(candidate, os.X_OK):
+        return None
+    return {
+        "path": str(candidate),
+        "size_bytes": int(stat.st_size),
+        "modified_at_ns": int(getattr(stat, "st_mtime_ns", 0) or 0),
+        "device_id": int(getattr(stat, "st_dev", 0) or 0) or None,
+        "inode_id": int(getattr(stat, "st_ino", 0) or 0) or None,
+    }
+
+
+def _ffmpeg_is_available(executable: str) -> bool:
+    return _ffmpeg_identity(executable) is not None
 
 
 def _validate_generated_jpeg(payload: bytes) -> bytes:
@@ -186,7 +208,13 @@ class LocalFfmpegFrameSource:
         except (TypeError, ValueError):
             runtime = 0.0
         self.runtime_seconds = runtime
-        self.executable = str(executable or ffmpeg_executable())
+        requested_executable = str(executable or ffmpeg_executable())
+        self._ffmpeg_identity = _ffmpeg_identity(requested_executable)
+        self.executable = (
+            str(self._ffmpeg_identity["path"])
+            if self._ffmpeg_identity is not None
+            else requested_executable
+        )
         self.timeout_seconds = max(1, min(int(timeout_seconds), 60))
         path_identity = _stat_identity(Path(context.media.path))
         if path_identity is None:
@@ -200,6 +228,7 @@ class LocalFfmpegFrameSource:
                 runtime,
                 device_id=self._device_id,
                 inode_id=self._inode_id,
+                ffmpeg_identity=self._ffmpeg_identity,
             )
             if runtime > 0
             else ""
@@ -224,7 +253,10 @@ class LocalFfmpegFrameSource:
                 available=False,
                 detail="The local media file no longer matches the verified snapshot.",
             )
-        if not _ffmpeg_is_available(self.executable):
+        if (
+            self._ffmpeg_identity is None
+            or _ffmpeg_identity(self.executable) != self._ffmpeg_identity
+        ):
             return ExternalSourceStatus(
                 source_key=self.source_key,
                 available=False,
@@ -304,6 +336,13 @@ class LocalFfmpegFrameSource:
         if frame.asset_ref != expected_asset_ref:
             raise LocalFrameSourceFailure(
                 "Generated preview reference does not match its extraction policy."
+            )
+        if (
+            self._ffmpeg_identity is None
+            or _ffmpeg_identity(self.executable) != self._ffmpeg_identity
+        ):
+            raise LocalFrameSourceFailure(
+                "FFmpeg changed after the generated-frame source was prepared."
             )
         path = Path(self.context.media.path)
         if not _stat_matches(
