@@ -131,10 +131,10 @@ def _flag(value: object) -> bool:
 
 
 def _stream_from_mapping(raw: Mapping[str, Any]) -> SpeechAudioStream | None:
-    stream_type = str(
-        raw.get("stream_type", raw.get("type", ""))
-        or ""
-    ).strip().casefold()
+    raw_type = raw.get("stream_type", raw.get("type", ""))
+    if not isinstance(raw_type, str):
+        return None
+    stream_type = raw_type.strip().casefold()
     if stream_type != "audio":
         return None
 
@@ -144,8 +144,14 @@ def _stream_from_mapping(raw: Mapping[str, Any]) -> SpeechAudioStream | None:
     if index is None:
         return None
 
-    language = str(raw.get("language") or "und").strip().casefold() or "und"
-    title = str(raw.get("title") or "").strip()
+    raw_language = raw.get("language")
+    language = (
+        raw_language.strip().casefold()
+        if isinstance(raw_language, str) and raw_language.strip()
+        else "und"
+    )
+    raw_title = raw.get("title")
+    title = raw_title.strip() if isinstance(raw_title, str) else ""
     return SpeechAudioStream(
         index=index,
         language=language,
@@ -654,12 +660,13 @@ class LocalFfmpegSpeechAudioExtractor:
             raise SpeechAudioStaleError(
                 "The local media file no longer matches the verified snapshot."
             )
-        if (
-            self._ffmpeg_identity is None
-            or _ffmpeg_identity(self.executable) != self._ffmpeg_identity
-        ):
+        if self._ffmpeg_identity is None:
+            raise SpeechAudioUnavailable(
+                "FFmpeg is unavailable for speech audio extraction."
+            )
+        if _ffmpeg_identity(self.executable) != self._ffmpeg_identity:
             raise SpeechAudioStaleError(
-                "FFmpeg is unavailable or changed after speech extraction was prepared."
+                "FFmpeg changed after speech extraction was prepared."
             )
         return self._ffmpeg_identity
 
