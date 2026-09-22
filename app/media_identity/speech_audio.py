@@ -17,6 +17,7 @@ from ..media_info import _quiet_subprocess_options, ffmpeg_executable
 from .models import MediaIdentityFile
 from .speech import (
     MAX_NORMAL_SPEECH_TOTAL_MS,
+    MAX_NORMAL_SPEECH_WINDOWS,
     SpeechAudioIdentity,
     SpeechIdentityError,
     SpeechWindow,
@@ -222,6 +223,11 @@ def validate_normal_speech_window_plan(
 ) -> tuple[SpeechWindow, ...]:
     """Validate the complete bounded Normal transcription plan before extraction."""
     planned = tuple(windows)
+    if len(planned) > MAX_NORMAL_SPEECH_WINDOWS:
+        raise SpeechIdentityError(
+            "Normal speech plans cannot exceed 8 targeted windows."
+        )
+
     seen: set[tuple[int, int]] = set()
     total_ms = 0
 
