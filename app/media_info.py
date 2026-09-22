@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .managed_ffmpeg import managed_ffmpeg_candidate
+
 
 class MediaInspectionError(RuntimeError):
     """A media-inspection failure with separate human and technical context."""
@@ -41,6 +43,10 @@ def ffmpeg_executable() -> str:
         candidate = Path(bundle_dir) / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
         if candidate.is_file():
             return str(candidate)
+
+    managed = managed_ffmpeg_candidate()
+    if managed is not None:
+        return str(managed)
 
     return shutil.which("ffmpeg") or "ffmpeg"
 
