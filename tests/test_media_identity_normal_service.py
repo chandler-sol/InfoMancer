@@ -18,6 +18,11 @@ from app.media_identity.fast import FastIdentityService
 from app.media_identity.normal import NormalResourceLimits, OcrTextResult
 from app.media_identity.local_frames import LOCAL_FRAME_SOURCE_KEY
 from app.media_identity.normal_service import NormalIdentityService
+from app.media_identity.service import MediaIdentityDecisionService
+from app.media_identity.versions import (
+    EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION,
+    NORMAL_EVIDENCE_ALGORITHM_VERSION,
+)
 
 
 class FakeOcr:
@@ -200,6 +205,62 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temporary.cleanup()
+
+    def test_decision_version_drift_makes_fast_scan_stale(self):
+        decisions = MediaIdentityDecisionService(self.database)
+        detail = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertTrue(detail["snapshot_current"])
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT claimed_identity_json FROM media_identity_scans WHERE id=?",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            claimed = json.loads(row["claimed_identity_json"])
+            self.assertEqual(
+                claimed["decision_algorithm_version"],
+                EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION,
+            )
+            claimed["decision_algorithm_version"] += 1
+            conn.execute(
+                "UPDATE media_identity_scans SET claimed_identity_json=? WHERE id=?",
+                (json.dumps(claimed, sort_keys=True), self.fast_scan.scan_id),
+            )
+
+        stale = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
+    def test_normal_version_drift_makes_completed_scan_stale(self):
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([FakePreviewSource()]),
+            FakeOcr(),
+        )
+        service.run_scan(self.fast_scan.scan_id)
+        decisions = MediaIdentityDecisionService(self.database)
+        detail = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertTrue(detail["snapshot_current"])
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT claimed_identity_json FROM media_identity_scans WHERE id=?",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            claimed = json.loads(row["claimed_identity_json"])
+            self.assertEqual(
+                claimed["normal_ocr"]["algorithm_version"],
+                NORMAL_EVIDENCE_ALGORITHM_VERSION,
+            )
+            claimed["normal_ocr"]["algorithm_version"] += 1
+            conn.execute(
+                "UPDATE media_identity_scans SET claimed_identity_json=? WHERE id=?",
+                (json.dumps(claimed, sort_keys=True), self.fast_scan.scan_id),
+            )
+
+        stale = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
 
     def test_normal_ocr_persists_visual_text_artifact_and_candidate_evidence(self):
         source = FakePreviewSource()
@@ -794,6 +855,40 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertEqual(result.observation_count, 1)
         self.assertEqual(external.read_calls, 1)
         self.assertEqual(engine.calls, 1)
+        local_factory.assert_not_called()
+
+    def test_external_byte_budget_blocks_local_ffmpeg_fallback(self):
+        class BlankExternal(FakePreviewSource):
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"blank"
+
+        class BlankOcr(FakeOcr):
+            def recognize(self, image: bytes) -> OcrTextResult:
+                self.calls += 1
+                return OcrTextResult(text="", confidence=0.95)
+
+        external = BlankExternal()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([external]),
+            BlankOcr(),
+            limits=NormalResourceLimits(
+                initial_preview_frames=1,
+                expanded_preview_frames=1,
+                max_preview_frames=1,
+                max_preview_bytes_per_frame=5,
+                max_preview_bytes_total=5,
+            ),
+        )
+
+        with patch(
+            "app.media_identity.normal_service.LocalFfmpegFrameSource"
+        ) as local_factory:
+            result = service.run_scan(self.fast_scan.scan_id)
+
+        self.assertTrue(result.budget_exhausted)
+        self.assertEqual(external.read_calls, 1)
         local_factory.assert_not_called()
 
     def test_local_ffmpeg_is_not_attempted_when_ocr_engine_is_unavailable(self):
