@@ -304,7 +304,11 @@ class NormalSpeechServiceTests(unittest.TestCase):
         self.assertEqual(second.transcript_count, 1)
         self.assertEqual(second.reused_artifact_count, 1)
         self.assertEqual(engine.calls, 1)
-        self.assertEqual(FakeExtractor.instances[-1].extract_calls, 0)
+        self.assertEqual(FakeExtractor.instances[-1].extract_calls, 1)
+        self.assertEqual(
+            FakeExtractor.instances[-1].prepared[0].cleanup_calls,
+            1,
+        )
 
         with self.database.connect() as conn:
             rows = conn.execute(
@@ -319,6 +323,83 @@ class NormalSpeechServiceTests(unittest.TestCase):
         self.assertEqual(rows[0]["end_ms"], 10_000)
         self.assertIn("dialogue", rows[0]["text_value"])
         self.assertTrue(rows[0]["source_signature"])
+
+    def test_same_stat_media_change_cannot_reuse_old_transcript(self):
+        class ContentAwareExtractor(FakeExtractor):
+            instances = []
+
+            def extract(self, window):
+                self.extract_calls += 1
+                media_bytes = Path(self.media.path).read_bytes()
+                payload = (
+                    b"wav:"
+                    + hashlib.sha256(media_bytes).digest()
+                    + f":{window.start_ms}:{window.end_ms}".encode()
+                )
+                identity = SpeechAudioIdentity(
+                    sha256=hashlib.sha256(payload).hexdigest(),
+                    size_bytes=len(payload),
+                    format_key="wav-pcm-s16le",
+                    sample_rate_hz=16_000,
+                    channels=1,
+                    source_signature=self.source_signature(window),
+                )
+                prepared = FakePreparedAudio(identity)
+                self.prepared.append(prepared)
+                return prepared
+
+        def service(engine):
+            return NormalSpeechService(
+                self.database,
+                engine,
+                self.model,
+                extractor_factory=ContentAwareExtractor,
+                language="eng",
+            )
+
+        first_engine = FakeSpeechEngine()
+        first = service(first_engine).run(
+            1,
+            self.scan,
+            self.media,
+            10,
+            self.streams,
+        )
+        self.assertEqual(first.transcript_count, 1)
+        self.assertEqual(first_engine.calls, 1)
+
+        original_stat = self.media_path.stat()
+        original = self.media_path.read_bytes()
+        changed = (b"X" if original[:1] != b"X" else b"Y") + original[1:]
+        self.assertEqual(len(changed), len(original))
+        self.media_path.write_bytes(changed)
+        os.utime(
+            self.media_path,
+            ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+        )
+        self.assertEqual(self.media_path.stat().st_size, original_stat.st_size)
+        self.assertEqual(self.media_path.stat().st_mtime, original_stat.st_mtime)
+
+        second_engine = FakeSpeechEngine()
+        second = service(second_engine).run(
+            1,
+            self.scan,
+            self.media,
+            10,
+            self.streams,
+        )
+
+        self.assertEqual(second.transcript_count, 1)
+        self.assertEqual(second.reused_artifact_count, 0)
+        self.assertEqual(second_engine.calls, 1)
+        self.assertEqual(ContentAwareExtractor.instances[-1].extract_calls, 1)
+        with self.database.connect() as conn:
+            count = conn.execute(
+                """SELECT COUNT(*) AS count
+                   FROM media_identity_artifacts
+                   WHERE file_id=1 AND artifact_type='speech_transcript'"""
+            ).fetchone()["count"]
+        self.assertEqual(int(count), 2)
 
     def test_interrupted_run_resumes_from_each_persisted_fragment(self):
         interrupted_engine = FakeSpeechEngine(interrupt_on_call=2)
