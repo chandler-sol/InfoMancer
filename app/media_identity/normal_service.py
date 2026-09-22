@@ -429,21 +429,37 @@ class NormalIdentityService:
     def _subtitle_evidence_sufficient(
         evidence: list[dict[str, Any]],
     ) -> bool:
-        """Return whether existing Fast subtitle evidence already separates candidates."""
-        strengths = sorted(
-            (
-                float(item.get("strength") or 0.0)
-                for item in evidence
-                if str(item.get("analyzer_key") or "") == "subtitle-synopsis"
-                and str(item.get("relation") or "") == EvidenceRelation.SUPPORTS.value
-                and str(item.get("candidate_key") or "")
-            ),
-            reverse=True,
-        )
-        if not strengths:
+        """Return whether existing Fast subtitle evidence already separates candidates.
+
+        Fast persists sub-threshold subtitle matches as neutral evidence with
+        strength zero, while retaining the raw synopsis similarity in details.
+        Escalation must use that raw similarity or a close runner-up can be
+        hidden by thresholding and speech may be skipped incorrectly.
+        """
+        scores: list[float] = []
+        for item in evidence:
+            if (
+                str(item.get("analyzer_key") or "") != "subtitle-synopsis"
+                or not str(item.get("candidate_key") or "")
+            ):
+                continue
+            details = _json_object(item.get("details_json"))
+            raw_similarity = details.get("similarity")
+            try:
+                score = (
+                    float(raw_similarity)
+                    if raw_similarity is not None
+                    else float(item.get("strength") or 0.0)
+                )
+            except (TypeError, ValueError):
+                continue
+            scores.append(max(0.0, min(1.0, score)))
+
+        scores.sort(reverse=True)
+        if not scores:
             return False
-        best = strengths[0]
-        second = strengths[1] if len(strengths) > 1 else 0.0
+        best = scores[0]
+        second = scores[1] if len(scores) > 1 else 0.0
         return (
             best >= NORMAL_FALLBACK_MIN_SIMILARITY
             and best - second >= NORMAL_FALLBACK_MIN_MARGIN
