@@ -624,6 +624,7 @@ def _extract_runtime_archive(
 ) -> list[Path]:
     extracted: list[Path] = []
     aliases: dict[Path, Path] = {}
+    members_seen: set[Path] = set()
     total = 0
 
     def reserve_file(size: int) -> None:
@@ -642,7 +643,15 @@ def _extract_runtime_archive(
                 "The whisper.cpp archive exceeded its expanded size ceiling."
             )
 
+    def claim_member(relative: Path) -> None:
+        if relative in members_seen:
+            raise ManagedSpeechComponentError(
+                "The whisper.cpp archive contains a duplicate member path."
+            )
+        members_seen.add(relative)
+
     def write_member(relative: Path, source: BinaryIO, size: int) -> None:
+        claim_member(relative)
         reserve_file(size)
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -660,6 +669,11 @@ def _extract_runtime_archive(
         *,
         target_from_archive_root: bool,
     ) -> None:
+        claim_member(relative)
+        if len(extracted) + len(aliases) >= _MAX_RUNTIME_FILES:
+            raise ManagedSpeechComponentError(
+                "The whisper.cpp archive contains too many files."
+            )
         target = _safe_relative_path(
             raw_target,
             "Speech runtime archive link target",
@@ -735,6 +749,7 @@ def _extract_runtime_archive(
                             "Encrypted whisper.cpp archive members are not supported."
                         )
                     if info.is_dir():
+                        claim_member(relative)
                         (destination / relative).mkdir(parents=True, exist_ok=True)
                         continue
                     if mode and stat_module.S_ISLNK(mode):
@@ -763,6 +778,7 @@ def _extract_runtime_archive(
                 for member in archive.getmembers():
                     relative = _archive_member_path(member.name)
                     if member.isdir():
+                        claim_member(relative)
                         (destination / relative).mkdir(parents=True, exist_ok=True)
                         continue
                     if member.issym() or member.islnk():
