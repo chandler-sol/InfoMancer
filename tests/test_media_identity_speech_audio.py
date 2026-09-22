@@ -4,6 +4,7 @@ from io import BytesIO
 import hashlib
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -379,6 +380,15 @@ class SpeechAudioExtractionTests(unittest.TestCase):
             ):
                 self.extractor().extract(SpeechWindow(0, 1000))
 
+    def test_ffmpeg_missing_at_preparation_time_is_optional_unavailable(self) -> None:
+        missing = self.root / "missing-ffmpeg"
+        extractor = self.extractor(executable=str(missing))
+        with self.assertRaisesRegex(
+            SpeechAudioUnavailable,
+            "FFmpeg is unavailable",
+        ):
+            extractor.source_signature(SpeechWindow(0, 1000))
+
     def test_timeout_and_ffmpeg_failure_are_optional_audio_failures(self) -> None:
         with patch(
             "app.media_identity.speech_audio.subprocess.run",
@@ -620,6 +630,48 @@ class SpeechAudioExtractionTests(unittest.TestCase):
                 missing,
                 self.streams,
                 executable=str(self.ffmpeg),
+            )
+
+    @unittest.skipUnless(
+        shutil.which("ffmpeg"),
+        "A system FFmpeg is required for the real extraction smoke test.",
+    )
+    def test_real_ffmpeg_extracts_and_revalidates_canonical_audio(self) -> None:
+        real_media = self.root / "real-input.wav"
+        real_media.write_bytes(wav_bytes(duration_ms=3000))
+        stat = real_media.stat()
+        media = MediaIdentityFile(
+            file_id=9,
+            title_id=3,
+            path=str(real_media),
+            size_bytes=stat.st_size,
+            modified_at=stat.st_mtime,
+        )
+        extractor = LocalFfmpegSpeechAudioExtractor(
+            media,
+            [
+                {
+                    "stream_index": 0,
+                    "stream_type": "audio",
+                    "language": "eng",
+                    "default_flag": 1,
+                    "channels": 1,
+                    "sample_rate": SPEECH_AUDIO_SAMPLE_RATE_HZ,
+                }
+            ],
+            preferred_language="eng",
+            executable=shutil.which("ffmpeg"),
+            timeout_seconds=30,
+        )
+        with extractor.extract(SpeechWindow(500, 1500)) as artifact:
+            self.assertTrue(Path(artifact.validated_path()).is_file())
+            self.assertEqual(
+                artifact.identity.format_key,
+                SPEECH_AUDIO_FORMAT_KEY,
+            )
+            self.assertLessEqual(
+                artifact.identity.size_bytes,
+                MAX_SPEECH_AUDIO_BYTES,
             )
 
     def test_timeout_contract_rejects_invalid_values(self) -> None:
