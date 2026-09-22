@@ -623,23 +623,27 @@ def _extract_runtime_archive(
     destination: Path,
 ) -> list[Path]:
     extracted: list[Path] = []
+    aliases: dict[Path, Path] = {}
     total = 0
 
-    def write_member(relative: Path, source: BinaryIO, size: int) -> None:
+    def reserve_file(size: int) -> None:
         nonlocal total
         if size < 0:
             raise ManagedSpeechComponentError(
                 "The whisper.cpp archive contains an invalid member size."
+            )
+        if len(extracted) + len(aliases) >= _MAX_RUNTIME_FILES:
+            raise ManagedSpeechComponentError(
+                "The whisper.cpp archive contains too many files."
             )
         total += size
         if total > _MAX_RUNTIME_EXPANDED_BYTES:
             raise ManagedSpeechComponentError(
                 "The whisper.cpp archive exceeded its expanded size ceiling."
             )
-        if len(extracted) >= _MAX_RUNTIME_FILES:
-            raise ManagedSpeechComponentError(
-                "The whisper.cpp archive contains too many files."
-            )
+
+    def write_member(relative: Path, source: BinaryIO, size: int) -> None:
+        reserve_file(size)
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         data = source.read(size + 1)
@@ -649,6 +653,76 @@ def _extract_runtime_archive(
             )
         target.write_bytes(data)
         extracted.append(target)
+
+    def add_alias(
+        relative: Path,
+        raw_target: str,
+        *,
+        target_from_archive_root: bool,
+    ) -> None:
+        target = _safe_relative_path(
+            raw_target,
+            "Speech runtime archive link target",
+        )
+        if not target_from_archive_root:
+            target = relative.parent / target
+        if target == relative or target in {Path("."), Path()}:
+            raise ManagedSpeechComponentError(
+                "The whisper.cpp archive contains an invalid self-referencing link."
+            )
+        # No link is ever created on disk. The alias is materialized as a
+        # regular-file copy after all regular archive members are written.
+        aliases[relative] = target
+
+    def materialize_aliases() -> None:
+        nonlocal total
+        for relative in aliases:
+            current = relative
+            seen: set[Path] = set()
+            for _depth in range(16):
+                if current in seen:
+                    raise ManagedSpeechComponentError(
+                        "The whisper.cpp archive contains a cyclic link alias."
+                    )
+                seen.add(current)
+                target_relative = aliases.get(current)
+                if target_relative is None:
+                    source = destination / current
+                    try:
+                        info = source.lstat()
+                    except OSError as exc:
+                        raise ManagedSpeechComponentError(
+                            "The whisper.cpp archive link target is missing."
+                        ) from exc
+                    if (
+                        stat_module.S_ISLNK(info.st_mode)
+                        or not stat_module.S_ISREG(info.st_mode)
+                        or info.st_size < 0
+                    ):
+                        raise ManagedSpeechComponentError(
+                            "The whisper.cpp archive link target is not a regular file."
+                        )
+                    total += int(info.st_size)
+                    if total > _MAX_RUNTIME_EXPANDED_BYTES:
+                        raise ManagedSpeechComponentError(
+                            "The whisper.cpp archive exceeded its expanded size ceiling."
+                        )
+                    alias_path = destination / relative
+                    alias_path.parent.mkdir(parents=True, exist_ok=True)
+                    with source.open("rb") as source_stream:
+                        data = source_stream.read(int(info.st_size) + 1)
+                    if len(data) != int(info.st_size):
+                        raise ManagedSpeechComponentError(
+                            "The whisper.cpp archive link target changed while materializing."
+                        )
+                    alias_path.write_bytes(data)
+                    extracted.append(alias_path)
+                    break
+                current = target_relative
+            else:
+                raise ManagedSpeechComponentError(
+                    "The whisper.cpp archive link chain is too deep."
+                )
 
     try:
         if archive_format == "zip":
@@ -664,9 +738,24 @@ def _extract_runtime_archive(
                         (destination / relative).mkdir(parents=True, exist_ok=True)
                         continue
                     if mode and stat_module.S_ISLNK(mode):
-                        raise ManagedSpeechComponentError(
-                            "The whisper.cpp archive cannot contain symbolic links."
+                        with archive.open(info, "r") as source:
+                            raw_target = source.read(4097)
+                        if len(raw_target) > 4096:
+                            raise ManagedSpeechComponentError(
+                                "The whisper.cpp archive link target is too long."
+                            )
+                        try:
+                            link_target = raw_target.decode("utf-8")
+                        except UnicodeDecodeError as exc:
+                            raise ManagedSpeechComponentError(
+                                "The whisper.cpp archive link target is not valid text."
+                            ) from exc
+                        add_alias(
+                            relative,
+                            link_target,
+                            target_from_archive_root=False,
                         )
+                        continue
                     with archive.open(info, "r") as source:
                         write_member(relative, source, int(info.file_size))
         elif archive_format == "tar.gz":
@@ -676,9 +765,16 @@ def _extract_runtime_archive(
                     if member.isdir():
                         (destination / relative).mkdir(parents=True, exist_ok=True)
                         continue
+                    if member.issym() or member.islnk():
+                        add_alias(
+                            relative,
+                            member.linkname,
+                            target_from_archive_root=member.islnk(),
+                        )
+                        continue
                     if not member.isfile():
                         raise ManagedSpeechComponentError(
-                            "The whisper.cpp archive contains an unsupported link or device."
+                            "The whisper.cpp archive contains an unsupported device."
                         )
                     source = archive.extractfile(member)
                     if source is None:
@@ -691,6 +787,7 @@ def _extract_runtime_archive(
             raise ManagedSpeechComponentError(
                 "InfoMancer does not recognize the pinned whisper.cpp archive format."
             )
+        materialize_aliases()
     except ManagedSpeechComponentError:
         raise
     except (OSError, EOFError, tarfile.TarError, zipfile.BadZipFile) as exc:
