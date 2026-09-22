@@ -34,7 +34,10 @@ from .speech_service import (
     NormalSpeechStaleError,
 )
 from .text import synopsis_similarity_from_corpus, text_corpus
-from .versions import NORMAL_EVIDENCE_ALGORITHM_VERSION
+from .versions import (
+    NORMAL_EVIDENCE_ALGORITHM_VERSION,
+    NORMAL_SPEECH_ORCHESTRATION_VERSION,
+)
 
 
 NORMAL_OCR_ARTIFACT_KEY = "external-preview-ocr"
@@ -865,6 +868,7 @@ class NormalIdentityService:
             }
             claimed["normal_speech"] = {
                 "version": 1,
+                "algorithm_version": NORMAL_SPEECH_ORCHESTRATION_VERSION,
                 "escalated": bool(speech_escalated),
                 "planned_windows": len(speech_run.planned_windows),
                 "transcript_count": speech_run.transcript_count,
@@ -912,7 +916,7 @@ class NormalIdentityService:
             scan_id=int(scan_id),
             completed_profile=(
                 IdentityProfile.NORMAL
-                if run.observations
+                if completed_normal
                 else IdentityProfile.FAST
             ),
             source_key=run.source_key,
