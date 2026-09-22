@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import tempfile
 import unittest
@@ -403,6 +404,79 @@ class NormalSpeechServiceTests(unittest.TestCase):
                    WHERE file_id=1 AND artifact_type='speech_transcript'"""
             ).fetchone()["count"]
         self.assertEqual(int(count), 2)
+
+    def test_corrupt_exact_cache_row_is_repaired_after_regeneration(self):
+        engine = FakeSpeechEngine()
+        service = self._service(engine)
+        extractor = FakeExtractor(
+            self.media,
+            self.streams,
+            preferred_language="eng",
+        )
+        window = SpeechWindow(
+            start_ms=0,
+            end_ms=10_000,
+            purpose="poison",
+        )
+        prepared = extractor.extract(window)
+        try:
+            request = SpeechRequest(
+                media=self.media,
+                window=window,
+                audio=prepared.identity,
+                model=self.model,
+                language="eng",
+            )
+            cache_key = speech_transcript_cache_key(
+                request,
+                service._engine_snapshot(),
+            )
+            with self.database.connect() as conn:
+                conn.execute(
+                    """INSERT INTO media_identity_artifacts(
+                         file_id,artifact_type,analyzer_key,analyzer_version,
+                         cache_key,status,profile,source_kind,source_ref,
+                         source_signature,file_size_bytes,file_modified_at,
+                         start_ms,end_ms,text_value,payload_json
+                       ) VALUES (
+                         1,'speech_transcript','local-speech-transcript','1',
+                         ?,'complete','normal','local_speech','fixture',
+                         ?,?,?,?,?,'poisoned','{not-json'
+                       )""",
+                    (
+                        cache_key,
+                        prepared.identity.source_signature,
+                        self.media.size_bytes,
+                        self.media.modified_at,
+                        window.start_ms,
+                        window.end_ms,
+                    ),
+                )
+        finally:
+            prepared.cleanup()
+
+        result = service.run(
+            1,
+            self.scan,
+            self.media,
+            10,
+            self.streams,
+        )
+
+        self.assertEqual(result.transcript_count, 1)
+        self.assertEqual(result.reused_artifact_count, 0)
+        self.assertEqual(engine.calls, 1)
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """SELECT text_value,payload_json,status,error
+                   FROM media_identity_artifacts
+                   WHERE file_id=1 AND artifact_type='speech_transcript'"""
+            ).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertIn("dialogue", rows[0]["text_value"])
+        self.assertEqual(rows[0]["status"], "complete")
+        self.assertEqual(rows[0]["error"], "")
+        self.assertIsInstance(json.loads(rows[0]["payload_json"]), dict)
 
     def test_existing_exact_artifact_wins_insert_ignore_race(self):
         engine = FakeSpeechEngine()
