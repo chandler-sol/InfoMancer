@@ -88,6 +88,10 @@ class OcrEngine(Protocol):
         """Return whether the optional OCR runtime/model is currently usable."""
         ...
 
+    def cache_identity(self) -> Mapping[str, Any]:
+        """Return deterministic output-affecting engine/runtime/model settings."""
+        ...
+
     def recognize(self, image: bytes) -> OcrTextResult:
         """Extract scene text from one bounded image without deciding identity."""
         ...
@@ -291,10 +295,24 @@ def ocr_preview_cache_key(
     version = str(getattr(engine, "version", "") or "").strip()
     if not key or not version:
         raise NormalIdentityError("OCR engines require stable key and version values.")
+    try:
+        engine_identity = dict(engine.cache_identity())
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise NormalIdentityError(
+            "OCR engines require a deterministic cache identity."
+        ) from exc
+    if not engine_identity:
+        raise NormalIdentityError(
+            "OCR engines require a deterministic cache identity."
+        )
 
     payload = {
         "cache_version": NORMAL_OCR_CACHE_VERSION,
-        "engine": {"key": key, "version": version},
+        "engine": {
+            "key": key,
+            "version": version,
+            "identity": engine_identity,
+        },
         "frame": {
             "source_key": str(frame.source_key or "").strip().casefold(),
             "item_id": str(frame.item_id or "").strip(),
