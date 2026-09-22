@@ -592,6 +592,8 @@ class MediaIdentityDecisionService:
                 for speech_row in speech_evidence_rows:
                     details = speech_row.get("details")
                     if not isinstance(details, Mapping):
+                        details = _json_object(speech_row.get("details_json"))
+                    if not details:
                         return False, file_row
                     correlated_with = details.get("correlated_with")
                     if (
@@ -616,12 +618,19 @@ class MediaIdentityDecisionService:
                             or not str(speech_row.get("cache_key") or "")
                         ):
                             return False, file_row
-                    elif (
-                        str(speech_row.get("relation") or "") != "neutral"
-                        or float(speech_row.get("strength") or 0.0) != 0.0
-                        or str(speech_row.get("cache_key") or "")
-                    ):
-                        return False, file_row
+                    else:
+                        try:
+                            speech_strength = float(
+                                speech_row.get("strength") or 0.0
+                            )
+                        except (TypeError, ValueError):
+                            return False, file_row
+                        if (
+                            str(speech_row.get("relation") or "") != "neutral"
+                            or speech_strength != 0.0
+                            or str(speech_row.get("cache_key") or "")
+                        ):
+                            return False, file_row
 
         normalized_expected = {
             str(key): str(value)
