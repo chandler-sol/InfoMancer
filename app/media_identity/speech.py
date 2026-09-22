@@ -173,6 +173,10 @@ class SpeechBinaryIdentity:
             "size_bytes": self.size_bytes,
         }
 
+    def details_payload(self) -> dict[str, Any]:
+        """Return a detached JSON-safe copy for persistence/logging."""
+        return _json_ready(self.details)
+
 
 @dataclass(frozen=True)
 class SpeechModelIdentity:
@@ -225,6 +229,10 @@ class SpeechModelIdentity:
             "sha256": self.sha256,
             "size_bytes": self.size_bytes,
         }
+
+    def details_payload(self) -> dict[str, Any]:
+        """Return a detached JSON-safe copy for persistence/logging."""
+        return _json_ready(self.details)
 
 
 @dataclass(frozen=True)
@@ -302,7 +310,7 @@ class SpeechRequest:
         return {
             "language": self.language.casefold(),
             "translate": self.translate,
-            "parameters": self.parameters,
+            "parameters": _json_ready(self.parameters),
         }
 
 
@@ -344,6 +352,10 @@ class SpeechTranscript:
             "details",
             _freeze_json_like(self.details, "Speech transcript details"),
         )
+
+    def details_payload(self) -> dict[str, Any]:
+        """Return a detached JSON-safe copy for persistence/logging."""
+        return _json_ready(self.details)
 
 
 @runtime_checkable
