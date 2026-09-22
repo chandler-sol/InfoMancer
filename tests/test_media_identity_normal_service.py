@@ -366,6 +366,37 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertFalse(stale["snapshot_current"])
         self.assertFalse(stale["actionable"])
 
+    def test_normal_speech_orchestration_version_drift_makes_scan_stale(self):
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([FakePreviewSource()]),
+            FakeOcr(),
+        )
+        service.run_scan(self.fast_scan.scan_id)
+        decisions = MediaIdentityDecisionService(self.database)
+        self.assertTrue(
+            decisions.scan_detail(self.fast_scan.scan_id)["snapshot_current"]
+        )
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT claimed_identity_json FROM media_identity_scans WHERE id=?",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            claimed = json.loads(row["claimed_identity_json"])
+            claimed["normal_speech"]["algorithm_version"] += 1
+            conn.execute(
+                "UPDATE media_identity_scans SET claimed_identity_json=? WHERE id=?",
+                (
+                    json.dumps(claimed, sort_keys=True),
+                    self.fast_scan.scan_id,
+                ),
+            )
+
+        stale = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
     def test_normal_ocr_persists_visual_text_artifact_and_candidate_evidence(self):
         source = FakePreviewSource()
         engine = FakeOcr()
