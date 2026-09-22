@@ -16,6 +16,7 @@ from .models import (
 )
 
 from .speech import (
+    SpeechAudioIdentity,
     SpeechBinaryIdentity,
     SpeechEngine,
     SpeechIdentityError,
@@ -39,6 +40,7 @@ __all__ = [
     "IdentityReference",
     "IdentityResultState",
     "MediaIdentityFile",
+    "SpeechAudioIdentity",
     "SpeechBinaryIdentity",
     "SpeechEngine",
     "SpeechIdentityError",
