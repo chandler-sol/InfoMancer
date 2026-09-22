@@ -123,6 +123,32 @@ def managed_ffmpeg_root(data_directory: Path | None = None) -> Path:
     return base / "components" / "ffmpeg"
 
 
+def _managed_tree_is_safe(data_directory: Path | None = None) -> bool:
+    base = (
+        Path(data_directory)
+        if data_directory is not None
+        else default_data_directory()
+    )
+    try:
+        trusted = base.resolve()
+    except OSError:
+        return False
+
+    for path in (
+        base / "components",
+        base / "components" / "ffmpeg",
+        base / "components" / "ffmpeg" / FFMPEG_VERSION,
+    ):
+        try:
+            if path.exists() and path.is_symlink():
+                return False
+            resolved = path.resolve(strict=False)
+            resolved.relative_to(trusted)
+        except (OSError, ValueError):
+            return False
+    return True
+
+
 def managed_ffmpeg_directory(data_directory: Path | None = None) -> Path:
     return managed_ffmpeg_root(data_directory) / FFMPEG_VERSION
 
@@ -132,6 +158,8 @@ def managed_ffmpeg_binary(data_directory: Path | None = None) -> Path:
 
 
 def managed_ffmpeg_candidate(data_directory: Path | None = None) -> Path | None:
+    if not _managed_tree_is_safe(data_directory):
+        return None
     try:
         key = ffmpeg_platform_key()
         candidate = managed_ffmpeg_binary(data_directory)
@@ -392,8 +420,22 @@ class ManagedFfmpegComponent:
         )
         _verify_hash("FFmpeg license", license_bytes, asset["license_sha256"])
 
+        if not _managed_tree_is_safe(self.data_directory):
+            raise ManagedFfmpegError(
+                "The managed FFmpeg component path leaves the InfoMancer data directory."
+            )
+        components = self.data_directory / "components"
+        components.mkdir(parents=False, exist_ok=True)
+        if components.is_symlink():
+            raise ManagedFfmpegError(
+                "The InfoMancer components directory cannot be a symbolic link."
+            )
         root = managed_ffmpeg_root(self.data_directory)
-        root.mkdir(parents=True, exist_ok=True)
+        root.mkdir(parents=False, exist_ok=True)
+        if not _managed_tree_is_safe(self.data_directory):
+            raise ManagedFfmpegError(
+                "The managed FFmpeg component path leaves the InfoMancer data directory."
+            )
         staging: Path | None = Path(
             tempfile.mkdtemp(prefix=".install-", dir=root)
         )
@@ -464,6 +506,10 @@ class ManagedFfmpegComponent:
             self._remove_locked()
 
     def _remove_locked(self) -> None:
+        if not _managed_tree_is_safe(self.data_directory):
+            raise ManagedFfmpegError(
+                "The managed FFmpeg component path leaves the InfoMancer data directory."
+            )
         directory = managed_ffmpeg_directory(self.data_directory)
         if not directory.exists():
             return
