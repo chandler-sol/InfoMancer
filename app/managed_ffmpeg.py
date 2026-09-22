@@ -341,9 +341,6 @@ class ManagedFfmpegComponent:
             return self._install_locked()
 
     def _install_locked(self) -> Path:
-        existing = managed_ffmpeg_candidate(self.data_directory)
-        if existing is not None:
-            return existing
         if _override_candidate() or _bundled_candidate() is not None:
             raise ManagedFfmpegError(
                 "A higher-priority FFmpeg configuration is already active."
@@ -352,6 +349,9 @@ class ManagedFfmpegComponent:
             raise ManagedFfmpegError(
                 "System FFmpeg is already available, so a managed copy is not needed."
             )
+        existing = managed_ffmpeg_candidate(self.data_directory)
+        if existing is not None:
+            return existing
 
         key = ffmpeg_platform_key()
         asset = FFMPEG_ASSETS.get(key)
