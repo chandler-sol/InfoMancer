@@ -1156,6 +1156,21 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertEqual(details["correlated_with"], ["subtitle-synopsis"])
         self.assertEqual(len(details["windows"]), 8)
 
+        review = MediaIdentityDecisionService(self.database).scan_detail(
+            self.fast_scan.scan_id
+        )
+        speech_analysis = review["speech_analysis"]
+        self.assertIsNotNone(speech_analysis)
+        self.assertTrue(speech_analysis["escalated"])
+        self.assertEqual(speech_analysis["text_transcript_count"], 8)
+        self.assertEqual(len(speech_analysis["windows"]), 8)
+        self.assertGreater(speech_analysis["strongest_similarity"], 0.9)
+        self.assertIn("bronze harbor", speech_analysis["transcript_excerpt"])
+        self.assertEqual(
+            speech_analysis["correlation_group"],
+            "subtitle-dialogue:1",
+        )
+
     def test_missing_speech_artifact_makes_completed_normal_scan_stale(self):
         class UnavailableOcr(FakeOcr):
             def available(self):
