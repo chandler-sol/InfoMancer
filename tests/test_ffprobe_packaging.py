@@ -77,6 +77,8 @@ class FFprobePackagingTests(unittest.TestCase):
         stage = (ROOT / "scripts" / "stage_ffmpeg.py").read_text(encoding="utf-8")
         self.assertIn("FFMPEG_LICENSE.txt", stage)
         self.assertIn("FFMPEG_NOTICE.txt", stage)
+        self.assertIn("ROOT = Path(__file__).resolve().parents[1]", stage)
+        self.assertIn("sys.path.insert(0, str(ROOT))", stage)
         self.assertIn('_require_hash("FFmpeg archive"', stage)
         self.assertIn('_require_hash("FFmpeg binary"', stage)
         self.assertIn('_require_hash("FFmpeg license"', stage)
