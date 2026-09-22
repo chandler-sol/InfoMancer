@@ -51,20 +51,19 @@ class ManagedFfmpegTests(unittest.TestCase):
         managed = self.data / "components" / "ffmpeg" / FFMPEG_VERSION / (
             "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
         )
-        managed.parent.mkdir(parents=True)
-        managed.write_bytes(b"managed")
-        if os.name != "nt":
-            managed.chmod(0o755)
         with (
             patch("app.managed_ffmpeg._override_candidate", return_value=""),
             patch("app.managed_ffmpeg._bundled_candidate", return_value=None),
+            patch(
+                "app.managed_ffmpeg.managed_ffmpeg_candidate",
+                return_value=managed,
+            ),
             patch("app.managed_ffmpeg.shutil.which", return_value=None),
         ):
             status = component.status()
         self.assertEqual(status.state, "managed")
         self.assertTrue(status.can_remove)
 
-        managed.unlink()
         with (
             patch("app.managed_ffmpeg._override_candidate", return_value=""),
             patch("app.managed_ffmpeg._bundled_candidate", return_value=None),
@@ -166,6 +165,58 @@ class ManagedFfmpegTests(unittest.TestCase):
         self.assertFalse(
             (self.data / "components" / "ffmpeg" / FFMPEG_VERSION).exists()
         )
+
+    def test_runtime_candidate_rejects_tampered_managed_binary(self):
+        from app import managed_ffmpeg as module
+
+        key = ("linux", "x86_64")
+        binary = b"trusted-managed-binary"
+        asset = dict(FFMPEG_ASSETS[key])
+        asset["binary_sha256"] = hashlib.sha256(binary).hexdigest()
+
+        with (
+            patch(
+                "app.managed_ffmpeg.ffmpeg_platform_key",
+                return_value=key,
+            ),
+            patch.dict(FFMPEG_ASSETS, {key: asset}, clear=False),
+        ):
+            path = managed_ffmpeg_binary(self.data)
+            path.parent.mkdir(parents=True)
+            path.write_bytes(binary)
+            if os.name != "nt":
+                path.chmod(0o755)
+            self.assertEqual(
+                module.managed_ffmpeg_candidate(self.data),
+                path,
+            )
+
+            path.write_bytes(b"tampered-managed-binary")
+            if os.name != "nt":
+                path.chmod(0o755)
+            self.assertIsNone(
+                module.managed_ffmpeg_candidate(self.data)
+            )
+
+    @unittest.skipIf(os.name == "nt", "Symlink creation is not reliably permitted on Windows CI.")
+    def test_runtime_candidate_rejects_symlinked_managed_binary(self):
+        from app import managed_ffmpeg as module
+
+        key = ("linux", "x86_64")
+        target = self.data / "outside-ffmpeg"
+        target.write_bytes(b"fixture")
+        target.chmod(0o755)
+
+        with patch(
+            "app.managed_ffmpeg.ffmpeg_platform_key",
+            return_value=key,
+        ):
+            path = managed_ffmpeg_binary(self.data)
+            path.parent.mkdir(parents=True)
+            path.symlink_to(target)
+            self.assertIsNone(
+                module.managed_ffmpeg_candidate(self.data)
+            )
 
     def test_remove_only_deletes_infomancer_managed_version_directory(self):
         component = ManagedFfmpegComponent(self.data)
