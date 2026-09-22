@@ -1055,6 +1055,37 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertIn("ocr-engine-unavailable", result.failures)
         local_factory.assert_not_called()
 
+    def test_failed_normal_fallback_does_not_leave_speech_evidence_on_fast_scan(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=FakeNormalSpeechEngine(available=False),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(result.completed_profile.value, "fast")
+        self.assertTrue(result.speech_escalated)
+        self.assertEqual(result.speech_transcript_count, 0)
+        with self.database.connect() as conn:
+            speech_evidence_count = conn.execute(
+                """SELECT COUNT(*) AS count
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key=?""",
+                (self.fast_scan.scan_id, NORMAL_SPEECH_EVIDENCE_KEY),
+            ).fetchone()["count"]
+        self.assertEqual(int(speech_evidence_count), 0)
+
+        detail = MediaIdentityDecisionService(self.database).scan_detail(
+            self.fast_scan.scan_id
+        )
+        self.assertTrue(detail["snapshot_current"])
+
     def test_weak_normal_evidence_escalates_to_neutral_speech_evidence(self):
         class UnavailableOcr(FakeOcr):
             def available(self):
