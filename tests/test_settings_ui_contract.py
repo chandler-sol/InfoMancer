@@ -37,6 +37,11 @@ class SettingsUiContractTests(unittest.TestCase):
         self.assertIn("/settings/integrations/ffmpeg/remove", template)
         self.assertIn("Local speech analysis", template)
         self.assertIn("Install whisper.cpp for InfoMancer", template)
+        self.assertIn("pinned to whisper.cpp 1.9.4 CPU release artifacts", template)
+        self.assertNotIn(
+            "pinned to whisper.cpp {{ speech_runtime_component.version",
+            template,
+        )
         self.assertIn("/settings/integrations/speech/runtime/install", template)
         self.assertIn("/settings/integrations/speech/runtime/remove", template)
         self.assertIn(
