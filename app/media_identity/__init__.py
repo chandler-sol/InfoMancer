@@ -28,6 +28,7 @@ __all__ = [
     "IdentityReference",
     "IdentityResultState",
     "MediaIdentityFile",
+    "SpeechBinaryIdentity",
     "SpeechEngine",
     "SpeechIdentityError",
     "SpeechModelIdentity",
@@ -38,6 +39,7 @@ __all__ = [
 ]
 
 from .speech import (
+    SpeechBinaryIdentity,
     SpeechEngine,
     SpeechIdentityError,
     SpeechModelIdentity,
