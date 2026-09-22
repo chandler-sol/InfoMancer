@@ -10,7 +10,7 @@ from typing import Any, Mapping, Protocol, runtime_checkable
 from .models import MediaIdentityFile
 
 
-SPEECH_CACHE_VERSION = 2
+SPEECH_CACHE_VERSION = 3
 MAX_NORMAL_SPEECH_WINDOW_MS = 90_000
 MAX_NORMAL_SPEECH_TOTAL_MS = 240_000
 _MAX_IDENTITY_DEPTH = 16
@@ -179,6 +179,86 @@ class SpeechBinaryIdentity:
 
 
 @dataclass(frozen=True)
+class SpeechAudioIdentity:
+    """Exact identity for one bounded audio artifact supplied to speech."""
+
+    sha256: str
+    size_bytes: int
+    format_key: str
+    sample_rate_hz: int
+    channels: int
+    source_signature: str = ""
+    details: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        digest = _normalized_text(
+            self.sha256,
+            "Speech audio SHA-256",
+        ).casefold()
+        size_bytes = _validated_size(
+            self.size_bytes,
+            "Speech audio size",
+        )
+        format_key = _normalized_text(
+            self.format_key,
+            "Speech audio format",
+        ).casefold()
+        if not format_key:
+            raise SpeechIdentityError(
+                "Speech audio requires a stable format identifier."
+            )
+        if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+            raise SpeechIdentityError(
+                "Speech audio identity requires a SHA-256 digest."
+            )
+        if (
+            isinstance(self.sample_rate_hz, bool)
+            or not isinstance(self.sample_rate_hz, int)
+            or self.sample_rate_hz <= 0
+        ):
+            raise SpeechIdentityError(
+                "Speech audio sample rate must be a positive integer."
+            )
+        if (
+            isinstance(self.channels, bool)
+            or not isinstance(self.channels, int)
+            or self.channels <= 0
+        ):
+            raise SpeechIdentityError(
+                "Speech audio channel count must be a positive integer."
+            )
+        if not isinstance(self.details, Mapping):
+            raise SpeechIdentityError("Speech audio details must be a mapping.")
+
+        source_signature = _normalized_text(
+            self.source_signature,
+            "Speech audio source signature",
+        )
+        object.__setattr__(self, "sha256", digest)
+        object.__setattr__(self, "size_bytes", size_bytes)
+        object.__setattr__(self, "format_key", format_key)
+        object.__setattr__(self, "source_signature", source_signature)
+        object.__setattr__(
+            self,
+            "details",
+            _freeze_json_like(self.details, "Speech audio details"),
+        )
+
+    def cache_identity(self) -> Mapping[str, Any]:
+        return {
+            "sha256": self.sha256,
+            "size_bytes": self.size_bytes,
+            "format_key": self.format_key,
+            "sample_rate_hz": self.sample_rate_hz,
+            "channels": self.channels,
+        }
+
+    def details_payload(self) -> dict[str, Any]:
+        """Return a detached JSON-safe copy for persistence/logging."""
+        return _json_ready(self.details)
+
+
+@dataclass(frozen=True)
 class SpeechModelIdentity:
     """Stable identity for one local speech model artifact."""
 
@@ -277,6 +357,7 @@ class SpeechWindow:
 class SpeechRequest:
     media: MediaIdentityFile
     window: SpeechWindow
+    audio: SpeechAudioIdentity
     model: SpeechModelIdentity
     language: str = ""
     translate: bool = False
@@ -289,6 +370,10 @@ class SpeechRequest:
             )
         if not isinstance(self.window, SpeechWindow):
             raise SpeechIdentityError("Speech requests require a speech window.")
+        if not isinstance(self.audio, SpeechAudioIdentity):
+            raise SpeechIdentityError(
+                "Speech requests require an exact audio identity."
+            )
         if not isinstance(self.model, SpeechModelIdentity):
             raise SpeechIdentityError("Speech requests require a speech model.")
         language = _normalized_text(self.language, "Speech language identifier")
@@ -378,7 +463,7 @@ class SpeechEngine(Protocol):
         ...
 
     def transcribe(self, audio_path: str, request: SpeechRequest) -> SpeechTranscript:
-        """Transcribe one bounded local audio window without deciding identity."""
+        """Transcribe audio_path matching request.audio without deciding identity."""
         ...
 
 
@@ -438,6 +523,7 @@ def speech_transcript_cache_key(
             "binary": binary_identity.cache_identity(),
             "identity": engine_identity,
         },
+        "audio": request.audio.cache_identity(),
         "model": request.model.cache_identity(),
         "media": {
             "file_id": int(media.file_id),
