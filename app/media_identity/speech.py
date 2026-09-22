@@ -171,11 +171,22 @@ class SpeechBinaryIdentity:
         )
 
     def cache_identity(self) -> Mapping[str, Any]:
+        runtime_tree_sha256 = self.sha256
+        if isinstance(self.details, Mapping):
+            candidate = self.details.get("runtime_tree_sha256", "")
+            if isinstance(candidate, str):
+                normalized = candidate.strip().casefold()
+                if (
+                    len(normalized) == 64
+                    and all(ch in "0123456789abcdef" for ch in normalized)
+                ):
+                    runtime_tree_sha256 = normalized
         return {
             "key": self.key.casefold(),
             "version": self.version,
             "sha256": self.sha256,
             "size_bytes": self.size_bytes,
+            "runtime_tree_sha256": runtime_tree_sha256,
         }
 
     def details_payload(self) -> dict[str, Any]:
