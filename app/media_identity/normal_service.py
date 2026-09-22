@@ -871,10 +871,15 @@ class NormalIdentityService:
                     "Episode Identity metadata changed during Normal OCR. Retry verification."
                 )
 
+            current_previous_normal_evidence = any(
+                str(item.get("analyzer_key") or "") == NORMAL_OCR_EVIDENCE_KEY
+                for item in evidence
+            )
             retain_previous_visual = (
                 not run.observations
-                and previous_completed_normal
-                and previous_normal_evidence
+                and str(current_scan.get("completed_profile") or "")
+                == IdentityProfile.NORMAL.value
+                and current_previous_normal_evidence
             )
             if retain_previous_visual:
                 evidence_count = 0
