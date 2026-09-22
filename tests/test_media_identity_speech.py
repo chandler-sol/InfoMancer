@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 from app.media_identity import (
@@ -181,6 +182,42 @@ class SpeechContractTests(unittest.TestCase):
         )
         with self.assertRaises(TypeError):
             identity.details["runtime"]["new"] = True
+
+    def test_json_safe_snapshots_are_detached_from_frozen_state(self) -> None:
+        request = self.request(
+            parameters={"decode": {"temperatures": [0.0, 0.2]}}
+        )
+        payload = request.cache_parameters()
+        self.assertEqual(
+            json.loads(json.dumps(payload)),
+            {
+                "language": "en",
+                "translate": False,
+                "parameters": {
+                    "decode": {"temperatures": [0.0, 0.2]}
+                },
+            },
+        )
+        payload["parameters"]["decode"]["temperatures"].append(0.4)
+        self.assertEqual(
+            request.parameters["decode"]["temperatures"],
+            (0.0, 0.2),
+        )
+
+        transcript = SpeechTranscript(
+            "words",
+            details={"segments": [{"start_ms": 0, "end_ms": 1000}]},
+        )
+        details = transcript.details_payload()
+        self.assertEqual(
+            json.loads(json.dumps(details)),
+            {"segments": [{"start_ms": 0, "end_ms": 1000}]},
+        )
+        details["segments"][0]["start_ms"] = 99
+        self.assertEqual(
+            transcript.details["segments"][0]["start_ms"],
+            0,
+        )
 
     def test_nondeterministic_parameter_values_are_rejected(self) -> None:
         with self.assertRaisesRegex(
