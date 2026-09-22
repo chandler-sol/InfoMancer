@@ -428,6 +428,57 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             ).fetchone()["count"]
         self.assertEqual(int(artifact_count), 1)
 
+    def test_failed_rerun_preserves_existing_completed_normal_evidence(self):
+        source = FakePreviewSource()
+        first_service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        first = first_service.run_scan(self.fast_scan.scan_id)
+        self.assertEqual(first.completed_profile.value, "normal")
+
+        with self.database.connect() as conn:
+            before = conn.execute(
+                """SELECT COUNT(*) AS count
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key='preview-ocr-synopsis'""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()["count"]
+
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        retry = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "existing completed Normal evidence was retained",
+        ):
+            retry.run_scan(self.fast_scan.scan_id)
+
+        with self.database.connect() as conn:
+            scan = conn.execute(
+                """SELECT completed_profile,stage
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            after = conn.execute(
+                """SELECT COUNT(*) AS count
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key='preview-ocr-synopsis'""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()["count"]
+
+        self.assertEqual(scan["completed_profile"], "normal")
+        self.assertEqual(scan["stage"], "normal_ocr_complete")
+        self.assertEqual(int(after), int(before))
+        self.assertGreater(int(after), 0)
+
     def test_local_ffmpeg_is_used_only_when_external_previews_are_unusable(self):
         class EmptyPreviewSource(FakePreviewSource):
             def preview_frames(self, _media):
