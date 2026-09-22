@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from app.managed_ffmpeg import FFMPEG_ASSETS as MANAGED_FFMPEG_ASSETS
 from app.media_info import ffmpeg_executable, ffprobe_executable
 from scripts.stage_ffmpeg import ASSETS as FFMPEG_ASSETS
 from scripts.stage_ffprobe import ASSETS
@@ -59,6 +60,7 @@ class FFprobePackagingTests(unittest.TestCase):
         }
         self.assertEqual(set(ASSETS), expected)
         self.assertEqual(set(FFMPEG_ASSETS), expected)
+        self.assertIs(FFMPEG_ASSETS, MANAGED_FFMPEG_ASSETS)
         sha256 = re.compile(r"^[0-9a-f]{64}$")
         for tool_name, assets in (
             ("ffprobe", ASSETS),
