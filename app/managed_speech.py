@@ -46,6 +46,16 @@ def _trusted_root(data_directory: Path) -> Path:
         ) from exc
 
 
+def _path_is_redirect(path: Path) -> bool:
+    try:
+        if path.is_symlink():
+            return True
+        is_junction = getattr(path, "is_junction", None)
+        return bool(is_junction is not None and is_junction())
+    except OSError:
+        return True
+
+
 def _path_is_safe(root: Path, path: Path) -> bool:
     try:
         trusted = root.resolve()
@@ -57,7 +67,7 @@ def _path_is_safe(root: Path, path: Path) -> bool:
     current = path
     while True:
         try:
-            if current.is_symlink():
+            if _path_is_redirect(current):
                 return False
         except OSError:
             return False
@@ -209,7 +219,11 @@ class ManagedSpeechLayout:
     def binary_directory(self, identity: SpeechBinaryIdentity) -> Path:
         key = _safe_segment(identity.key, "Speech binary key")
         version = _safe_segment(identity.version, "Speech binary version")
-        return self.binary_root / key / version
+        digest = _safe_segment(
+            identity.sha256,
+            "Speech binary hash",
+        )
+        return self.binary_root / key / version / digest
 
     def model_directory(self, identity: SpeechModelIdentity) -> Path:
         key = _safe_segment(identity.key, "Speech model key")
@@ -285,7 +299,7 @@ class ManagedSpeechLayout:
             for part in relative.parts:
                 current = current / part
                 try:
-                    if current.is_symlink():
+                    if _path_is_redirect(current):
                         raise ManagedSpeechComponentError(
                             "Managed speech component path is not a normal directory tree."
                         )
@@ -298,7 +312,7 @@ class ManagedSpeechLayout:
                     try:
                         current.mkdir()
                     except FileExistsError:
-                        if current.is_symlink() or not current.is_dir():
+                        if _path_is_redirect(current) or not current.is_dir():
                             raise ManagedSpeechComponentError(
                                 "Managed speech component path is not a normal directory tree."
                             )
