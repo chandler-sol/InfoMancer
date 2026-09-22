@@ -103,6 +103,24 @@ class ConservativeResolverTests(unittest.TestCase):
         self.assertAlmostEqual(candidate.support_strength, 0.70)
         self.assertEqual(resolution.state, IdentityResultState.INCONCLUSIVE)
 
+    def test_subtitle_and_speech_dialogue_count_as_one_support_group(self) -> None:
+        resolution = resolve_identity(
+            [_candidate("claimed", claimed=True)],
+            [
+                _evidence("claimed", "subtitle_text", 0.42, "subtitle-dialogue:1"),
+                _evidence("claimed", "speech", 0.78, "subtitle-dialogue:1"),
+            ],
+            self.CLAIM,
+        )
+        candidate = resolution.candidates[0]
+        self.assertEqual(candidate.support_groups, 1)
+        self.assertAlmostEqual(candidate.support_strength, 0.78)
+        self.assertEqual(candidate.independent_categories, 1)
+        self.assertEqual(
+            candidate.details["correlation_groups"],
+            ["subtitle-dialogue:1"],
+        )
+
     def test_three_independent_signals_can_verify_claimed_episode(self) -> None:
         resolution = resolve_identity(
             [
