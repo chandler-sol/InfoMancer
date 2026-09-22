@@ -604,6 +604,45 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             any("jellyfin:ocr:no-visual-text" in item for item in result.failures)
         )
 
+    def test_weak_jellyfin_ocr_can_yield_to_stronger_plex_before_ffmpeg(self):
+        class WeakJellyfin(FakePreviewSource):
+            source_key = "jellyfin"
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"unrelated sponsor graphic weather logo"
+
+        class StrongPlex(FakePreviewSource):
+            source_key = "plex"
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"bronze harbor lantern meadow quartz thunder"
+
+        jellyfin = WeakJellyfin()
+        plex = StrongPlex()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([plex, jellyfin]),
+            FakeOcr(),
+        )
+
+        with patch(
+            "app.media_identity.normal_service.LocalFfmpegFrameSource"
+        ) as local_factory:
+            result = service.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(result.source_key, "plex")
+        self.assertEqual(jellyfin.read_calls, 1)
+        self.assertEqual(plex.read_calls, 1)
+        self.assertTrue(
+            any(
+                "jellyfin:ocr:weak-visual-signal" in item
+                for item in result.failures
+            )
+        )
+        local_factory.assert_not_called()
+
     def test_weak_external_ocr_falls_back_to_stronger_local_frames(self):
         class WeakExternal(FakePreviewSource):
             def read_preview(self, _frame):
