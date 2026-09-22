@@ -15,7 +15,7 @@ from app.media_identity.external import (
     PreviewFrameRef,
 )
 from app.media_identity.fast import FastIdentityService
-from app.media_identity.normal import OcrTextResult
+from app.media_identity.normal import NormalResourceLimits, OcrTextResult
 from app.media_identity.local_frames import LOCAL_FRAME_SOURCE_KEY
 from app.media_identity.normal_service import NormalIdentityService
 
@@ -668,6 +668,43 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
 
         self.assertEqual(result.source_key, "jellyfin")
         self.assertEqual(local.read_calls, 1)
+
+    def test_exhausted_external_budget_prevents_local_fallback(self):
+        class BlankExternal(FakePreviewSource):
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"1234567890"
+
+        class BlankOcr(FakeOcr):
+            def recognize(self, image: bytes) -> OcrTextResult:
+                self.calls += 1
+                return OcrTextResult(text="", confidence=0.95)
+
+        external = BlankExternal()
+        engine = BlankOcr()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([external]),
+            engine,
+            limits=NormalResourceLimits(
+                initial_preview_frames=1,
+                expanded_preview_frames=1,
+                max_preview_frames=1,
+                max_preview_bytes_per_frame=10,
+                max_preview_bytes_total=10,
+            ),
+        )
+
+        with patch(
+            "app.media_identity.normal_service.LocalFfmpegFrameSource"
+        ) as local_factory:
+            result = service.run_scan(self.fast_scan.scan_id)
+
+        self.assertTrue(result.budget_exhausted)
+        self.assertEqual(result.observation_count, 1)
+        self.assertEqual(external.read_calls, 1)
+        self.assertEqual(engine.calls, 1)
+        local_factory.assert_not_called()
 
     def test_local_ffmpeg_is_not_attempted_when_ocr_engine_is_unavailable(self):
         class UnavailableOcr(FakeOcr):
