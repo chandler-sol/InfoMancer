@@ -70,6 +70,10 @@ class SpeechAudioUnavailable(SpeechAudioError):
     """Local audio extraction cannot safely produce a usable artifact."""
 
 
+class SpeechBudgetExceeded(SpeechAudioUnavailable):
+    """A bounded Normal speech byte ceiling was reached."""
+
+
 class SpeechAudioStaleError(SpeechAudioError):
     """Media, FFmpeg, or a prepared audio artifact changed unexpectedly."""
 
@@ -308,9 +312,12 @@ def validate_normal_speech_audio_budget(
             raise SpeechAudioUnavailable(
                 "Normal speech audio budgets require SpeechAudioIdentity values."
             )
+        if identity.size_bytes > MAX_SPEECH_AUDIO_BYTES:
+            raise SpeechBudgetExceeded(
+                "Prepared Normal speech audio exceeded the per-window byte limit."
+            )
         if (
-            identity.size_bytes > MAX_SPEECH_AUDIO_BYTES
-            or identity.format_key != SPEECH_AUDIO_FORMAT_KEY
+            identity.format_key != SPEECH_AUDIO_FORMAT_KEY
             or identity.sample_rate_hz != SPEECH_AUDIO_SAMPLE_RATE_HZ
             or identity.channels != SPEECH_AUDIO_CHANNELS
         ):
@@ -320,7 +327,7 @@ def validate_normal_speech_audio_budget(
         total_bytes += identity.size_bytes
 
     if total_bytes > MAX_NORMAL_SPEECH_AUDIO_BYTES:
-        raise SpeechAudioUnavailable(
+        raise SpeechBudgetExceeded(
             "Prepared Normal speech audio exceeded the aggregate byte limit."
         )
     return prepared
