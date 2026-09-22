@@ -37,11 +37,16 @@ class ManagedFfmpegTests(unittest.TestCase):
         self.assertEqual(status.state, "override")
         self.assertTrue(status.available)
 
+        bundled = self.data / "bundle" / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+        bundled.parent.mkdir(parents=True)
+        bundled.write_bytes(b"fixture-bundled-ffmpeg")
+        if os.name != "nt":
+            bundled.chmod(0o755)
         with (
             patch("app.managed_ffmpeg._override_candidate", return_value=""),
             patch(
                 "app.managed_ffmpeg._bundled_candidate",
-                return_value=self.data / "bundle" / "ffmpeg",
+                return_value=bundled,
             ),
         ):
             status = component.status()
@@ -72,6 +77,26 @@ class ManagedFfmpegTests(unittest.TestCase):
             status = component.status()
         self.assertEqual(status.state, "system")
         self.assertFalse(status.can_install)
+
+    @unittest.skipIf(os.name == "nt", "POSIX executable bits do not apply on Windows.")
+    def test_non_executable_override_is_reported_unavailable(self):
+        override = self.data / "custom-ffmpeg"
+        override.write_bytes(b"fixture")
+        override.chmod(0o644)
+        component = ManagedFfmpegComponent(self.data)
+
+        with (
+            patch(
+                "app.managed_ffmpeg._override_candidate",
+                return_value=str(override),
+            ),
+            patch("app.managed_ffmpeg.shutil.which", return_value=None),
+        ):
+            status = component.status()
+
+        self.assertEqual(status.state, "override")
+        self.assertFalse(status.available)
+        self.assertIn("unavailable", status.detail)
 
     def test_unavailable_supported_platform_offers_managed_install(self):
         component = ManagedFfmpegComponent(self.data)
