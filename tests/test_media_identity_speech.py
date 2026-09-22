@@ -294,6 +294,16 @@ class SpeechContractTests(unittest.TestCase):
         ):
             self.assertNotEqual(changed, baseline)
 
+    def test_engine_key_and_version_must_be_stable_text(self) -> None:
+        class Broken(FakeSpeechEngine):
+            key = object()
+
+        with self.assertRaisesRegex(
+            SpeechIdentityError,
+            "stable text",
+        ):
+            speech_transcript_cache_key(self.request(), Broken())
+
     def test_engine_without_exact_binary_identity_is_rejected(self) -> None:
         class Broken:
             key = "broken"
