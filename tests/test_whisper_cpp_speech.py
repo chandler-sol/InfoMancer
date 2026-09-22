@@ -156,7 +156,7 @@ class WhisperCppSpeechEngineTests(unittest.TestCase):
         self.assertEqual(transcript.text, "hello there")
         self.assertEqual(transcript.language, "en")
         self.assertTrue(transcript.details["cpu_only"])
-        self.assertEqual(transcript.details["engine_version"], "adapter-1")
+        self.assertEqual(transcript.details["engine_version"], "adapter-2")
         self.assertEqual(transcript.details["runtime_version"], "1.9.4")
         self.assertEqual(
             transcript.details["runtime_tree_sha256"],
@@ -253,6 +253,64 @@ class WhisperCppSpeechEngineTests(unittest.TestCase):
         self.assertEqual(command[command.index("--language") + 1], "auto")
         self.assertIn("--translate", command)
         self.assertEqual(transcript.language, "")
+
+    def test_iso_language_aliases_and_unknown_codes_use_valid_whisper_ids(self) -> None:
+        engine = WhisperCppSpeechEngine(self.runtime, self.model)
+        cases = {
+            "rus": "ru",
+            "nld": "nl",
+            "cze": "cs",
+            "jav": "jw",
+            "yue": "yue",
+            "und": "auto",
+            "xyz": "auto",
+        }
+        for requested, expected in cases.items():
+            with self.subTest(requested=requested):
+                completed = subprocess.CompletedProcess(
+                    args=[],
+                    returncode=0,
+                    stdout=b"spoken",
+                    stderr=b"",
+                )
+                with patch(
+                    "app.whisper_cpp_speech._run_bounded_process",
+                    return_value=completed,
+                ) as run:
+                    transcript = engine.transcribe(
+                        str(self.audio),
+                        self.request(language=requested),
+                    )
+                command = run.call_args.args[0]
+                self.assertEqual(
+                    command[command.index("--language") + 1],
+                    expected,
+                )
+                self.assertEqual(
+                    transcript.language,
+                    "" if expected == "auto" else expected,
+                )
+
+    def test_zero_exit_with_only_stderr_is_rejected(self) -> None:
+        engine = WhisperCppSpeechEngine(self.runtime, self.model)
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=b"",
+            stderr=b"error: unknown language",
+        )
+        with patch(
+            "app.whisper_cpp_speech._run_bounded_process",
+            return_value=completed,
+        ):
+            with self.assertRaisesRegex(
+                WhisperCppSpeechError,
+                "reported an error",
+            ):
+                engine.transcribe(
+                    str(self.audio),
+                    self.request(language="eng"),
+                )
 
     def test_unsupported_request_parameters_fail_closed(self) -> None:
         engine = WhisperCppSpeechEngine(self.runtime, self.model)
