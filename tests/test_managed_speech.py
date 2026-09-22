@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from app.managed_speech import (
     ManagedSpeechComponentError,
@@ -31,6 +32,7 @@ class ManagedSpeechLayoutTests(unittest.TestCase):
             key="whisper.cpp",
             version="fixture-v1",
             sha256=hashlib.sha256(payload).hexdigest(),
+            size_bytes=len(payload),
             source="fixture",
             license_id="MIT",
         )
@@ -41,14 +43,21 @@ class ManagedSpeechLayoutTests(unittest.TestCase):
             key="ggml-base.en",
             version="fixture-v1",
             sha256=hashlib.sha256(payload).hexdigest(),
+            size_bytes=len(payload),
             source="fixture",
             license_id="fixture",
         )
 
     def test_relative_data_root_is_normalized_before_path_checks(self) -> None:
-        relative = Path(self.temporary.name).relative_to(Path.cwd()) if str(self.temporary.name).startswith(str(Path.cwd())) else None
+        relative = (
+            Path(self.temporary.name).relative_to(Path.cwd())
+            if str(self.temporary.name).startswith(str(Path.cwd()))
+            else None
+        )
         if relative is None:
-            self.skipTest("Temporary directory is not beneath the current working directory.")
+            self.skipTest(
+                "Temporary directory is not beneath the current working directory."
+            )
         layout = ManagedSpeechLayout(relative)
         self.assertTrue(layout.data_directory.is_absolute())
 
@@ -76,19 +85,21 @@ class ManagedSpeechLayoutTests(unittest.TestCase):
         digest = "a" * 64
         with self.assertRaises(ManagedSpeechComponentError):
             self.layout.binary_directory(
-                SpeechBinaryIdentity("../escape", "v1", digest)
+                SpeechBinaryIdentity("../escape", "v1", digest, 100)
             )
         with self.assertRaises(ManagedSpeechComponentError):
             self.layout.binary_directory(
-                SpeechBinaryIdentity("whisper.cpp", "../escape", digest)
+                SpeechBinaryIdentity("whisper.cpp", "../escape", digest, 100)
             )
         with self.assertRaises(ManagedSpeechComponentError):
             self.layout.model_path(
-                SpeechModelIdentity("model", "v1", digest),
+                SpeechModelIdentity("model", "v1", digest, 100),
                 "../model.bin",
             )
 
-    def test_verified_binary_requires_exact_hash_and_executable_bit(self) -> None:
+    def test_verified_binary_requires_exact_hash_size_and_executable_bit(
+        self,
+    ) -> None:
         payload = b"trusted-binary"
         identity = self.binary_identity(payload)
         path = self.layout.binary_path(identity, "whisper-cli")
@@ -120,7 +131,7 @@ class ManagedSpeechLayoutTests(unittest.TestCase):
             self.layout.binary_candidate(identity, "whisper-cli")
         )
 
-    def test_verified_model_requires_exact_hash(self) -> None:
+    def test_verified_model_requires_exact_hash_and_size(self) -> None:
         payload = b"trusted-model"
         identity = self.model_identity(payload)
         path = self.layout.model_path(identity, "model.bin")
@@ -135,6 +146,49 @@ class ManagedSpeechLayoutTests(unittest.TestCase):
         self.assertIsNone(
             self.layout.model_candidate(identity, "model.bin")
         )
+
+    def test_size_mismatch_is_rejected_before_hashing(self) -> None:
+        payload = b"trusted-model"
+        identity = self.model_identity(payload)
+        path = self.layout.model_path(identity, "model.bin")
+        self.layout.ensure_directories([path.parent])
+        path.write_bytes(payload + b"-extra")
+
+        with patch(
+            "app.managed_speech._sha256_stream",
+            side_effect=AssertionError("hashing should not run"),
+        ):
+            self.assertIsNone(
+                self.layout.model_candidate(identity, "model.bin")
+            )
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "Replacing an open executable is platform-dependent on Windows.",
+    )
+    def test_path_replacement_during_hash_is_rejected(self) -> None:
+        payload = b"trusted-binary"
+        identity = self.binary_identity(payload)
+        path = self.layout.binary_path(identity, "whisper-cli")
+        replacement = path.with_name("replacement")
+        self.layout.ensure_directories([path.parent])
+        path.write_bytes(payload)
+        path.chmod(0o755)
+
+        def replace_path_while_hashing(stream):
+            original_bytes = stream.read()
+            replacement.write_bytes(payload)
+            replacement.chmod(0o755)
+            os.replace(replacement, path)
+            return hashlib.sha256(original_bytes).hexdigest()
+
+        with patch(
+            "app.managed_speech._sha256_stream",
+            side_effect=replace_path_while_hashing,
+        ):
+            self.assertIsNone(
+                self.layout.binary_candidate(identity, "whisper-cli")
+            )
 
     @unittest.skipIf(
         os.name == "nt",
@@ -159,6 +213,23 @@ class ManagedSpeechLayoutTests(unittest.TestCase):
                 [self.layout.model_directory(identity)]
             )
         self.assertEqual(list(outside.iterdir()), [])
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "Symlink creation is not reliably permitted on Windows CI.",
+    )
+    def test_broken_symlink_component_is_rejected_cleanly(self) -> None:
+        components = self.data / "components"
+        components.symlink_to(
+            self.data / "missing-target",
+            target_is_directory=True,
+        )
+
+        identity = self.model_identity(b"trusted-model")
+        with self.assertRaises(ManagedSpeechComponentError):
+            self.layout.ensure_directories(
+                [self.layout.model_directory(identity)]
+            )
 
 
 if __name__ == "__main__":
