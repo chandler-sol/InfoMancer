@@ -436,6 +436,71 @@ class MediaIdentityDecisionService:
             if speech_version != NORMAL_SPEECH_ORCHESTRATION_VERSION:
                 return False, file_row
 
+            try:
+                transcript_count = int(
+                    speech_metadata.get("transcript_count") or 0
+                )
+            except (TypeError, ValueError):
+                return False, file_row
+            if transcript_count < 0:
+                return False, file_row
+
+            if transcript_count:
+                raw_artifact_ids = speech_metadata.get("artifact_ids")
+                raw_cache_keys = speech_metadata.get("cache_keys")
+                if (
+                    not isinstance(raw_artifact_ids, list)
+                    or not isinstance(raw_cache_keys, list)
+                    or len(raw_artifact_ids) != transcript_count
+                    or len(raw_cache_keys) != transcript_count
+                ):
+                    return False, file_row
+                try:
+                    artifact_ids = [int(value) for value in raw_artifact_ids]
+                except (TypeError, ValueError):
+                    return False, file_row
+                cache_keys = [str(value or "") for value in raw_cache_keys]
+                if (
+                    any(value <= 0 for value in artifact_ids)
+                    or len(set(artifact_ids)) != transcript_count
+                    or any(not value for value in cache_keys)
+                    or len(set(cache_keys)) != transcript_count
+                ):
+                    return False, file_row
+
+                placeholders = ",".join("?" for _ in artifact_ids)
+                artifact_rows = conn.execute(
+                    f"""SELECT id,file_id,artifact_type,analyzer_key,
+                               analyzer_version,cache_key,status,profile,
+                               file_size_bytes,file_modified_at
+                        FROM media_identity_artifacts
+                        WHERE id IN ({placeholders})""",
+                    tuple(artifact_ids),
+                ).fetchall()
+                if len(artifact_rows) != transcript_count:
+                    return False, file_row
+                expected_by_id = dict(zip(artifact_ids, cache_keys))
+                for artifact_row in artifact_rows:
+                    if (
+                        int(artifact_row["file_id"]) != int(scan["file_id"])
+                        or str(artifact_row["artifact_type"] or "")
+                        != "speech_transcript"
+                        or str(artifact_row["analyzer_key"] or "")
+                        != "local-speech-transcript"
+                        or str(artifact_row["analyzer_version"] or "") != "1"
+                        or str(artifact_row["status"] or "") != "complete"
+                        or str(artifact_row["profile"] or "") != "normal"
+                        or str(artifact_row["cache_key"] or "")
+                        != expected_by_id.get(int(artifact_row["id"]), "")
+                        or int(artifact_row["file_size_bytes"] or 0)
+                        != int(scan["file_size_bytes"] or 0)
+                        or not _same_modified_at(
+                            artifact_row["file_modified_at"],
+                            scan["file_modified_at"],
+                        )
+                    ):
+                        return False, file_row
+
         normalized_expected = {
             str(key): str(value)
             for key, value in expected_signatures.items()
