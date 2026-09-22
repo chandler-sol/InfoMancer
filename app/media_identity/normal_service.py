@@ -819,6 +819,28 @@ class NormalIdentityService:
         previous_completed_normal = (
             str(scan.get("completed_profile") or "") == IdentityProfile.NORMAL.value
         )
+        previous_speech_metadata = claimed_before_normal.get("normal_speech")
+        try:
+            previous_speech_count = (
+                int(previous_speech_metadata.get("transcript_count") or 0)
+                if isinstance(previous_speech_metadata, Mapping)
+                else 0
+            )
+        except (TypeError, ValueError):
+            previous_speech_count = 0
+
+        if (
+            previous_completed_normal
+            and previous_speech_count > 0
+            and not cheaper_evidence_sufficient
+            and not speech_run.observations
+        ):
+            raise NormalIdentityScanError(
+                "Normal rerun could not revalidate the speech fragments still "
+                "needed by this scan. The existing completed Normal evidence "
+                "was retained."
+            )
+
         if (
             not run.observations
             and not speech_run.observations
