@@ -28,6 +28,38 @@ def _canonical_json(value: Any) -> str:
 
 
 @dataclass(frozen=True)
+class SpeechBinaryIdentity:
+    """Stable identity for one local speech-engine executable."""
+
+    key: str
+    version: str
+    sha256: str
+    source: str = ""
+    license_id: str = ""
+    details: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        key = self.key.strip()
+        version = self.version.strip()
+        digest = self.sha256.strip().casefold()
+        if not key:
+            raise SpeechIdentityError("Speech binaries require a stable key.")
+        if not version:
+            raise SpeechIdentityError("Speech binaries require a stable version.")
+        if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+            raise SpeechIdentityError(
+                "Speech binary identity requires a SHA-256 digest."
+            )
+
+    def cache_identity(self) -> Mapping[str, Any]:
+        return {
+            "key": self.key.strip().casefold(),
+            "version": self.version.strip(),
+            "sha256": self.sha256.strip().casefold(),
+        }
+
+
+@dataclass(frozen=True)
 class SpeechModelIdentity:
     """Stable identity for one local speech model artifact."""
 
