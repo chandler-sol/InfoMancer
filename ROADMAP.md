@@ -249,6 +249,14 @@ After the Windows alpha and 0.8 release pipeline are proven:
 
 Use the 0.8 benchmark data to guide targeted work rather than optimizing speculatively:
 
+Longer-term analysis architecture should also remain hardware-flexible without making accelerator-specific runtimes mandatory:
+
+- keep OCR, transcription, fingerprinting, and future ML-assisted analysis behind modular execution-provider contracts so CPU remains the universal baseline while optional NVIDIA, Intel, or other accelerators can be added later;
+- allow advanced installations to prefer or force a supported execution provider while keeping Automatic selection and safe CPU fallback as the default;
+- design future **connected analysis workers** so an authoritative InfoMancer Server can lease bounded compute-heavy analysis jobs to trusted registered machines with stronger hardware, while the server retains the catalog, job authority, final evidence persistence, and review/decision workflow;
+- make worker capability advertisement explicit and versioned, including supported analysis features, execution providers, resource ceilings, and software/model versions;
+- treat worker authentication, job leasing, cancellation, artifact provenance, file accessibility, protocol compatibility, and network trust as first-class design requirements before distributed execution ships;
+
 - faster incremental scans;
 - more efficient large Review queues and Inspector aggregations;
 - reduced memory pressure during metadata, hashing, and analysis jobs;

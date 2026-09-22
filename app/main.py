@@ -47,6 +47,7 @@ from .engagement import EngagementError, EngagementService, utc_from_local
 from .event_log import EventLog
 from .file_hashes import MediaHashService
 from .imdb import sync_genres
+from .managed_ffmpeg import ManagedFfmpegComponent
 from .media_info import MediaInspectionError, inspect_media
 from .mie import CATEGORIES as MIE_CATEGORIES
 from .mie import SEVERITIES as MIE_SEVERITIES
@@ -102,6 +103,7 @@ provider_secrets = ProviderSecretStore(
     settings.database.parent / "provider-secrets.enc", settings.application_secret
 )
 external_source_config = ExternalSourceConfigService(db)
+ffmpeg_components = ManagedFfmpegComponent(settings.database.parent)
 provider_secret_error = ""
 try:
     stored_provider_secrets = provider_secrets.load()
@@ -2771,6 +2773,7 @@ def settings_page_context(
             })
         context["external_integrations"] = integration_rows
         context["integration_secret_error"] = integration_secret_error
+        context["ffmpeg_component"] = ffmpeg_components.status()
     elif section == "external-search":
         context["test_search_url"] = preferences["search_url_template"].replace(
             "{query}", quote_plus("House of the Dragon S01E01")

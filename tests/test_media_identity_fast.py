@@ -13,6 +13,9 @@ from app.db import Database
 from app.media_identity.candidates import generate_episode_candidates
 from app.media_identity.fast import FastIdentityService, FastIdentityStaleError
 from app.media_identity.text import normalize_subtitle_text
+from app.media_identity.versions import (
+    EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION,
+)
 
 
 REGULAR_OVERVIEWS = {
@@ -247,6 +250,20 @@ class FastEpisodeIdentityTests(unittest.TestCase):
             details = json.loads(row["details_json"] or "{}")
             result[str(row["provider_item_id"])] = float(details.get("similarity") or 0.0)
         return result
+
+    def test_fast_scan_persists_decision_algorithm_version(self) -> None:
+        file_id = self._add_file(1, actual_episode=1)
+        result = self.service.scan_file(file_id)
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT claimed_identity_json FROM media_identity_scans WHERE id=?",
+                (result.scan_id,),
+            ).fetchone()
+        claimed = json.loads(row["claimed_identity_json"])
+        self.assertEqual(
+            claimed["decision_algorithm_version"],
+            EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION,
+        )
 
     def test_subtitle_normalizer_handles_srt_vtt_and_ass_transport_markup(self) -> None:
         srt = "1\n00:00:01,000 --> 00:00:02,000\n<b>Amber Falcon</b>\n"

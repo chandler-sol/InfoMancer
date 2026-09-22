@@ -96,7 +96,7 @@ class ExternalSourceConfigTests(unittest.TestCase):
         self.assertEqual(source.last_test_version, "1.2.3")
         self.assertIsNotNone(source.last_test_at)
 
-    def test_plex_registry_keeps_preview_capability_hidden_until_consumer_exists(self):
+    def test_plex_registry_exposes_preview_capability_for_normal_ocr(self):
         local_root = self.data / "media"
         self.service.add_mapping(
             "plex",
@@ -121,12 +121,14 @@ class ExternalSourceConfigTests(unittest.TestCase):
         plex = registry.require("plex")
         status = plex.status()
         self.assertTrue(status.available)
-        self.assertEqual(status.capabilities, frozenset())
-        self.assertIn("BIF adapter", status.detail)
-        self.assertIn("consuming analyzer", status.detail)
+        self.assertEqual(
+            status.capabilities,
+            frozenset({ExternalCapability.PREVIEW_FRAMES}),
+        )
+        self.assertIn("ready for Episode Identity", status.detail)
         self.assertEqual(
             registry.available_for(ExternalCapability.PREVIEW_FRAMES),
-            (),
+            (plex,),
         )
         self.assertEqual(plex.metadata_root, str(self.data / "plex-data"))
         self.assertFalse(registry.require("jellyfin").status().available)
@@ -285,7 +287,7 @@ class ExternalSourceConfigTests(unittest.TestCase):
         self.assertEqual(status.capabilities, frozenset())
         self.assertIn("path mapping", status.detail.casefold())
 
-    def test_jellyfin_registry_keeps_preview_capability_hidden_until_consumer_exists(self):
+    def test_jellyfin_registry_exposes_preview_capability_for_normal_ocr(self):
         local_root = self.data / "media"
         self.service.add_mapping(
             "jellyfin",
@@ -308,11 +310,14 @@ class ExternalSourceConfigTests(unittest.TestCase):
         jellyfin = registry.require("jellyfin")
         status = jellyfin.status()
         self.assertTrue(status.available)
-        self.assertEqual(status.capabilities, frozenset())
-        self.assertIn("consuming analyzer", status.detail)
+        self.assertEqual(
+            status.capabilities,
+            frozenset({ExternalCapability.PREVIEW_FRAMES}),
+        )
+        self.assertIn("ready for Episode Identity", status.detail)
         self.assertEqual(
             registry.available_for(ExternalCapability.PREVIEW_FRAMES),
-            (),
+            (jellyfin,),
         )
 
         stale_registry = build_configured_source_registry(

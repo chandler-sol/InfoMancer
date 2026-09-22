@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from dataclasses import replace
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,9 +14,13 @@ from jinja2 import Environment, FileSystemLoader
 from app import main
 from app.db import Database
 from app.duplicates import DuplicateService
+from app.media_identity.models import IdentityProfile, IdentityResultState
+from app.media_identity.normal import NormalSamplingStage
+from app.media_identity.normal_service import NormalIdentityService
 from app.mie import MediaIntelligenceEngine
 from app.review_queue import ReviewQueue
 from app.request_security import LOCAL_CSRF_COOKIE
+from app.provider_secrets import ProviderSecretError
 from app.routes.health_action_routing import health_finding_href
 
 
@@ -157,6 +162,7 @@ class EpisodeIdentityHttpBindingTests(unittest.TestCase):
         requests = [
             ("POST", "/files/999999/episode-identity/fast"),
             ("GET", "/episode-identity/scans/999999"),
+            ("POST", "/episode-identity/scans/999999/normal"),
             ("GET", "/episode-identity/scans/999999/rename-preview"),
             ("POST", "/episode-identity/scans/999999/confirm-current"),
             ("POST", "/episode-identity/scans/999999/confirm-best"),
@@ -170,12 +176,19 @@ class EpisodeIdentityHttpBindingTests(unittest.TestCase):
                 422,
                 f"{method} {url} treated request as a query parameter: {response.text}",
             )
-        self.assertEqual([response.status_code for response in responses[:3]], [404, 404, 404])
-        self.assertEqual([response.status_code for response in responses[3:]], [303, 303])
+        self.assertEqual(
+            [response.status_code for response in responses[:4]],
+            [404, 404, 404, 404],
+        )
+        self.assertEqual(
+            [response.status_code for response in responses[4:]],
+            [303, 303],
+        )
 
         target_paths = {
             "/files/{file_id}/episode-identity/fast",
             "/episode-identity/scans/{scan_id}",
+            "/episode-identity/scans/{scan_id}/normal",
             "/episode-identity/scans/{scan_id}/rename-preview",
             "/episode-identity/scans/{scan_id}/confirm-current",
             "/episode-identity/scans/{scan_id}/confirm-best",
@@ -191,6 +204,158 @@ class EpisodeIdentityHttpBindingTests(unittest.TestCase):
             }
             self.assertNotIn("request", query_names, route.path)
         self.assertEqual(checked, target_paths)
+
+
+class EpisodeIdentityNormalRouteTests(EpisodeIdentityHttpBindingTests):
+    def test_normal_route_resolves_again_after_visual_evidence_is_committed(self) -> None:
+        fake_provider_secrets = SimpleNamespace(load=lambda: {})
+        normal_result = SimpleNamespace(
+            completed_profile=IdentityProfile.NORMAL,
+            source_key="jellyfin",
+            observation_count=5,
+            reused_artifact_count=2,
+            highest_observed_stage=NormalSamplingStage.INITIAL,
+            failures=(),
+            budget_exhausted=False,
+        )
+        resolution = SimpleNamespace(state=IdentityResultState.PROBABLY_CORRECT)
+
+        with (
+            patch.object(
+                main,
+                "provider_secrets",
+                fake_provider_secrets,
+            ),
+            patch(
+                "app.routes.episode_identity_review.build_configured_source_registry",
+                return_value=SimpleNamespace(),
+            ),
+            patch.object(
+                main,
+                "analyze_library_health_with_activity",
+                return_value=None,
+            ),
+            patch.object(
+                main,
+                "record_event",
+                return_value=None,
+            ),
+            patch(
+                "app.media_identity.service.MediaIdentityDecisionService.scan_detail",
+                return_value={"file": {"title_id": 1}},
+            ),
+            patch.object(
+                NormalIdentityService,
+                "run_scan",
+                return_value=normal_result,
+            ) as run_scan,
+            patch(
+                "app.media_identity.service.MediaIdentityDecisionService.resolve_scan",
+                return_value=resolution,
+            ) as resolve_scan,
+        ):
+            response = self.client.post("/episode-identity/scans/42/normal")
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("/episode-identity/scans/42", response.headers["location"])
+        self.assertIn("Normal", response.headers["location"])
+        run_scan.assert_called_once_with(42)
+        resolve_scan.assert_called_once_with(42)
+
+    def test_normal_route_keeps_local_fallback_available_when_provider_secrets_fail(self) -> None:
+        fake_provider_secrets = SimpleNamespace(
+            load=lambda: (_ for _ in ()).throw(
+                ProviderSecretError("fixture credential store failure")
+            )
+        )
+        normal_result = SimpleNamespace(
+            completed_profile=IdentityProfile.NORMAL,
+            source_key="local-ffmpeg",
+            observation_count=5,
+            reused_artifact_count=0,
+            highest_observed_stage=NormalSamplingStage.INITIAL,
+            failures=(),
+            budget_exhausted=False,
+        )
+        resolution = SimpleNamespace(state=IdentityResultState.PROBABLY_CORRECT)
+
+        with (
+            patch.object(main, "provider_secrets", fake_provider_secrets),
+            patch(
+                "app.routes.episode_identity_review.build_configured_source_registry",
+                return_value=SimpleNamespace(),
+            ) as build_registry,
+            patch.object(
+                main,
+                "analyze_library_health_with_activity",
+                return_value=None,
+            ),
+            patch.object(main, "record_event", return_value=None),
+            patch(
+                "app.media_identity.service.MediaIdentityDecisionService.scan_detail",
+                return_value={"file": {"title_id": 1}},
+            ),
+            patch.object(
+                NormalIdentityService,
+                "run_scan",
+                return_value=normal_result,
+            ),
+            patch(
+                "app.media_identity.service.MediaIdentityDecisionService.resolve_scan",
+                return_value=resolution,
+            ),
+        ):
+            response = self.client.post("/episode-identity/scans/42/normal")
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("local", response.headers["location"].casefold())
+        self.assertIn("credentials", response.headers["location"].casefold())
+        self.assertEqual(build_registry.call_args.args[1], {})
+
+    def test_normal_route_degrades_cleanly_when_optional_ocr_is_unavailable(self) -> None:
+        fake_provider_secrets = SimpleNamespace(load=lambda: {})
+        normal_result = SimpleNamespace(
+            completed_profile=IdentityProfile.FAST,
+            source_key="",
+            observation_count=0,
+            reused_artifact_count=0,
+            highest_observed_stage=None,
+            failures=("ocr-engine-unavailable",),
+            budget_exhausted=False,
+        )
+        resolution = SimpleNamespace(state=IdentityResultState.INCONCLUSIVE)
+
+        with (
+            patch.object(main, "provider_secrets", fake_provider_secrets),
+            patch(
+                "app.routes.episode_identity_review.build_configured_source_registry",
+                return_value=SimpleNamespace(),
+            ),
+            patch.object(
+                main,
+                "analyze_library_health_with_activity",
+                return_value=None,
+            ),
+            patch.object(main, "record_event", return_value=None),
+            patch(
+                "app.media_identity.service.MediaIdentityDecisionService.scan_detail",
+                return_value={"file": {"title_id": 1}},
+            ),
+            patch.object(
+                NormalIdentityService,
+                "run_scan",
+                return_value=normal_result,
+            ),
+            patch(
+                "app.media_identity.service.MediaIdentityDecisionService.resolve_scan",
+                return_value=resolution,
+            ),
+        ):
+            response = self.client.post("/episode-identity/scans/42/normal")
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("Fast", response.headers["location"])
+        self.assertIn("OCR", response.headers["location"])
 
 
 class EpisodeIdentityReviewContractTests(unittest.TestCase):
@@ -216,6 +381,7 @@ class EpisodeIdentityReviewContractTests(unittest.TestCase):
 
         self.assertIn('/files/{file_id}/episode-identity/fast', routes)
         self.assertIn('/episode-identity/scans/{scan_id}', routes)
+        self.assertIn('/episode-identity/scans/{scan_id}/normal', routes)
         self.assertIn("@librarian_get(", routes)
         self.assertNotIn("resolve_if_needed=True", routes)
         self.assertIn('/confirm-current', routes)
@@ -229,6 +395,8 @@ class EpisodeIdentityReviewContractTests(unittest.TestCase):
         self.assertIn("Verify Episode Identity", detail)
         self.assertIn("read-only", rename.casefold())
         self.assertIn("identity.snapshot_current", identity)
+        self.assertIn("Run Normal", identity)
+        self.assertIn("bounded CPU OCR", identity)
         self.assertIn("finding.rule_key == 'episode-identity-review'", health)
         self.assertIn('name="scope" value="finding"', health)
         self.assertNotIn("source.rename(", routes)

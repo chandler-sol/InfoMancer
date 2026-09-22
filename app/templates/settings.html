@@ -63,9 +63,37 @@
 {% elif section == 'integrations' %}
 <div class="settings-page-grid">
   <section class="panel settings-card full-width">
+    <p class="eyebrow">EPISODE IDENTITY COMPONENTS</p>
+    <h2>FFmpeg frame extraction</h2>
+    <p class="muted">Normal verification uses FFmpeg only when Plex or Jellyfin preview frames are unavailable or contain no useful visual text. InfoMancer never needs to install FFmpeg system-wide.</p>
+    <div class="settings-metrics">
+      <div><strong>{{ ffmpeg_component.state|replace('_',' ')|title }}</strong><span>Source</span></div>
+      <div><strong>{{ ffmpeg_component.version or 'Unavailable' }}</strong><span>Version</span></div>
+      <div><strong>{{ 'Ready' if ffmpeg_component.available else 'Unavailable' }}</strong><span>Frame extraction</span></div>
+      <div><strong>Read-only</strong><span>Media access</span></div>
+    </div>
+    <p class="muted">{{ ffmpeg_component.detail }}</p>
+    {% if ffmpeg_component.path %}<p class="muted"><small>Executable: <code>{{ ffmpeg_component.path }}</code></small></p>{% endif %}
+    <div class="actions">
+      {% if ffmpeg_component.can_install %}
+      <form method="post" action="/settings/integrations/ffmpeg/install">
+        <button class="button primary">Install FFmpeg for InfoMancer</button>
+      </form>
+      {% elif ffmpeg_component.can_remove %}
+      <form method="post" action="/settings/integrations/ffmpeg/remove" onsubmit="return confirm('Remove InfoMancer\'s managed FFmpeg copy? Normal verification will fall back to another available FFmpeg source or skip local frame generation.');">
+        <button class="button danger">Remove managed FFmpeg</button>
+      </form>
+      {% endif %}
+    </div>
+    {% if ffmpeg_component.can_install %}
+    <p class="muted"><small>InfoMancer downloads its pinned FFmpeg {{ ffmpeg_component.version }} build from the configured GitHub release, verifies SHA-256 hashes for the archive, binary, and license, verifies the executable, then stores it under this installation's private data directory.</small></p>
+    {% endif %}
+  </section>
+
+  <section class="panel settings-card full-width">
     <p class="eyebrow">MEDIA SERVERS</p>
     <h2>Episode Identity integrations</h2>
-    <p class="muted">Plex and Jellyfin are optional, read-only analysis accelerators. Their preview adapters can be configured now, but preview frames are not advertised as analysis-ready until a consuming analyzer is installed.</p>
+    <p class="muted">Plex and Jellyfin are optional, read-only Episode Identity accelerators. When configured and mapped, their existing preview frames are available to Normal verification before InfoMancer falls back to local frame generation.</p>
     {% if integration_secret_error %}<div class="form-error">{{ integration_secret_error }}</div>{% endif %}
   </section>
 

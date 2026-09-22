@@ -50,7 +50,11 @@
     <article>
       <strong>{{ (identity.completed_profile or identity.requested_profile)|title }}</strong>
       <h3>Completed tier</h3>
+      {% if identity.completed_profile == 'normal' %}
+      <p>Normal includes the Fast evidence plus bounded visual text from media-server previews or local FFmpeg-generated fallback frames.</p>
+      {% else %}
       <p>Fast uses local catalog, provider metadata, stream facts, and available subtitle text.</p>
+      {% endif %}
     </article>
     <article>
       <strong>{{ identity.confirmation.freshness|title if identity.confirmation else 'None' }}</strong>
@@ -59,6 +63,29 @@
     </article>
   </div>
 </section>
+
+{% if current_user.is_librarian %}
+<section class="panel">
+  <header>
+    <div>
+      <p class="eyebrow">NORMAL VERIFICATION</p>
+      <h2>Run deeper visual analysis</h2>
+      <p>Normal keeps the Fast evidence, prefers existing Plex or Jellyfin preview frames, then falls back to bounded local FFmpeg frame extraction when needed. The optional OCR component then runs bounded CPU OCR.</p>
+    </div>
+  </header>
+  {% if identity.snapshot_current %}
+  <form method="post" action="/episode-identity/scans/{{ identity.id }}/normal">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="button primary">
+      {% if identity.completed_profile == 'normal' %}Run Normal again{% else %}Run Normal{% endif %}
+    </button>
+  </form>
+  <p class="legal-note">Normal remains read-only. OCR observations only add evidence to this scan.</p>
+  {% else %}
+  <p>Run Fast verification again first because this scan no longer matches the current file and metadata snapshot.</p>
+  {% endif %}
+</section>
+{% endif %}
 
 {% if current_user.is_librarian %}
 <section class="panel">

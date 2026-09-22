@@ -79,6 +79,18 @@ If that reports a permission problem, run:
 sh setup-infomancer.sh
 ```
 
+### Optional Episode Identity CPU OCR
+
+For source or other local installations that do not already provide FFmpeg, open **App Settings → Integrations → FFmpeg frame extraction** and choose **Install FFmpeg for InfoMancer**. InfoMancer downloads its pinned platform build, verifies the archive, binary, and license hashes, verifies the executable, and stores it only inside the InfoMancer data directory. Native packages already bundle FFmpeg, and Docker Server images already include it.
+
+The Server helper also asks whether to include **Episode Identity CPU OCR**. This is optional.
+
+- Choose **Yes** if you want to test the Normal verification tier. The Server image will include RapidOCR and ONNX Runtime CPU support.
+- Choose **No** if you only want Fast verification for now. Normal will remain available later after rebuilding the Server with OCR enabled.
+- This option does not enable GPU processing. InfoMancer 0.9 uses CPU OCR by design.
+
+FFmpeg is already included in the Server image for bounded local-frame fallback, so no separate FFmpeg installation is needed for a normal Server setup.
+
 ### 3. Tell InfoMancer where your media lives
 
 The helper asks for your Movies folder and TV Shows folder. You can leave one blank if you do not have it.

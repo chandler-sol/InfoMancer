@@ -192,6 +192,29 @@ fi
 
 mkdir -p data || fail "Could not create the data folder."
 
+CURRENT_OCR=$(awk -F= '/^INFOMANCER_INSTALL_OCR=/{print tolower($2); exit}' .env 2>/dev/null || true)
+if [ "$CURRENT_OCR" = "true" ]; then
+  printf 'Episode Identity CPU OCR is enabled. Keep it enabled? [Y/n]: '
+  IFS= read -r answer || exit 1
+  case "$answer" in
+    n|N|no|NO|No) OCR_ENABLED=false ;;
+    *) OCR_ENABLED=true ;;
+  esac
+else
+  printf 'Install optional Episode Identity CPU OCR for Normal verification? [y/N]: '
+  IFS= read -r answer || exit 1
+  case "$answer" in
+    y|Y|yes|YES|Yes) OCR_ENABLED=true ;;
+    *) OCR_ENABLED=false ;;
+  esac
+fi
+replace_env_value INFOMANCER_INSTALL_OCR "$OCR_ENABLED" || fail "Could not save the Episode Identity OCR choice in .env."
+if [ "$OCR_ENABLED" = "true" ]; then
+  say "Episode Identity CPU OCR will be included in the Server image."
+else
+  say "Episode Identity CPU OCR will remain optional and can be enabled later."
+fi
+
 if [ "$PLATFORM" = "linux" ]; then
   replace_env_value INFOMANCER_UID "$(id -u)" || fail "Could not set the Linux user ID in .env."
   replace_env_value INFOMANCER_GID "$(id -g)" || fail "Could not set the Linux group ID in .env."

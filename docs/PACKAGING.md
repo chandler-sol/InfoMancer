@@ -22,7 +22,7 @@ A polished native package must decide and test:
 - how InfoMancer starts, stops, restarts, and updates;
 - how it selects a free local port and opens the browser;
 - how media folders and network shares are granted;
-- how FFprobe is bundled and licensed;
+- how FFprobe and FFmpeg are bundled and licensed;
 - how an uninstall preserves or removes application data;
 - how crashes are reported when no terminal window is visible;
 - how the application and installer are signed.
@@ -158,31 +158,40 @@ The desktop build has an automated Windows smoke test that seeds known Roaming a
 Local AppData paths, silently uninstalls InfoMancer, and fails if owned state or
 installer registration survives.
 
-### Bundled FFprobe contract
+### Bundled FFprobe and FFmpeg contract
 
-Native desktop packages include FFprobe because media inspection must work on a
-clean machine without requiring the user to install FFmpeg or modify `PATH`.
-InfoMancer currently pins FFprobe 6.1.1 from the `eugeneware/ffmpeg-static`
-`b6.1.1` release and stages the matching binary for Windows x64, Linux x64,
-Linux arm64, macOS x64, or macOS arm64 at package-build time.
+Native desktop packages include FFprobe for media inspection and FFmpeg for
+bounded Episode Identity preview-frame extraction. Both are pinned to the
+`eugeneware/ffmpeg-static` `b6.1.1` / FFmpeg 6.1.1 release and staged for
+Windows x64, Linux x64, Linux arm64, macOS x64, or macOS arm64 at package-build
+time.
 
-The staging script pins SHA-256 values for the downloaded compressed asset, the
-decompressed executable, and the upstream-provided platform license. Packaging
-fails if any of those hashes differ. The executable and its license/notice are
-then added to the PyInstaller core. Before Tauri is allowed to create the native
-installer or image, CI executes the finished core with `--check-ffprobe`. That
-check must successfully locate and execute the bundled FFprobe binary.
+Separate staging scripts pin SHA-256 values for each compressed asset,
+decompressed executable, and upstream-provided platform license. Packaging fails
+if any hash differs. Both executables and their license/notice files are added
+to the PyInstaller core. Before Tauri may create an installer or image, CI runs
+`--check-ffprobe` and `--check-ffmpeg` against the finished core.
 
-At runtime, media inspection resolves FFprobe in this order:
+At runtime, FFprobe resolves in this order:
 
-1. `INFOMANCER_FFPROBE`, when an operator explicitly provides an override.
-2. The FFprobe executable embedded in a native PyInstaller build.
-3. A system `ffprobe` available on `PATH`, which remains useful for source and
-   server installations.
+1. The explicit operator override, `INFOMANCER_FFPROBE`.
+2. The executable embedded in a native PyInstaller build.
+3. A system `ffprobe` on `PATH`.
 
-Only FFprobe is bundled for this inspection feature. The full FFmpeg executable
-should not be added unless a future feature actually requires media conversion
-or remuxing.
+FFmpeg resolves in this order:
+
+1. The explicit operator override, `INFOMANCER_FFMPEG`.
+2. The executable embedded in a native PyInstaller build.
+3. An InfoMancer-managed, hash-verified private copy under the application data
+   directory.
+4. A system `ffmpeg` on `PATH`.
+
+Source/local installations without FFmpeg can install the pinned private copy
+from **App Settings → Integrations → FFmpeg frame extraction**. The managed
+component is not installed system-wide and can be removed independently.
+
+FFmpeg is used only for read-only, bounded single-frame extraction in Episode
+Identity Normal. It is not used to transcode, remux, replace, or modify media.
 
 The native package carries the license text distributed with the pinned binary
 and an InfoMancer third-party notice. Those files document what is shipped, but
@@ -191,6 +200,19 @@ been satisfied. Before publishing a production release, confirm the exact
 FFmpeg build configuration and applicable LGPL/GPL obligations, including any
 source or build-correspondence requirements that apply to that binary.
 
+
+### Optional Episode Identity CPU OCR contract
+
+RapidOCR and ONNX Runtime remain optional 0.9 dependencies in
+`requirements-ocr.txt`; they are not part of the base Python requirements or
+the current native desktop core. Server/source installs that enable CPU OCR use
+the pinned RapidOCR + ONNX Runtime CPU path.
+
+`THIRD_PARTY_NOTICES.md` records the OCR projects, pinned versions, upstream
+license families, model attribution notes, and packaging scope. The Server
+release ZIP includes that notice, and Docker copies it into the image. Native
+OCR bundling remains deferred until the runtime has been qualified against real
+libraries.
 
 ### Pillow image-decoding contract
 

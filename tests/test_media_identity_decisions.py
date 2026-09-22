@@ -18,6 +18,9 @@ from app.media_identity.fast import (
 from app.media_identity.models import IdentityReference, IdentityResultState
 from app.media_identity.scoring import resolve_identity
 from app.media_identity.service import MediaIdentityDecisionService
+from app.media_identity.versions import (
+    EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION,
+)
 from app.mie_history import MediaIntelligenceHistoryEngine
 
 
@@ -462,6 +465,9 @@ class DecisionServiceTests(unittest.TestCase):
                 "expanded_specials": False,
                 "input_signature_version": SCAN_INPUT_SIGNATURE_VERSION,
                 "input_signatures": signatures,
+                "decision_algorithm_version": (
+                    EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION
+                ),
             }
             conn.execute(
                 """UPDATE media_identity_scans

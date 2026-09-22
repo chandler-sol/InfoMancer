@@ -5,7 +5,19 @@ import sqlite3
 from fastapi import APIRouter, Depends, Request
 
 from ..access import require_librarian
+from ..media_identity.external_config import (
+    ExternalSourceConfigService,
+    build_configured_source_registry,
+)
 from ..media_identity.fast import FastIdentityScanError, FastIdentityService
+from ..media_identity.local_frames import LOCAL_FRAME_SOURCE_KEY
+from ..media_identity.models import IdentityProfile
+from ..media_identity.normal_service import (
+    NormalIdentityScanError,
+    NormalIdentityService,
+)
+from ..media_identity.ocr import RapidOcrCpuEngine
+from ..provider_secrets import ProviderSecretError
 from ..media_identity.service import (
     MediaIdentityDecisionError,
     MediaIdentityDecisionService,
@@ -24,6 +36,7 @@ def build_router(ctx: RouteContext):
     analyze_library_health_with_activity = ctx.live(
         "analyze_library_health_with_activity"
     )
+    provider_secrets = ctx.live("provider_secrets")
 
     fast = FastIdentityService(db)
     decisions = MediaIdentityDecisionService(db)
@@ -105,6 +118,143 @@ def build_router(ctx: RouteContext):
             message += " Library Health will catch up on the next successful analysis."
         return redirect(
             f"/episode-identity/scans/{scan.scan_id}",
+            message,
+        )
+
+    @librarian_post("/episode-identity/scans/{scan_id}/normal")
+    def run_normal_episode_identity(request: Request, scan_id: int):
+        try:
+            detail = decisions.scan_detail(int(scan_id))
+        except MediaIdentityDecisionError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        file_row = detail.get("file") or {}
+        title_id = int(file_row.get("title_id") or 0)
+        credential_warning = ""
+        try:
+            try:
+                secrets = provider_secrets.load()
+            except ProviderSecretError as exc:
+                secrets = {}
+                credential_warning = str(exc)
+                record_event(
+                    "mie",
+                    "Episode Identity Normal could not read external integration credentials; local fallback remains available.",
+                    level="warning",
+                    detail=credential_warning,
+                    context={
+                        "scan_id": int(scan_id),
+                        "title_id": title_id or None,
+                        "profile": "normal",
+                    },
+                    user_id=request.state.user.id,
+                )
+            registry = build_configured_source_registry(
+                ExternalSourceConfigService(db),
+                secrets,
+            )
+            normal = NormalIdentityService(
+                db,
+                registry,
+                RapidOcrCpuEngine(),
+            )
+            result = normal.run_scan(int(scan_id))
+            resolution = decisions.resolve_scan(int(scan_id))
+            findings_refreshed = _refresh_findings(request.state.user.id)
+        except (NormalIdentityScanError, MediaIdentityDecisionError) as exc:
+            record_event(
+                "mie",
+                f"Episode Identity Normal verification could not complete for scan {scan_id}.",
+                level="warning",
+                detail=str(exc),
+                context={
+                    "scan_id": int(scan_id),
+                    "title_id": title_id or None,
+                    "profile": "normal",
+                },
+                user_id=request.state.user.id,
+            )
+            return redirect(
+                f"/episode-identity/scans/{scan_id}",
+                f"Normal verification could not complete: {exc}",
+            )
+
+        record_event(
+            "mie",
+            f"Episode Identity Normal verification completed for scan {scan_id}.",
+            context={
+                "scan_id": int(scan_id),
+                "title_id": title_id or None,
+                "profile": "normal",
+                "completed_profile": result.completed_profile.value,
+                "source_key": result.source_key,
+                "observation_count": result.observation_count,
+                "reused_artifact_count": result.reused_artifact_count,
+                "sampling_stage": (
+                    result.highest_observed_stage.name.casefold()
+                    if result.highest_observed_stage is not None
+                    else ""
+                ),
+                "result_state": resolution.state.value,
+            },
+            user_id=request.state.user.id,
+        )
+
+        if result.completed_profile == IdentityProfile.NORMAL:
+            source_label = (
+                "generated local FFmpeg frames"
+                if result.source_key == LOCAL_FRAME_SOURCE_KEY
+                else f"{result.source_key.title()} preview frames"
+                if result.source_key
+                else "preview frames"
+            )
+            stage_label = (
+                result.highest_observed_stage.name.title()
+                if result.highest_observed_stage is not None
+                else "Unknown"
+            )
+            message = (
+                f"Normal verification completed using {source_label}. "
+                f"{result.observation_count} preview frame(s) were analyzed "
+                f"through the {stage_label} sampling stage"
+            )
+            if result.reused_artifact_count:
+                message += (
+                    f", including {result.reused_artifact_count} cached OCR artifact(s)"
+                )
+            message += ". Review the updated evidence before making any correction."
+        elif "ocr-engine-unavailable" in set(result.failures):
+            message = (
+                "Normal OCR is not installed or available on this server, so the scan "
+                "remains at Fast evidence. Install the optional CPU OCR component and try again."
+            )
+        else:
+            local_failure = next(
+                (
+                    item.split(":unavailable:", 1)[1]
+                    for item in result.failures
+                    if item.startswith(
+                        f"{LOCAL_FRAME_SOURCE_KEY}:unavailable:"
+                    )
+                ),
+                "",
+            )
+            message = (
+                "Normal could not obtain usable Plex/Jellyfin previews or generated "
+                "local FFmpeg frames, so the scan remains at Fast evidence."
+            )
+            if local_failure:
+                message += f" Local fallback: {local_failure}"
+        if credential_warning:
+            message += (
+                " Plex/Jellyfin credentials could not be read, so external previews "
+                "were skipped and only local fallback was available."
+            )
+        if result.budget_exhausted:
+            message += " Normal stopped at its configured resource limit."
+        if not findings_refreshed:
+            message += " Library Health will catch up on the next successful analysis."
+        return redirect(
+            f"/episode-identity/scans/{scan_id}",
             message,
         )
 
@@ -205,6 +355,7 @@ def build_router(ctx: RouteContext):
         "episode_identity_fast": fast,
         "episode_identity_decisions": decisions,
         "verify_episode_identity": verify_episode_identity,
+        "run_normal_episode_identity": run_normal_episode_identity,
         "episode_identity_detail": episode_identity_detail,
         "episode_identity_rename_preview": episode_identity_rename_preview,
         "confirm_current_identity": confirm_current_identity,

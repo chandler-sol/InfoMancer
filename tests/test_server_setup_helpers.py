@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -16,10 +17,30 @@ class ServerSetupHelperContracts(unittest.TestCase):
             "Setup-InfoMancer.command",
             "Setup-InfoMancer.ps1",
             "setup-infomancer.sh",
+            "requirements-ocr.txt",
         ):
             with self.subTest(filename=filename):
                 self.assertIn(f'"{filename}"', builder)
                 self.assertTrue((ROOT / filename).is_file(), filename)
+
+    def test_optional_ocr_is_a_reproducible_server_build_choice(self):
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+        env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+        requirements = (ROOT / "requirements-ocr.txt").read_text(encoding="utf-8")
+        builder = (ROOT / "scripts/build_release.py").read_text(encoding="utf-8")
+
+        self.assertIn("ARG INFOMANCER_INSTALL_OCR=false", dockerfile)
+        self.assertIn('requirements-ocr.txt', dockerfile)
+        self.assertIn('$INFOMANCER_INSTALL_OCR', dockerfile)
+        self.assertIn(
+            "INFOMANCER_INSTALL_OCR: ${INFOMANCER_INSTALL_OCR:-false}",
+            compose,
+        )
+        self.assertIn("INFOMANCER_INSTALL_OCR=false", env_example)
+        self.assertIn("rapidocr==", requirements)
+        self.assertIn("onnxruntime==", requirements)
+        self.assertIn('"requirements-ocr.txt"', builder)
 
     def test_start_here_is_short_and_platform_specific(self):
         text = (ROOT / "START-HERE.txt").read_text(encoding="utf-8")
@@ -46,6 +67,8 @@ class ServerSetupHelperContracts(unittest.TestCase):
             "https://docs.docker.com/engine/install/",
             "INFOMANCER_UID",
             "INFOMANCER_GID",
+            "INFOMANCER_INSTALL_OCR",
+            "Episode Identity CPU OCR",
             "compose.media.yaml",
             "dc up -d --build",
             "data/bootstrap-token",
@@ -66,6 +89,28 @@ class ServerSetupHelperContracts(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_windows_helper_has_valid_powershell_syntax_when_parser_is_available(self):
+        powershell = shutil.which("pwsh") or shutil.which("powershell")
+        if not powershell:
+            self.skipTest("PowerShell is not available on this runner")
+        env = os.environ.copy()
+        env["INFOMANCER_SETUP_PS1"] = str(ROOT / "Setup-InfoMancer.ps1")
+        command = (
+            "$errors=$null; "
+            "[System.Management.Automation.Language.Parser]::ParseFile("
+            "$env:INFOMANCER_SETUP_PS1,[ref]$null,[ref]$errors) | Out-Null; "
+            "if ($errors.Count -gt 0) { "
+            "$errors | ForEach-Object { Write-Error $_.Message }; exit 1 }"
+        )
+        result = subprocess.run(
+            [powershell, "-NoProfile", "-Command", command],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_windows_helper_automates_first_run_and_checks_docker(self):
         script = (ROOT / "Setup-InfoMancer.ps1").read_text(encoding="utf-8")
         wrapper = (ROOT / "Setup-InfoMancer.cmd").read_text(encoding="utf-8")
@@ -79,6 +124,8 @@ class ServerSetupHelperContracts(unittest.TestCase):
             "winget",
             "https://docs.docker.com/desktop/setup/install/windows-install/",
             "docker info",
+            "INFOMANCER_INSTALL_OCR",
+            "Episode Identity CPU OCR",
             "compose.media.yaml",
             "up -d --build",
             "data\\bootstrap-token",
@@ -99,6 +146,8 @@ class ServerSetupHelperContracts(unittest.TestCase):
         self.assertIn("https://docs.docker.com/desktop/setup/install/mac-install/", guide)
         self.assertIn("https://docs.docker.com/engine/install/", guide)
         self.assertIn("Double-click:\n\n`Setup-InfoMancer.cmd`", guide)
+        self.assertIn("Optional Episode Identity CPU OCR", guide)
+        self.assertIn("RapidOCR and ONNX Runtime CPU support", guide)
         self.assertIn("`Setup-InfoMancer.command`", guide)
         self.assertIn("./setup-infomancer.sh", guide)
         self.assertIn("[Manual Server Setup](SERVER_MANUAL.md)", guide)

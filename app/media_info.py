@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .managed_ffmpeg import managed_ffmpeg_candidate
+
 
 class MediaInspectionError(RuntimeError):
     """A media-inspection failure with separate human and technical context."""
@@ -28,6 +30,25 @@ class MediaInspectionError(RuntimeError):
         if not self.technical_detail:
             return self.user_message
         return f"{self.user_message}\n\nFFprobe output:\n{self.technical_detail}"
+
+
+def ffmpeg_executable() -> str:
+    """Resolve FFmpeg from an override, native bundle, or the host PATH."""
+    override = os.environ.get("INFOMANCER_FFMPEG", "").strip()
+    if override:
+        return override
+
+    bundle_dir = getattr(sys, "_MEIPASS", "")
+    if bundle_dir:
+        candidate = Path(bundle_dir) / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+        if candidate.is_file():
+            return str(candidate)
+
+    managed = managed_ffmpeg_candidate()
+    if managed is not None:
+        return str(managed)
+
+    return shutil.which("ffmpeg") or "ffmpeg"
 
 
 def ffprobe_executable() -> str:

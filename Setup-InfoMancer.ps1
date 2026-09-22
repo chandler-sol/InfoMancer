@@ -241,6 +241,28 @@ if (-not (Test-Path -LiteralPath 'data')) {
     New-Item -ItemType Directory -Path 'data' | Out-Null
 }
 
+$currentOcr = ''
+$ocrLine = Get-Content -LiteralPath '.env' |
+    Where-Object { $_ -match '^INFOMANCER_INSTALL_OCR=' } |
+    Select-Object -First 1
+if ($ocrLine) {
+    $currentOcr = ($ocrLine -split '=', 2)[1].Trim().ToLowerInvariant()
+}
+if ($currentOcr -eq 'true') {
+    $answer = Read-Host 'Episode Identity CPU OCR is enabled. Keep it enabled? [Y/n]'
+    $ocrEnabled = -not ($answer -match '^(n|no)$')
+} else {
+    $answer = Read-Host 'Install optional Episode Identity CPU OCR for Normal verification? [y/N]'
+    $ocrEnabled = $answer -match '^(y|yes)$'
+}
+$ocrValue = if ($ocrEnabled) { 'true' } else { 'false' }
+Set-EnvValue 'INFOMANCER_INSTALL_OCR' $ocrValue
+if ($ocrEnabled) {
+    Write-Host 'Episode Identity CPU OCR will be included in the Server image.' -ForegroundColor Green
+} else {
+    Write-Host 'Episode Identity CPU OCR will remain optional and can be enabled later.'
+}
+
 $reuseMedia = $false
 if (Test-Path -LiteralPath 'compose.media.yaml') {
     $answer = Read-Host 'An existing compose.media.yaml was found. Keep it? [Y/n]'

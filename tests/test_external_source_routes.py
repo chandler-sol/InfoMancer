@@ -10,6 +10,11 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.db import Database
+from app.managed_ffmpeg import (
+    ManagedFfmpegComponent,
+    ManagedFfmpegError,
+    ManagedFfmpegStatus,
+)
 from app.media_identity.external_config import ExternalSourceConfigService
 from app.provider_secrets import ProviderSecretStore
 from app.request_security import LOCAL_CSRF_COOKIE
@@ -35,6 +40,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
             main.settings,
             main.external_source_config,
             main.provider_secrets,
+            main.ffmpeg_components,
         )
         main.db = database
         main.settings = settings
@@ -43,6 +49,7 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
             data / "provider-secrets.enc",
             "external-route-security-test-secret",
         )
+        main.ffmpeg_components = ManagedFfmpegComponent(data)
 
         main.external_source_config.save_source(
             "plex",
@@ -69,10 +76,64 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
             main.settings,
             main.external_source_config,
             main.provider_secrets,
+            main.ffmpeg_components,
         ) = self.original
         self.temporary.cleanup()
 
-    def test_integrations_page_reports_plex_adapter_without_claiming_analysis_ready(self):
+    def test_integrations_page_offers_managed_ffmpeg_when_unavailable(self):
+        status = ManagedFfmpegStatus(
+            state="unavailable",
+            available=False,
+            version="6.1.1",
+            path="",
+            detail="FFmpeg is not available.",
+            can_install=True,
+            can_remove=False,
+        )
+        with patch.object(main.ffmpeg_components, "status", return_value=status):
+            response = self.client.get("/settings/integrations")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("FFmpeg frame extraction", response.text)
+        self.assertIn("Install FFmpeg for InfoMancer", response.text)
+        self.assertIn("/settings/integrations/ffmpeg/install", response.text)
+        self.assertNotIn("Remove managed FFmpeg", response.text)
+
+    def test_managed_ffmpeg_install_route_redirects_after_verified_install(self):
+        installed = Path(self.temporary.name) / "components" / "ffmpeg" / "6.1.1" / "ffmpeg"
+        with patch.object(
+            main.ffmpeg_components,
+            "install",
+            return_value=installed,
+        ) as install:
+            response = self.client.post("/settings/integrations/ffmpeg/install")
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("/settings/integrations", response.headers["location"])
+        self.assertIn("downloaded", response.headers["location"])
+        install.assert_called_once_with()
+
+    def test_managed_ffmpeg_install_failure_returns_to_settings_without_500(self):
+        with patch.object(
+            main.ffmpeg_components,
+            "install",
+            side_effect=ManagedFfmpegError("fixture integrity failure"),
+        ):
+            response = self.client.post("/settings/integrations/ffmpeg/install")
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("fixture+integrity+failure", response.headers["location"])
+
+    def test_managed_ffmpeg_remove_route_only_calls_component_manager(self):
+        with patch.object(main.ffmpeg_components, "remove") as remove:
+            response = self.client.post("/settings/integrations/ffmpeg/remove")
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("/settings/integrations", response.headers["location"])
+        self.assertIn("removed", response.headers["location"])
+        remove.assert_called_once_with()
+
+    def test_integrations_page_reports_plex_adapter_ready_for_normal(self):
         local_root = Path(self.temporary.name) / "media"
         main.external_source_config.add_mapping(
             "plex",
@@ -84,23 +145,28 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("BIF adapter", response.text)
-        self.assertIn("Installed", response.text)
         self.assertIn(
-            "Plex BIF adapter is configured and validated.",
+            "<strong>Ready</strong><span>BIF adapter</span>",
             response.text,
         )
         self.assertIn(
+            "Plex BIF preview frames are ready for Episode Identity.",
+            response.text,
+        )
+        self.assertIn(
+            "existing preview frames are available to Normal verification",
+            response.text,
+        )
+        self.assertNotIn(
             "Preview-frame analysis becomes available when a consuming analyzer is installed.",
             response.text,
         )
-        self.assertNotIn(">Ready</span><span>BIF adapter", response.text)
-        self.assertNotIn(">Pending</strong><span>Preview adapter", response.text)
         self.assertIn("Allow this Plex token over plain HTTP", response.text)
         self.assertIn('placeholder="https://plex.local:32400"', response.text)
         self.assertIn("Auto-detect, or enter a custom Plex data root", response.text)
         self.assertIn("Leave blank for Auto detection", response.text)
 
-    def test_integrations_page_reports_jellyfin_adapter_without_claiming_analysis_ready(self):
+    def test_integrations_page_reports_jellyfin_adapter_ready_for_normal(self):
         local_root = Path(self.temporary.name) / "media"
         source = main.external_source_config.save_source(
             "jellyfin",
@@ -123,12 +189,18 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("Trickplay adapter", response.text)
-        self.assertIn("Installed", response.text)
         self.assertIn(
-            "Preview-frame analysis becomes available when a consuming analyzer is installed.",
+            "<strong>Ready</strong><span>Trickplay adapter</span>",
             response.text,
         )
-        self.assertNotIn(">Ready</span><span>Trickplay adapter", response.text)
+        self.assertIn(
+            "Jellyfin Trickplay preview frames are ready for Episode Identity.",
+            response.text,
+        )
+        self.assertIn(
+            "existing preview frames are available to Normal verification",
+            response.text,
+        )
 
     def test_plex_plain_http_requires_explicit_opt_in(self):
         response = self.client.post(

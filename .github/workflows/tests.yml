@@ -36,6 +36,7 @@ jobs:
         run: |
           python -m pip install pip-audit==2.10.1
           python -m pip_audit -r requirements.txt
+          python -m pip_audit -r requirements-ocr.txt
 
       - name: Scan Python security patterns
         run: |
@@ -52,6 +53,49 @@ jobs:
         run: |
           cargo install cargo-audit --version 0.22.2 --locked
           cargo audit --file desktop/src-tauri/Cargo.lock
+
+  ocr-smoke:
+    name: Optional CPU OCR smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install base and optional OCR dependencies
+        run: python -m pip install -r requirements.txt -r requirements-ocr.txt
+
+      - name: Initialize and exercise real CPU OCR adapter
+        shell: bash
+        run: |
+          python - <<'PY'
+          from io import BytesIO
+          from PIL import Image, ImageDraw
+          from app.media_identity.ocr import RapidOcrCpuEngine
+
+          image = Image.new("RGB", (320, 120), "white")
+          ImageDraw.Draw(image).text((20, 40), "INFOMANCER OCR TEST", fill="black")
+          payload = BytesIO()
+          image.save(payload, format="JPEG", quality=90)
+
+          engine = RapidOcrCpuEngine()
+          assert engine.available(), "Pinned RapidOCR/ONNX Runtime stack is unavailable"
+          identity = engine.cache_identity()
+          assert identity["backend"] == "onnxruntime-cpu"
+          result = engine.recognize(payload.getvalue())
+          assert isinstance(result.text, str)
+          assert result.confidence is None or 0.0 <= result.confidence <= 1.0
+          print(identity)
+          print({"text": result.text, "confidence": result.confidence})
+          PY
 
   test:
     name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
@@ -189,6 +233,7 @@ jobs:
       github.ref == 'refs/heads/testing/0.9-alpha'
     needs:
       - audit
+      - ocr-smoke
       - test
       - desktop-rust-test
       - acceptance
@@ -244,6 +289,7 @@ jobs:
       github.ref == 'refs/heads/testing/0.9-alpha'
     needs:
       - audit
+      - ocr-smoke
       - test
       - desktop-rust-test
       - acceptance

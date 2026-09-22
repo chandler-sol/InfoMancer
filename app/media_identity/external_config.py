@@ -561,7 +561,7 @@ def build_configured_source_registry(
                     allow_insecure_http=bool(
                         source.config.get("allow_insecure_http", False)
                     ),
-                    advertise_preview_frames=False,
+                    advertise_preview_frames=True,
                 )
             )
         elif source.source_key == "plex":
@@ -576,7 +576,7 @@ def build_configured_source_registry(
                     allow_insecure_http=bool(
                         source.config.get("allow_insecure_http", False)
                     ),
-                    advertise_preview_frames=False,
+                    advertise_preview_frames=True,
                 )
             )
         else:
