@@ -968,12 +968,15 @@ def _model_catalog_identity(model_key: str) -> SpeechModelIdentity:
 def _external_runtime_identity(path: Path, source: str) -> SpeechBinaryIdentity:
     try:
         resolved = path.expanduser().resolve(strict=True)
-        info = resolved.stat()
+        info = resolved.lstat()
     except OSError as exc:
         raise ManagedSpeechComponentError(
             "The configured whisper.cpp executable is unavailable."
         ) from exc
-    if not stat_module.S_ISREG(info.st_mode):
+    if (
+        stat_module.S_ISLNK(info.st_mode)
+        or not stat_module.S_ISREG(info.st_mode)
+    ):
         raise ManagedSpeechComponentError(
             "The configured whisper.cpp executable is not a regular file."
         )
@@ -981,10 +984,36 @@ def _external_runtime_identity(path: Path, source: str) -> SpeechBinaryIdentity:
         raise ManagedSpeechComponentError(
             "The configured whisper.cpp executable is not executable."
         )
-    with resolved.open("rb") as stream:
-        digest = _sha256_stream(stream)
+
+    try:
+        with resolved.open("rb") as stream:
+            digest = _sha256_stream(stream)
+    except OSError as exc:
+        raise ManagedSpeechComponentError(
+            "InfoMancer could not hash the configured whisper.cpp executable."
+        ) from exc
+
+    # Self-check the exact executable path, then hash it again through the
+    # descriptor-bound verifier. A replacement between hashing and --version
+    # therefore fails closed instead of producing provenance for one binary
+    # while executing another.
     version_output = _verify_whisper_cli(resolved)
-    match = re.search(r"(?<!\d)(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9._-]+)?)", version_output)
+    verified = _verified_file(
+        resolved.parent,
+        resolved,
+        digest,
+        int(info.st_size),
+        require_executable=True,
+    )
+    if verified is None:
+        raise ManagedSpeechComponentError(
+            "The configured whisper.cpp executable changed during verification."
+        )
+
+    match = re.search(
+        r"(?<!\d)(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9._-]+)?)",
+        version_output,
+    )
     version = match.group(1) if match else "external"
     return SpeechBinaryIdentity(
         key="whisper.cpp",
@@ -1147,17 +1176,19 @@ class ManagedWhisperCppRuntime:
                 continue
 
             try:
-                actual_paths = {
-                    item.relative_to(directory).as_posix()
-                    for item in directory.rglob("*")
-                    if item.is_file()
-                    and item.name
-                    not in {
-                        "component.json",
-                        "WHISPERCPP_LICENSE.txt",
-                        "WHISPERCPP_NOTICE.txt",
-                    }
+                metadata_paths = {
+                    "component.json",
+                    "WHISPERCPP_LICENSE.txt",
+                    "WHISPERCPP_NOTICE.txt",
                 }
+                actual_paths: set[str] = set()
+                for item in directory.rglob("*"):
+                    if not item.is_file():
+                        continue
+                    relative_path = item.relative_to(directory).as_posix()
+                    if relative_path in metadata_paths:
+                        continue
+                    actual_paths.add(relative_path)
             except OSError:
                 continue
             if actual_paths != expected_paths:
