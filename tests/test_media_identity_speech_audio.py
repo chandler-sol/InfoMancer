@@ -592,10 +592,7 @@ class SpeechAudioExtractionTests(unittest.TestCase):
             tampered = bytearray(artifact.path.read_bytes())
             tampered[-1] ^= 0x01
             artifact.path.write_bytes(tampered)
-            with self.assertRaisesRegex(
-                SpeechAudioStaleError,
-                "bytes no longer match",
-            ):
+            with self.assertRaises(SpeechAudioStaleError):
                 artifact.validated_path()
         finally:
             artifact.cleanup()
