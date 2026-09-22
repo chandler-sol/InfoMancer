@@ -361,10 +361,10 @@ class NormalPreviewOcrRun:
 class NormalPreviewOcrExecutor:
     """Run bounded OCR against the first usable external preview source.
 
-    External sources are tried in registry order. A source may be unavailable or
-    have no previews without making Normal verification fail. Once a source yields
-    preview frames, this executor stays on that source for the run so the same
-    visual moment is not double-counted across Plex and Jellyfin.
+    External sources are tried in registry order. A source may be unavailable,
+    malformed, textless, or too weak without making Normal verification fail.
+    Callers may provide source-level sufficiency/preference callbacks so existing
+    preview sources can be compared before more expensive local fallback.
     """
 
     def __init__(
@@ -389,6 +389,12 @@ class NormalPreviewOcrExecutor:
         max_stage: NormalSamplingStage = NormalSamplingStage.FINAL,
         stage_sufficient: Callable[
             [NormalPreviewOcrRun, NormalSamplingStage], bool
+        ] | None = None,
+        source_sufficient: Callable[
+            [NormalPreviewOcrRun], bool
+        ] | None = None,
+        source_preference: Callable[
+            [NormalPreviewOcrRun, NormalPreviewOcrRun], NormalPreviewOcrRun
         ] | None = None,
         initial_image_bytes: int = 0,
         initial_text_chars: int = 0,
@@ -423,7 +429,20 @@ class NormalPreviewOcrExecutor:
             )
 
         failures: list[str] = []
-        empty_result: NormalPreviewOcrRun | None = None
+        best_result: NormalPreviewOcrRun | None = None
+
+        def choose_result(
+            current: NormalPreviewOcrRun | None,
+            candidate: NormalPreviewOcrRun,
+        ) -> NormalPreviewOcrRun:
+            if current is None:
+                return candidate
+            if source_preference is not None:
+                return source_preference(current, candidate)
+            if candidate.has_text and not current.has_text:
+                return candidate
+            return current
+
         for source in self.registry.available_for(ExternalCapability.PREVIEW_FRAMES):
             try:
                 media = source.resolve_media(context)
@@ -485,21 +504,40 @@ class NormalPreviewOcrExecutor:
                     total_text_chars=spent_text_chars,
                     budget_exhausted=True,
                 )
-            if result.has_text or result.budget_exhausted:
-                return result
-            if result.observations and empty_result is None:
-                empty_result = result
+            if result.has_text:
+                best_result = choose_result(best_result, result)
+                if (
+                    source_sufficient is None
+                    or source_sufficient(result)
+                ):
+                    return result
+                failures.append(
+                    f"{source.source_key}:ocr:weak-visual-signal"
+                )
+            elif result.observations:
+                best_result = choose_result(best_result, result)
                 failures.append(f"{source.source_key}:ocr:no-visual-text")
 
-        if empty_result is not None:
+            if result.budget_exhausted:
+                selected = best_result or result
+                return NormalPreviewOcrRun(
+                    source_key=selected.source_key,
+                    observations=selected.observations,
+                    failures=tuple(failures),
+                    total_image_bytes=spent_image_bytes,
+                    total_text_chars=spent_text_chars,
+                    budget_exhausted=True,
+                )
+
+        if best_result is not None:
             return NormalPreviewOcrRun(
-                source_key=empty_result.source_key,
-                observations=empty_result.observations,
+                source_key=best_result.source_key,
+                observations=best_result.observations,
                 failures=tuple(failures),
                 total_image_bytes=spent_image_bytes,
                 total_text_chars=spent_text_chars,
                 budget_exhausted=(
-                    empty_result.budget_exhausted
+                    best_result.budget_exhausted
                     or spent_image_bytes >= self.limits.max_preview_bytes_total
                     or spent_text_chars >= self.limits.max_ocr_text_chars
                 ),
