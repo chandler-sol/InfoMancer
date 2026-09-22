@@ -144,7 +144,11 @@ def select_speech_audio_stream(
     preferred_language: str = "",
 ) -> SpeechAudioStream:
     """Choose one stable primary dialogue stream from normalized catalog rows."""
-    preferred = str(preferred_language or "").strip().casefold()
+    if not isinstance(preferred_language, str):
+        raise SpeechAudioUnavailable(
+            "Preferred speech language must be text."
+        )
+    preferred = preferred_language.strip().casefold()
     candidates: list[SpeechAudioStream] = []
     for raw in streams:
         if not isinstance(raw, Mapping):
@@ -494,10 +498,20 @@ class ExtractedSpeechAudio:
         self.stream = stream
         self._closed = False
 
-    def validated_path(self) -> str:
+    def validated_path(
+        self,
+        expected_identity: SpeechAudioIdentity | None = None,
+    ) -> str:
         if self._closed:
             raise SpeechAudioStaleError(
                 "The prepared speech audio artifact has already been released."
+            )
+        if (
+            expected_identity is not None
+            and expected_identity != self.identity
+        ):
+            raise SpeechAudioStaleError(
+                "The prepared speech audio identity does not match the request."
             )
         payload = _read_bounded_regular_file(self.path)
         _validate_wav_payload(payload, self.window)
@@ -573,10 +587,10 @@ class LocalFfmpegSpeechAudioExtractor:
 
         path_identity = _stat_identity(Path(media.path))
         if path_identity is None:
-            self._device_id = None
-            self._inode_id = None
-        else:
-            _, self._device_id, self._inode_id = path_identity
+            raise SpeechAudioUnavailable(
+                "The cataloged media file is unavailable for speech extraction."
+            )
+        _, self._device_id, self._inode_id = path_identity
 
     def _require_current_inputs(self) -> Mapping[str, Any]:
         path = Path(self.media.path)
@@ -702,7 +716,12 @@ class LocalFfmpegSpeechAudioExtractor:
                     "FFmpeg could not extract the requested speech audio window."
                 )
 
-            payload = _read_bounded_regular_file(output_path)
+            try:
+                payload = _read_bounded_regular_file(output_path)
+            except SpeechAudioStaleError as exc:
+                raise SpeechAudioUnavailable(
+                    "FFmpeg did not produce a bounded regular speech audio file."
+                ) from exc
             _validate_wav_payload(payload, window)
             identity = SpeechAudioIdentity(
                 sha256=hashlib.sha256(payload).hexdigest(),
