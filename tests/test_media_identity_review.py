@@ -28,6 +28,15 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class EpisodeIdentityReviewAdapterTests(unittest.TestCase):
+    def test_episode_identity_template_explains_correlated_speech_review(self) -> None:
+        template = (ROOT / "app/templates/episode_identity.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("TARGETED SPEECH ANALYSIS", template)
+        self.assertIn("Speech and subtitle matches share one dialogue correlation group", template)
+        self.assertIn("Transcript sample", template)
+        self.assertIn("Sampled speech windows", template)
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.database = Database(Path(self.temporary.name) / "review.db")
