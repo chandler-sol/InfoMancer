@@ -1189,6 +1189,51 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             "subtitle-dialogue:1",
         )
 
+    def test_tokenless_nonblank_speech_stays_current_neutral_evidence(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        class StopwordSpeech(FakeNormalSpeechEngine):
+            def transcribe(self, _audio_path, request):
+                self.calls += 1
+                return SpeechTranscript(
+                    text="this that with there",
+                    language="en",
+                )
+
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=StopwordSpeech(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(result.speech_text_transcript_count, 8)
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """SELECT relation,strength,cache_key,details_json
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key=?""",
+                (self.fast_scan.scan_id, NORMAL_SPEECH_EVIDENCE_KEY),
+            ).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["relation"], "neutral")
+        self.assertEqual(float(rows[0]["strength"]), 0.0)
+        self.assertTrue(rows[0]["cache_key"])
+        details = json.loads(rows[0]["details_json"])
+        self.assertEqual(len(details["artifact_ids"]), 8)
+        self.assertEqual(len(details["windows"]), 8)
+        self.assertIn("this that with there", details["transcript_excerpt"])
+
+        detail = MediaIdentityDecisionService(self.database).scan_detail(
+            self.fast_scan.scan_id
+        )
+        self.assertTrue(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+
     def test_speech_corpus_does_not_create_cross_window_bigrams(self):
         audio = SpeechAudioIdentity(
             sha256="a" * 64,
