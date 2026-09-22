@@ -172,13 +172,23 @@ if any hash differs. Both executables and their license/notice files are added
 to the PyInstaller core. Before Tauri may create an installer or image, CI runs
 `--check-ffprobe` and `--check-ffmpeg` against the finished core.
 
-At runtime, each tool resolves in the same order:
+At runtime, FFprobe resolves in this order:
 
-1. The explicit operator override, `INFOMANCER_FFPROBE` or
-   `INFOMANCER_FFMPEG`.
-2. The matching executable embedded in a native PyInstaller build.
-3. A system executable on `PATH`, which remains useful for source and server
-   installations.
+1. The explicit operator override, `INFOMANCER_FFPROBE`.
+2. The executable embedded in a native PyInstaller build.
+3. A system `ffprobe` on `PATH`.
+
+FFmpeg resolves in this order:
+
+1. The explicit operator override, `INFOMANCER_FFMPEG`.
+2. The executable embedded in a native PyInstaller build.
+3. An InfoMancer-managed, hash-verified private copy under the application data
+   directory.
+4. A system `ffmpeg` on `PATH`.
+
+Source/local installations without FFmpeg can install the pinned private copy
+from **App Settings → Integrations → FFmpeg frame extraction**. The managed
+component is not installed system-wide and can be removed independently.
 
 FFmpeg is used only for read-only, bounded single-frame extraction in Episode
 Identity Normal. It is not used to transcode, remux, replace, or modify media.
@@ -190,6 +200,19 @@ been satisfied. Before publishing a production release, confirm the exact
 FFmpeg build configuration and applicable LGPL/GPL obligations, including any
 source or build-correspondence requirements that apply to that binary.
 
+
+### Optional Episode Identity CPU OCR contract
+
+RapidOCR and ONNX Runtime remain optional 0.9 dependencies in
+`requirements-ocr.txt`; they are not part of the base Python requirements or
+the current native desktop core. Server/source installs that enable CPU OCR use
+the pinned RapidOCR + ONNX Runtime CPU path.
+
+`THIRD_PARTY_NOTICES.md` records the OCR projects, pinned versions, upstream
+license families, model attribution notes, and packaging scope. The Server
+release ZIP includes that notice, and Docker copies it into the image. Native
+OCR bundling remains deferred until the runtime has been qualified against real
+libraries.
 
 ### Pillow image-decoding contract
 
