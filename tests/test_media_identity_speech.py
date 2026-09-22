@@ -5,6 +5,7 @@ import unittest
 
 from app.media_identity import (
     MediaIdentityFile,
+    SpeechAudioIdentity,
     SpeechBinaryIdentity,
     SpeechEngine,
     SpeechIdentityError,
@@ -65,6 +66,15 @@ class SpeechContractTests(unittest.TestCase):
             modified_at=42.5,
             sha256="a" * 64,
         )
+        self.audio = SpeechAudioIdentity(
+            sha256="f" * 64,
+            size_bytes=1_440_044,
+            format_key="wav-pcm-s16le",
+            sample_rate_hz=16_000,
+            channels=1,
+            source_signature="fixture-audio",
+            details={"stream_index": 1},
+        )
         self.model = SpeechModelIdentity(
             key="ggml-base-en",
             version="fixture-v1",
@@ -78,6 +88,7 @@ class SpeechContractTests(unittest.TestCase):
         values = {
             "media": self.media,
             "window": SpeechWindow(30_000, 75_000, "dialogue-gap"),
+            "audio": self.audio,
             "model": self.model,
             "language": "en",
             "translate": False,
@@ -110,6 +121,50 @@ class SpeechContractTests(unittest.TestCase):
             SpeechWindow(True, 1000)
         with self.assertRaises(SpeechIdentityError):
             SpeechWindow(0, "1000")
+
+    def test_audio_identity_requires_exact_bytes_and_stable_format(self) -> None:
+        self.assertEqual(
+            self.audio.cache_identity(),
+            {
+                "sha256": "f" * 64,
+                "size_bytes": 1_440_044,
+                "format_key": "wav-pcm-s16le",
+                "sample_rate_hz": 16_000,
+                "channels": 1,
+            },
+        )
+        with self.assertRaises(SpeechIdentityError):
+            SpeechAudioIdentity(
+                "not-a-hash",
+                100,
+                "wav-pcm-s16le",
+                16_000,
+                1,
+            )
+        with self.assertRaises(SpeechIdentityError):
+            SpeechAudioIdentity(
+                "f" * 64,
+                0,
+                "wav-pcm-s16le",
+                16_000,
+                1,
+            )
+        with self.assertRaises(SpeechIdentityError):
+            SpeechAudioIdentity(
+                "f" * 64,
+                100,
+                "",
+                16_000,
+                1,
+            )
+        with self.assertRaises(SpeechIdentityError):
+            SpeechAudioIdentity(
+                "f" * 64,
+                100,
+                "wav-pcm-s16le",
+                True,
+                1,
+            )
 
     def test_model_identity_requires_content_hash_and_exact_size(self) -> None:
         self.assertEqual(
@@ -267,6 +322,18 @@ class SpeechContractTests(unittest.TestCase):
             self.request(window=SpeechWindow(31_000, 75_000, "dialogue-gap")),
             FakeSpeechEngine(),
         )
+        changed_audio = speech_transcript_cache_key(
+            self.request(
+                audio=SpeechAudioIdentity(
+                    "0" * 64,
+                    self.audio.size_bytes,
+                    self.audio.format_key,
+                    self.audio.sample_rate_hz,
+                    self.audio.channels,
+                )
+            ),
+            FakeSpeechEngine(),
+        )
         changed_model = speech_transcript_cache_key(
             self.request(
                 model=SpeechModelIdentity(
@@ -323,6 +390,7 @@ class SpeechContractTests(unittest.TestCase):
 
         for changed in (
             changed_window,
+            changed_audio,
             changed_model,
             changed_language,
             changed_media,
@@ -330,6 +398,13 @@ class SpeechContractTests(unittest.TestCase):
             changed_binary,
         ):
             self.assertNotEqual(changed, baseline)
+
+    def test_request_without_exact_audio_identity_is_rejected(self) -> None:
+        with self.assertRaisesRegex(
+            SpeechIdentityError,
+            "exact audio identity",
+        ):
+            self.request(audio=object())
 
     def test_engine_key_and_version_must_be_stable_text(self) -> None:
         class Broken(FakeSpeechEngine):
