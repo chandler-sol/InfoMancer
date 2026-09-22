@@ -419,6 +419,7 @@ class NormalPreviewOcrExecutorTests(unittest.TestCase):
                 initial_preview_frames=1,
                 expanded_preview_frames=1,
                 max_preview_frames=1,
+                max_preview_bytes_per_frame=10,
                 max_preview_bytes_total=10,
             ),
         ).run(
