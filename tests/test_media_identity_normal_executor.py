@@ -38,6 +38,9 @@ class FakeOcr:
     def available(self) -> bool:
         return self._available
 
+    def cache_identity(self):
+        return {"fixture": "fake-ocr-v1"}
+
     def recognize(self, image: bytes) -> OcrTextResult:
         self.calls.append(bytes(image))
         if self.fail_on is not None and image == self.fail_on:
