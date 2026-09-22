@@ -26,6 +26,7 @@ from app.media_identity.speech_audio import (
     ExtractedSpeechAudio,
     LocalFfmpegSpeechAudioExtractor,
     SpeechAudioStaleError,
+    SpeechAudioStream,
     SpeechAudioUnavailable,
     select_speech_audio_stream,
     validate_normal_speech_audio_budget,
@@ -136,6 +137,24 @@ class SpeechAudioExtractionTests(unittest.TestCase):
             )
 
         return run
+
+    def test_public_stream_contract_enforces_normalized_invariants(self) -> None:
+        stream = SpeechAudioStream(
+            index=2,
+            language=" ENG ",
+            title=" Main ",
+            channels=2,
+            sample_rate_hz=48_000,
+            default=True,
+        )
+        self.assertEqual(stream.language, "eng")
+        self.assertEqual(stream.title, "Main")
+        with self.assertRaises(SpeechAudioUnavailable):
+            SpeechAudioStream(index=-1)
+        with self.assertRaises(SpeechAudioUnavailable):
+            SpeechAudioStream(index=1, default=1)
+        with self.assertRaises(SpeechAudioUnavailable):
+            SpeechAudioStream(index=1, channels=0)
 
     def test_stream_selection_prefers_primary_requested_language_then_default(self) -> None:
         english = select_speech_audio_stream(
