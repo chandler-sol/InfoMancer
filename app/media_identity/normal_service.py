@@ -1107,19 +1107,19 @@ class NormalIdentityService:
                     artifact_ids,
                 )
 
+            completed_normal = bool(
+                run.observations or speech_run.observations
+            )
             speech_evidence_count = self._persist_speech_evidence(
                 conn,
                 current_scan,
                 candidates,
                 speech_run,
-                escalated=speech_escalated,
+                escalated=(speech_escalated and completed_normal),
             )
             evidence_count += speech_evidence_count
 
             claimed = _json_object(current_scan["claimed_identity_json"])
-            completed_normal = bool(
-                run.observations or speech_run.observations
-            )
             if not retain_previous_visual:
                 claimed["normal_ocr"] = {
                     "version": 1,
