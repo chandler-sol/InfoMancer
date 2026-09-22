@@ -607,11 +607,10 @@ class NormalSpeechService:
             )
             inserted = insert_cursor.rowcount == 1
             persisted = conn.execute(
-                """SELECT id,text_value,payload_json
+                """SELECT id,text_value,payload_json,status
                    FROM media_identity_artifacts
                    WHERE file_id=? AND artifact_type='speech_transcript'
                      AND analyzer_key=? AND analyzer_version=? AND cache_key=?
-                     AND status='complete'
                    ORDER BY id DESC LIMIT 1""",
                 (
                     int(transaction_scan["file_id"]),
@@ -649,7 +648,11 @@ class NormalSpeechService:
                 else None
             )
             persisted_matches = False
-            if persisted_audio is not None and persisted_transcript is not None:
+            if (
+                str(persisted["status"] or "") == "complete"
+                and persisted_audio is not None
+                and persisted_transcript is not None
+            ):
                 try:
                     persisted_request = SpeechRequest(
                         media=media,
@@ -674,7 +677,7 @@ class NormalSpeechService:
                 # The cache row is derived data. If its unique cache key blocks
                 # regeneration but its payload is corrupt or identity-mismatched,
                 # repair that exact row from the freshly verified transcript.
-                conn.execute(
+                repair_cursor = conn.execute(
                     """UPDATE media_identity_artifacts
                        SET status='complete',
                            profile='normal',
@@ -704,6 +707,10 @@ class NormalSpeechService:
                         cache_key,
                     ),
                 )
+                if repair_cursor.rowcount != 1:
+                    raise NormalSpeechError(
+                        "InfoMancer could not repair the speech transcript cache row safely."
+                    )
                 persisted_audio = request.audio
                 persisted_transcript = transcript
                 inserted = True
