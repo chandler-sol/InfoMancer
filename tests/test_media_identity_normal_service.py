@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -19,6 +20,13 @@ from app.media_identity.normal import NormalResourceLimits, OcrTextResult
 from app.media_identity.local_frames import LOCAL_FRAME_SOURCE_KEY
 from app.media_identity.normal_service import NormalIdentityService
 from app.media_identity.service import MediaIdentityDecisionService
+from app.media_identity.speech import (
+    SpeechAudioIdentity,
+    SpeechBinaryIdentity,
+    SpeechModelIdentity,
+    SpeechTranscript,
+)
+from app.media_identity.speech_audio import SpeechAudioStream
 from app.media_identity.versions import (
     EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION,
     NORMAL_EVIDENCE_ALGORITHM_VERSION,
@@ -45,6 +53,102 @@ class FakeOcr:
             confidence=1.0,
             details={"fixture": True},
         )
+
+
+class FakeNormalSpeechPrepared:
+    def __init__(self, identity):
+        self.identity = identity
+        self.cleanup_calls = 0
+
+    def validated_path(self, expected_identity=None):
+        if expected_identity is not None and expected_identity != self.identity:
+            raise RuntimeError("speech identity mismatch")
+        return "/tmp/fake-normal-speech.wav"
+
+    def cleanup(self):
+        self.cleanup_calls += 1
+
+
+class FakeNormalSpeechExtractor:
+    instances = []
+
+    def __init__(self, media, streams, *, preferred_language=""):
+        self.media = media
+        self.streams = tuple(streams)
+        self.preferred_language = preferred_language
+        self.stream = SpeechAudioStream(
+            index=0,
+            language="eng",
+            channels=2,
+            sample_rate_hz=48_000,
+            default=True,
+        )
+        self.extract_calls = 0
+        self.prepared = []
+        type(self).instances.append(self)
+
+    def source_signature(self, window):
+        return hashlib.sha256(
+            f"normal:{self.media.file_id}:{window.start_ms}:{window.end_ms}".encode()
+        ).hexdigest()
+
+    def extract(self, window):
+        self.extract_calls += 1
+        payload = f"normal-audio:{window.start_ms}:{window.end_ms}".encode()
+        identity = SpeechAudioIdentity(
+            sha256=hashlib.sha256(payload).hexdigest(),
+            size_bytes=len(payload),
+            format_key="wav-pcm-s16le",
+            sample_rate_hz=16_000,
+            channels=1,
+            source_signature=self.source_signature(window),
+        )
+        prepared = FakeNormalSpeechPrepared(identity)
+        self.prepared.append(prepared)
+        return prepared
+
+
+class FakeNormalSpeechEngine:
+    key = "fake-normal-speech"
+    version = "1"
+
+    def __init__(self, *, available=True):
+        self.is_available = available
+        self.calls = 0
+
+    def available(self):
+        return self.is_available
+
+    def binary_identity(self):
+        return SpeechBinaryIdentity(
+            key=self.key,
+            version=self.version,
+            sha256="d" * 64,
+            size_bytes=2048,
+            source="fixture",
+            details={"runtime_tree_sha256": "e" * 64},
+        )
+
+    def cache_identity(self):
+        return {"fixture": "normal-speech-v1", "cpu_only": True}
+
+    def transcribe(self, _audio_path, request):
+        self.calls += 1
+        return SpeechTranscript(
+            text=f"dialogue {request.window.start_ms}-{request.window.end_ms}",
+            language="en",
+        )
+
+
+def fake_normal_speech_model():
+    return SpeechModelIdentity(
+        key="base-q5_1",
+        version="fixture",
+        sha256="f" * 64,
+        size_bytes=4096,
+        source="fixture",
+        details={"multilingual": True},
+    )
 
 
 class FakePreviewSource:
@@ -910,6 +1014,137 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertEqual(result.completed_profile.value, "fast")
         self.assertIn("ocr-engine-unavailable", result.failures)
         local_factory.assert_not_called()
+
+    def test_weak_normal_evidence_escalates_to_speech_without_scoring_it(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        FakeNormalSpeechExtractor.instances.clear()
+        speech_engine = FakeNormalSpeechEngine()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=speech_engine,
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        )
+
+        result = service.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(result.completed_profile.value, "normal")
+        self.assertTrue(result.speech_escalated)
+        self.assertEqual(result.speech_transcript_count, 8)
+        self.assertEqual(result.speech_reused_artifact_count, 0)
+        self.assertEqual(speech_engine.calls, 8)
+        self.assertEqual(FakeNormalSpeechExtractor.instances[-1].extract_calls, 8)
+        self.assertTrue(
+            all(
+                item.cleanup_calls == 1
+                for item in FakeNormalSpeechExtractor.instances[-1].prepared
+            )
+        )
+
+        with self.database.connect() as conn:
+            scan = conn.execute(
+                """SELECT completed_profile,stage,claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            transcript_count = conn.execute(
+                """SELECT COUNT(*) AS count
+                   FROM media_identity_artifacts
+                   WHERE file_id=1 AND artifact_type='speech_transcript'"""
+            ).fetchone()["count"]
+            speech_evidence_count = conn.execute(
+                """SELECT COUNT(*) AS count
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND evidence_category='speech'""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()["count"]
+
+        claimed = json.loads(scan["claimed_identity_json"])
+        self.assertEqual(scan["completed_profile"], "normal")
+        self.assertEqual(scan["stage"], "normal_speech_complete")
+        self.assertEqual(int(transcript_count), 8)
+        self.assertEqual(int(speech_evidence_count), 0)
+        self.assertTrue(claimed["normal_speech"]["escalated"])
+        self.assertEqual(claimed["normal_speech"]["transcript_count"], 8)
+
+    def test_second_normal_speech_run_reuses_persisted_fragments(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        FakeNormalSpeechExtractor.instances.clear()
+        first_engine = FakeNormalSpeechEngine()
+        first_service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=first_engine,
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        )
+        first = first_service.run_scan(self.fast_scan.scan_id)
+        self.assertEqual(first.speech_transcript_count, 8)
+        self.assertEqual(first_engine.calls, 8)
+
+        second_engine = FakeNormalSpeechEngine()
+        second_service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=second_engine,
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        )
+        second = second_service.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(second.completed_profile.value, "normal")
+        self.assertEqual(second.speech_transcript_count, 8)
+        self.assertEqual(second.speech_reused_artifact_count, 8)
+        self.assertEqual(second_engine.calls, 0)
+        self.assertEqual(FakeNormalSpeechExtractor.instances[-1].extract_calls, 0)
+
+    def test_strong_existing_subtitle_signal_skips_speech_escalation(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        with self.database.connect() as conn:
+            candidate = conn.execute(
+                """SELECT candidate_key FROM media_identity_candidates
+                   WHERE scan_id=? ORDER BY rank,candidate_key LIMIT 1""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            conn.execute(
+                """INSERT INTO media_identity_evidence(
+                     scan_id,candidate_key,analyzer_key,analyzer_version,
+                     evidence_category,correlation_group,relation,strength,
+                     source_kind,source_ref,value_text,details_json,cache_key,profile
+                   ) VALUES (
+                     ?,?,'subtitle-synopsis','1','subtitle_text',
+                     'subtitle-dialogue:1','supports',0.75,
+                     'sidecar_subtitle','fixture.srt','fixture','{}','','fast'
+                   )""",
+                (self.fast_scan.scan_id, candidate["candidate_key"]),
+            )
+
+        speech_engine = FakeNormalSpeechEngine()
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=speech_engine,
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertFalse(result.speech_escalated)
+        self.assertEqual(result.speech_transcript_count, 0)
+        self.assertEqual(speech_engine.calls, 0)
 
     def test_file_change_during_ocr_prevents_artifact_or_evidence_commit(self):
         def mutate_file():
