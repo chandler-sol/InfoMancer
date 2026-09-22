@@ -27,12 +27,13 @@ from .normal import (
 )
 from .service import MediaIdentityDecisionService
 from .text import synopsis_similarity_from_corpus, text_corpus
+from .versions import NORMAL_EVIDENCE_ALGORITHM_VERSION
 
 
 NORMAL_OCR_ARTIFACT_KEY = "external-preview-ocr"
 NORMAL_OCR_ARTIFACT_VERSION = "1"
 NORMAL_OCR_EVIDENCE_KEY = "preview-ocr-synopsis"
-NORMAL_OCR_EVIDENCE_VERSION = "1"
+NORMAL_OCR_EVIDENCE_VERSION = "2"
 NORMAL_OCR_SUPPORT_THRESHOLD = 0.30
 NORMAL_INITIAL_STOP_SIMILARITY = 0.55
 NORMAL_INITIAL_STOP_MARGIN = 0.18
@@ -743,6 +744,7 @@ class NormalIdentityService:
             completed_normal = bool(run.observations)
             claimed["normal_ocr"] = {
                 "version": 1,
+                "algorithm_version": NORMAL_EVIDENCE_ALGORITHM_VERSION,
                 "source_key": run.source_key,
                 "engine_key": str(self.engine.key),
                 "engine_version": str(self.engine.version),
