@@ -627,10 +627,21 @@ class NormalIdentityService:
             current_run,
             stage,
         )
+        source_sufficient = lambda current_run: self._visual_source_sufficient(
+            candidates,
+            current_run,
+        )
+        source_preference = lambda current_run, candidate_run: self._prefer_visual_run(
+            candidates,
+            current_run,
+            candidate_run,
+        )
         run = executor.run(
             context,
             max_stage=max_stage,
             stage_sufficient=stage_sufficient,
+            source_sufficient=source_sufficient,
+            source_preference=source_preference,
         )
 
         if (
