@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Form, Request
 import uuid
 
 from ..access import require_librarian
+from ..managed_ffmpeg import ManagedFfmpegError
 from ..media_identity.external_config import (
     ExternalSourceConfigError,
     external_token_is_bound,
@@ -16,6 +17,7 @@ from .context import RouteContext
 def build_router(ctx: RouteContext):
     router = APIRouter()
     external_source_config = ctx.live("external_source_config")
+    ffmpeg_components = ctx.live("ffmpeg_components")
     provider_secrets = ctx.live("provider_secrets")
     record_event = ctx.live("record_event")
     redirect = ctx.live("redirect")
@@ -30,6 +32,55 @@ def build_router(ctx: RouteContext):
         dependencies = list(kwargs.pop("dependencies", ()))
         dependencies.append(Depends(require_librarian))
         return router.post(path, dependencies=dependencies, **kwargs)
+
+    @librarian_post("/settings/integrations/ffmpeg/install")
+    def install_managed_ffmpeg(request: Request):
+        try:
+            installed = ffmpeg_components.install()
+        except ManagedFfmpegError as exc:
+            record_event(
+                "settings",
+                "Managed FFmpeg installation failed.",
+                level="error",
+                detail=str(exc),
+                user_id=request.state.user.id,
+            )
+            return redirect("/settings/integrations", str(exc))
+
+        record_event(
+            "settings",
+            "Managed FFmpeg installed.",
+            context={"path": str(installed)},
+            user_id=request.state.user.id,
+        )
+        return redirect(
+            "/settings/integrations",
+            "FFmpeg was downloaded, verified, and installed for InfoMancer.",
+        )
+
+    @librarian_post("/settings/integrations/ffmpeg/remove")
+    def remove_managed_ffmpeg(request: Request):
+        try:
+            ffmpeg_components.remove()
+        except ManagedFfmpegError as exc:
+            record_event(
+                "settings",
+                "Managed FFmpeg removal failed.",
+                level="error",
+                detail=str(exc),
+                user_id=request.state.user.id,
+            )
+            return redirect("/settings/integrations", str(exc))
+
+        record_event(
+            "settings",
+            "Managed FFmpeg removed.",
+            user_id=request.state.user.id,
+        )
+        return redirect(
+            "/settings/integrations",
+            "InfoMancer's managed FFmpeg copy was removed.",
+        )
 
     @librarian_post("/settings/integrations/{source_key}")
     def save_external_source(
@@ -336,6 +387,8 @@ def build_router(ctx: RouteContext):
         )
 
     return router, {
+        "install_managed_ffmpeg": install_managed_ffmpeg,
+        "remove_managed_ffmpeg": remove_managed_ffmpeg,
         "save_external_source": save_external_source,
         "test_source_connection": test_source_connection,
         "add_source_mapping": add_source_mapping,
