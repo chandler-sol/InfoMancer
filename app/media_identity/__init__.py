@@ -28,4 +28,21 @@ __all__ = [
     "IdentityReference",
     "IdentityResultState",
     "MediaIdentityFile",
+    "SpeechEngine",
+    "SpeechIdentityError",
+    "SpeechModelIdentity",
+    "SpeechRequest",
+    "SpeechTranscript",
+    "SpeechWindow",
+    "speech_transcript_cache_key",
 ]
+
+from .speech import (
+    SpeechEngine,
+    SpeechIdentityError,
+    SpeechModelIdentity,
+    SpeechRequest,
+    SpeechTranscript,
+    SpeechWindow,
+    speech_transcript_cache_key,
+)
