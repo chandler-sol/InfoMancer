@@ -1269,6 +1269,97 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertIn(("bravo", "delta"), corpus.bigrams)
         self.assertNotIn(("cedar", "bravo"), corpus.bigrams)
 
+    def test_reassigned_speech_candidate_makes_completed_normal_scan_stale(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        class EpisodeTwoSpeech(FakeNormalSpeechEngine):
+            def transcribe(self, _audio_path, request):
+                self.calls += 1
+                return SpeechTranscript(
+                    text="bronze harbor lantern meadow quartz thunder",
+                    language="en",
+                )
+
+        NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=EpisodeTwoSpeech(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        decisions = MediaIdentityDecisionService(self.database)
+        self.assertTrue(
+            decisions.scan_detail(self.fast_scan.scan_id)["snapshot_current"]
+        )
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """SELECT id,candidate_key,relation
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key=?
+                   ORDER BY id""",
+                (self.fast_scan.scan_id, NORMAL_SPEECH_EVIDENCE_KEY),
+            ).fetchall()
+            supported = next(row for row in rows if row["relation"] == "supports")
+            other = next(
+                row for row in rows
+                if row["candidate_key"] != supported["candidate_key"]
+            )
+            conn.execute(
+                """UPDATE media_identity_evidence
+                   SET candidate_key=?
+                   WHERE id=?""",
+                (other["candidate_key"], supported["id"]),
+            )
+
+        stale = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
+    def test_tampered_speech_strength_makes_completed_normal_scan_stale(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        class EpisodeTwoSpeech(FakeNormalSpeechEngine):
+            def transcribe(self, _audio_path, request):
+                self.calls += 1
+                return SpeechTranscript(
+                    text="bronze harbor lantern meadow quartz thunder",
+                    language="en",
+                )
+
+        NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=EpisodeTwoSpeech(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        decisions = MediaIdentityDecisionService(self.database)
+        self.assertTrue(
+            decisions.scan_detail(self.fast_scan.scan_id)["snapshot_current"]
+        )
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE media_identity_evidence
+                   SET strength=0.123456
+                   WHERE scan_id=? AND analyzer_key=? AND relation='supports'""",
+                (
+                    self.fast_scan.scan_id,
+                    NORMAL_SPEECH_EVIDENCE_KEY,
+                ),
+            )
+
+        stale = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
     def test_missing_speech_evidence_makes_completed_normal_scan_stale(self):
         class UnavailableOcr(FakeOcr):
             def available(self):
