@@ -33,7 +33,8 @@ from .speech_service import (
     NormalSpeechService,
     NormalSpeechStaleError,
 )
-from .text import synopsis_similarity_from_corpus, text_corpus
+from .fast import TEXT_SUPPORT_THRESHOLD
+from .text import TextCorpus, synopsis_similarity_from_corpus, text_corpus
 from .versions import (
     NORMAL_EVIDENCE_ALGORITHM_VERSION,
     NORMAL_SPEECH_ORCHESTRATION_VERSION,
@@ -53,6 +54,8 @@ NORMAL_EARLY_STOP_MIN_OCR_CONFIDENCE = 0.60
 NORMAL_UNCALIBRATED_OCR_QUALITY = 0.35
 NORMAL_FALLBACK_MIN_SIMILARITY = 0.35
 NORMAL_FALLBACK_MIN_MARGIN = 0.08
+NORMAL_SPEECH_EVIDENCE_KEY = "speech-synopsis"
+NORMAL_SPEECH_EVIDENCE_VERSION = "1"
 
 
 class NormalIdentityScanError(RuntimeError):
@@ -488,6 +491,191 @@ class NormalIdentityService:
         )
         return candidate if candidate_key > current_key else current
 
+    @staticmethod
+    def _speech_aggregate_cache_key(run: NormalSpeechRun) -> str:
+        payload = {
+            "observations": [
+                {
+                    "artifact_id": int(item.artifact_id),
+                    "cache_key": item.cache_key,
+                    "source_signature": item.source_signature,
+                    "start_ms": int(item.window.start_ms),
+                    "end_ms": int(item.window.end_ms),
+                    "transcript_sha256": hashlib.sha256(
+                        item.transcript.text.encode("utf-8")
+                    ).hexdigest(),
+                }
+                for item in run.observations
+                if item.transcript.text.strip()
+            ],
+        }
+        return hashlib.sha256(
+            _canonical_json(payload).encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _speech_text_corpus(
+        run: NormalSpeechRun,
+    ) -> tuple[TextCorpus, list[Any]]:
+        usable = [
+            item for item in run.observations
+            if item.transcript.text.strip()
+        ]
+        tokens: set[str] = set()
+        bigrams: set[tuple[str, str]] = set()
+        for item in usable:
+            corpus = text_corpus(item.transcript.text)
+            tokens.update(corpus.tokens)
+            bigrams.update(corpus.bigrams)
+        return (
+            TextCorpus(
+                tokens=frozenset(tokens),
+                bigrams=frozenset(bigrams),
+            ),
+            usable,
+        )
+
+    def _persist_speech_evidence(
+        self,
+        conn: sqlite3.Connection,
+        scan: Mapping[str, Any],
+        candidates: list[dict[str, Any]],
+        run: NormalSpeechRun,
+        *,
+        escalated: bool,
+    ) -> int:
+        conn.execute(
+            """DELETE FROM media_identity_evidence
+               WHERE scan_id=? AND analyzer_key=?""",
+            (int(scan["id"]), NORMAL_SPEECH_EVIDENCE_KEY),
+        )
+        if not escalated:
+            return 0
+
+        correlation = f"subtitle-dialogue:{int(scan['file_id'])}"
+        corpus, usable = self._speech_text_corpus(run)
+        aggregate_cache_key = (
+            self._speech_aggregate_cache_key(run) if usable else ""
+        )
+        evidence_rows: list[tuple[Any, ...]] = []
+
+        if usable and corpus.tokens:
+            comparable = 0
+            artifact_ids = [int(item.artifact_id) for item in usable]
+            windows = [
+                {
+                    "artifact_id": int(item.artifact_id),
+                    "start_ms": int(item.window.start_ms),
+                    "end_ms": int(item.window.end_ms),
+                    "cache_key": item.cache_key,
+                }
+                for item in usable
+            ]
+            transcript_excerpt = "\n".join(
+                item.transcript.text.strip() for item in usable
+            )[:4000]
+            for candidate in candidates:
+                details = _json_object(candidate.get("details_json"))
+                overview = str(details.get("overview") or "").strip()
+                if not overview:
+                    continue
+                comparable += 1
+                similarity = synopsis_similarity_from_corpus(corpus, overview)
+                relation = (
+                    EvidenceRelation.SUPPORTS.value
+                    if similarity >= TEXT_SUPPORT_THRESHOLD
+                    else EvidenceRelation.NEUTRAL.value
+                )
+                evidence_rows.append((
+                    int(scan["id"]),
+                    str(candidate["candidate_key"]),
+                    NORMAL_SPEECH_EVIDENCE_KEY,
+                    NORMAL_SPEECH_EVIDENCE_VERSION,
+                    EvidenceCategory.SPEECH.value,
+                    correlation,
+                    relation,
+                    (
+                        similarity
+                        if relation == EvidenceRelation.SUPPORTS.value
+                        else 0.0
+                    ),
+                    "local_speech_transcript",
+                    f"file:{int(scan['file_id'])}:targeted-windows",
+                    None,
+                    f"targeted speech synopsis similarity {similarity:.3f}",
+                    _canonical_json({
+                        "similarity": similarity,
+                        "support_threshold": TEXT_SUPPORT_THRESHOLD,
+                        "artifact_ids": artifact_ids,
+                        "windows": windows,
+                        "transcript_count": len(usable),
+                        "transcript_excerpt": transcript_excerpt,
+                        "correlated_with": ["subtitle-synopsis"],
+                    }),
+                    aggregate_cache_key,
+                    IdentityProfile.NORMAL.value,
+                ))
+
+            if comparable == 0:
+                evidence_rows.append((
+                    int(scan["id"]),
+                    "",
+                    NORMAL_SPEECH_EVIDENCE_KEY,
+                    NORMAL_SPEECH_EVIDENCE_VERSION,
+                    EvidenceCategory.SPEECH.value,
+                    correlation,
+                    EvidenceRelation.NEUTRAL.value,
+                    0.0,
+                    "local_speech_transcript",
+                    f"file:{int(scan['file_id'])}:targeted-windows",
+                    None,
+                    "Targeted speech was available, but candidate synopses were unavailable.",
+                    _canonical_json({
+                        "artifact_ids": artifact_ids,
+                        "windows": windows,
+                        "transcript_count": len(usable),
+                        "transcript_excerpt": transcript_excerpt,
+                        "correlated_with": ["subtitle-synopsis"],
+                    }),
+                    aggregate_cache_key,
+                    IdentityProfile.NORMAL.value,
+                ))
+        else:
+            evidence_rows.append((
+                int(scan["id"]),
+                "",
+                NORMAL_SPEECH_EVIDENCE_KEY,
+                NORMAL_SPEECH_EVIDENCE_VERSION,
+                EvidenceCategory.SPEECH.value,
+                correlation,
+                EvidenceRelation.NEUTRAL.value,
+                0.0,
+                "local_speech_transcript",
+                f"file:{int(scan['file_id'])}:targeted-windows",
+                None,
+                "Speech escalation produced no usable transcript text.",
+                _canonical_json({
+                    "planned_windows": len(run.planned_windows),
+                    "transcript_count": run.transcript_count,
+                    "failures": list(run.failures),
+                    "budget_exhausted": bool(run.budget_exhausted),
+                    "correlated_with": ["subtitle-synopsis"],
+                }),
+                "",
+                IdentityProfile.NORMAL.value,
+            ))
+
+        conn.executemany(
+            """INSERT INTO media_identity_evidence(
+                 scan_id,candidate_key,analyzer_key,analyzer_version,
+                 evidence_category,correlation_group,relation,strength,
+                 source_kind,source_ref,timestamp_ms,value_text,details_json,
+                 cache_key,profile
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            evidence_rows,
+        )
+        return len(evidence_rows)
+
     def _persist_visual_evidence(
         self,
         conn: sqlite3.Connection,
@@ -892,6 +1080,15 @@ class NormalIdentityService:
                     run,
                     artifact_ids,
                 )
+
+            speech_evidence_count = self._persist_speech_evidence(
+                conn,
+                current_scan,
+                candidates,
+                speech_run,
+                escalated=speech_escalated,
+            )
+            evidence_count += speech_evidence_count
 
             claimed = _json_object(current_scan["claimed_identity_json"])
             completed_normal = bool(
