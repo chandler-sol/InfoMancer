@@ -23,7 +23,10 @@ from app.media_identity.speech_service import (
     NormalSpeechStaleError,
     plan_normal_speech_windows,
 )
-from app.media_identity.speech_audio import SpeechAudioStream
+from app.media_identity.speech_audio import (
+    MAX_SPEECH_AUDIO_BYTES,
+    SpeechAudioStream,
+)
 
 
 class FakePreparedAudio:
@@ -678,6 +681,49 @@ class NormalSpeechServiceTests(unittest.TestCase):
                    WHERE file_id=1 AND artifact_type='speech_transcript'"""
             ).fetchone()["count"]
         self.assertEqual(int(count), 0)
+
+    def test_per_window_byte_ceiling_sets_budget_exhausted(self):
+        class OversizedExtractor(FakeExtractor):
+            instances = []
+
+            def extract(self, window):
+                self.extract_calls += 1
+                identity = SpeechAudioIdentity(
+                    sha256="a" * 64,
+                    size_bytes=MAX_SPEECH_AUDIO_BYTES + 1,
+                    format_key="wav-pcm-s16le",
+                    sample_rate_hz=16_000,
+                    channels=1,
+                    source_signature=self.source_signature(window),
+                )
+                prepared = FakePreparedAudio(identity)
+                self.prepared.append(prepared)
+                return prepared
+
+        engine = FakeSpeechEngine()
+        service = NormalSpeechService(
+            self.database,
+            engine,
+            self.model,
+            extractor_factory=OversizedExtractor,
+            language="eng",
+        )
+        result = service.run(
+            1,
+            self.scan,
+            self.media,
+            10,
+            self.streams,
+        )
+
+        self.assertTrue(result.budget_exhausted)
+        self.assertEqual(result.transcript_count, 0)
+        self.assertEqual(engine.calls, 0)
+        self.assertEqual(OversizedExtractor.instances[-1].extract_calls, 1)
+        self.assertEqual(
+            OversizedExtractor.instances[-1].prepared[0].cleanup_calls,
+            1,
+        )
 
     def test_unavailable_engine_is_optional_and_does_not_extract_audio(self):
         engine = FakeSpeechEngine(available=False)
