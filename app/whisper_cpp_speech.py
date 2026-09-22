@@ -378,13 +378,12 @@ class WhisperCppSpeechEngine:
         return self.runtime.binary_identity()
 
     def cache_identity(self) -> Mapping[str, object]:
-        binary = self.binary_identity()
-        details = binary.details_payload()
+        # The exact executable/runtime-tree identity is carried by
+        # SpeechBinaryIdentity in the transcript cache key. Keep this method
+        # limited to adapter settings so one cache-key build cannot combine
+        # identities from two separate runtime snapshots.
         return {
             "adapter_version": WHISPERCPP_ENGINE_CACHE_VERSION,
-            "runtime_tree_sha256": str(
-                details.get("runtime_tree_sha256", binary.sha256)
-            ),
             "cpu_only": True,
             "threads": self.threads,
             "stdout_parser": "plain-no-timestamps-v1",
