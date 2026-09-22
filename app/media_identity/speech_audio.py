@@ -592,14 +592,27 @@ class ExtractedSpeechAudio:
     def __init__(
         self,
         *,
-        temporary_directory: str,
+        temporary_directory: tempfile.TemporaryDirectory,
         path: Path,
         identity: SpeechAudioIdentity,
         window: SpeechWindow,
         stream: SpeechAudioStream,
     ) -> None:
+        if not isinstance(temporary_directory, tempfile.TemporaryDirectory):
+            raise SpeechAudioUnavailable(
+                "Prepared speech audio requires owned temporary-directory state."
+            )
+        root = Path(temporary_directory.name)
+        candidate = Path(path)
+        try:
+            candidate.resolve(strict=False).relative_to(root.resolve())
+        except (OSError, ValueError) as exc:
+            raise SpeechAudioUnavailable(
+                "Prepared speech audio path leaves its owned temporary directory."
+            ) from exc
+
         self._temporary_directory = temporary_directory
-        self.path = Path(path)
+        self.path = candidate
         self.identity = identity
         self.window = window
         self.stream = stream
@@ -635,7 +648,7 @@ class ExtractedSpeechAudio:
         if self._closed:
             return
         self._closed = True
-        shutil.rmtree(self._temporary_directory, ignore_errors=True)
+        self._temporary_directory.cleanup()
 
     def __enter__(self) -> "ExtractedSpeechAudio":
         self.validated_path()
@@ -750,8 +763,10 @@ class LocalFfmpegSpeechAudioExtractor:
             ffmpeg_identity=ffmpeg_identity,
         )
 
-        temporary_directory = tempfile.mkdtemp(prefix="infomancer-speech-")
-        output_path = Path(temporary_directory) / "audio.wav"
+        temporary_directory = tempfile.TemporaryDirectory(
+            prefix="infomancer-speech-"
+        )
+        output_path = Path(temporary_directory.name) / "audio.wav"
         path = Path(self.media.path)
         start_seconds = window.start_ms / 1000.0
         duration_seconds = window.duration_ms / 1000.0
@@ -802,17 +817,17 @@ class LocalFfmpegSpeechAudioExtractor:
                 **_quiet_subprocess_options(),
             )
         except FileNotFoundError as exc:
-            shutil.rmtree(temporary_directory, ignore_errors=True)
+            temporary_directory.cleanup()
             raise SpeechAudioUnavailable(
                 "FFmpeg is unavailable for speech audio extraction."
             ) from exc
         except subprocess.TimeoutExpired as exc:
-            shutil.rmtree(temporary_directory, ignore_errors=True)
+            temporary_directory.cleanup()
             raise SpeechAudioUnavailable(
                 "FFmpeg timed out while preparing speech audio."
             ) from exc
         except OSError as exc:
-            shutil.rmtree(temporary_directory, ignore_errors=True)
+            temporary_directory.cleanup()
             raise SpeechAudioUnavailable(
                 "InfoMancer could not start FFmpeg for speech audio extraction."
             ) from exc
@@ -856,5 +871,5 @@ class LocalFfmpegSpeechAudioExtractor:
                 stream=self.stream,
             )
         except Exception:
-            shutil.rmtree(temporary_directory, ignore_errors=True)
+            temporary_directory.cleanup()
             raise
