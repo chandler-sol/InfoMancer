@@ -10,7 +10,7 @@ from typing import Any, Mapping, Protocol, runtime_checkable
 from .models import MediaIdentityFile
 
 
-SPEECH_CACHE_VERSION = 3
+SPEECH_CACHE_VERSION = 4
 MAX_NORMAL_SPEECH_WINDOW_MS = 90_000
 MAX_NORMAL_SPEECH_TOTAL_MS = 240_000
 MAX_NORMAL_SPEECH_WINDOWS = 8
@@ -156,10 +156,14 @@ class SpeechBinaryIdentity:
         if not isinstance(self.details, Mapping):
             raise SpeechIdentityError("Speech binary details must be a mapping.")
 
+        source = _normalized_text(self.source, "Speech binary source")
+        license_id = _normalized_text(self.license_id, "Speech binary license")
         object.__setattr__(self, "key", key)
         object.__setattr__(self, "version", version)
         object.__setattr__(self, "sha256", digest)
         object.__setattr__(self, "size_bytes", size_bytes)
+        object.__setattr__(self, "source", source)
+        object.__setattr__(self, "license_id", license_id)
         object.__setattr__(
             self,
             "details",
@@ -293,10 +297,14 @@ class SpeechModelIdentity:
         if not isinstance(self.details, Mapping):
             raise SpeechIdentityError("Speech model details must be a mapping.")
 
+        source = _normalized_text(self.source, "Speech model source")
+        license_id = _normalized_text(self.license_id, "Speech model license")
         object.__setattr__(self, "key", key)
         object.__setattr__(self, "version", version)
         object.__setattr__(self, "sha256", digest)
         object.__setattr__(self, "size_bytes", size_bytes)
+        object.__setattr__(self, "source", source)
+        object.__setattr__(self, "license_id", license_id)
         object.__setattr__(
             self,
             "details",
@@ -535,7 +543,6 @@ def speech_transcript_cache_key(
         "window": {
             "start_ms": request.window.start_ms,
             "end_ms": request.window.end_ms,
-            "purpose": request.window.purpose.casefold(),
         },
         "request": request.cache_parameters(),
     }
