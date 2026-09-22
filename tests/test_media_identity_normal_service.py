@@ -1189,6 +1189,37 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             "subtitle-dialogue:1",
         )
 
+    def test_padded_speech_text_remains_current_with_exact_cache_hash(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        class PaddedSpeech(FakeNormalSpeechEngine):
+            def transcribe(self, _audio_path, request):
+                self.calls += 1
+                return SpeechTranscript(
+                    text="  bronze harbor lantern meadow quartz thunder  \n",
+                    language="en",
+                )
+
+        NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=PaddedSpeech(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        detail = MediaIdentityDecisionService(self.database).scan_detail(
+            self.fast_scan.scan_id
+        )
+        self.assertTrue(detail["snapshot_current"])
+        self.assertIn(
+            "bronze harbor lantern meadow quartz thunder",
+            detail["speech_analysis"]["transcript_excerpt"],
+        )
+
     def test_tokenless_nonblank_speech_stays_current_neutral_evidence(self):
         class UnavailableOcr(FakeOcr):
             def available(self):
