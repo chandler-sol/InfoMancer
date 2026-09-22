@@ -33,6 +33,32 @@ MAX_NORMAL_SPEECH_AUDIO_BYTES = 9 * 1024 * 1024
 DEFAULT_SPEECH_EXTRACTION_TIMEOUT_SECONDS = 60
 _MAX_EXTRACTION_TIMEOUT_SECONDS = 120
 
+_LANGUAGE_ALIASES = {
+    "en": "eng",
+    "eng": "eng",
+    "es": "spa",
+    "spa": "spa",
+    "fr": "fra",
+    "fra": "fra",
+    "fre": "fra",
+    "de": "deu",
+    "deu": "deu",
+    "ger": "deu",
+    "it": "ita",
+    "ita": "ita",
+    "pt": "por",
+    "por": "por",
+    "ja": "jpn",
+    "jpn": "jpn",
+    "ko": "kor",
+    "kor": "kor",
+    "zh": "zho",
+    "zho": "zho",
+    "chi": "zho",
+    "ru": "rus",
+    "rus": "rus",
+}
+
 
 class SpeechAudioError(RuntimeError):
     """Base failure for bounded local speech-audio preparation."""
@@ -73,25 +99,20 @@ class SpeechAudioStream:
 
 
 def _strict_nonnegative_int(value: object) -> int | None:
-    if isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, int):
         return None
-    try:
-        converted = int(value)
-    except (TypeError, ValueError):
-        return None
-    if converted < 0:
-        return None
-    return converted
+    return value if value >= 0 else None
 
 
 def _optional_positive_int(value: object) -> int | None:
-    if value in (None, "") or isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, int):
         return None
-    try:
-        converted = int(value)
-    except (TypeError, ValueError):
-        return None
-    return converted if converted > 0 else None
+    return value if value > 0 else None
+
+
+def _language_key(value: str) -> str:
+    normalized = value.strip().casefold()
+    return _LANGUAGE_ALIASES.get(normalized, normalized)
 
 
 def _flag(value: object) -> bool:
@@ -148,7 +169,7 @@ def select_speech_audio_stream(
         raise SpeechAudioUnavailable(
             "Preferred speech language must be text."
         )
-    preferred = preferred_language.strip().casefold()
+    preferred = _language_key(preferred_language)
     candidates: list[SpeechAudioStream] = []
     for raw in streams:
         if not isinstance(raw, Mapping):
@@ -175,7 +196,9 @@ def select_speech_audio_stream(
 
     if preferred:
         language_matches = [
-            stream for stream in pool if stream.language == preferred
+            stream
+            for stream in pool
+            if _language_key(stream.language) == preferred
         ]
         if language_matches:
             pool = language_matches
@@ -452,11 +475,17 @@ def _validate_wav_payload(payload: bytes, window: SpeechWindow) -> bytes:
             sample_rate = int(reader.getframerate())
             frame_count = int(reader.getnframes())
             compression = str(reader.getcomptype() or "")
-            reader.readframes(frame_count)
+            frame_bytes = reader.readframes(frame_count)
     except (EOFError, OSError, wave.Error) as exc:
         raise SpeechAudioUnavailable(
             "FFmpeg speech audio output is not a valid PCM WAV file."
         ) from exc
+
+    expected_frame_bytes = frame_count * channels * sample_width
+    if len(frame_bytes) != expected_frame_bytes:
+        raise SpeechAudioUnavailable(
+            "FFmpeg speech audio output contains truncated PCM frame data."
+        )
 
     if (
         channels != SPEECH_AUDIO_CHANNELS
