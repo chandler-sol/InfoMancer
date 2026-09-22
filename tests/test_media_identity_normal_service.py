@@ -29,8 +29,13 @@ from app.media_identity.speech import (
     SpeechBinaryIdentity,
     SpeechModelIdentity,
     SpeechTranscript,
+    SpeechWindow,
 )
 from app.media_identity.speech_audio import SpeechAudioStream
+from app.media_identity.speech_service import (
+    NormalSpeechObservation,
+    NormalSpeechRun,
+)
 from app.media_identity.versions import (
     EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION,
     NORMAL_EVIDENCE_ALGORITHM_VERSION,
@@ -1170,6 +1175,138 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             speech_analysis["correlation_group"],
             "subtitle-dialogue:1",
         )
+
+    def test_speech_corpus_does_not_create_cross_window_bigrams(self):
+        audio = SpeechAudioIdentity(
+            sha256="a" * 64,
+            size_bytes=1024,
+            format_key="wav-pcm-s16le",
+            sample_rate_hz=16_000,
+            channels=1,
+            source_signature="fixture",
+        )
+        run = NormalSpeechRun(
+            observations=(
+                NormalSpeechObservation(
+                    window=SpeechWindow(0, 1000),
+                    cache_key="one",
+                    source_signature="fixture-one",
+                    transcript=SpeechTranscript(text="alpha cedar", language="en"),
+                    audio_identity=audio,
+                    artifact_id=1,
+                ),
+                NormalSpeechObservation(
+                    window=SpeechWindow(2000, 3000),
+                    cache_key="two",
+                    source_signature="fixture-two",
+                    transcript=SpeechTranscript(text="bravo delta", language="en"),
+                    audio_identity=audio,
+                    artifact_id=2,
+                ),
+            )
+        )
+        corpus, usable = NormalIdentityService._speech_text_corpus(run)
+        self.assertEqual(len(usable), 2)
+        self.assertIn(("alpha", "cedar"), corpus.bigrams)
+        self.assertIn(("bravo", "delta"), corpus.bigrams)
+        self.assertNotIn(("cedar", "bravo"), corpus.bigrams)
+
+    def test_missing_speech_evidence_makes_completed_normal_scan_stale(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=FakeNormalSpeechEngine(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+        self.assertEqual(result.speech_transcript_count, 8)
+
+        decisions = MediaIdentityDecisionService(self.database)
+        self.assertTrue(
+            decisions.scan_detail(self.fast_scan.scan_id)["snapshot_current"]
+        )
+        with self.database.connect() as conn:
+            conn.execute(
+                """DELETE FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key='speech-synopsis'""",
+                (self.fast_scan.scan_id,),
+            )
+
+        stale = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
+    def test_wrong_speech_correlation_group_makes_scan_stale(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=FakeNormalSpeechEngine(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+        self.assertEqual(result.speech_transcript_count, 8)
+
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE media_identity_evidence
+                   SET correlation_group='speech-independent:1'
+                   WHERE scan_id=? AND analyzer_key='speech-synopsis'""",
+                (self.fast_scan.scan_id,),
+            )
+
+        stale = MediaIdentityDecisionService(self.database).scan_detail(
+            self.fast_scan.scan_id
+        )
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
+    def test_pre_i5_normal_metadata_without_speech_evidence_version_is_stale(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=FakeNormalSpeechEngine(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            claimed = json.loads(row["claimed_identity_json"])
+            claimed["normal_speech"].pop("evidence_algorithm_version", None)
+            conn.execute(
+                """UPDATE media_identity_scans
+                   SET claimed_identity_json=?
+                   WHERE id=?""",
+                (
+                    json.dumps(claimed, sort_keys=True),
+                    self.fast_scan.scan_id,
+                ),
+            )
+
+        stale = MediaIdentityDecisionService(self.database).scan_detail(
+            self.fast_scan.scan_id
+        )
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
 
     def test_missing_speech_artifact_makes_completed_normal_scan_stale(self):
         class UnavailableOcr(FakeOcr):
