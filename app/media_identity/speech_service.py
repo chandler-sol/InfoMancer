@@ -24,7 +24,6 @@ from .speech import (
 from .speech_audio import (
     ExtractedSpeechAudio,
     LocalFfmpegSpeechAudioExtractor,
-    SpeechAudioError,
     SpeechAudioStaleError,
     SpeechAudioUnavailable,
     validate_normal_speech_audio_budget,
