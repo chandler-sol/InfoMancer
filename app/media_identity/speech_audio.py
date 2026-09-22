@@ -30,6 +30,7 @@ SPEECH_AUDIO_CHANNELS = 1
 SPEECH_AUDIO_SAMPLE_WIDTH_BYTES = 2
 MAX_SPEECH_AUDIO_BYTES = 3 * 1024 * 1024
 MAX_NORMAL_SPEECH_AUDIO_BYTES = 9 * 1024 * 1024
+_MAX_WAV_CONTAINER_OVERHEAD_BYTES = 64 * 1024
 DEFAULT_SPEECH_EXTRACTION_TIMEOUT_SECONDS = 60
 _MAX_EXTRACTION_TIMEOUT_SECONDS = 120
 
@@ -239,12 +240,29 @@ def validate_normal_speech_window_plan(
 
 
 def validate_normal_speech_audio_budget(
-    artifacts: Iterable["ExtractedSpeechAudio"],
-) -> tuple["ExtractedSpeechAudio", ...]:
-    """Fail closed if prepared Normal audio exceeds aggregate duration/byte limits."""
-    prepared = tuple(artifacts)
-    validate_normal_speech_window_plan(item.window for item in prepared)
-    total_bytes = sum(item.identity.size_bytes for item in prepared)
+    records: Iterable[tuple[SpeechWindow, SpeechAudioIdentity]],
+) -> tuple[tuple[SpeechWindow, SpeechAudioIdentity], ...]:
+    """Validate retained provenance records without keeping temp WAV files alive."""
+    prepared = tuple(records)
+    validate_normal_speech_window_plan(window for window, _ in prepared)
+
+    total_bytes = 0
+    for _, identity in prepared:
+        if not isinstance(identity, SpeechAudioIdentity):
+            raise SpeechAudioUnavailable(
+                "Normal speech audio budgets require SpeechAudioIdentity values."
+            )
+        if (
+            identity.size_bytes > MAX_SPEECH_AUDIO_BYTES
+            or identity.format_key != SPEECH_AUDIO_FORMAT_KEY
+            or identity.sample_rate_hz != SPEECH_AUDIO_SAMPLE_RATE_HZ
+            or identity.channels != SPEECH_AUDIO_CHANNELS
+        ):
+            raise SpeechAudioUnavailable(
+                "Prepared Normal speech audio does not match the bounded canonical format."
+            )
+        total_bytes += identity.size_bytes
+
     if total_bytes > MAX_NORMAL_SPEECH_AUDIO_BYTES:
         raise SpeechAudioUnavailable(
             "Prepared Normal speech audio exceeded the aggregate byte limit."
@@ -485,6 +503,10 @@ def _validate_wav_payload(payload: bytes, window: SpeechWindow) -> bytes:
     if len(frame_bytes) != expected_frame_bytes:
         raise SpeechAudioUnavailable(
             "FFmpeg speech audio output contains truncated PCM frame data."
+        )
+    if len(payload) > expected_frame_bytes + _MAX_WAV_CONTAINER_OVERHEAD_BYTES:
+        raise SpeechAudioUnavailable(
+            "FFmpeg speech audio output contains excessive container overhead."
         )
 
     if (
