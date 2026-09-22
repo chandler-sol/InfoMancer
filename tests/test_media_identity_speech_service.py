@@ -164,7 +164,7 @@ class NormalSpeechServiceTests(unittest.TestCase):
                 """INSERT INTO files(
                      id,title_id,path,filename,extension,size_bytes,modified_at,
                      season,episode_start,episode_end,runtime_seconds,seen_scan
-                   ) VALUES (1,1,?,?,?,?,1,1,1,1800,'fixture')""",
+                   ) VALUES (1,1,?,?,?,?,?,1,1,1,1800,'fixture')""",
                 (
                     str(self.media_path),
                     self.media_path.name,
