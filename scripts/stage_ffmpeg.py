@@ -4,74 +4,20 @@ import argparse
 import gzip
 import hashlib
 import os
-import platform
 import stat
 import urllib.request
 from pathlib import Path
 
 
-VERSION = "6.1.1"
-RELEASE_BASE = (
-    "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1"
+from app.managed_ffmpeg import (
+    FFMPEG_ASSETS as ASSETS,
+    FFMPEG_RELEASE_BASE as RELEASE_BASE,
+    FFMPEG_VERSION as VERSION,
+    ffmpeg_platform_key as _platform_key,
 )
-
-ASSETS = {
-    ("windows", "x86_64"): {
-        "slug": "win32-x64",
-        "archive_sha256": "8883a3dffbd0a16cf4ef95206ea05283f78908dbfb118f73c83f4951dcc06d77",
-        "binary_sha256": "04e1307997530f9cf2fe35cba2ca7e8875ca91da02f89d6c7243df819c94ad00",
-        "license_sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
-    },
-    ("linux", "x86_64"): {
-        "slug": "linux-x64",
-        "archive_sha256": "bfe8a8fc511530457b528c48d77b5737527b504a3797a9bc4866aeca69c2dffa",
-        "binary_sha256": "e7e7fb30477f717e6f55f9180a70386c62677ef8a4d4d1a5d948f4098aa3eb99",
-        "license_sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
-    },
-    ("linux", "arm64"): {
-        "slug": "linux-arm64",
-        "archive_sha256": "754a678672298bc68156adff58aa7385a592c2b30b1d0ae8750c45c915c4bac0",
-        "binary_sha256": "6bb182d0d75d23028db82e9e4f723ca69b853d055698486e6984ddb2c06fb8ce",
-        "license_sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
-    },
-    ("darwin", "x86_64"): {
-        "slug": "darwin-x64",
-        "archive_sha256": "929b375c1182d956c51f7ac25e0b2b0411fb01f6f407aa15c9758efeb4242106",
-        "binary_sha256": "ebdddc936f61e14049a2d4b549a412b8a40deeff6540e58a9f2a2da9e6b18894",
-        "license_sha256": "2e1d16c72fd74e12063776371da757322f8b77589386532f4fd8634bde7de1af",
-    },
-    ("darwin", "arm64"): {
-        "slug": "darwin-arm64",
-        "archive_sha256": "8923876afa8db5585022d7860ec7e589af192f441c56793971276d450ed3bbfa",
-        "binary_sha256": "a90e3db6a3fd35f6074b013f948b1aa45b31c6375489d39e572bea3f18336584",
-        "license_sha256": "cb48bf09a11f5fb576cddb0431c8f5ed0a60157a9ec942adffc13907cbe083f2",
-    },
-}
-
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
-
-def _platform_key() -> tuple[str, str]:
-    system = platform.system().casefold()
-    machine = platform.machine().casefold()
-    if system == "windows":
-        os_name = "windows"
-    elif system == "darwin":
-        os_name = "darwin"
-    elif system == "linux":
-        os_name = "linux"
-    else:
-        raise RuntimeError(f"Unsupported FFmpeg build operating system: {system}")
-
-    if machine in {"amd64", "x86_64"}:
-        arch = "x86_64"
-    elif machine in {"arm64", "aarch64"}:
-        arch = "arm64"
-    else:
-        raise RuntimeError(f"Unsupported FFmpeg build architecture: {machine}")
-    return os_name, arch
 
 
 def _download(url: str) -> bytes:
