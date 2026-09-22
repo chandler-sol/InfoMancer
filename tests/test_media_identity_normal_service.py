@@ -347,6 +347,60 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             result.highest_observed_stage.name,
             "FINAL",
         )
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT strength,details_json
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key='preview-ocr-synopsis'
+                     AND candidate_key LIKE '%"1002"]'
+                   ORDER BY id LIMIT 1""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertLessEqual(float(row["strength"]), 0.35)
+        details = json.loads(row["details_json"])
+        self.assertEqual(details["calibrated_observations"], 0)
+        self.assertEqual(details["uncalibrated_observations"], 12)
+
+    def test_mixed_calibrated_and_uncalibrated_text_does_not_stop_early(self):
+        class ManyFrameSource(FakePreviewSource):
+            def preview_frames(self, _media):
+                return tuple(
+                    PreviewFrameRef(
+                        source_key=self.source_key,
+                        item_id="episode-1",
+                        timestamp_ms=index * 10_000,
+                        asset_ref=f"mixed:{index}",
+                        source_signature="preview-mixed-confidence-v1",
+                        width=320,
+                        height=180,
+                    )
+                    for index in range(40)
+                )
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"bronze harbor lantern meadow quartz thunder"
+
+        class MixedConfidenceOcr(FakeOcr):
+            def recognize(self, image: bytes) -> OcrTextResult:
+                self.calls += 1
+                return OcrTextResult(
+                    text=image.decode("utf-8"),
+                    confidence=(1.0 if self.calls % 2 else None),
+                )
+
+        source = ManyFrameSource()
+        engine = MixedConfidenceOcr()
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            engine,
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(result.observation_count, 12)
+        self.assertEqual(result.highest_observed_stage.name, "FINAL")
+        self.assertEqual(engine.calls, 12)
 
     def test_second_normal_run_reuses_derived_ocr_without_rereading_preview(self):
         source = FakePreviewSource()
