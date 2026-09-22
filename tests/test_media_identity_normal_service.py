@@ -621,7 +621,7 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         class AmbiguousExternal(FakePreviewSource):
             def read_preview(self, _frame):
                 self.read_calls += 1
-                return b"bronze harbor lantern meadow quartz"
+                return b"bronze harbor"
 
         class WorseLocal(FakePreviewSource):
             source_key = LOCAL_FRAME_SOURCE_KEY
