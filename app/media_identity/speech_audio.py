@@ -449,12 +449,16 @@ def _source_signature(
 
 def _stat_signature(
     value: os.stat_result,
-) -> tuple[int, int, int, int, int, int]:
+) -> tuple[int, int, int, int, int]:
+    # Do not include st_ctime_ns here. On Windows, ctime semantics differ
+    # from POSIX and path-based stat versus descriptor-based fstat can report
+    # different values for the same untouched file. Content integrity is
+    # still protected by size/mtime/device/inode checks plus the exact SHA-256
+    # comparison performed after this bounded read.
     return (
         stat_module.S_IFMT(value.st_mode),
         int(value.st_size),
         int(getattr(value, "st_mtime_ns", int(value.st_mtime * 1_000_000_000))),
-        int(getattr(value, "st_ctime_ns", int(value.st_ctime * 1_000_000_000))),
         int(getattr(value, "st_dev", 0)),
         int(getattr(value, "st_ino", 0)),
     )
