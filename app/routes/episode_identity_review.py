@@ -17,6 +17,7 @@ from ..media_identity.normal_service import (
     NormalIdentityService,
 )
 from ..media_identity.ocr import RapidOcrCpuEngine
+from ..whisper_cpp_speech import WhisperCppSpeechEngine
 from ..provider_secrets import ProviderSecretError
 from ..media_identity.service import (
     MediaIdentityDecisionError,
@@ -37,6 +38,8 @@ def build_router(ctx: RouteContext):
         "analyze_library_health_with_activity"
     )
     provider_secrets = ctx.live("provider_secrets")
+    speech_runtime_component = ctx.live("speech_runtime_component")
+    speech_model_components = ctx.live("speech_model_components")
 
     fast = FastIdentityService(db)
     decisions = MediaIdentityDecisionService(db)
@@ -152,10 +155,17 @@ def build_router(ctx: RouteContext):
                 ExternalSourceConfigService(db),
                 secrets,
             )
+            speech_model_component = speech_model_components["base-q5_1"]
+            speech_engine = WhisperCppSpeechEngine(
+                speech_runtime_component,
+                speech_model_component,
+            )
             normal = NormalIdentityService(
                 db,
                 registry,
                 RapidOcrCpuEngine(),
+                speech_engine=speech_engine,
+                speech_model=speech_model_component.identity,
             )
             result = normal.run_scan(int(scan_id))
             resolution = decisions.resolve_scan(int(scan_id))
@@ -194,38 +204,70 @@ def build_router(ctx: RouteContext):
                     if result.highest_observed_stage is not None
                     else ""
                 ),
+                "speech_escalated": result.speech_escalated,
+                "speech_planned_window_count": result.speech_planned_window_count,
+                "speech_transcript_count": result.speech_transcript_count,
+                "speech_reused_artifact_count": result.speech_reused_artifact_count,
+                "speech_failures": list(result.speech_failures),
                 "result_state": resolution.state.value,
             },
             user_id=request.state.user.id,
         )
 
         if result.completed_profile == IdentityProfile.NORMAL:
-            source_label = (
-                "generated local FFmpeg frames"
-                if result.source_key == LOCAL_FRAME_SOURCE_KEY
-                else f"{result.source_key.title()} preview frames"
-                if result.source_key
-                else "preview frames"
-            )
-            stage_label = (
-                result.highest_observed_stage.name.title()
-                if result.highest_observed_stage is not None
-                else "Unknown"
-            )
-            message = (
-                f"Normal verification completed using {source_label}. "
-                f"{result.observation_count} preview frame(s) were analyzed "
-                f"through the {stage_label} sampling stage"
-            )
-            if result.reused_artifact_count:
-                message += (
-                    f", including {result.reused_artifact_count} cached OCR artifact(s)"
+            if result.observation_count:
+                source_label = (
+                    "generated local FFmpeg frames"
+                    if result.source_key == LOCAL_FRAME_SOURCE_KEY
+                    else f"{result.source_key.title()} preview frames"
+                    if result.source_key
+                    else "preview frames"
                 )
-            message += ". Review the updated evidence before making any correction."
+                stage_label = (
+                    result.highest_observed_stage.name.title()
+                    if result.highest_observed_stage is not None
+                    else "Unknown"
+                )
+                message = (
+                    f"Normal verification completed using {source_label}. "
+                    f"{result.observation_count} preview frame(s) were analyzed "
+                    f"through the {stage_label} sampling stage"
+                )
+                if result.reused_artifact_count:
+                    message += (
+                        f", including {result.reused_artifact_count} cached OCR artifact(s)"
+                    )
+                message += "."
+            else:
+                message = "Normal verification completed without usable visual OCR."
+
+            if result.speech_escalated:
+                if result.speech_transcript_count:
+                    message += (
+                        f" Local speech analysis transcribed "
+                        f"{result.speech_transcript_count} targeted window(s)"
+                    )
+                    if result.speech_reused_artifact_count:
+                        message += (
+                            f", including {result.speech_reused_artifact_count} "
+                            "cached transcript(s)"
+                        )
+                    message += "."
+                elif "speech-engine-unavailable" in set(result.speech_failures):
+                    message += (
+                        " Local speech escalation was needed, but the optional "
+                        "whisper.cpp runtime/model is not currently available."
+                    )
+                elif result.speech_failures:
+                    message += (
+                        " Local speech escalation was attempted but produced no "
+                        "reusable transcript."
+                    )
+            message += " Review the updated evidence before making any correction."
         elif "ocr-engine-unavailable" in set(result.failures):
             message = (
-                "Normal OCR is not installed or available on this server, so the scan "
-                "remains at Fast evidence. Install the optional CPU OCR component and try again."
+                "Normal OCR is not installed or available on this server, and local "
+                "speech did not produce a transcript, so the scan remains at Fast evidence."
             )
         else:
             local_failure = next(
@@ -239,18 +281,23 @@ def build_router(ctx: RouteContext):
                 "",
             )
             message = (
-                "Normal could not obtain usable Plex/Jellyfin previews or generated "
-                "local FFmpeg frames, so the scan remains at Fast evidence."
+                "Normal could not obtain usable Plex/Jellyfin previews, generated "
+                "local FFmpeg frames, or a reusable targeted speech transcript, so "
+                "the scan remains at Fast evidence."
             )
             if local_failure:
-                message += f" Local fallback: {local_failure}"
+                message += f" Local visual fallback: {local_failure}"
+            if result.speech_escalated and result.speech_failures:
+                message += " Local speech escalation was unavailable or unsuccessful."
         if credential_warning:
             message += (
                 " Plex/Jellyfin credentials could not be read, so external previews "
                 "were skipped and only local fallback was available."
             )
         if result.budget_exhausted:
-            message += " Normal stopped at its configured resource limit."
+            message += " Normal visual analysis stopped at its configured resource limit."
+        if result.speech_budget_exhausted:
+            message += " Normal speech analysis stopped at its configured resource limit."
         if not findings_refreshed:
             message += " Library Health will catch up on the next successful analysis."
         return redirect(
