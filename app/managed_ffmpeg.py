@@ -275,7 +275,10 @@ class ManagedFfmpegComponent:
         if override:
             resolved = shutil.which(override)
             candidate = Path(override)
-            available = bool(resolved or candidate.is_file())
+            direct_available = candidate.is_file() and (
+                os.name == "nt" or os.access(candidate, os.X_OK)
+            )
+            available = bool(resolved or direct_available)
             return ManagedFfmpegStatus(
                 state="override",
                 available=available,
@@ -291,7 +294,10 @@ class ManagedFfmpegComponent:
             )
 
         bundled = _bundled_candidate()
-        if bundled is not None:
+        if (
+            bundled is not None
+            and (os.name == "nt" or os.access(bundled, os.X_OK))
+        ):
             return ManagedFfmpegStatus(
                 state="bundled",
                 available=True,
