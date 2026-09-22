@@ -40,6 +40,8 @@ NORMAL_EXPANDED_STOP_SIMILARITY = 0.45
 NORMAL_EXPANDED_STOP_MARGIN = 0.14
 NORMAL_EARLY_STOP_MIN_OCR_CONFIDENCE = 0.60
 NORMAL_UNCALIBRATED_OCR_QUALITY = 0.35
+NORMAL_FALLBACK_MIN_SIMILARITY = 0.35
+NORMAL_FALLBACK_MIN_MARGIN = 0.08
 
 
 class NormalIdentityScanError(RuntimeError):
@@ -299,29 +301,33 @@ class NormalIdentityService:
         return artifact_ids
 
     @staticmethod
-    def _visual_stage_sufficient(
+    def _visual_run_metrics(
         candidates: list[dict[str, Any]],
         run: NormalPreviewOcrRun,
-        stage: NormalSamplingStage,
-    ) -> bool:
-        if stage >= NormalSamplingStage.FINAL:
-            return False
+    ) -> dict[str, Any]:
         usable = [item for item in run.observations if item.text.strip()]
         if not usable:
-            return False
+            return {
+                "has_text": False,
+                "fully_calibrated": False,
+                "quality": 0.0,
+                "best_similarity": 0.0,
+                "margin": 0.0,
+                "evidence_score": 0.0,
+            }
 
-        confidences = [
-            float(item.confidence)
+        qualities = [
+            (
+                float(item.confidence)
+                if item.confidence is not None
+                else NORMAL_UNCALIBRATED_OCR_QUALITY
+            )
             for item in usable
-            if item.confidence is not None
         ]
-        if len(confidences) != len(usable):
-            return False
-        if (
-            (sum(confidences) / len(confidences))
-            < NORMAL_EARLY_STOP_MIN_OCR_CONFIDENCE
-        ):
-            return False
+        quality = sum(qualities) / len(qualities)
+        fully_calibrated = all(
+            item.confidence is not None for item in usable
+        )
 
         corpus = text_corpus("\n".join(item.text for item in usable))
         scores: list[float] = []
@@ -332,13 +338,38 @@ class NormalIdentityService:
                 scores.append(
                     synopsis_similarity_from_corpus(corpus, overview)
                 )
-        if not scores:
-            return False
-
         scores.sort(reverse=True)
-        best = scores[0]
+        best = scores[0] if scores else 0.0
         second = scores[1] if len(scores) > 1 else 0.0
         margin = max(0.0, best - second)
+        return {
+            "has_text": True,
+            "fully_calibrated": fully_calibrated,
+            "quality": quality,
+            "best_similarity": best,
+            "margin": margin,
+            "evidence_score": best * quality,
+        }
+
+    @classmethod
+    def _visual_stage_sufficient(
+        cls,
+        candidates: list[dict[str, Any]],
+        run: NormalPreviewOcrRun,
+        stage: NormalSamplingStage,
+    ) -> bool:
+        if stage >= NormalSamplingStage.FINAL:
+            return False
+        metrics = cls._visual_run_metrics(candidates, run)
+        if (
+            not metrics["has_text"]
+            or not metrics["fully_calibrated"]
+            or metrics["quality"] < NORMAL_EARLY_STOP_MIN_OCR_CONFIDENCE
+        ):
+            return False
+
+        best = float(metrics["best_similarity"])
+        margin = float(metrics["margin"])
         if stage == NormalSamplingStage.INITIAL:
             return (
                 best >= NORMAL_INITIAL_STOP_SIMILARITY
@@ -348,6 +379,44 @@ class NormalIdentityService:
             best >= NORMAL_EXPANDED_STOP_SIMILARITY
             and margin >= NORMAL_EXPANDED_STOP_MARGIN
         )
+
+    @classmethod
+    def _visual_source_sufficient(
+        cls,
+        candidates: list[dict[str, Any]],
+        run: NormalPreviewOcrRun,
+    ) -> bool:
+        metrics = cls._visual_run_metrics(candidates, run)
+        return bool(
+            metrics["has_text"]
+            and metrics["fully_calibrated"]
+            and metrics["quality"] >= NORMAL_EARLY_STOP_MIN_OCR_CONFIDENCE
+            and metrics["best_similarity"] >= NORMAL_FALLBACK_MIN_SIMILARITY
+            and metrics["margin"] >= NORMAL_FALLBACK_MIN_MARGIN
+        )
+
+    @classmethod
+    def _prefer_visual_run(
+        cls,
+        candidates: list[dict[str, Any]],
+        current: NormalPreviewOcrRun,
+        candidate: NormalPreviewOcrRun,
+    ) -> NormalPreviewOcrRun:
+        current_metrics = cls._visual_run_metrics(candidates, current)
+        candidate_metrics = cls._visual_run_metrics(candidates, candidate)
+        current_key = (
+            float(current_metrics["evidence_score"]),
+            float(current_metrics["margin"]),
+            int(bool(current_metrics["fully_calibrated"])),
+            float(current_metrics["best_similarity"]),
+        )
+        candidate_key = (
+            float(candidate_metrics["evidence_score"]),
+            float(candidate_metrics["margin"]),
+            int(bool(candidate_metrics["fully_calibrated"])),
+            float(candidate_metrics["best_similarity"]),
+        )
+        return candidate if candidate_key > current_key else current
 
     def _persist_visual_evidence(
         self,
@@ -565,7 +634,7 @@ class NormalIdentityService:
         )
 
         if (
-            not run.has_text
+            not self._visual_source_sufficient(candidates, run)
             and not run.budget_exhausted
             and "ocr-engine-unavailable" not in set(run.failures)
         ):
@@ -598,30 +667,19 @@ class NormalIdentityService:
                 tuple(external_run.failures)
                 + tuple(local_run.failures)
             )
-            if (
-                local_run.has_text
-                or (
-                    not external_run.observations
-                    and bool(local_run.observations)
-                )
-            ):
-                run = NormalPreviewOcrRun(
-                    source_key=local_run.source_key,
-                    observations=local_run.observations,
-                    failures=combined_failures,
-                    total_image_bytes=local_run.total_image_bytes,
-                    total_text_chars=local_run.total_text_chars,
-                    budget_exhausted=local_run.budget_exhausted,
-                )
-            else:
-                run = NormalPreviewOcrRun(
-                    source_key=external_run.source_key,
-                    observations=external_run.observations,
-                    failures=combined_failures,
-                    total_image_bytes=external_run.total_image_bytes,
-                    total_text_chars=external_run.total_text_chars,
-                    budget_exhausted=external_run.budget_exhausted,
-                )
+            preferred = self._prefer_visual_run(
+                candidates,
+                external_run,
+                local_run,
+            )
+            run = NormalPreviewOcrRun(
+                source_key=preferred.source_key,
+                observations=preferred.observations,
+                failures=combined_failures,
+                total_image_bytes=preferred.total_image_bytes,
+                total_text_chars=preferred.total_text_chars,
+                budget_exhausted=preferred.budget_exhausted,
+            )
 
         with self.database.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
