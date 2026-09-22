@@ -1055,7 +1055,7 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertIn("ocr-engine-unavailable", result.failures)
         local_factory.assert_not_called()
 
-    def test_weak_normal_evidence_escalates_to_speech_without_scoring_it(self):
+    def test_weak_normal_evidence_escalates_to_neutral_speech_evidence(self):
         class UnavailableOcr(FakeOcr):
             def available(self):
                 return False
@@ -1097,18 +1097,31 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
                    FROM media_identity_artifacts
                    WHERE file_id=1 AND artifact_type='speech_transcript'"""
             ).fetchone()["count"]
-            speech_evidence_count = conn.execute(
-                """SELECT COUNT(*) AS count
+            speech_evidence = conn.execute(
+                """SELECT relation,strength,correlation_group
                    FROM media_identity_evidence
-                   WHERE scan_id=? AND evidence_category='speech'""",
+                   WHERE scan_id=? AND evidence_category='speech'
+                   ORDER BY candidate_key""",
                 (self.fast_scan.scan_id,),
-            ).fetchone()["count"]
+            ).fetchall()
 
         claimed = json.loads(scan["claimed_identity_json"])
         self.assertEqual(scan["completed_profile"], "normal")
         self.assertEqual(scan["stage"], "normal_speech_complete")
         self.assertEqual(int(transcript_count), 8)
-        self.assertEqual(int(speech_evidence_count), 0)
+        self.assertEqual(len(speech_evidence), 2)
+        self.assertTrue(
+            all(row["relation"] == "neutral" for row in speech_evidence)
+        )
+        self.assertTrue(
+            all(float(row["strength"]) == 0.0 for row in speech_evidence)
+        )
+        self.assertTrue(
+            all(
+                row["correlation_group"] == "subtitle-dialogue:1"
+                for row in speech_evidence
+            )
+        )
         self.assertTrue(claimed["normal_speech"]["escalated"])
         self.assertEqual(claimed["normal_speech"]["transcript_count"], 8)
 
