@@ -1103,6 +1103,78 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertTrue(claimed["normal_speech"]["escalated"])
         self.assertEqual(claimed["normal_speech"]["transcript_count"], 8)
 
+    def test_missing_speech_artifact_makes_completed_normal_scan_stale(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=FakeNormalSpeechEngine(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+        self.assertEqual(result.speech_transcript_count, 8)
+
+        decisions = MediaIdentityDecisionService(self.database)
+        before = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertTrue(before["snapshot_current"])
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            claimed = json.loads(row["claimed_identity_json"])
+            artifact_id = claimed["normal_speech"]["artifact_ids"][0]
+            conn.execute(
+                "DELETE FROM media_identity_artifacts WHERE id=?",
+                (artifact_id,),
+            )
+
+        after = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(after["snapshot_current"])
+        self.assertFalse(after["actionable"])
+
+    def test_error_speech_artifact_makes_completed_normal_scan_stale(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=FakeNormalSpeechEngine(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+        self.assertEqual(result.speech_transcript_count, 8)
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            claimed = json.loads(row["claimed_identity_json"])
+            artifact_id = claimed["normal_speech"]["artifact_ids"][0]
+            conn.execute(
+                """UPDATE media_identity_artifacts
+                   SET status='error',error='fixture'
+                   WHERE id=?""",
+                (artifact_id,),
+            )
+
+        detail = MediaIdentityDecisionService(self.database).scan_detail(
+            self.fast_scan.scan_id
+        )
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+
     def test_second_normal_speech_run_reuses_persisted_fragments(self):
         class UnavailableOcr(FakeOcr):
             def available(self):
