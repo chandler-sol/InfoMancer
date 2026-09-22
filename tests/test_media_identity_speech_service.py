@@ -440,7 +440,7 @@ class NormalSpeechServiceTests(unittest.TestCase):
                          start_ms,end_ms,text_value,payload_json
                        ) VALUES (
                          1,'speech_transcript','local-speech-transcript','1',
-                         ?,'complete','normal','local_speech','fixture',
+                         ?,'error','normal','local_speech','fixture',
                          ?,?,?,?,?,'poisoned','{not-json'
                        )""",
                     (
