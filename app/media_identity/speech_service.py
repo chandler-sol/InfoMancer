@@ -279,6 +279,7 @@ class NormalSpeechService:
         self,
         scan_id: int,
         baseline_scan: Mapping[str, Any],
+        media: MediaIdentityFile | None = None,
     ) -> dict[str, Any]:
         with self.database.connect() as conn:
             row = conn.execute(
@@ -324,16 +325,24 @@ class NormalSpeechService:
                     "Episode Identity file hash binding changed during speech analysis."
                 )
 
-            current, _ = MediaIdentityDecisionService._snapshot_is_current(
+            current, current_file = MediaIdentityDecisionService._snapshot_is_current(
                 conn,
                 int(current_scan["file_id"]),
                 size_bytes=int(current_scan["file_size_bytes"] or 0),
                 modified_at=current_scan["file_modified_at"],
                 sha256=current_scan["file_sha256"],
             )
-            if not current:
+            if not current or current_file is None:
                 raise NormalSpeechStaleError(
                     "The media file changed during speech analysis."
+                )
+            if media is not None and (
+                int(current_file["id"]) != int(media.file_id)
+                or int(current_file["title_id"]) != int(media.title_id)
+                or str(current_file["path"]) != str(media.path)
+            ):
+                raise NormalSpeechStaleError(
+                    "The cataloged media binding changed during speech analysis."
                 )
         return current_scan
 
@@ -438,7 +447,11 @@ class NormalSpeechService:
         transcript: SpeechTranscript,
         engine_snapshot: _SpeechEngineSnapshot,
     ) -> NormalSpeechObservation:
-        current_scan = self._require_fresh_scan(scan_id, baseline_scan)
+        current_scan = self._require_fresh_scan(
+            scan_id,
+            baseline_scan,
+            media,
+        )
         binary_identity = engine_snapshot.binary
         payload = {
             "version": 1,
@@ -609,7 +622,7 @@ class NormalSpeechService:
                 failures=(_bounded_failure("speech-engine-unavailable", exc),),
             )
 
-        self._require_fresh_scan(int(scan_id), scan)
+        self._require_fresh_scan(int(scan_id), scan, media)
         try:
             extractor = self.extractor_factory(
                 media,
@@ -629,7 +642,7 @@ class NormalSpeechService:
         budget_records: list[tuple[SpeechWindow, SpeechAudioIdentity]] = []
 
         for window in windows:
-            self._require_fresh_scan(int(scan_id), scan)
+            self._require_fresh_scan(int(scan_id), scan, media)
             try:
                 source_signature = extractor.source_signature(window)
                 engine_snapshot = self._engine_snapshot()
@@ -739,7 +752,7 @@ class NormalSpeechService:
                     raise SpeechIdentityError(
                         "Speech engine identity changed during transcription."
                     )
-                self._require_fresh_scan(int(scan_id), scan)
+                self._require_fresh_scan(int(scan_id), scan, media)
                 observation = self._persist_observation(
                     int(scan_id),
                     scan,
