@@ -165,13 +165,19 @@ class WhisperCppSpeechEngineTests(unittest.TestCase):
         self.assertGreaterEqual(self.runtime.resolve_calls, 1)
         self.assertGreaterEqual(self.model.resolve_calls, 1)
 
-    def test_cache_identity_binds_runtime_tree_threads_and_adapter(self) -> None:
+    def test_cache_identity_keeps_runtime_snapshot_in_binary_identity(self) -> None:
         engine = WhisperCppSpeechEngine(self.runtime, self.model, threads=4)
+        before = self.runtime.resolve_calls
         identity = engine.cache_identity()
-        self.assertEqual(identity["runtime_tree_sha256"], "a" * 64)
+        self.assertEqual(self.runtime.resolve_calls, before)
         self.assertEqual(identity["threads"], 4)
         self.assertTrue(identity["cpu_only"])
         self.assertIn("adapter_version", identity)
+        self.assertNotIn("runtime_tree_sha256", identity)
+        self.assertEqual(
+            self.runtime.identity.cache_identity()["runtime_tree_sha256"],
+            "a" * 64,
+        )
 
     def test_exact_audio_is_rehashed_immediately_before_launch(self) -> None:
         engine = WhisperCppSpeechEngine(self.runtime, self.model)
