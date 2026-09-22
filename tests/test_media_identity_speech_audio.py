@@ -536,18 +536,21 @@ class SpeechAudioExtractionTests(unittest.TestCase):
             )
         self.assertTrue(self.root.exists())
 
-        with tempfile.TemporaryDirectory() as owned:
+        owner = tempfile.TemporaryDirectory()
+        try:
             with self.assertRaisesRegex(
                 SpeechAudioUnavailable,
                 "leaves its owned",
             ):
                 ExtractedSpeechAudio(
-                    temporary_directory=object.__new__(tempfile.TemporaryDirectory),
+                    temporary_directory=owner,
                     path=self.root / "outside.wav",
                     identity=identity,
                     window=window,
                     stream=stream,
                 )
+        finally:
+            owner.cleanup()
 
     def test_final_audio_revalidation_can_bind_the_pending_request_identity(self) -> None:
         payload = wav_bytes(duration_ms=1000)
