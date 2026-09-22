@@ -1211,6 +1211,98 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertFalse(detail["snapshot_current"])
         self.assertFalse(detail["actionable"])
 
+    def test_speech_only_rerun_preserves_prior_normal_ocr_evidence(self):
+        class WeakPreview(FakePreviewSource):
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"unrelated"
+
+        FakeNormalSpeechExtractor.instances.clear()
+        first_service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([WeakPreview()]),
+            FakeOcr(),
+            limits=NormalResourceLimits(
+                initial_preview_frames=1,
+                expanded_preview_frames=1,
+                max_preview_frames=1,
+                max_preview_bytes_per_frame=9,
+                max_preview_bytes_total=9,
+            ),
+            speech_engine=FakeNormalSpeechEngine(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        )
+        first = first_service.run_scan(self.fast_scan.scan_id)
+        self.assertEqual(first.completed_profile.value, "normal")
+        self.assertGreater(first.observation_count, 0)
+        self.assertEqual(first.speech_transcript_count, 8)
+
+        with self.database.connect() as conn:
+            before_scan = conn.execute(
+                """SELECT claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            before_evidence = [
+                tuple(row)
+                for row in conn.execute(
+                    """SELECT candidate_key,relation,strength,source_kind,
+                              source_ref,value_text,details_json,cache_key
+                       FROM media_identity_evidence
+                       WHERE scan_id=? AND analyzer_key=?
+                       ORDER BY id""",
+                    (self.fast_scan.scan_id, NORMAL_OCR_EVIDENCE_KEY),
+                ).fetchall()
+            ]
+
+        before_claimed = json.loads(before_scan["claimed_identity_json"])
+        self.assertTrue(before_evidence)
+        self.assertIn("normal_ocr", before_claimed)
+
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        second = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=FakeNormalSpeechEngine(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(second.completed_profile.value, "normal")
+        self.assertEqual(second.observation_count, 0)
+        self.assertEqual(second.speech_transcript_count, 8)
+        self.assertEqual(second.speech_reused_artifact_count, 8)
+
+        with self.database.connect() as conn:
+            after_scan = conn.execute(
+                """SELECT claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            after_evidence = [
+                tuple(row)
+                for row in conn.execute(
+                    """SELECT candidate_key,relation,strength,source_kind,
+                              source_ref,value_text,details_json,cache_key
+                       FROM media_identity_evidence
+                       WHERE scan_id=? AND analyzer_key=?
+                       ORDER BY id""",
+                    (self.fast_scan.scan_id, NORMAL_OCR_EVIDENCE_KEY),
+                ).fetchall()
+            ]
+
+        after_claimed = json.loads(after_scan["claimed_identity_json"])
+        self.assertEqual(after_evidence, before_evidence)
+        self.assertEqual(
+            after_claimed["normal_ocr"],
+            before_claimed["normal_ocr"],
+        )
+
     def test_second_normal_speech_run_reuses_persisted_fragments(self):
         class UnavailableOcr(FakeOcr):
             def available(self):
