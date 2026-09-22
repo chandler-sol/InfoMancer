@@ -9,7 +9,6 @@ from typing import Iterable
 
 from .media_identity.speech import (
     SpeechBinaryIdentity,
-    SpeechIdentityError,
     SpeechModelIdentity,
 )
 
@@ -103,7 +102,12 @@ class ManagedSpeechLayout:
     """Safe filesystem layout for separately managed speech binary/model assets."""
 
     def __init__(self, data_directory: Path) -> None:
-        self.data_directory = Path(data_directory)
+        try:
+            self.data_directory = Path(data_directory).resolve()
+        except OSError as exc:
+            raise ManagedSpeechComponentError(
+                "InfoMancer could not resolve its speech component data directory."
+            ) from exc
 
     @property
     def components_root(self) -> Path:
