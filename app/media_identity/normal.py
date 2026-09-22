@@ -440,14 +440,20 @@ class NormalPreviewOcrExecutor:
             if not frames:
                 continue
 
-            samples = tuple(
-                sample
-                for sample in select_staged_preview_frames(
-                    frames,
-                    limits=self.limits,
+            try:
+                samples = tuple(
+                    sample
+                    for sample in select_staged_preview_frames(
+                        frames,
+                        limits=self.limits,
+                    )
+                    if sample.stage <= max_stage
                 )
-                if sample.stage <= max_stage
-            )
+            except NormalIdentityError as exc:
+                failures.append(
+                    f"{source.source_key}:preview-normalize:{exc}"
+                )
+                continue
             result = self._run_source(
                 source,
                 samples,
