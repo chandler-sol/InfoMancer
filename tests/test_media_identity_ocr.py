@@ -36,9 +36,20 @@ class RapidOcrCpuEngineTests(unittest.TestCase):
             text_score=0.55,
             runner_factory=factory,
             package_version="3.9.2",
+            onnxruntime_version="1.30.0",
         )
         self.assertTrue(engine.available())
         self.assertEqual(engine.version, "1:3.9.2")
+        self.assertEqual(
+            engine.cache_identity(),
+            {
+                "backend": "onnxruntime-cpu",
+                "rapidocr_version": "3.9.2",
+                "onnxruntime_version": "1.30.0",
+                "text_score": 0.55,
+                "model_bundle": "rapidocr-default",
+            },
+        )
 
         result = engine.recognize(b"fake-jpeg-bytes")
 
@@ -75,6 +86,28 @@ class RapidOcrCpuEngineTests(unittest.TestCase):
         self.assertAlmostEqual(result.confidence, 0.8)
         self.assertEqual(result.details["backend"], "onnxruntime-cpu")
         self.assertEqual(result.details["line_count"], 2)
+
+    def test_cache_identity_changes_with_threshold_or_runtime(self) -> None:
+        baseline = RapidOcrCpuEngine(
+            text_score=0.5,
+            runner_factory=lambda **_kwargs: object(),
+            package_version="3.9.2",
+            onnxruntime_version="1.30.0",
+        ).cache_identity()
+        threshold = RapidOcrCpuEngine(
+            text_score=0.6,
+            runner_factory=lambda **_kwargs: object(),
+            package_version="3.9.2",
+            onnxruntime_version="1.30.0",
+        ).cache_identity()
+        runtime = RapidOcrCpuEngine(
+            text_score=0.5,
+            runner_factory=lambda **_kwargs: object(),
+            package_version="3.9.2",
+            onnxruntime_version="1.31.0",
+        ).cache_identity()
+        self.assertNotEqual(baseline, threshold)
+        self.assertNotEqual(baseline, runtime)
 
     def test_empty_ocr_output_is_valid_neutral_observation(self) -> None:
         class Runner:
