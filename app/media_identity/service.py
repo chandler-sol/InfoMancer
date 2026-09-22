@@ -499,13 +499,19 @@ class MediaIdentityDecisionService:
                     try:
                         payload_start = int(window_payload["start_ms"])
                         payload_end = int(window_payload["end_ms"])
+                        artifact_start = int(artifact_row["start_ms"])
+                        artifact_end = int(artifact_row["end_ms"])
                     except (KeyError, TypeError, ValueError):
                         return False, file_row
+                    artifact_source_signature = str(
+                        artifact_row["source_signature"] or ""
+                    )
                     if (
-                        payload_start != int(artifact_row["start_ms"])
-                        or payload_end != int(artifact_row["end_ms"])
+                        payload_start != artifact_start
+                        or payload_end != artifact_end
+                        or not artifact_source_signature
                         or str(audio_payload.get("source_signature") or "")
-                        != str(artifact_row["source_signature"] or "")
+                        != artifact_source_signature
                     ):
                         return False, file_row
 
