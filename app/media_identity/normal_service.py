@@ -497,7 +497,6 @@ class NormalIdentityService:
         payload = {
             "observations": [
                 {
-                    "artifact_id": int(item.artifact_id),
                     "cache_key": item.cache_key,
                     "source_signature": item.source_signature,
                     "start_ms": int(item.window.start_ms),
@@ -574,7 +573,7 @@ class NormalIdentityService:
             ]
             transcript_excerpt = "\n".join(
                 item.transcript.text.strip() for item in usable
-            )[:4000]
+            )[:1200]
             for candidate in candidates:
                 details = _json_object(candidate.get("details_json"))
                 overview = str(details.get("overview") or "").strip()
