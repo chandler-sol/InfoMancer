@@ -19,6 +19,7 @@ from .text import discover_sidecar_subtitles, sidecar_identity
 from .versions import (
     EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION,
     NORMAL_EVIDENCE_ALGORITHM_VERSION,
+    NORMAL_SPEECH_EVIDENCE_ALGORITHM_VERSION,
     NORMAL_SPEECH_ORCHESTRATION_VERSION,
 )
 
@@ -435,16 +436,60 @@ class MediaIdentityDecisionService:
                 return False, file_row
             if speech_version != NORMAL_SPEECH_ORCHESTRATION_VERSION:
                 return False, file_row
+            try:
+                speech_evidence_version = int(
+                    speech_metadata.get("evidence_algorithm_version") or 0
+                )
+            except (TypeError, ValueError):
+                return False, file_row
+            if (
+                speech_evidence_version
+                != NORMAL_SPEECH_EVIDENCE_ALGORITHM_VERSION
+            ):
+                return False, file_row
 
             try:
                 transcript_count = int(
                     speech_metadata.get("transcript_count") or 0
                 )
+                text_transcript_count = int(
+                    speech_metadata.get("text_transcript_count") or 0
+                )
             except (TypeError, ValueError):
                 return False, file_row
-            if transcript_count < 0:
+            if (
+                transcript_count < 0
+                or text_transcript_count < 0
+                or text_transcript_count > transcript_count
+            ):
                 return False, file_row
 
+            speech_escalated = bool(speech_metadata.get("escalated"))
+            speech_evidence_rows = [
+                item for item in evidence
+                if str(item.get("analyzer_key") or "") == "speech-synopsis"
+            ]
+            if (
+                (speech_escalated and not speech_evidence_rows)
+                or (not speech_escalated and speech_evidence_rows)
+                or (not speech_escalated and transcript_count)
+            ):
+                return False, file_row
+
+            expected_dialogue_group = f"subtitle-dialogue:{int(scan['file_id'])}"
+            for speech_row in speech_evidence_rows:
+                if (
+                    str(speech_row.get("analyzer_version") or "")
+                    != str(NORMAL_SPEECH_EVIDENCE_ALGORITHM_VERSION)
+                    or str(speech_row.get("evidence_category") or "") != "speech"
+                    or str(speech_row.get("correlation_group") or "")
+                    != expected_dialogue_group
+                    or str(speech_row.get("profile") or "") != "normal"
+                ):
+                    return False, file_row
+
+            artifact_rows = []
+            artifact_ids: list[int] = []
             if transcript_count:
                 raw_artifact_ids = speech_metadata.get("artifact_ids")
                 raw_cache_keys = speech_metadata.get("cache_keys")
@@ -473,7 +518,7 @@ class MediaIdentityDecisionService:
                     f"""SELECT id,file_id,artifact_type,analyzer_key,
                                analyzer_version,cache_key,status,profile,
                                source_signature,file_size_bytes,file_modified_at,
-                               start_ms,end_ms,payload_json
+                               start_ms,end_ms,text_value,payload_json
                         FROM media_identity_artifacts
                         WHERE id IN ({placeholders})""",
                     tuple(artifact_ids),
@@ -532,6 +577,49 @@ class MediaIdentityDecisionService:
                             artifact_row["file_modified_at"],
                             scan["file_modified_at"],
                         )
+                    ):
+                        return False, file_row
+
+            text_artifact_ids = {
+                int(row["id"])
+                for row in artifact_rows
+                if str(row["text_value"] or "").strip()
+            }
+            if len(text_artifact_ids) != text_transcript_count:
+                return False, file_row
+
+            if speech_escalated:
+                for speech_row in speech_evidence_rows:
+                    details = speech_row.get("details")
+                    if not isinstance(details, Mapping):
+                        return False, file_row
+                    correlated_with = details.get("correlated_with")
+                    if (
+                        not isinstance(correlated_with, list)
+                        or "subtitle-synopsis" not in {
+                            str(value) for value in correlated_with
+                        }
+                    ):
+                        return False, file_row
+                    if text_transcript_count:
+                        raw_ids = details.get("artifact_ids")
+                        if not isinstance(raw_ids, list):
+                            return False, file_row
+                        try:
+                            evidence_artifact_ids = {
+                                int(value) for value in raw_ids
+                            }
+                        except (TypeError, ValueError):
+                            return False, file_row
+                        if (
+                            evidence_artifact_ids != text_artifact_ids
+                            or not str(speech_row.get("cache_key") or "")
+                        ):
+                            return False, file_row
+                    elif (
+                        str(speech_row.get("relation") or "") != "neutral"
+                        or float(speech_row.get("strength") or 0.0) != 0.0
+                        or str(speech_row.get("cache_key") or "")
                     ):
                         return False, file_row
 
