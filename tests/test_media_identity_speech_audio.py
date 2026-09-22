@@ -512,6 +512,43 @@ class SpeechAudioExtractionTests(unittest.TestCase):
         ):
             extractor.source_signature(SpeechWindow(0, 1000))
 
+    def test_transient_artifact_cleanup_cannot_claim_arbitrary_directories(self) -> None:
+        identity = SpeechAudioIdentity(
+            "f" * 64,
+            100,
+            SPEECH_AUDIO_FORMAT_KEY,
+            SPEECH_AUDIO_SAMPLE_RATE_HZ,
+            SPEECH_AUDIO_CHANNELS,
+        )
+        window = SpeechWindow(0, 1000)
+        stream = SpeechAudioStream(index=0)
+
+        with self.assertRaisesRegex(
+            SpeechAudioUnavailable,
+            "owned temporary-directory",
+        ):
+            ExtractedSpeechAudio(
+                temporary_directory=str(self.root),
+                path=self.root / "audio.wav",
+                identity=identity,
+                window=window,
+                stream=stream,
+            )
+        self.assertTrue(self.root.exists())
+
+        with tempfile.TemporaryDirectory() as owned:
+            with self.assertRaisesRegex(
+                SpeechAudioUnavailable,
+                "leaves its owned",
+            ):
+                ExtractedSpeechAudio(
+                    temporary_directory=object.__new__(tempfile.TemporaryDirectory),
+                    path=self.root / "outside.wav",
+                    identity=identity,
+                    window=window,
+                    stream=stream,
+                )
+
     def test_final_audio_revalidation_can_bind_the_pending_request_identity(self) -> None:
         payload = wav_bytes(duration_ms=1000)
         with patch(
