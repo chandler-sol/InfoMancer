@@ -12,6 +12,7 @@ from .speech import (
     MAX_NORMAL_SPEECH_TOTAL_MS,
     MAX_NORMAL_SPEECH_WINDOWS,
     SpeechAudioIdentity,
+    SpeechBinaryIdentity,
     SpeechEngine,
     SpeechIdentityError,
     SpeechModelIdentity,
@@ -52,6 +53,20 @@ class NormalSpeechError(RuntimeError):
 
 class NormalSpeechStaleError(NormalSpeechError):
     """Raised when the media or scan snapshot changes during speech work."""
+
+
+@dataclass(frozen=True)
+class _SpeechEngineSnapshot:
+    key: str
+    version: str
+    binary: SpeechBinaryIdentity
+    identity: Mapping[str, Any]
+
+    def binary_identity(self) -> SpeechBinaryIdentity:
+        return self.binary
+
+    def cache_identity(self) -> Mapping[str, Any]:
+        return self.identity
 
 
 @dataclass(frozen=True)
@@ -240,6 +255,27 @@ class NormalSpeechService:
         self.translate = translate
         self.parameters = dict(parameters or {})
 
+    def _engine_snapshot(self) -> _SpeechEngineSnapshot:
+        binary = self.engine.binary_identity()
+        if not isinstance(binary, SpeechBinaryIdentity):
+            raise SpeechIdentityError(
+                "Speech engines require an exact binary identity."
+            )
+        raw_identity = self.engine.cache_identity()
+        if not isinstance(raw_identity, Mapping):
+            raise SpeechIdentityError(
+                "Speech engines require a deterministic cache identity."
+            )
+        # Canonical JSON round-tripping both validates the identity payload and
+        # detaches it from any mutable mapping owned by the live engine.
+        identity = json.loads(_canonical_json(dict(raw_identity)))
+        return _SpeechEngineSnapshot(
+            key=str(self.engine.key),
+            version=str(self.engine.version),
+            binary=binary,
+            identity=identity,
+        )
+
     def _require_fresh_scan(
         self,
         scan_id: int,
@@ -308,6 +344,7 @@ class NormalSpeechService:
         media: MediaIdentityFile,
         window: SpeechWindow,
         source_signature: str,
+        engine_snapshot: _SpeechEngineSnapshot,
     ) -> NormalSpeechObservation | None:
         with self.database.connect() as conn:
             rows = conn.execute(
@@ -364,7 +401,7 @@ class NormalSpeechService:
             try:
                 expected_cache_key = speech_transcript_cache_key(
                     request,
-                    self.engine,
+                    engine_snapshot,
                 )
             except (SpeechIdentityError, TypeError, ValueError):
                 continue
@@ -400,9 +437,10 @@ class NormalSpeechService:
         request: SpeechRequest,
         cache_key: str,
         transcript: SpeechTranscript,
+        engine_snapshot: _SpeechEngineSnapshot,
     ) -> NormalSpeechObservation:
         current_scan = self._require_fresh_scan(scan_id, baseline_scan)
-        binary_identity = self.engine.binary_identity()
+        binary_identity = engine_snapshot.binary
         payload = {
             "version": 1,
             "window": {
@@ -425,7 +463,7 @@ class NormalSpeechService:
                     "license_id": binary_identity.license_id,
                     "details": binary_identity.details_payload(),
                 },
-                "identity": dict(self.engine.cache_identity()),
+                "identity": dict(engine_snapshot.identity),
             },
             "model": {
                 **dict(self.model.cache_identity()),
@@ -595,6 +633,7 @@ class NormalSpeechService:
             self._require_fresh_scan(int(scan_id), scan)
             try:
                 source_signature = extractor.source_signature(window)
+                engine_snapshot = self._engine_snapshot()
             except SpeechAudioStaleError as exc:
                 raise NormalSpeechStaleError(str(exc)) from exc
             except (SpeechAudioError, SpeechIdentityError, OSError) as exc:
@@ -608,6 +647,7 @@ class NormalSpeechService:
                 media,
                 window,
                 source_signature,
+                engine_snapshot,
             )
             if cached is not None:
                 try:
@@ -640,7 +680,10 @@ class NormalSpeechService:
                     translate=self.translate,
                     parameters=self.parameters,
                 )
-                cache_key = speech_transcript_cache_key(request, self.engine)
+                cache_key = speech_transcript_cache_key(
+                    request,
+                    engine_snapshot,
+                )
 
                 # A concurrent or interrupted prior run may have completed the
                 # exact fragment after our source-level lookup but before this
@@ -651,6 +694,7 @@ class NormalSpeechService:
                     media,
                     window,
                     prepared.identity.source_signature,
+                    engine_snapshot,
                 )
                 if (
                     exact_cached is not None
@@ -677,6 +721,17 @@ class NormalSpeechService:
                     raise SpeechIdentityError(
                         "Speech engines must return SpeechTranscript values."
                     )
+                post_engine_snapshot = self._engine_snapshot()
+                if (
+                    speech_transcript_cache_key(
+                        request,
+                        post_engine_snapshot,
+                    )
+                    != cache_key
+                ):
+                    raise SpeechIdentityError(
+                        "Speech engine identity changed during transcription."
+                    )
                 self._require_fresh_scan(int(scan_id), scan)
                 observation = self._persist_observation(
                     int(scan_id),
@@ -687,6 +742,7 @@ class NormalSpeechService:
                     request,
                     cache_key,
                     transcript,
+                    post_engine_snapshot,
                 )
                 budget_records.append((window, request.audio))
                 observations.append(observation)
