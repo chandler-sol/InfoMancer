@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from io import BytesIO
 import hashlib
 import os
 from pathlib import Path
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -10,6 +12,12 @@ from unittest.mock import patch
 from app.managed_speech import (
     ManagedSpeechComponentError,
     ManagedSpeechLayout,
+    ManagedWhisperCppRuntime,
+    ManagedWhisperModel,
+    WHISPERCPP_ASSETS,
+    WHISPER_MODELS,
+    _download_pinned,
+    _extract_runtime_archive,
 )
 from app.media_identity.speech import (
     SpeechBinaryIdentity,
@@ -265,6 +273,238 @@ class ManagedSpeechLayoutTests(unittest.TestCase):
             self.layout.ensure_directories(
                 [self.layout.model_directory(identity)]
             )
+
+
+class ManagedSpeechComponentTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.data = Path(self.temporary.name)
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    @staticmethod
+    def runtime_archive(
+        *,
+        cli: bytes = b"fixture-whisper-cli",
+        companion: bytes = b"fixture-lib",
+    ) -> bytes:
+        output = BytesIO()
+        with tarfile.open(fileobj=output, mode="w:gz") as archive:
+            for name, payload in (
+                ("bin/whisper-cli", cli),
+                ("bin/libwhisper.so", companion),
+            ):
+                info = tarfile.TarInfo(name)
+                info.size = len(payload)
+                info.mode = 0o755 if name.endswith("whisper-cli") else 0o644
+                archive.addfile(info, BytesIO(payload))
+        return output.getvalue()
+
+    def test_runtime_install_is_content_addressed_and_companion_tamper_fails_closed(
+        self,
+    ) -> None:
+        archive = self.runtime_archive()
+        asset = {
+            "filename": "fixture.tar.gz",
+            "format": "tar.gz",
+            "size_bytes": len(archive),
+            "sha256": hashlib.sha256(archive).hexdigest(),
+        }
+        runtime = ManagedWhisperCppRuntime(self.data)
+
+        with (
+            patch(
+                "app.managed_speech.whispercpp_platform_key",
+                return_value=("linux", "x86_64"),
+            ),
+            patch.dict(
+                WHISPERCPP_ASSETS,
+                {("linux", "x86_64"): asset},
+                clear=False,
+            ),
+            patch(
+                "app.managed_speech._download_pinned",
+                return_value=archive,
+            ),
+            patch(
+                "app.managed_speech._verify_whisper_cli",
+                return_value="whisper.cpp 1.9.4",
+            ),
+        ):
+            path, identity = runtime.install()
+            self.assertTrue(path.is_file())
+            self.assertEqual(path.name, "whisper-cli")
+            self.assertEqual(path.parents[2].name, identity.sha256)
+            self.assertEqual(identity.version, "1.9.4")
+            self.assertEqual(
+                runtime.resolve()[1].sha256,
+                identity.sha256,
+            )
+
+            companion = path.parent / "libwhisper.so"
+            self.assertTrue(companion.is_file())
+            companion.write_bytes(b"tampered-lib")
+            self.assertIsNone(runtime._managed_candidate())
+
+    def test_runtime_archive_rejects_path_traversal_before_writing(self) -> None:
+        output = BytesIO()
+        with tarfile.open(fileobj=output, mode="w:gz") as archive:
+            payload = b"escape"
+            info = tarfile.TarInfo("../escape")
+            info.size = len(payload)
+            archive.addfile(info, BytesIO(payload))
+
+        destination = self.data / "runtime"
+        destination.mkdir()
+        with self.assertRaisesRegex(
+            ManagedSpeechComponentError,
+            "unsupported path",
+        ):
+            _extract_runtime_archive(
+                output.getvalue(),
+                "tar.gz",
+                destination,
+            )
+        self.assertFalse((self.data / "escape").exists())
+
+    def test_runtime_status_does_not_offer_managed_install_without_pinned_asset(
+        self,
+    ) -> None:
+        runtime = ManagedWhisperCppRuntime(self.data)
+        with (
+            patch.object(runtime, "_override", return_value=""),
+            patch.object(runtime, "_managed_candidate", return_value=None),
+            patch.object(runtime, "_system_candidate", return_value=""),
+            patch(
+                "app.managed_speech.whispercpp_platform_key",
+                return_value=("darwin", "arm64"),
+            ),
+        ):
+            status = runtime.status()
+        self.assertEqual(status.state, "unsupported")
+        self.assertFalse(status.can_install)
+        self.assertIn("custom or system", status.detail)
+
+    def test_model_install_is_separate_exact_and_tamper_detected(self) -> None:
+        payload = b"fixture-model-payload"
+        entry = {
+            "filename": "fixture.bin",
+            "size_bytes": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "multilingual": True,
+            "language_scope": "multilingual",
+            "original_model": "fixture/original",
+            "quantization": "q5_1",
+        }
+        with (
+            patch.dict(
+                WHISPER_MODELS,
+                {"fixture": entry},
+                clear=False,
+            ),
+            patch(
+                "app.managed_speech._download_pinned",
+                return_value=payload,
+            ),
+        ):
+            model = ManagedWhisperModel(self.data, "fixture")
+            path, identity = model.install()
+            self.assertEqual(path.read_bytes(), payload)
+            self.assertIn("whisper-models", path.parts)
+            self.assertNotIn("whispercpp", path.parts)
+            self.assertEqual(model.resolve()[1], identity)
+
+            path.write_bytes(b"x" * len(payload))
+            self.assertFalse(model.status().available)
+            with self.assertRaisesRegex(
+                ManagedSpeechComponentError,
+                "integrity",
+            ):
+                model.resolve()
+
+    def test_model_and_runtime_downloads_are_separately_bounded(self) -> None:
+        class Response:
+            def __init__(self, payload: bytes, final_url: str) -> None:
+                self.payload = payload
+                self.final_url = final_url
+                self.headers = {"Content-Length": str(len(payload))}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def geturl(self):
+                return self.final_url
+
+            def read(self, _limit):
+                return self.payload
+
+        payload = b"model"
+        digest = hashlib.sha256(payload).hexdigest()
+        with patch(
+            "app.managed_speech.urllib.request.urlopen",
+            return_value=Response(
+                payload,
+                "https://cas-bridge.xethub.hf.co/model",
+            ),
+        ):
+            self.assertEqual(
+                _download_pinned(
+                    "https://huggingface.co/example/model",
+                    expected_size=len(payload),
+                    expected_sha256=digest,
+                    maximum_bytes=100,
+                    kind="model",
+                ),
+                payload,
+            )
+
+        with patch(
+            "app.managed_speech.urllib.request.urlopen",
+            return_value=Response(
+                payload,
+                "https://evil.example/model",
+            ),
+        ):
+            with self.assertRaisesRegex(
+                ManagedSpeechComponentError,
+                "redirected",
+            ):
+                _download_pinned(
+                    "https://huggingface.co/example/model",
+                    expected_size=len(payload),
+                    expected_sha256=digest,
+                    maximum_bytes=100,
+                    kind="model",
+                )
+
+    def test_remove_never_claims_unmanaged_sibling_data(self) -> None:
+        payload = b"fixture-model"
+        entry = {
+            "filename": "fixture.bin",
+            "size_bytes": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "multilingual": True,
+            "language_scope": "multilingual",
+            "original_model": "fixture/original",
+            "quantization": "q5_1",
+        }
+        sibling = self.data / "keep-me"
+        sibling.write_text("safe", encoding="utf-8")
+        with (
+            patch.dict(WHISPER_MODELS, {"fixture": entry}, clear=False),
+            patch(
+                "app.managed_speech._download_pinned",
+                return_value=payload,
+            ),
+        ):
+            model = ManagedWhisperModel(self.data, "fixture")
+            model.install()
+            model.remove()
+        self.assertEqual(sibling.read_text(encoding="utf-8"), "safe")
 
 
 if __name__ == "__main__":
