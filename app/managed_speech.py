@@ -532,6 +532,11 @@ def _sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _sha256_file(path: Path) -> str:
+    with path.open("rb") as stream:
+        return _sha256_stream(stream)
+
+
 def _allowed_download_host(hostname: str | None, kind: str) -> bool:
     host = (hostname or "").casefold()
     if kind == "runtime":
@@ -1513,10 +1518,7 @@ class ManagedWhisperModel:
             path.write_bytes(payload)
             if (
                 path.stat().st_size != self.identity.size_bytes
-                or (
-                    (lambda stream: _sha256_stream(stream))(path.open("rb"))
-                    != self.identity.sha256
-                )
+                or _sha256_file(path) != self.identity.sha256
             ):
                 raise ManagedSpeechComponentError(
                     "The staged Whisper model failed integrity verification."
