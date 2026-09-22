@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
+from io import BytesIO
+import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import platform
 import re
+import shutil
 import stat as stat_module
-from typing import BinaryIO, Iterable
+import subprocess
+import tarfile
+import tempfile
+import threading
+from typing import BinaryIO, Iterable, Mapping
+import urllib.error
+import urllib.request
+from urllib.parse import urlparse
+import zipfile
 
 from .media_identity.speech import (
     SpeechBinaryIdentity,
@@ -14,6 +27,28 @@ from .media_identity.speech import (
 
 
 _COMPONENT_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
+
+_ARCHIVE_SEGMENT = re.compile(r"^[^\\/:*?\"<>|]+$")
+
+
+def _safe_relative_path(value: str, label: str) -> Path:
+    if not isinstance(value, str):
+        raise ManagedSpeechComponentError(f"{label} must be text.")
+    normalized = value.strip().replace("\\", "/")
+    candidate = PurePosixPath(normalized)
+    if (
+        not normalized
+        or candidate.is_absolute()
+        or any(
+            part in {"", ".", ".."}
+            or not _ARCHIVE_SEGMENT.fullmatch(part)
+            for part in candidate.parts
+        )
+    ):
+        raise ManagedSpeechComponentError(
+            f"{label} contains unsupported path characters."
+        )
+    return Path(*candidate.parts)
 
 
 class ManagedSpeechComponentError(RuntimeError):
@@ -79,12 +114,13 @@ def _path_is_safe(root: Path, path: Path) -> bool:
     return True
 
 
-def _stat_signature(value: os.stat_result) -> tuple[int, int, int, int, int, int]:
+def _stat_signature(value: os.stat_result) -> tuple[int, int, int, int, int]:
+    # Windows ctime semantics are not stable across path stat and descriptor
+    # fstat calls. Content integrity is protected by exact size/hash checks.
     return (
         stat_module.S_IFMT(value.st_mode),
         int(value.st_size),
         int(getattr(value, "st_mtime_ns", int(value.st_mtime * 1_000_000_000))),
-        int(getattr(value, "st_ctime_ns", int(value.st_ctime * 1_000_000_000))),
         int(getattr(value, "st_dev", 0)),
         int(getattr(value, "st_ino", 0)),
     )
@@ -238,16 +274,20 @@ class ManagedSpeechLayout:
         identity: SpeechBinaryIdentity,
         filename: str,
     ) -> Path:
-        name = _safe_segment(filename, "Speech binary filename")
-        return self.binary_directory(identity) / name
+        return self.binary_directory(identity) / _safe_relative_path(
+            filename,
+            "Speech binary filename",
+        )
 
     def model_path(
         self,
         identity: SpeechModelIdentity,
         filename: str,
     ) -> Path:
-        name = _safe_segment(filename, "Speech model filename")
-        return self.model_directory(identity) / name
+        return self.model_directory(identity) / _safe_relative_path(
+            filename,
+            "Speech model filename",
+        )
 
     def binary_candidate(
         self,
