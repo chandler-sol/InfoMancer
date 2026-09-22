@@ -15,6 +15,17 @@ from .models import (
     MediaIdentityFile,
 )
 
+from .speech import (
+    SpeechBinaryIdentity,
+    SpeechEngine,
+    SpeechIdentityError,
+    SpeechModelIdentity,
+    SpeechRequest,
+    SpeechTranscript,
+    SpeechWindow,
+    speech_transcript_cache_key,
+)
+
 __all__ = [
     "AnalyzerContext",
     "AnalyzerResult",
@@ -37,14 +48,3 @@ __all__ = [
     "SpeechWindow",
     "speech_transcript_cache_key",
 ]
-
-from .speech import (
-    SpeechBinaryIdentity,
-    SpeechEngine,
-    SpeechIdentityError,
-    SpeechModelIdentity,
-    SpeechRequest,
-    SpeechTranscript,
-    SpeechWindow,
-    speech_transcript_cache_key,
-)
