@@ -24,7 +24,7 @@ from .media_identity.speech import (
 )
 
 
-WHISPERCPP_ENGINE_CACHE_VERSION = 1
+WHISPERCPP_ENGINE_CACHE_VERSION = 2
 DEFAULT_WHISPERCPP_THREADS = 4
 DEFAULT_WHISPERCPP_TIMEOUT_SECONDS = 180
 MAX_WHISPERCPP_TIMEOUT_SECONDS = 300
@@ -34,27 +34,60 @@ MAX_WHISPERCPP_STDERR_BYTES = 256 * 1024
 MAX_WHISPERCPP_AUDIO_BYTES = 3 * 1024 * 1024
 
 _LANGUAGE_ALIASES = {
-    "eng": "en",
     "english": "en",
-    "jpn": "ja",
     "japanese": "ja",
-    "spa": "es",
     "spanish": "es",
-    "fra": "fr",
-    "fre": "fr",
     "french": "fr",
-    "deu": "de",
-    "ger": "de",
     "german": "de",
-    "ita": "it",
     "italian": "it",
-    "por": "pt",
     "portuguese": "pt",
-    "zho": "zh",
-    "chi": "zh",
     "chinese": "zh",
-    "kor": "ko",
     "korean": "ko",
+    "mandarin": "zh",
+    "cantonese": "yue",
+}
+
+# OpenAI Whisper language IDs. Most are ISO 639-1; Hawaiian and Cantonese
+# use Whisper's three-letter IDs, while Javanese uses Whisper's historical
+# "jw" ID. ISO 639-2/T and bibliographic aliases are normalized below.
+_WHISPER_LANGUAGE_CODES = frozenset({
+    "en", "zh", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr", "pl",
+    "ca", "nl", "ar", "sv", "it", "id", "hi", "fi", "vi", "he", "uk",
+    "el", "ms", "cs", "ro", "da", "hu", "ta", "no", "th", "ur", "hr",
+    "bg", "lt", "la", "mi", "ml", "cy", "sk", "te", "fa", "lv", "bn",
+    "sr", "az", "sl", "kn", "et", "mk", "br", "eu", "is", "hy", "ne",
+    "mn", "bs", "kk", "sq", "sw", "gl", "mr", "pa", "si", "km", "sn",
+    "yo", "so", "af", "oc", "ka", "be", "tg", "sd", "gu", "am", "yi",
+    "lo", "uz", "fo", "ht", "ps", "tk", "nn", "mt", "sa", "lb", "my",
+    "bo", "tl", "mg", "as", "tt", "haw", "ln", "ha", "ba", "jw", "su",
+    "yue",
+})
+
+_ISO_LANGUAGE_ALIASES = {
+    "afr": "af", "alb": "sq", "amh": "am", "ara": "ar", "arm": "hy",
+    "asm": "as", "aze": "az", "bak": "ba", "baq": "eu", "bel": "be",
+    "ben": "bn", "bod": "bo", "bos": "bs", "bre": "br", "bul": "bg",
+    "bur": "my", "cat": "ca", "ces": "cs", "chi": "zh", "cym": "cy",
+    "cze": "cs", "dan": "da", "deu": "de", "dut": "nl", "ell": "el",
+    "eng": "en", "est": "et", "eus": "eu", "fao": "fo", "fas": "fa",
+    "fin": "fi", "fra": "fr", "fre": "fr", "geo": "ka", "ger": "de",
+    "glg": "gl", "gre": "el", "guj": "gu", "hat": "ht", "hau": "ha",
+    "heb": "he", "hin": "hi", "hrv": "hr", "hun": "hu", "hye": "hy",
+    "ice": "is", "ind": "id", "isl": "is", "ita": "it", "jav": "jw",
+    "jpn": "ja", "jv": "jw", "kan": "kn", "kat": "ka", "kaz": "kk",
+    "khm": "km", "kor": "ko", "lao": "lo", "lat": "la", "lav": "lv",
+    "lin": "ln", "lit": "lt", "ltz": "lb", "mac": "mk", "mal": "ml",
+    "mao": "mi", "mar": "mr", "may": "ms", "mkd": "mk", "mlg": "mg",
+    "mlt": "mt", "mon": "mn", "mri": "mi", "msa": "ms", "mya": "my",
+    "nep": "ne", "nld": "nl", "nno": "nn", "nor": "no", "oci": "oc",
+    "pan": "pa", "per": "fa", "pol": "pl", "por": "pt", "pus": "ps",
+    "ron": "ro", "rum": "ro", "rus": "ru", "san": "sa", "sin": "si",
+    "slk": "sk", "slo": "sk", "slv": "sl", "sna": "sn", "snd": "sd",
+    "som": "so", "spa": "es", "sqi": "sq", "srp": "sr", "sun": "su",
+    "swa": "sw", "swe": "sv", "tam": "ta", "tat": "tt", "tel": "te",
+    "tgk": "tg", "tgl": "tl", "tha": "th", "tib": "bo", "tuk": "tk",
+    "tur": "tr", "ukr": "uk", "und": "auto", "urd": "ur", "uzb": "uz",
+    "vie": "vi", "wel": "cy", "yid": "yi", "yor": "yo", "zho": "zh",
 }
 
 
@@ -306,6 +339,19 @@ def _normalize_language(value: str, multilingual: bool) -> str:
     if not normalized:
         return "auto" if multilingual else "en"
     normalized = _LANGUAGE_ALIASES.get(normalized, normalized)
+    normalized = _ISO_LANGUAGE_ALIASES.get(normalized, normalized)
+    if normalized == "auto":
+        if multilingual:
+            return "auto"
+        raise WhisperCppSpeechError(
+            "The selected English-only Whisper model cannot transcribe another language."
+        )
+    if normalized not in _WHISPER_LANGUAGE_CODES:
+        if multilingual:
+            return "auto"
+        raise WhisperCppSpeechError(
+            "The selected English-only Whisper model cannot transcribe another language."
+        )
     if not multilingual and normalized != "en":
         raise WhisperCppSpeechError(
             "The selected English-only Whisper model cannot transcribe another language."
@@ -473,6 +519,10 @@ class WhisperCppSpeechEngine:
             )
 
         text = stdout.decode("utf-8", errors="replace").strip()
+        if not text and stderr.strip():
+            raise WhisperCppSpeechError(
+                "Local whisper.cpp reported an error without producing a transcript."
+            )
         transcript_language = (
             "en"
             if not multilingual
