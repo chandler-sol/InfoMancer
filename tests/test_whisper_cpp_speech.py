@@ -4,6 +4,7 @@ import hashlib
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -20,6 +21,8 @@ from app.media_identity.speech import (
 from app.whisper_cpp_speech import (
     WhisperCppSpeechEngine,
     WhisperCppSpeechError,
+    _WhisperOutputLimitError,
+    _run_bounded_process,
 )
 
 
@@ -132,7 +135,7 @@ class WhisperCppSpeechEngineTests(unittest.TestCase):
             stderr=b"",
         )
         with patch(
-            "app.whisper_cpp_speech.subprocess.run",
+            "app.whisper_cpp_speech._run_bounded_process",
             return_value=completed,
         ) as run:
             transcript = engine.transcribe(
@@ -147,7 +150,7 @@ class WhisperCppSpeechEngineTests(unittest.TestCase):
         self.assertEqual(command[command.index("--threads") + 1], "3")
         self.assertEqual(command[command.index("--language") + 1], "en")
         self.assertEqual(
-            run.call_args.kwargs["timeout"],
+            run.call_args.kwargs["timeout_seconds"],
             42,
         )
         self.assertEqual(transcript.text, "hello there")
@@ -173,7 +176,7 @@ class WhisperCppSpeechEngineTests(unittest.TestCase):
     def test_exact_audio_is_rehashed_immediately_before_launch(self) -> None:
         engine = WhisperCppSpeechEngine(self.runtime, self.model)
         self.audio.write_bytes(b"X" * self.audio_identity.size_bytes)
-        with patch("app.whisper_cpp_speech.subprocess.run") as run:
+        with patch("app.whisper_cpp_speech._run_bounded_process") as run:
             with self.assertRaisesRegex(
                 WhisperCppSpeechError,
                 "bytes no longer match",
@@ -189,7 +192,7 @@ class WhisperCppSpeechEngineTests(unittest.TestCase):
             sha256="c" * 64,
             size_bytes=1,
         )
-        with patch("app.whisper_cpp_speech.subprocess.run") as run:
+        with patch("app.whisper_cpp_speech._run_bounded_process") as run:
             with self.assertRaisesRegex(
                 WhisperCppSpeechError,
                 "does not match",
@@ -233,7 +236,7 @@ class WhisperCppSpeechEngineTests(unittest.TestCase):
             stderr=b"",
         )
         with patch(
-            "app.whisper_cpp_speech.subprocess.run",
+            "app.whisper_cpp_speech._run_bounded_process",
             return_value=completed,
         ) as run:
             transcript = engine.transcribe(
@@ -259,14 +262,14 @@ class WhisperCppSpeechEngineTests(unittest.TestCase):
     def test_timeout_and_nonzero_exit_are_optional_speech_failures(self) -> None:
         engine = WhisperCppSpeechEngine(self.runtime, self.model)
         with patch(
-            "app.whisper_cpp_speech.subprocess.run",
+            "app.whisper_cpp_speech._run_bounded_process",
             side_effect=subprocess.TimeoutExpired(["whisper-cli"], 180),
         ):
             with self.assertRaisesRegex(WhisperCppSpeechError, "timed out"):
                 engine.transcribe(str(self.audio), self.request())
 
         with patch(
-            "app.whisper_cpp_speech.subprocess.run",
+            "app.whisper_cpp_speech._run_bounded_process",
             return_value=subprocess.CompletedProcess(
                 args=[],
                 returncode=2,
@@ -279,6 +282,22 @@ class WhisperCppSpeechEngineTests(unittest.TestCase):
                 "could not transcribe",
             ):
                 engine.transcribe(str(self.audio), self.request())
+
+    def test_process_runner_caps_output_before_returning_it(self) -> None:
+        with self.assertRaises(_WhisperOutputLimitError) as caught:
+            _run_bounded_process(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; sys.stdout.buffer.write(b'x' * 4096)",
+                ],
+                cwd=str(self.root),
+                env=os.environ,
+                timeout_seconds=10,
+                stdout_limit=1024,
+                stderr_limit=1024,
+            )
+        self.assertEqual(caught.exception.stream_name, "stdout")
 
     def test_thread_and_timeout_contracts_are_strict(self) -> None:
         for invalid in (0, -1, 1.5, True, 33):
