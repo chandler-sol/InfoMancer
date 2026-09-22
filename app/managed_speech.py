@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import re
 import stat as stat_module
-from typing import Iterable
+from typing import BinaryIO, Iterable
 
 from .media_identity.speech import (
     SpeechBinaryIdentity,
@@ -53,7 +53,7 @@ def _path_is_safe(root: Path, path: Path) -> bool:
     current = path
     while True:
         try:
-            if current.exists() and current.is_symlink():
+            if current.is_symlink():
                 return False
         except OSError:
             return False
@@ -65,36 +65,107 @@ def _path_is_safe(root: Path, path: Path) -> bool:
     return True
 
 
+def _stat_signature(value: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        stat_module.S_IFMT(value.st_mode),
+        int(value.st_size),
+        int(getattr(value, "st_mtime_ns", int(value.st_mtime * 1_000_000_000))),
+        int(getattr(value, "st_ctime_ns", int(value.st_ctime * 1_000_000_000))),
+        int(getattr(value, "st_dev", 0)),
+        int(getattr(value, "st_ino", 0)),
+    )
+
+
+def _same_file_snapshot(
+    first: os.stat_result,
+    second: os.stat_result,
+) -> bool:
+    return _stat_signature(first) == _stat_signature(second)
+
+
+def _sha256_stream(stream: BinaryIO) -> str:
+    hasher = hashlib.sha256()
+    while True:
+        chunk = stream.read(1024 * 1024)
+        if not chunk:
+            break
+        hasher.update(chunk)
+    return hasher.hexdigest()
+
+
 def _verified_file(
     root: Path,
     path: Path,
     expected_sha256: str,
+    expected_size: int,
     *,
     require_executable: bool,
 ) -> Path | None:
     if not _path_is_safe(root, path):
         return None
+
     try:
-        stat = path.stat()
+        initial = path.lstat()
     except OSError:
         return None
-    if not stat_module.S_ISREG(stat.st_mode) or path.is_symlink():
+    if (
+        stat_module.S_ISLNK(initial.st_mode)
+        or not stat_module.S_ISREG(initial.st_mode)
+        or initial.st_size != expected_size
+    ):
         return None
     if require_executable and os.name != "nt" and not os.access(path, os.X_OK):
         return None
 
-    hasher = hashlib.sha256()
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+
+    descriptor: int | None = None
     try:
-        with path.open("rb") as stream:
-            while True:
-                chunk = stream.read(1024 * 1024)
-                if not chunk:
-                    break
-                hasher.update(chunk)
+        descriptor = os.open(path, flags)
+        opened = os.fstat(descriptor)
+        if (
+            not stat_module.S_ISREG(opened.st_mode)
+            or opened.st_size != expected_size
+            or not _same_file_snapshot(initial, opened)
+        ):
+            return None
+
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            digest = _sha256_stream(stream)
+
+        after_hash = os.fstat(descriptor)
+        if not _same_file_snapshot(opened, after_hash):
+            return None
     except OSError:
         return None
-    if hasher.hexdigest() != expected_sha256.strip().casefold():
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+    if digest != expected_sha256.strip().casefold():
         return None
+
+    try:
+        final = path.lstat()
+    except OSError:
+        return None
+    if (
+        stat_module.S_ISLNK(final.st_mode)
+        or not stat_module.S_ISREG(final.st_mode)
+        or final.st_size != expected_size
+        or not _same_file_snapshot(after_hash, final)
+        or not _path_is_safe(root, path)
+    ):
+        return None
+    if require_executable and os.name != "nt" and not os.access(path, os.X_OK):
+        return None
+
     return path
 
 
@@ -129,7 +200,7 @@ class ManagedSpeechLayout:
     def model_directory(self, identity: SpeechModelIdentity) -> Path:
         key = _safe_segment(identity.key, "Speech model key")
         digest = _safe_segment(
-            identity.sha256.strip().casefold(),
+            identity.sha256,
             "Speech model hash",
         )
         return self.model_root / key / digest
@@ -160,6 +231,7 @@ class ManagedSpeechLayout:
             root,
             self.binary_path(identity, filename),
             identity.sha256,
+            identity.size_bytes,
             require_executable=True,
         )
 
@@ -173,6 +245,7 @@ class ManagedSpeechLayout:
             root,
             self.model_path(identity, filename),
             identity.sha256,
+            identity.size_bytes,
             require_executable=False,
         )
 
@@ -194,12 +267,30 @@ class ManagedSpeechLayout:
                 raise ManagedSpeechComponentError(
                     "Managed speech component path leaves the InfoMancer data directory."
                 ) from exc
+
             for part in relative.parts:
                 current = current / part
-                if current.exists():
-                    if current.is_symlink() or not current.is_dir():
+                try:
+                    if current.is_symlink():
                         raise ManagedSpeechComponentError(
                             "Managed speech component path is not a normal directory tree."
                         )
-                    continue
-                current.mkdir()
+                    if current.exists():
+                        if not current.is_dir():
+                            raise ManagedSpeechComponentError(
+                                "Managed speech component path is not a normal directory tree."
+                            )
+                        continue
+                    try:
+                        current.mkdir()
+                    except FileExistsError:
+                        if current.is_symlink() or not current.is_dir():
+                            raise ManagedSpeechComponentError(
+                                "Managed speech component path is not a normal directory tree."
+                            )
+                except ManagedSpeechComponentError:
+                    raise
+                except OSError as exc:
+                    raise ManagedSpeechComponentError(
+                        "InfoMancer could not create its managed speech component directories."
+                    ) from exc
