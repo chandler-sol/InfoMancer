@@ -153,6 +153,8 @@ class WhisperCppSpeechEngineTests(unittest.TestCase):
         self.assertEqual(transcript.text, "hello there")
         self.assertEqual(transcript.language, "en")
         self.assertTrue(transcript.details["cpu_only"])
+        self.assertEqual(transcript.details["engine_version"], "adapter-1")
+        self.assertEqual(transcript.details["runtime_version"], "1.9.4")
         self.assertEqual(
             transcript.details["runtime_tree_sha256"],
             "a" * 64,
