@@ -345,13 +345,13 @@ class ManagedFfmpegComponent:
             raise ManagedFfmpegError(
                 "A higher-priority FFmpeg configuration is already active."
             )
+        existing = managed_ffmpeg_candidate(self.data_directory)
+        if existing is not None:
+            return existing
         if shutil.which("ffmpeg"):
             raise ManagedFfmpegError(
                 "System FFmpeg is already available, so a managed copy is not needed."
             )
-        existing = managed_ffmpeg_candidate(self.data_directory)
-        if existing is not None:
-            return existing
 
         key = ffmpeg_platform_key()
         asset = FFMPEG_ASSETS.get(key)
