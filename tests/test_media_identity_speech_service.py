@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -360,6 +361,43 @@ class NormalSpeechServiceTests(unittest.TestCase):
                    WHERE file_id=1 AND artifact_type='speech_transcript'"""
             ).fetchone()["count"]
         self.assertEqual(int(after), 3)
+
+    def test_catalog_path_rebinding_is_rejected_even_with_same_stat_snapshot(self):
+        original_stat = self.media_path.stat()
+        replacement = self.media_root / "Replacement - S01E01.mkv"
+        replacement.write_bytes(self.media_path.read_bytes())
+        os.utime(
+            replacement,
+            ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+        )
+        self.assertEqual(replacement.stat().st_size, original_stat.st_size)
+        self.assertEqual(replacement.stat().st_mtime, original_stat.st_mtime)
+
+        with self.database.connect() as conn:
+            conn.execute(
+                "UPDATE files SET path=?,filename=? WHERE id=1",
+                (str(replacement), replacement.name),
+            )
+
+        with self.assertRaisesRegex(
+            NormalSpeechStaleError,
+            "cataloged media binding changed",
+        ):
+            self._service(FakeSpeechEngine()).run(
+                1,
+                self.scan,
+                self.media,
+                10,
+                self.streams,
+            )
+
+        with self.database.connect() as conn:
+            count = conn.execute(
+                """SELECT COUNT(*) AS count
+                   FROM media_identity_artifacts
+                   WHERE file_id=1 AND artifact_type='speech_transcript'"""
+            ).fetchone()["count"]
+        self.assertEqual(int(count), 0)
 
     def test_file_change_after_transcription_blocks_persistence(self):
         def mutate():
