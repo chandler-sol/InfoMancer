@@ -1177,6 +1177,117 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertEqual(result.speech_transcript_count, 0)
         self.assertEqual(speech_engine.calls, 0)
 
+    def test_close_neutral_subtitle_runner_up_still_escalates_to_speech(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        with self.database.connect() as conn:
+            candidates = conn.execute(
+                """SELECT candidate_key FROM media_identity_candidates
+                   WHERE scan_id=? ORDER BY rank,candidate_key LIMIT 2""",
+                (self.fast_scan.scan_id,),
+            ).fetchall()
+            self.assertEqual(len(candidates), 2)
+            rows = [
+                (
+                    self.fast_scan.scan_id,
+                    candidates[0]["candidate_key"],
+                    "supports",
+                    0.35,
+                    json.dumps({"similarity": 0.35}),
+                ),
+                (
+                    self.fast_scan.scan_id,
+                    candidates[1]["candidate_key"],
+                    "neutral",
+                    0.0,
+                    json.dumps({"similarity": 0.29}),
+                ),
+            ]
+            conn.executemany(
+                """INSERT INTO media_identity_evidence(
+                     scan_id,candidate_key,analyzer_key,analyzer_version,
+                     evidence_category,correlation_group,relation,strength,
+                     source_kind,source_ref,value_text,details_json,cache_key,profile
+                   ) VALUES (
+                     ?,?,'subtitle-synopsis','1','subtitle_text',
+                     'subtitle-dialogue:1',?,?, 'sidecar_subtitle',
+                     'fixture.srt','fixture',?,'','fast'
+                   )""",
+                rows,
+            )
+
+        FakeNormalSpeechExtractor.instances.clear()
+        speech_engine = FakeNormalSpeechEngine()
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=speech_engine,
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertTrue(result.speech_escalated)
+        self.assertEqual(result.speech_transcript_count, 8)
+        self.assertEqual(speech_engine.calls, 8)
+
+    def test_raw_subtitle_similarity_can_skip_speech_when_separation_is_clear(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        with self.database.connect() as conn:
+            candidates = conn.execute(
+                """SELECT candidate_key FROM media_identity_candidates
+                   WHERE scan_id=? ORDER BY rank,candidate_key LIMIT 2""",
+                (self.fast_scan.scan_id,),
+            ).fetchall()
+            self.assertEqual(len(candidates), 2)
+            rows = [
+                (
+                    self.fast_scan.scan_id,
+                    candidates[0]["candidate_key"],
+                    "supports",
+                    0.55,
+                    json.dumps({"similarity": 0.55}),
+                ),
+                (
+                    self.fast_scan.scan_id,
+                    candidates[1]["candidate_key"],
+                    "neutral",
+                    0.0,
+                    json.dumps({"similarity": 0.20}),
+                ),
+            ]
+            conn.executemany(
+                """INSERT INTO media_identity_evidence(
+                     scan_id,candidate_key,analyzer_key,analyzer_version,
+                     evidence_category,correlation_group,relation,strength,
+                     source_kind,source_ref,value_text,details_json,cache_key,profile
+                   ) VALUES (
+                     ?,?,'subtitle-synopsis','1','subtitle_text',
+                     'subtitle-dialogue:1',?,?, 'sidecar_subtitle',
+                     'fixture.srt','fixture',?,'','fast'
+                   )""",
+                rows,
+            )
+
+        speech_engine = FakeNormalSpeechEngine()
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=speech_engine,
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertFalse(result.speech_escalated)
+        self.assertEqual(result.speech_transcript_count, 0)
+        self.assertEqual(speech_engine.calls, 0)
+
     def test_file_change_during_ocr_prevents_artifact_or_evidence_commit(self):
         def mutate_file():
             self.media_path.write_bytes(self.media_path.read_bytes() + b"changed")
