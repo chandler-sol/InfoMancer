@@ -149,6 +149,39 @@ class SpeechAudioExtractionTests(unittest.TestCase):
         self.assertEqual(default.index, 3)
         self.assertTrue(default.default)
 
+    def test_stream_selection_normalizes_common_language_tags_only_for_matching(self) -> None:
+        streams = [
+            {
+                "stream_index": 4,
+                "stream_type": "audio",
+                "language": "en",
+                "default_flag": 0,
+            },
+            {
+                "stream_index": 5,
+                "stream_type": "audio",
+                "language": "jpn",
+                "default_flag": 1,
+            },
+        ]
+        selected = select_speech_audio_stream(
+            streams,
+            preferred_language="eng",
+        )
+        self.assertEqual(selected.index, 4)
+        self.assertEqual(selected.language, "en")
+
+    def test_stream_selection_rejects_lossy_stream_index_coercion(self) -> None:
+        with self.assertRaisesRegex(SpeechAudioUnavailable, "No usable"):
+            select_speech_audio_stream(
+                [
+                    {
+                        "stream_index": 1.5,
+                        "stream_type": "audio",
+                    }
+                ]
+            )
+
     def test_stream_selection_falls_back_deterministically(self) -> None:
         streams = [
             {
@@ -298,6 +331,18 @@ class SpeechAudioExtractionTests(unittest.TestCase):
                 ):
                     with self.assertRaises(SpeechAudioUnavailable):
                         self.extractor().extract(SpeechWindow(0, 5_000))
+
+    def test_truncated_pcm_frame_data_is_rejected(self) -> None:
+        payload = wav_bytes(duration_ms=1000)[:-10]
+        with patch(
+            "app.media_identity.speech_audio.subprocess.run",
+            side_effect=self.completed(payload),
+        ):
+            with self.assertRaisesRegex(
+                SpeechAudioUnavailable,
+                "truncated PCM",
+            ):
+                self.extractor().extract(SpeechWindow(0, 2000))
 
     def test_output_cannot_exceed_requested_duration(self) -> None:
         payload = wav_bytes(duration_ms=2000)
