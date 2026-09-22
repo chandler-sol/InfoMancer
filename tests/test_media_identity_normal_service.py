@@ -30,6 +30,9 @@ class FakeOcr:
     def available(self) -> bool:
         return True
 
+    def cache_identity(self):
+        return {"fixture": "fake-ocr-v1"}
+
     def recognize(self, image: bytes) -> OcrTextResult:
         self.calls += 1
         return OcrTextResult(
