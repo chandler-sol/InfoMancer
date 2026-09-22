@@ -609,9 +609,10 @@ class MediaIdentityDecisionService:
                     artifact_row = artifact_by_id.get(artifact_id)
                     if artifact_row is None:
                         return False, file_row
-                    transcript_text = str(
+                    raw_transcript_text = str(
                         artifact_row["text_value"] or ""
-                    ).strip()
+                    )
+                    transcript_text = raw_transcript_text.strip()
                     if not transcript_text:
                         continue
                     corpus = text_corpus(transcript_text)
@@ -631,7 +632,7 @@ class MediaIdentityDecisionService:
                         "start_ms": int(artifact_row["start_ms"]),
                         "end_ms": int(artifact_row["end_ms"]),
                         "transcript_sha256": hashlib.sha256(
-                            transcript_text.encode("utf-8")
+                            raw_transcript_text.encode("utf-8")
                         ).hexdigest(),
                     })
                     transcript_parts.append(transcript_text)
