@@ -13,6 +13,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
@@ -62,6 +63,7 @@ _ALLOWED_DOWNLOAD_HOSTS = {
     "github.com",
     "release-assets.githubusercontent.com",
 }
+_COMPONENT_LOCK = threading.Lock()
 
 
 class ManagedFfmpegError(RuntimeError):
@@ -335,6 +337,13 @@ class ManagedFfmpegComponent:
         )
 
     def install(self) -> Path:
+        with _COMPONENT_LOCK:
+            return self._install_locked()
+
+    def _install_locked(self) -> Path:
+        existing = managed_ffmpeg_candidate(self.data_directory)
+        if existing is not None:
+            return existing
         if _override_candidate() or _bundled_candidate() is not None:
             raise ManagedFfmpegError(
                 "A higher-priority FFmpeg configuration is already active."
@@ -432,6 +441,10 @@ class ManagedFfmpegComponent:
         return installed
 
     def remove(self) -> None:
+        with _COMPONENT_LOCK:
+            self._remove_locked()
+
+    def _remove_locked(self) -> None:
         directory = managed_ffmpeg_directory(self.data_directory)
         if not directory.exists():
             return
