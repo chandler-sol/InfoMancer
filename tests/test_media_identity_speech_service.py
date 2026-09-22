@@ -248,6 +248,24 @@ class NormalSpeechServiceTests(unittest.TestCase):
         )
         self.assertTrue(all(item.duration_ms == 30_000 for item in windows))
 
+    def test_long_runtime_windows_do_not_overlap_near_budget_boundary(self):
+        windows = plan_normal_speech_windows(241)
+        ordered = sorted(windows, key=lambda item: item.start_ms)
+
+        self.assertEqual(len(ordered), 8)
+        self.assertEqual(
+            sum(item.duration_ms for item in ordered),
+            240_000,
+        )
+        self.assertTrue(
+            all(
+                first.end_ms <= second.start_ms
+                for first, second in zip(ordered, ordered[1:])
+            )
+        )
+        self.assertGreaterEqual(ordered[0].start_ms, 0)
+        self.assertLessEqual(ordered[-1].end_ms, 241_000)
+
     def test_short_runtime_is_covered_without_exceeding_eight_windows(self):
         windows = plan_normal_speech_windows(95)
         self.assertEqual(len(windows), 4)
