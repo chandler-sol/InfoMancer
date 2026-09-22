@@ -39,6 +39,7 @@ NORMAL_INITIAL_STOP_MARGIN = 0.18
 NORMAL_EXPANDED_STOP_SIMILARITY = 0.45
 NORMAL_EXPANDED_STOP_MARGIN = 0.14
 NORMAL_EARLY_STOP_MIN_OCR_CONFIDENCE = 0.60
+NORMAL_UNCALIBRATED_OCR_QUALITY = 0.35
 
 
 class NormalIdentityScanError(RuntimeError):
@@ -314,7 +315,7 @@ class NormalIdentityService:
             for item in usable
             if item.confidence is not None
         ]
-        if not confidences:
+        if len(confidences) != len(usable):
             return False
         if (
             (sum(confidences) / len(confidences))
@@ -374,15 +375,18 @@ class NormalIdentityService:
 
         if usable:
             corpus = text_corpus(combined_text)
-            confidences = [
-                float(item.confidence)
+            observation_qualities = [
+                (
+                    float(item.confidence)
+                    if item.confidence is not None
+                    else NORMAL_UNCALIBRATED_OCR_QUALITY
+                )
                 for item in usable
-                if item.confidence is not None
             ]
             quality = (
-                sum(confidences) / len(confidences)
-                if confidences
-                else 0.75
+                sum(observation_qualities) / len(observation_qualities)
+                if observation_qualities
+                else 0.0
             )
             comparable = 0
             for candidate in candidates:
@@ -422,6 +426,12 @@ class NormalIdentityService:
                         "similarity": similarity,
                         "support_threshold": NORMAL_OCR_SUPPORT_THRESHOLD,
                         "ocr_quality": round(quality, 6),
+                        "calibrated_observations": sum(
+                            item.confidence is not None for item in usable
+                        ),
+                        "uncalibrated_observations": sum(
+                            item.confidence is None for item in usable
+                        ),
                         "artifact_ids": artifact_ids,
                         "timestamps_ms": [item.timestamp_ms for item in usable],
                         "source_signatures": sorted({
