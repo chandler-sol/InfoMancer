@@ -21,7 +21,11 @@ class ManagedSpeechComponentError(RuntimeError):
 
 
 def _safe_segment(value: str, label: str) -> str:
-    normalized = str(value or "").strip()
+    if not isinstance(value, str):
+        raise ManagedSpeechComponentError(
+            f"{label} must be text."
+        )
+    normalized = value.strip()
     if (
         not normalized
         or normalized in {".", ".."}
@@ -114,7 +118,12 @@ def _verified_file(
         or initial.st_size != expected_size
     ):
         return None
-    if require_executable and os.name != "nt" and not os.access(path, os.X_OK):
+    if (
+        require_executable
+        and os.name != "nt"
+        and not initial.st_mode
+        & (stat_module.S_IXUSR | stat_module.S_IXGRP | stat_module.S_IXOTH)
+    ):
         return None
 
     flags = os.O_RDONLY
@@ -163,7 +172,12 @@ def _verified_file(
         or not _path_is_safe(root, path)
     ):
         return None
-    if require_executable and os.name != "nt" and not os.access(path, os.X_OK):
+    if (
+        require_executable
+        and os.name != "nt"
+        and not final.st_mode
+        & (stat_module.S_IXUSR | stat_module.S_IXGRP | stat_module.S_IXOTH)
+    ):
         return None
 
     return path
