@@ -18,7 +18,10 @@ from app.media_identity.external import (
 from app.media_identity.fast import FastIdentityService
 from app.media_identity.normal import NormalResourceLimits, OcrTextResult
 from app.media_identity.local_frames import LOCAL_FRAME_SOURCE_KEY
-from app.media_identity.normal_service import NormalIdentityService
+from app.media_identity.normal_service import (
+    NORMAL_OCR_EVIDENCE_KEY,
+    NormalIdentityService,
+)
 from app.media_identity.service import MediaIdentityDecisionService
 from app.media_identity.speech import (
     SpeechAudioIdentity,
