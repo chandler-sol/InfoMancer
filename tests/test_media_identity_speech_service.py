@@ -12,7 +12,10 @@ from app.media_identity.speech import (
     SpeechAudioIdentity,
     SpeechBinaryIdentity,
     SpeechModelIdentity,
+    SpeechRequest,
     SpeechTranscript,
+    SpeechWindow,
+    speech_transcript_cache_key,
 )
 from app.media_identity.speech_service import (
     NormalSpeechService,
@@ -400,6 +403,70 @@ class NormalSpeechServiceTests(unittest.TestCase):
                    WHERE file_id=1 AND artifact_type='speech_transcript'"""
             ).fetchone()["count"]
         self.assertEqual(int(count), 2)
+
+    def test_existing_exact_artifact_wins_insert_ignore_race(self):
+        engine = FakeSpeechEngine()
+        service = self._service(engine)
+        extractor = FakeExtractor(
+            self.media,
+            self.streams,
+            preferred_language="eng",
+        )
+        window = SpeechWindow(
+            start_ms=0,
+            end_ms=10_000,
+            purpose="race",
+        )
+        prepared = extractor.extract(window)
+        try:
+            request = SpeechRequest(
+                media=self.media,
+                window=window,
+                audio=prepared.identity,
+                model=self.model,
+                language="eng",
+            )
+            snapshot = service._engine_snapshot()
+            cache_key = speech_transcript_cache_key(
+                request,
+                snapshot,
+            )
+            winner = service._persist_observation(
+                1,
+                self.scan,
+                self.media,
+                extractor,
+                window,
+                request,
+                cache_key,
+                SpeechTranscript(text="persisted winner", language="en"),
+                snapshot,
+            )
+            loser = service._persist_observation(
+                1,
+                self.scan,
+                self.media,
+                extractor,
+                window,
+                request,
+                cache_key,
+                SpeechTranscript(text="concurrent loser", language="en"),
+                snapshot,
+            )
+        finally:
+            prepared.cleanup()
+
+        self.assertFalse(winner.reused)
+        self.assertTrue(loser.reused)
+        self.assertEqual(loser.artifact_id, winner.artifact_id)
+        self.assertEqual(loser.transcript.text, "persisted winner")
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """SELECT text_value FROM media_identity_artifacts
+                   WHERE file_id=1 AND artifact_type='speech_transcript'"""
+            ).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["text_value"], "persisted winner")
 
     def test_interrupted_run_resumes_from_each_persisted_fragment(self):
         interrupted_engine = FakeSpeechEngine(interrupt_on_call=2)
