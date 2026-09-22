@@ -336,6 +336,72 @@ class NormalPreviewOcrExecutorTests(unittest.TestCase):
         self.assertEqual(result.total_image_bytes, 12)
         self.assertTrue(result.budget_exhausted)
 
+    def test_aggregate_byte_budget_applies_across_preview_sources(self):
+        class ConditionalOcr(FakeOcr):
+            def recognize(self, image: bytes) -> OcrTextResult:
+                self.calls.append(bytes(image))
+                if image == b"1234567890":
+                    return OcrTextResult(text="", confidence=0.9)
+                return OcrTextResult(text="useful visual text", confidence=0.9)
+
+        first_frames = frames("aaa", 1)
+        second_frames = frames("zzz", 1)
+        first = PreviewSource(
+            "aaa",
+            frames=first_frames,
+            payloads={first_frames[0].timestamp_ms: b"1234567890"},
+        )
+        second = PreviewSource(
+            "zzz",
+            frames=second_frames,
+            payloads={second_frames[0].timestamp_ms: b"useful"},
+        )
+        engine = ConditionalOcr()
+        result = NormalPreviewOcrExecutor(
+            ExternalSourceRegistry([second, first]),
+            engine,
+            limits=NormalResourceLimits(
+                initial_preview_frames=1,
+                expanded_preview_frames=1,
+                max_preview_frames=1,
+                max_preview_bytes_per_frame=10,
+                max_preview_bytes_total=10,
+            ),
+        ).run(context())
+
+        self.assertEqual(result.source_key, "aaa")
+        self.assertEqual(result.total_image_bytes, 10)
+        self.assertTrue(result.budget_exhausted)
+        self.assertEqual(engine.calls, [b"1234567890"])
+        self.assertEqual(second.read_calls, [])
+
+    def test_initial_budget_at_ceiling_stops_before_touching_source(self):
+        source_frames = frames("jellyfin", 1)
+        source = PreviewSource(
+            "jellyfin",
+            frames=source_frames,
+            payloads={source_frames[0].timestamp_ms: b"unused"},
+        )
+        engine = FakeOcr()
+        result = NormalPreviewOcrExecutor(
+            ExternalSourceRegistry([source]),
+            engine,
+            limits=NormalResourceLimits(
+                initial_preview_frames=1,
+                expanded_preview_frames=1,
+                max_preview_frames=1,
+                max_preview_bytes_total=10,
+            ),
+        ).run(
+            context(),
+            initial_image_bytes=10,
+        )
+
+        self.assertTrue(result.budget_exhausted)
+        self.assertEqual(result.total_image_bytes, 10)
+        self.assertEqual(source.read_calls, [])
+        self.assertEqual(engine.calls, [])
+
     def test_ocr_failure_isolated_to_one_frame(self):
         source_frames = frames("jellyfin", 3)
         source = PreviewSource(
