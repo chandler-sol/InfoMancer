@@ -97,6 +97,14 @@ class ManagedSpeechLayoutTests(unittest.TestCase):
                 "../model.bin",
             )
 
+    def test_component_filename_must_be_text(self) -> None:
+        identity = self.model_identity(b"model")
+        with self.assertRaisesRegex(
+            ManagedSpeechComponentError,
+            "must be text",
+        ):
+            self.layout.model_path(identity, object())
+
     def test_verified_binary_requires_exact_hash_size_and_executable_bit(
         self,
     ) -> None:
@@ -112,7 +120,7 @@ class ManagedSpeechLayoutTests(unittest.TestCase):
             path,
         )
 
-        path.write_bytes(b"tampered")
+        path.write_bytes(b"x" * len(payload))
         if os.name != "nt":
             path.chmod(0o755)
         self.assertIsNone(
@@ -142,7 +150,7 @@ class ManagedSpeechLayoutTests(unittest.TestCase):
             path,
         )
 
-        path.write_bytes(b"tampered-model")
+        path.write_bytes(b"x" * len(payload))
         self.assertIsNone(
             self.layout.model_candidate(identity, "model.bin")
         )
