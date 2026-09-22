@@ -20,6 +20,7 @@ from app.media_identity.normal import NormalResourceLimits, OcrTextResult
 from app.media_identity.local_frames import LOCAL_FRAME_SOURCE_KEY
 from app.media_identity.normal_service import (
     NORMAL_OCR_EVIDENCE_KEY,
+    NORMAL_SPEECH_EVIDENCE_KEY,
     NormalIdentityService,
 )
 from app.media_identity.service import MediaIdentityDecisionService
@@ -1105,6 +1106,55 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertEqual(int(speech_evidence_count), 0)
         self.assertTrue(claimed["normal_speech"]["escalated"])
         self.assertEqual(claimed["normal_speech"]["transcript_count"], 8)
+
+    def test_targeted_speech_persists_candidate_evidence_in_dialogue_group(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        class EpisodeTwoSpeech(FakeNormalSpeechEngine):
+            def transcribe(self, _audio_path, request):
+                self.calls += 1
+                return SpeechTranscript(
+                    text="bronze harbor lantern meadow quartz thunder",
+                    language="en",
+                )
+
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=EpisodeTwoSpeech(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertTrue(result.speech_escalated)
+        self.assertEqual(result.speech_transcript_count, 8)
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """SELECT candidate_key,evidence_category,relation,strength,
+                          correlation_group,details_json,cache_key
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key=?
+                   ORDER BY candidate_key""",
+                (self.fast_scan.scan_id, NORMAL_SPEECH_EVIDENCE_KEY),
+            ).fetchall()
+
+        self.assertEqual(len(rows), 2)
+        supported = next(
+            row for row in rows
+            if row["candidate_key"].endswith('"1002"]')
+        )
+        self.assertEqual(supported["evidence_category"], "speech")
+        self.assertEqual(supported["relation"], "supports")
+        self.assertGreater(float(supported["strength"]), 0.9)
+        self.assertEqual(supported["correlation_group"], "subtitle-dialogue:1")
+        self.assertTrue(supported["cache_key"])
+        details = json.loads(supported["details_json"])
+        self.assertEqual(details["transcript_count"], 8)
+        self.assertEqual(details["correlated_with"], ["subtitle-synopsis"])
+        self.assertEqual(len(details["windows"]), 8)
 
     def test_missing_speech_artifact_makes_completed_normal_scan_stale(self):
         class UnavailableOcr(FakeOcr):
