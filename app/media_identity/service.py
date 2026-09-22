@@ -16,6 +16,10 @@ from .fast import (
 from .models import IdentityResultState
 from .scoring import IdentityResolution, resolve_identity
 from .text import discover_sidecar_subtitles, sidecar_identity
+from .versions import (
+    EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION,
+    NORMAL_EVIDENCE_ALGORITHM_VERSION,
+)
 
 
 SUGGESTED_CONFIRM_STATES = {
@@ -397,6 +401,28 @@ class MediaIdentityDecisionService:
             language=language,
             expanded_specials=expanded_specials,
         )
+        try:
+            decision_version = int(
+                claimed.get("decision_algorithm_version") or 0
+            )
+        except (TypeError, ValueError):
+            return False, file_row
+        if decision_version != EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION:
+            return False, file_row
+
+        if str(scan.get("completed_profile") or "") == "normal":
+            normal_metadata = claimed.get("normal_ocr")
+            if not isinstance(normal_metadata, Mapping):
+                return False, file_row
+            try:
+                normal_version = int(
+                    normal_metadata.get("algorithm_version") or 0
+                )
+            except (TypeError, ValueError):
+                return False, file_row
+            if normal_version != NORMAL_EVIDENCE_ALGORITHM_VERSION:
+                return False, file_row
+
         normalized_expected = {
             str(key): str(value)
             for key, value in expected_signatures.items()
