@@ -133,12 +133,25 @@ def managed_ffmpeg_binary(data_directory: Path | None = None) -> Path:
 
 def managed_ffmpeg_candidate(data_directory: Path | None = None) -> Path | None:
     try:
+        key = ffmpeg_platform_key()
         candidate = managed_ffmpeg_binary(data_directory)
-    except ManagedFfmpegError:
+        version_dir = candidate.parent
+        asset = FFMPEG_ASSETS[key]
+    except (ManagedFfmpegError, KeyError):
         return None
-    if not candidate.is_file():
+    if (
+        not candidate.is_file()
+        or candidate.is_symlink()
+        or version_dir.is_symlink()
+    ):
         return None
     if os.name != "nt" and not os.access(candidate, os.X_OK):
+        return None
+    try:
+        digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+    except OSError:
+        return None
+    if digest != asset["binary_sha256"]:
         return None
     return candidate
 
