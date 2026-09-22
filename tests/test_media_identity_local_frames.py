@@ -41,6 +41,10 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.media = self.root / "episode.mkv"
         self.media.write_bytes(b"fixture-media" * 64)
+        self.ffmpeg = self.root / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+        self.ffmpeg.write_bytes(b"fixture-ffmpeg-v1")
+        if os.name != "nt":
+            self.ffmpeg.chmod(0o755)
         stat = self.media.stat()
         self.context = AnalyzerContext(
             media=MediaIdentityFile(
@@ -65,33 +69,22 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
         return LocalFfmpegFrameSource(
             self.context,
             1800.0,
-            executable=kwargs.pop("executable", "ffmpeg"),
+            executable=kwargs.pop("executable", str(self.ffmpeg)),
             **kwargs,
         )
 
     def test_status_requires_ffmpeg_and_current_media_snapshot(self):
-        with patch(
-            "app.media_identity.local_frames.shutil.which",
-            return_value="/usr/bin/ffmpeg",
-        ):
-            status = self.source().status()
+        status = self.source().status()
         self.assertTrue(status.available)
         self.assertIn("PREVIEW_FRAMES", repr(status.capabilities))
 
-        with patch(
-            "app.media_identity.local_frames.shutil.which",
-            return_value=None,
-        ):
-            status = self.source().status()
+        missing = self.root / "missing-ffmpeg"
+        status = self.source(executable=str(missing)).status()
         self.assertFalse(status.available)
         self.assertIn("FFmpeg", status.detail)
 
         self.media.write_bytes(self.media.read_bytes() + b"changed")
-        with patch(
-            "app.media_identity.local_frames.shutil.which",
-            return_value="/usr/bin/ffmpeg",
-        ):
-            status = self.source().status()
+        status = self.source().status()
         self.assertFalse(status.available)
         self.assertIn("snapshot", status.detail)
 
@@ -143,7 +136,7 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
 
         self.assertEqual(extracted, payload)
         command = run.call_args.args[0]
-        self.assertEqual(command[0], "ffmpeg")
+        self.assertEqual(command[0], str(self.ffmpeg.resolve()))
         self.assertIn("-nostdin", command)
         self.assertIn("-ss", command)
         self.assertIn("-frames:v", command)
@@ -172,6 +165,28 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
             frame = source.preview_frames(media)[0]
             with self.assertRaisesRegex(LocalFrameUnavailable, "timed out"):
                 source.read_preview(frame)
+
+    def test_ffmpeg_change_invalidates_prepared_source_and_cache_signature(self):
+        source = self.source()
+        media = source.resolve_media(self.context)
+        self.assertIsNotNone(media)
+        original_signature = media.source_signature
+
+        self.ffmpeg.write_bytes(b"fixture-ffmpeg-v2-with-different-size")
+        if os.name != "nt":
+            self.ffmpeg.chmod(0o755)
+
+        status = source.status()
+        self.assertFalse(status.available)
+        self.assertIn("FFmpeg", status.detail)
+
+        refreshed = self.source()
+        refreshed_media = refreshed.resolve_media(self.context)
+        self.assertIsNotNone(refreshed_media)
+        self.assertNotEqual(
+            refreshed_media.source_signature,
+            original_signature,
+        )
 
     def test_media_change_during_extraction_fails_closed(self):
         payload = jpeg_bytes()
