@@ -553,6 +553,122 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             any("jellyfin:ocr:no-visual-text" in item for item in result.failures)
         )
 
+    def test_weak_external_ocr_falls_back_to_stronger_local_frames(self):
+        class WeakExternal(FakePreviewSource):
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"unrelated sponsor graphic weather logo"
+
+        class StrongLocal(FakePreviewSource):
+            source_key = LOCAL_FRAME_SOURCE_KEY
+
+            def resolve_media(self, _context):
+                return ExternalMediaRef(
+                    source_key=self.source_key,
+                    item_id="file:1",
+                    path=str(self_path),
+                    source_signature="local-strong-v1",
+                )
+
+            def preview_frames(self, _media):
+                return (
+                    PreviewFrameRef(
+                        source_key=self.source_key,
+                        item_id="file:1",
+                        timestamp_ms=45_000,
+                        asset_ref="ffmpeg:1:45000",
+                        source_signature="local-strong-v1",
+                        width=1280,
+                        height=720,
+                    ),
+                )
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"bronze harbor lantern meadow quartz thunder"
+
+        self_path = self.media_path
+        external = WeakExternal()
+        local = StrongLocal()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([external]),
+            FakeOcr(),
+        )
+
+        with patch(
+            "app.media_identity.normal_service.LocalFfmpegFrameSource",
+            return_value=local,
+        ):
+            result = service.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(result.source_key, LOCAL_FRAME_SOURCE_KEY)
+        self.assertEqual(local.read_calls, 1)
+        with self.database.connect() as conn:
+            supporting = conn.execute(
+                """SELECT candidate_key,strength,source_kind
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key='preview-ocr-synopsis'
+                     AND relation='supports'
+                   ORDER BY strength DESC LIMIT 1""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+        self.assertIsNotNone(supporting)
+        self.assertTrue(supporting["candidate_key"].endswith('"1002"]'))
+        self.assertEqual(supporting["source_kind"], "generated_preview_ocr")
+
+    def test_weak_local_fallback_does_not_replace_stronger_external_signal(self):
+        class AmbiguousExternal(FakePreviewSource):
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"bronze harbor lantern meadow quartz"
+
+        class WorseLocal(FakePreviewSource):
+            source_key = LOCAL_FRAME_SOURCE_KEY
+
+            def resolve_media(self, _context):
+                return ExternalMediaRef(
+                    source_key=self.source_key,
+                    item_id="file:1",
+                    path=str(self_path),
+                    source_signature="local-weak-v1",
+                )
+
+            def preview_frames(self, _media):
+                return (
+                    PreviewFrameRef(
+                        source_key=self.source_key,
+                        item_id="file:1",
+                        timestamp_ms=45_000,
+                        asset_ref="ffmpeg:1:45000",
+                        source_signature="local-weak-v1",
+                        width=1280,
+                        height=720,
+                    ),
+                )
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"unrelated sponsor graphic weather logo"
+
+        self_path = self.media_path
+        external = AmbiguousExternal()
+        local = WorseLocal()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([external]),
+            FakeOcr(),
+        )
+
+        with patch(
+            "app.media_identity.normal_service.LocalFfmpegFrameSource",
+            return_value=local,
+        ):
+            result = service.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(result.source_key, "jellyfin")
+        self.assertEqual(local.read_calls, 1)
+
     def test_local_ffmpeg_is_not_attempted_when_ocr_engine_is_unavailable(self):
         class UnavailableOcr(FakeOcr):
             def available(self):
