@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import sqlite3
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from ..db import Database
 from .external import ExternalSourceRegistry, PreviewFrameRef
@@ -26,6 +26,13 @@ from .normal import (
     OcrTextResult,
 )
 from .service import MediaIdentityDecisionService
+from .speech import SpeechEngine, SpeechModelIdentity
+from .speech_audio import LocalFfmpegSpeechAudioExtractor
+from .speech_service import (
+    NormalSpeechRun,
+    NormalSpeechService,
+    NormalSpeechStaleError,
+)
 from .text import synopsis_similarity_from_corpus, text_corpus
 from .versions import NORMAL_EVIDENCE_ALGORITHM_VERSION
 
@@ -61,6 +68,13 @@ class NormalScanResult:
     highest_observed_stage: NormalSamplingStage | None
     failures: tuple[str, ...]
     budget_exhausted: bool
+    speech_escalated: bool = False
+    speech_planned_window_count: int = 0
+    speech_transcript_count: int = 0
+    speech_text_transcript_count: int = 0
+    speech_reused_artifact_count: int = 0
+    speech_failures: tuple[str, ...] = ()
+    speech_budget_exhausted: bool = False
 
 
 def _canonical_json(value: Any) -> str:
@@ -97,11 +111,23 @@ class NormalIdentityService:
         engine: OcrEngine,
         *,
         limits: NormalResourceLimits | None = None,
+        speech_engine: SpeechEngine | None = None,
+        speech_model: SpeechModelIdentity | None = None,
+        speech_extractor_factory: Callable[..., LocalFfmpegSpeechAudioExtractor] = (
+            LocalFfmpegSpeechAudioExtractor
+        ),
     ) -> None:
+        if (speech_engine is None) != (speech_model is None):
+            raise NormalIdentityScanError(
+                "Normal speech requires both a speech engine and model identity."
+            )
         self.database = database
         self.registry = registry
         self.engine = engine
         self.limits = limits or NormalResourceLimits()
+        self.speech_engine = speech_engine
+        self.speech_model = speech_model
+        self.speech_extractor_factory = speech_extractor_factory
 
     @staticmethod
     def _scan_rows(
@@ -396,6 +422,30 @@ class NormalIdentityService:
             and metrics["margin"] >= NORMAL_FALLBACK_MIN_MARGIN
         )
 
+    @staticmethod
+    def _subtitle_evidence_sufficient(
+        evidence: list[dict[str, Any]],
+    ) -> bool:
+        """Return whether existing Fast subtitle evidence already separates candidates."""
+        strengths = sorted(
+            (
+                float(item.get("strength") or 0.0)
+                for item in evidence
+                if str(item.get("analyzer_key") or "") == "subtitle-synopsis"
+                and str(item.get("relation") or "") == EvidenceRelation.SUPPORTS.value
+                and str(item.get("candidate_key") or "")
+            ),
+            reverse=True,
+        )
+        if not strengths:
+            return False
+        best = strengths[0]
+        second = strengths[1] if len(strengths) > 1 else 0.0
+        return (
+            best >= NORMAL_FALLBACK_MIN_SIMILARITY
+            and best - second >= NORMAL_FALLBACK_MIN_MARGIN
+        )
+
     @classmethod
     def _prefer_visual_run(
         cls,
@@ -611,6 +661,21 @@ class NormalIdentityService:
                 if runtime_row is not None
                 else None
             )
+            streams = [
+                dict(row)
+                for row in conn.execute(
+                    """SELECT stream_index,stream_type,codec,language,title,channels,
+                              channel_layout,sample_rate,default_flag,forced_flag,
+                              hearing_impaired,visual_impaired,commentary,disposition_json
+                       FROM media_streams
+                       WHERE file_id=? ORDER BY stream_index""",
+                    (int(scan["file_id"]),),
+                ).fetchall()
+            ]
+            claimed_before_normal = _json_object(scan["claimed_identity_json"])
+            speech_language = str(
+                claimed_before_normal.get("scan_language") or "eng"
+            ).strip().casefold() or "eng"
 
         cache_lookup = lambda frame, cache_key: self._cached_ocr(
             scan,
@@ -695,6 +760,39 @@ class NormalIdentityService:
                 budget_exhausted=local_run.budget_exhausted,
             )
 
+        speech_run = NormalSpeechRun()
+        speech_escalated = False
+        cheaper_evidence_sufficient = (
+            self._subtitle_evidence_sufficient(evidence)
+            or self._visual_source_sufficient(candidates, run)
+        )
+        if (
+            not cheaper_evidence_sufficient
+            and self.speech_engine is not None
+            and self.speech_model is not None
+        ):
+            speech_escalated = True
+            speech_service = NormalSpeechService(
+                self.database,
+                self.speech_engine,
+                self.speech_model,
+                extractor_factory=self.speech_extractor_factory,
+                language=speech_language,
+            )
+            try:
+                speech_run = speech_service.run(
+                    int(scan_id),
+                    scan,
+                    context.media,
+                    runtime_seconds,
+                    streams,
+                )
+            except NormalSpeechStaleError as exc:
+                raise NormalIdentityScanError(
+                    "Episode Identity inputs changed during Normal speech analysis. "
+                    "Retry verification."
+                ) from exc
+
         previous_normal_evidence = any(
             str(item.get("analyzer_key") or "") == NORMAL_OCR_EVIDENCE_KEY
             for item in evidence
@@ -704,6 +802,7 @@ class NormalIdentityService:
         )
         if (
             not run.observations
+            and not speech_run.observations
             and previous_completed_normal
             and previous_normal_evidence
         ):
@@ -741,7 +840,9 @@ class NormalIdentityService:
             )
 
             claimed = _json_object(current_scan["claimed_identity_json"])
-            completed_normal = bool(run.observations)
+            completed_normal = bool(
+                run.observations or speech_run.observations
+            )
             claimed["normal_ocr"] = {
                 "version": 1,
                 "algorithm_version": NORMAL_EVIDENCE_ALGORITHM_VERSION,
@@ -762,6 +863,22 @@ class NormalIdentityService:
                 "failures": list(run.failures),
                 "budget_exhausted": bool(run.budget_exhausted),
             }
+            claimed["normal_speech"] = {
+                "version": 1,
+                "escalated": bool(speech_escalated),
+                "planned_windows": len(speech_run.planned_windows),
+                "transcript_count": speech_run.transcript_count,
+                "text_transcript_count": speech_run.text_transcript_count,
+                "reused_artifact_count": speech_run.reused_artifact_count,
+                "artifact_ids": [
+                    item.artifact_id for item in speech_run.observations
+                ],
+                "cache_keys": [
+                    item.cache_key for item in speech_run.observations
+                ],
+                "failures": list(speech_run.failures),
+                "budget_exhausted": bool(speech_run.budget_exhausted),
+            }
             conn.execute(
                 """UPDATE media_identity_scans
                    SET requested_profile='normal',
@@ -780,8 +897,10 @@ class NormalIdentityService:
                         else IdentityProfile.FAST.value
                     ),
                     (
-                        "normal_ocr_complete"
-                        if completed_normal
+                        "normal_speech_complete"
+                        if speech_run.observations
+                        else "normal_ocr_complete"
+                        if run.observations
                         else "normal_ocr_unavailable"
                     ),
                     _canonical_json(claimed),
@@ -811,4 +930,11 @@ class NormalIdentityService:
             ),
             failures=run.failures,
             budget_exhausted=run.budget_exhausted,
+            speech_escalated=speech_escalated,
+            speech_planned_window_count=len(speech_run.planned_windows),
+            speech_transcript_count=speech_run.transcript_count,
+            speech_text_transcript_count=speech_run.text_transcript_count,
+            speech_reused_artifact_count=speech_run.reused_artifact_count,
+            speech_failures=speech_run.failures,
+            speech_budget_exhausted=speech_run.budget_exhausted,
         )
