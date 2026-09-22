@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -10,12 +11,19 @@ from ..naming import contained_destination, plex_episode_filename
 from .candidates import generate_episode_candidates
 from .fast import (
     SCAN_INPUT_SIGNATURE_VERSION,
+    TEXT_SUPPORT_THRESHOLD,
     combined_scan_input_signature,
     scan_input_signatures,
 )
 from .models import IdentityResultState
 from .scoring import IdentityResolution, resolve_identity
-from .text import discover_sidecar_subtitles, sidecar_identity
+from .text import (
+    TextCorpus,
+    discover_sidecar_subtitles,
+    sidecar_identity,
+    synopsis_similarity_from_corpus,
+    text_corpus,
+)
 from .versions import (
     EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION,
     NORMAL_EVIDENCE_ALGORITHM_VERSION,
@@ -580,15 +588,115 @@ class MediaIdentityDecisionService:
                     ):
                         return False, file_row
 
+            artifact_by_id = {
+                int(row["id"]): row for row in artifact_rows
+            }
             text_artifact_ids = {
-                int(row["id"])
-                for row in artifact_rows
+                artifact_id
+                for artifact_id, row in artifact_by_id.items()
                 if str(row["text_value"] or "").strip()
             }
             if len(text_artifact_ids) != text_transcript_count:
                 return False, file_row
 
             if speech_escalated:
+                speech_tokens: set[str] = set()
+                speech_bigrams: set[tuple[str, str]] = set()
+                expected_windows: list[dict[str, Any]] = []
+                cache_observations: list[dict[str, Any]] = []
+                transcript_parts: list[str] = []
+                for artifact_id in artifact_ids:
+                    artifact_row = artifact_by_id.get(artifact_id)
+                    if artifact_row is None:
+                        return False, file_row
+                    transcript_text = str(
+                        artifact_row["text_value"] or ""
+                    ).strip()
+                    if not transcript_text:
+                        continue
+                    corpus = text_corpus(transcript_text)
+                    speech_tokens.update(corpus.tokens)
+                    speech_bigrams.update(corpus.bigrams)
+                    expected_windows.append({
+                        "artifact_id": artifact_id,
+                        "start_ms": int(artifact_row["start_ms"]),
+                        "end_ms": int(artifact_row["end_ms"]),
+                        "cache_key": str(artifact_row["cache_key"] or ""),
+                    })
+                    cache_observations.append({
+                        "cache_key": str(artifact_row["cache_key"] or ""),
+                        "source_signature": str(
+                            artifact_row["source_signature"] or ""
+                        ),
+                        "start_ms": int(artifact_row["start_ms"]),
+                        "end_ms": int(artifact_row["end_ms"]),
+                        "transcript_sha256": hashlib.sha256(
+                            transcript_text.encode("utf-8")
+                        ).hexdigest(),
+                    })
+                    transcript_parts.append(transcript_text)
+
+                expected_speech_cache_key = ""
+                if text_transcript_count:
+                    expected_speech_cache_key = hashlib.sha256(
+                        json.dumps(
+                            {"observations": cache_observations},
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            default=str,
+                        ).encode("utf-8")
+                    ).hexdigest()
+
+                speech_corpus = TextCorpus(
+                    tokens=frozenset(speech_tokens),
+                    bigrams=frozenset(speech_bigrams),
+                )
+                expected_similarities: dict[str, float] = {}
+                if speech_corpus.tokens:
+                    candidate_rows = conn.execute(
+                        """SELECT candidate_key,details_json
+                           FROM media_identity_candidates
+                           WHERE scan_id=?
+                           ORDER BY rank,candidate_key""",
+                        (int(scan["id"]),),
+                    ).fetchall()
+                    for candidate_row in candidate_rows:
+                        candidate_details = _json_object(
+                            candidate_row["details_json"]
+                        )
+                        overview = str(
+                            candidate_details.get("overview") or ""
+                        ).strip()
+                        if overview:
+                            expected_similarities[
+                                str(candidate_row["candidate_key"])
+                            ] = synopsis_similarity_from_corpus(
+                                speech_corpus,
+                                overview,
+                            )
+
+                if expected_similarities:
+                    evidence_candidate_keys = [
+                        str(row.get("candidate_key") or "")
+                        for row in speech_evidence_rows
+                    ]
+                    if (
+                        len(evidence_candidate_keys)
+                        != len(expected_similarities)
+                        or set(evidence_candidate_keys)
+                        != set(expected_similarities)
+                    ):
+                        return False, file_row
+                elif (
+                    len(speech_evidence_rows) != 1
+                    or str(
+                        speech_evidence_rows[0].get("candidate_key") or ""
+                    )
+                ):
+                    return False, file_row
+
+                expected_excerpt = "\n".join(transcript_parts)[:1200]
                 for speech_row in speech_evidence_rows:
                     details = speech_row.get("details")
                     if not isinstance(details, Mapping):
@@ -603,6 +711,13 @@ class MediaIdentityDecisionService:
                         }
                     ):
                         return False, file_row
+                    try:
+                        speech_strength = float(
+                            speech_row.get("strength") or 0.0
+                        )
+                    except (TypeError, ValueError):
+                        return False, file_row
+
                     if text_transcript_count:
                         raw_ids = details.get("artifact_ids")
                         if not isinstance(raw_ids, list):
@@ -613,24 +728,81 @@ class MediaIdentityDecisionService:
                             }
                         except (TypeError, ValueError):
                             return False, file_row
-                        if (
-                            evidence_artifact_ids != text_artifact_ids
-                            or not str(speech_row.get("cache_key") or "")
-                        ):
-                            return False, file_row
-                    else:
                         try:
-                            speech_strength = float(
-                                speech_row.get("strength") or 0.0
+                            evidence_transcript_count = int(
+                                details.get("transcript_count") or 0
                             )
                         except (TypeError, ValueError):
                             return False, file_row
                         if (
-                            str(speech_row.get("relation") or "") != "neutral"
-                            or speech_strength != 0.0
+                            evidence_artifact_ids != text_artifact_ids
+                            or details.get("windows") != expected_windows
+                            or evidence_transcript_count
+                            != text_transcript_count
+                            or str(
+                                details.get("transcript_excerpt") or ""
+                            ) != expected_excerpt
                             or str(speech_row.get("cache_key") or "")
+                            != expected_speech_cache_key
                         ):
                             return False, file_row
+
+                    candidate_key = str(
+                        speech_row.get("candidate_key") or ""
+                    )
+                    if expected_similarities:
+                        expected_similarity = expected_similarities.get(
+                            candidate_key
+                        )
+                        if expected_similarity is None:
+                            return False, file_row
+                        try:
+                            persisted_similarity = float(
+                                details.get("similarity")
+                            )
+                            persisted_threshold = float(
+                                details.get("support_threshold")
+                            )
+                        except (TypeError, ValueError):
+                            return False, file_row
+                        expected_relation = (
+                            "supports"
+                            if expected_similarity
+                            >= TEXT_SUPPORT_THRESHOLD
+                            else "neutral"
+                        )
+                        expected_strength = (
+                            expected_similarity
+                            if expected_relation == "supports"
+                            else 0.0
+                        )
+                        if (
+                            abs(
+                                persisted_similarity
+                                - expected_similarity
+                            ) > 1e-12
+                            or abs(
+                                persisted_threshold
+                                - TEXT_SUPPORT_THRESHOLD
+                            ) > 1e-12
+                            or str(
+                                speech_row.get("relation") or ""
+                            ) != expected_relation
+                            or abs(
+                                speech_strength - expected_strength
+                            ) > 1e-12
+                        ):
+                            return False, file_row
+                    elif (
+                        str(speech_row.get("relation") or "")
+                        != "neutral"
+                        or speech_strength != 0.0
+                        or (
+                            not text_transcript_count
+                            and str(speech_row.get("cache_key") or "")
+                        )
+                    ):
+                        return False, file_row
 
         normalized_expected = {
             str(key): str(value)
