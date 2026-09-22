@@ -366,7 +366,9 @@ class ManagedFfmpegComponent:
 
         root = managed_ffmpeg_root(self.data_directory)
         root.mkdir(parents=True, exist_ok=True)
-        staging = Path(tempfile.mkdtemp(prefix=".install-", dir=root))
+        staging: Path | None = Path(
+            tempfile.mkdtemp(prefix=".install-", dir=root)
+        )
         final = managed_ffmpeg_directory(self.data_directory)
         binary_path = staging / ffmpeg_binary_name(key)
         try:
@@ -411,7 +413,7 @@ class ManagedFfmpegComponent:
                     )
                 shutil.rmtree(final)
             os.replace(staging, final)
-            staging = Path()
+            staging = None
         except ManagedFfmpegError:
             raise
         except OSError as exc:
@@ -419,7 +421,7 @@ class ManagedFfmpegComponent:
                 "InfoMancer could not save the managed FFmpeg component."
             ) from exc
         finally:
-            if staging and staging.exists():
+            if staging is not None and staging.exists():
                 shutil.rmtree(staging, ignore_errors=True)
 
         installed = managed_ffmpeg_binary(self.data_directory)
