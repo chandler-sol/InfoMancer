@@ -28,6 +28,7 @@ from app.media_identity.speech_audio import (
     SpeechAudioStaleError,
     SpeechAudioStream,
     SpeechAudioUnavailable,
+    SpeechBudgetExceeded,
     select_speech_audio_stream,
     validate_normal_speech_audio_budget,
     validate_normal_speech_window_plan,
@@ -263,6 +264,38 @@ class SpeechAudioExtractionTests(unittest.TestCase):
                     for index in range(9)
                 ]
             )
+
+    def test_normal_audio_byte_ceilings_raise_typed_budget_errors(self) -> None:
+        oversized = SpeechAudioIdentity(
+            sha256="a" * 64,
+            size_bytes=MAX_SPEECH_AUDIO_BYTES + 1,
+            format_key=SPEECH_AUDIO_FORMAT_KEY,
+            sample_rate_hz=SPEECH_AUDIO_SAMPLE_RATE_HZ,
+            channels=SPEECH_AUDIO_CHANNELS,
+        )
+        with self.assertRaisesRegex(SpeechBudgetExceeded, "per-window"):
+            validate_normal_speech_audio_budget(
+                [(SpeechWindow(0, 1000), oversized)]
+            )
+
+        records = []
+        for index in range(4):
+            identity = SpeechAudioIdentity(
+                sha256=f"{index + 1:064x}",
+                size_bytes=MAX_SPEECH_AUDIO_BYTES,
+                format_key=SPEECH_AUDIO_FORMAT_KEY,
+                sample_rate_hz=SPEECH_AUDIO_SAMPLE_RATE_HZ,
+                channels=SPEECH_AUDIO_CHANNELS,
+            )
+            records.append(
+                (SpeechWindow(index * 1000, (index + 1) * 1000), identity)
+            )
+        self.assertGreater(
+            sum(identity.size_bytes for _, identity in records),
+            MAX_NORMAL_SPEECH_AUDIO_BYTES,
+        )
+        with self.assertRaisesRegex(SpeechBudgetExceeded, "aggregate"):
+            validate_normal_speech_audio_budget(records)
 
     def test_extract_uses_one_bounded_canonical_software_audio_command(self) -> None:
         payload = wav_bytes(duration_ms=1000)
