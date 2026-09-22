@@ -142,10 +142,6 @@ def _ffmpeg_identity(executable: str) -> dict[str, Any] | None:
     }
 
 
-def _ffmpeg_is_available(executable: str) -> bool:
-    return _ffmpeg_identity(executable) is not None
-
-
 def _validate_generated_jpeg(payload: bytes) -> bytes:
     if (
         len(payload) < 4
