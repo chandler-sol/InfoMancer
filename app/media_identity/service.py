@@ -19,6 +19,7 @@ from .text import discover_sidecar_subtitles, sidecar_identity
 from .versions import (
     EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION,
     NORMAL_EVIDENCE_ALGORITHM_VERSION,
+    NORMAL_SPEECH_ORCHESTRATION_VERSION,
 )
 
 
@@ -421,6 +422,18 @@ class MediaIdentityDecisionService:
             except (TypeError, ValueError):
                 return False, file_row
             if normal_version != NORMAL_EVIDENCE_ALGORITHM_VERSION:
+                return False, file_row
+
+            speech_metadata = claimed.get("normal_speech")
+            if not isinstance(speech_metadata, Mapping):
+                return False, file_row
+            try:
+                speech_version = int(
+                    speech_metadata.get("algorithm_version") or 0
+                )
+            except (TypeError, ValueError):
+                return False, file_row
+            if speech_version != NORMAL_SPEECH_ORCHESTRATION_VERSION:
                 return False, file_row
 
         normalized_expected = {
