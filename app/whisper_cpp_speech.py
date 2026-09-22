@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import stat as stat_module
 import subprocess
+import threading
+import time
 from typing import Mapping
 
 from .managed_speech import (
@@ -58,6 +60,140 @@ _LANGUAGE_ALIASES = {
 
 class WhisperCppSpeechError(RuntimeError):
     """Local whisper.cpp could not safely complete a speech request."""
+
+
+class _WhisperOutputLimitError(RuntimeError):
+    def __init__(self, stream_name: str) -> None:
+        super().__init__(stream_name)
+        self.stream_name = stream_name
+
+
+def _run_bounded_process(
+    command: list[str],
+    *,
+    cwd: str,
+    env: Mapping[str, str],
+    timeout_seconds: float,
+    stdout_limit: int = MAX_WHISPERCPP_STDOUT_BYTES,
+    stderr_limit: int = MAX_WHISPERCPP_STDERR_BYTES,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run whisper-cli while bounding pipe memory before the process exits."""
+    if stdout_limit <= 0 or stderr_limit <= 0:
+        raise ValueError("Whisper output limits must be positive.")
+
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            env=dict(env),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            **_quiet_subprocess_options(),
+        )
+    except OSError:
+        raise
+
+    if process.stdout is None or process.stderr is None:
+        try:
+            process.kill()
+        except OSError:
+            pass
+        raise OSError("whisper.cpp pipes were not created.")
+
+    stdout_buffer = bytearray()
+    stderr_buffer = bytearray()
+    overflow = threading.Event()
+    overflow_name: list[str] = []
+    overflow_lock = threading.Lock()
+
+    def drain(stream, buffer: bytearray, limit: int, name: str) -> None:
+        try:
+            while True:
+                chunk = stream.read(64 * 1024)
+                if not chunk:
+                    return
+                remaining = limit - len(buffer)
+                if remaining <= 0:
+                    with overflow_lock:
+                        if not overflow_name:
+                            overflow_name.append(name)
+                    overflow.set()
+                    return
+                if len(chunk) > remaining:
+                    buffer.extend(chunk[:remaining])
+                    with overflow_lock:
+                        if not overflow_name:
+                            overflow_name.append(name)
+                    overflow.set()
+                    return
+                buffer.extend(chunk)
+        finally:
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+    stdout_thread = threading.Thread(
+        target=drain,
+        args=(process.stdout, stdout_buffer, stdout_limit, "stdout"),
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=drain,
+        args=(process.stderr, stderr_buffer, stderr_limit, "stderr"),
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+
+    deadline = time.monotonic() + float(timeout_seconds)
+    timed_out = False
+    try:
+        while process.poll() is None:
+            if overflow.is_set():
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+                break
+            time.sleep(min(0.02, remaining))
+        try:
+            return_code = process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+            except OSError:
+                pass
+            return_code = process.wait(timeout=5)
+    finally:
+        stdout_thread.join(timeout=5)
+        stderr_thread.join(timeout=5)
+
+    if stdout_thread.is_alive() or stderr_thread.is_alive():
+        raise WhisperCppSpeechError(
+            "InfoMancer could not finish draining bounded whisper.cpp output."
+        )
+    if timed_out:
+        raise subprocess.TimeoutExpired(command, timeout_seconds)
+    if overflow.is_set():
+        stream_name = overflow_name[0] if overflow_name else "output"
+        raise _WhisperOutputLimitError(stream_name)
+
+    return subprocess.CompletedProcess(
+        args=command,
+        returncode=return_code,
+        stdout=bytes(stdout_buffer),
+        stderr=bytes(stderr_buffer),
+    )
 
 
 def _stable_stat(value: os.stat_result) -> tuple[int, int, int, int, int]:
@@ -305,21 +441,26 @@ class WhisperCppSpeechEngine:
             command.append("--translate")
 
         try:
-            result = subprocess.run(
+            result = _run_bounded_process(
                 command,
                 cwd=str(executable.parent),
                 env=self.runtime.launch_environment(executable),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=self.timeout_seconds,
-                check=False,
-                **_quiet_subprocess_options(),
+                timeout_seconds=self.timeout_seconds,
             )
         except subprocess.TimeoutExpired as exc:
             raise WhisperCppSpeechError(
                 "Local whisper.cpp transcription timed out."
             ) from exc
+        except _WhisperOutputLimitError as exc:
+            if exc.stream_name == "stdout":
+                raise WhisperCppSpeechError(
+                    "whisper.cpp returned more transcript data than the bounded window permits."
+                ) from exc
+            raise WhisperCppSpeechError(
+                "whisper.cpp returned excessive diagnostic output."
+            ) from exc
+        except WhisperCppSpeechError:
+            raise
         except (OSError, subprocess.SubprocessError) as exc:
             raise WhisperCppSpeechError(
                 "InfoMancer could not start local whisper.cpp transcription."
@@ -327,14 +468,6 @@ class WhisperCppSpeechEngine:
 
         stdout = result.stdout or b""
         stderr = result.stderr or b""
-        if len(stdout) > MAX_WHISPERCPP_STDOUT_BYTES:
-            raise WhisperCppSpeechError(
-                "whisper.cpp returned more transcript data than the bounded window permits."
-            )
-        if len(stderr) > MAX_WHISPERCPP_STDERR_BYTES:
-            raise WhisperCppSpeechError(
-                "whisper.cpp returned excessive diagnostic output."
-            )
         if result.returncode != 0:
             raise WhisperCppSpeechError(
                 "Local whisper.cpp could not transcribe the prepared speech window."
