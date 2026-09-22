@@ -871,39 +871,48 @@ class NormalIdentityService:
                     "Episode Identity metadata changed during Normal OCR. Retry verification."
                 )
 
-            artifact_ids = self._persist_artifacts(conn, current_scan, run)
-            evidence_count = self._persist_visual_evidence(
-                conn,
-                current_scan,
-                candidates,
-                run,
-                artifact_ids,
+            retain_previous_visual = (
+                not run.observations
+                and previous_completed_normal
+                and previous_normal_evidence
             )
+            if retain_previous_visual:
+                evidence_count = 0
+            else:
+                artifact_ids = self._persist_artifacts(conn, current_scan, run)
+                evidence_count = self._persist_visual_evidence(
+                    conn,
+                    current_scan,
+                    candidates,
+                    run,
+                    artifact_ids,
+                )
 
             claimed = _json_object(current_scan["claimed_identity_json"])
             completed_normal = bool(
                 run.observations or speech_run.observations
             )
-            claimed["normal_ocr"] = {
-                "version": 1,
-                "algorithm_version": NORMAL_EVIDENCE_ALGORITHM_VERSION,
-                "source_key": run.source_key,
-                "engine_key": str(self.engine.key),
-                "engine_version": str(self.engine.version),
-                "max_stage": int(max_stage),
-                "highest_observed_stage": max(
-                    (int(item.stage) for item in run.observations),
-                    default=0,
-                ),
-                "observation_cache_keys": [
-                    item.cache_key for item in run.observations
-                ],
-                "reused_artifact_count": sum(
-                    1 for item in run.observations if item.reused
-                ),
-                "failures": list(run.failures),
-                "budget_exhausted": bool(run.budget_exhausted),
-            }
+            if not retain_previous_visual:
+                claimed["normal_ocr"] = {
+                    "version": 1,
+                    "algorithm_version": NORMAL_EVIDENCE_ALGORITHM_VERSION,
+                    "source_key": run.source_key,
+                    "engine_key": str(self.engine.key),
+                    "engine_version": str(self.engine.version),
+                    "max_stage": int(max_stage),
+                    "highest_observed_stage": max(
+                        (int(item.stage) for item in run.observations),
+                        default=0,
+                    ),
+                    "observation_cache_keys": [
+                        item.cache_key for item in run.observations
+                    ],
+                    "reused_artifact_count": sum(
+                        1 for item in run.observations if item.reused
+                    ),
+                    "failures": list(run.failures),
+                    "budget_exhausted": bool(run.budget_exhausted),
+                }
             claimed["normal_speech"] = {
                 "version": 1,
                 "algorithm_version": NORMAL_SPEECH_ORCHESTRATION_VERSION,
