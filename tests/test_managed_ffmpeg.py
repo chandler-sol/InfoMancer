@@ -243,6 +243,45 @@ class ManagedFfmpegTests(unittest.TestCase):
                 module.managed_ffmpeg_candidate(self.data)
             )
 
+    @unittest.skipIf(
+        os.name == "nt",
+        "Symlink creation is not reliably permitted on Windows CI.",
+    )
+    def test_managed_component_rejects_redirected_components_directory(self):
+        outside = self.data / "outside-components"
+        outside.mkdir()
+        components = self.data / "components"
+        components.symlink_to(outside, target_is_directory=True)
+
+        component = ManagedFfmpegComponent(self.data)
+        self.assertIsNone(
+            __import__(
+                "app.managed_ffmpeg",
+                fromlist=["managed_ffmpeg_candidate"],
+            ).managed_ffmpeg_candidate(self.data)
+        )
+        with (
+            patch("app.managed_ffmpeg._override_candidate", return_value=""),
+            patch("app.managed_ffmpeg._bundled_candidate", return_value=None),
+            patch("app.managed_ffmpeg.shutil.which", return_value=None),
+            patch(
+                "app.managed_ffmpeg.ffmpeg_platform_key",
+                return_value=("linux", "x86_64"),
+            ),
+        ):
+            with self.assertRaisesRegex(
+                ManagedFfmpegError,
+                "leaves the InfoMancer data directory",
+            ):
+                component.install()
+
+        with self.assertRaisesRegex(
+            ManagedFfmpegError,
+            "leaves the InfoMancer data directory",
+        ):
+            component.remove()
+        self.assertEqual(list(outside.iterdir()), [])
+
     def test_remove_only_deletes_infomancer_managed_version_directory(self):
         component = ManagedFfmpegComponent(self.data)
         directory = self.data / "components" / "ffmpeg" / FFMPEG_VERSION
