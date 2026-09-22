@@ -123,10 +123,10 @@
           {% for model in speech_model_components %}
           <tr>
             <td>
-              <strong>{{ 'Base multilingual' if model.key == 'base-q5_1' else 'Base English' }}</strong><br>
+              <strong>{% if model.key == 'base-q5_1' %}Base multilingual{% elif model.key == 'base.en-q5_1' %}Base English{% else %}Whisper model{% endif %}</strong><br>
               <small><code>{{ model.key }}</code></small>
             </td>
-            <td>{{ 'Multilingual' if model.key == 'base-q5_1' else 'English only' }}</td>
+            <td>{% if model.key == 'base-q5_1' %}Multilingual{% elif model.key == 'base.en-q5_1' %}English only{% else %}Configured{% endif %}</td>
             <td>{{ format_bytes(model.identity.size_bytes) }}</td>
             <td>{{ 'Ready' if model.available else 'Not installed' }}</td>
             <td>
