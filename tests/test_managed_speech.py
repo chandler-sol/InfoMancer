@@ -45,6 +45,13 @@ class ManagedSpeechLayoutTests(unittest.TestCase):
             license_id="fixture",
         )
 
+    def test_relative_data_root_is_normalized_before_path_checks(self) -> None:
+        relative = Path(self.temporary.name).relative_to(Path.cwd()) if str(self.temporary.name).startswith(str(Path.cwd())) else None
+        if relative is None:
+            self.skipTest("Temporary directory is not beneath the current working directory.")
+        layout = ManagedSpeechLayout(relative)
+        self.assertTrue(layout.data_directory.is_absolute())
+
     def test_binary_and_model_live_in_separate_component_trees(self) -> None:
         binary = self.binary_identity(b"binary")
         model = self.model_identity(b"model")
