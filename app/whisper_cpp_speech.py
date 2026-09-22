@@ -199,6 +199,7 @@ class WhisperCppSpeechEngine:
     """CPU-only whisper.cpp SpeechEngine implementation for targeted windows."""
 
     key = "whisper.cpp"
+    version = f"adapter-{WHISPERCPP_ENGINE_CACHE_VERSION}"
 
     def __init__(
         self,
@@ -228,7 +229,6 @@ class WhisperCppSpeechEngine:
         self.model = model
         self.threads = threads
         self.timeout_seconds = timeout_seconds
-        self.version = WHISPERCPP_VERSION
 
     def available(self) -> bool:
         try:
@@ -353,6 +353,7 @@ class WhisperCppSpeechEngine:
             details={
                 "engine": self.key,
                 "engine_version": self.version,
+                "runtime_version": binary_identity.version,
                 "binary_sha256": binary_identity.sha256,
                 "runtime_tree_sha256": str(
                     binary_identity.details_payload().get(
