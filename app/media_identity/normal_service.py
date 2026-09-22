@@ -683,6 +683,23 @@ class NormalIdentityService:
                 budget_exhausted=local_run.budget_exhausted,
             )
 
+        previous_normal_evidence = any(
+            str(item.get("analyzer_key") or "") == NORMAL_OCR_EVIDENCE_KEY
+            for item in evidence
+        )
+        previous_completed_normal = (
+            str(scan.get("completed_profile") or "") == IdentityProfile.NORMAL.value
+        )
+        if (
+            not run.observations
+            and previous_completed_normal
+            and previous_normal_evidence
+        ):
+            raise NormalIdentityScanError(
+                "Normal rerun produced no replacement observations. "
+                "The existing completed Normal evidence was retained."
+            )
+
         with self.database.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             current_scan, candidates, evidence = self._scan_rows(conn, int(scan_id))
