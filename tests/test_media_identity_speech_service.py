@@ -85,10 +85,19 @@ class FakeSpeechEngine:
     key = "fake-speech"
     version = "1"
 
-    def __init__(self, *, available=True, interrupt_on_call=None, mutate=None):
+    def __init__(
+        self,
+        *,
+        available=True,
+        interrupt_on_call=None,
+        mutate=None,
+        change_identity_after_transcribe=False,
+    ):
         self.is_available = available
         self.interrupt_on_call = interrupt_on_call
         self.mutate = mutate
+        self.change_identity_after_transcribe = change_identity_after_transcribe
+        self.identity_revision = 0
         self.calls = 0
 
     def available(self):
@@ -98,10 +107,14 @@ class FakeSpeechEngine:
         return SpeechBinaryIdentity(
             key="fake-speech",
             version="1",
-            sha256="a" * 64,
+            sha256=("a" if self.identity_revision == 0 else "b") * 64,
             size_bytes=1234,
             source="fixture",
-            details={"runtime_tree_sha256": "b" * 64},
+            details={
+                "runtime_tree_sha256": (
+                    "c" if self.identity_revision == 0 else "d"
+                ) * 64
+            },
         )
 
     def cache_identity(self):
@@ -113,11 +126,14 @@ class FakeSpeechEngine:
             raise KeyboardInterrupt()
         if self.mutate is not None:
             self.mutate()
-        return SpeechTranscript(
+        transcript = SpeechTranscript(
             text=f"dialogue {request.window.start_ms}-{request.window.end_ms}",
             language="en",
             details={"fixture": True},
         )
+        if self.change_identity_after_transcribe:
+            self.identity_revision += 1
+        return transcript
 
 
 class NormalSpeechServiceTests(unittest.TestCase):
@@ -354,6 +370,36 @@ class NormalSpeechServiceTests(unittest.TestCase):
             FakeExtractor.instances[-1].prepared[0].cleanup_calls,
             1,
         )
+
+    def test_runtime_identity_change_discards_transcript_instead_of_caching_it(self):
+        engine = FakeSpeechEngine(change_identity_after_transcribe=True)
+        result = self._service(engine).run(
+            1,
+            self.scan,
+            self.media,
+            10,
+            self.streams,
+        )
+
+        self.assertEqual(result.transcript_count, 0)
+        self.assertTrue(
+            any(
+                "Speech engine identity changed during transcription" in item
+                for item in result.failures
+            )
+        )
+        self.assertEqual(engine.calls, 1)
+        self.assertEqual(
+            FakeExtractor.instances[-1].prepared[0].cleanup_calls,
+            1,
+        )
+        with self.database.connect() as conn:
+            count = conn.execute(
+                """SELECT COUNT(*) AS count
+                   FROM media_identity_artifacts
+                   WHERE file_id=1 AND artifact_type='speech_transcript'"""
+            ).fetchone()["count"]
+        self.assertEqual(int(count), 0)
 
     def test_unavailable_engine_is_optional_and_does_not_extract_audio(self):
         engine = FakeSpeechEngine(available=False)
