@@ -1137,7 +1137,13 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertEqual(second.speech_transcript_count, 8)
         self.assertEqual(second.speech_reused_artifact_count, 8)
         self.assertEqual(second_engine.calls, 0)
-        self.assertEqual(FakeNormalSpeechExtractor.instances[-1].extract_calls, 0)
+        self.assertEqual(FakeNormalSpeechExtractor.instances[-1].extract_calls, 8)
+        self.assertTrue(
+            all(
+                item.cleanup_calls == 1
+                for item in FakeNormalSpeechExtractor.instances[-1].prepared
+            )
+        )
 
     def test_strong_existing_subtitle_signal_skips_speech_escalation(self):
         class UnavailableOcr(FakeOcr):
