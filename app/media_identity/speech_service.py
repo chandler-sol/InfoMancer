@@ -698,20 +698,6 @@ class NormalSpeechService:
 
         for window in windows:
             self._require_fresh_scan(int(scan_id), scan, media)
-            try:
-                extractor.source_signature(window)
-            except SpeechAudioStaleError as exc:
-                raise NormalSpeechStaleError(str(exc)) from exc
-            except (SpeechAudioError, SpeechIdentityError, OSError) as exc:
-                failures.append(
-                    _bounded_failure(f"speech:{window.key}:source", exc)
-                )
-                continue
-            except Exception as exc:
-                failures.append(
-                    _bounded_failure(f"speech:{window.key}:source", exc)
-                )
-                continue
 
             # Transcript cache reuse is intentionally checked only after
             # extraction. The cache key is bound to the exact bounded WAV
