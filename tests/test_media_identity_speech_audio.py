@@ -237,6 +237,14 @@ class SpeechAudioExtractionTests(unittest.TestCase):
                 ]
             )
 
+        with self.assertRaisesRegex(SpeechIdentityError, "8 targeted windows"):
+            validate_normal_speech_window_plan(
+                [
+                    SpeechWindow(index * 1000, (index + 1) * 1000)
+                    for index in range(9)
+                ]
+            )
+
     def test_extract_uses_one_bounded_canonical_software_audio_command(self) -> None:
         payload = wav_bytes(duration_ms=1000)
         with patch(
