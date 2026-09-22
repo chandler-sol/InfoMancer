@@ -347,6 +347,54 @@ class ManagedSpeechComponentTests(unittest.TestCase):
             companion.write_bytes(b"tampered-lib")
             self.assertIsNone(runtime._managed_candidate())
 
+    def test_runtime_archive_materializes_safe_library_symlink_as_regular_file(
+        self,
+    ) -> None:
+        output = BytesIO()
+        payload = b"shared-library"
+        with tarfile.open(fileobj=output, mode="w:gz") as archive:
+            target = tarfile.TarInfo("bin/libwhisper.so.1.9.4")
+            target.size = len(payload)
+            archive.addfile(target, BytesIO(payload))
+            alias = tarfile.TarInfo("bin/libwhisper.so")
+            alias.type = tarfile.SYMTYPE
+            alias.linkname = "libwhisper.so.1.9.4"
+            archive.addfile(alias)
+
+        destination = self.data / "runtime"
+        destination.mkdir()
+        _extract_runtime_archive(
+            output.getvalue(),
+            "tar.gz",
+            destination,
+        )
+
+        alias_path = destination / "bin" / "libwhisper.so"
+        self.assertTrue(alias_path.is_file())
+        self.assertFalse(alias_path.is_symlink())
+        self.assertEqual(alias_path.read_bytes(), payload)
+
+    def test_runtime_archive_rejects_escaping_library_link_target(self) -> None:
+        output = BytesIO()
+        with tarfile.open(fileobj=output, mode="w:gz") as archive:
+            alias = tarfile.TarInfo("bin/libwhisper.so")
+            alias.type = tarfile.SYMTYPE
+            alias.linkname = "../../outside"
+            archive.addfile(alias)
+
+        destination = self.data / "runtime"
+        destination.mkdir()
+        with self.assertRaisesRegex(
+            ManagedSpeechComponentError,
+            "unsupported path",
+        ):
+            _extract_runtime_archive(
+                output.getvalue(),
+                "tar.gz",
+                destination,
+            )
+        self.assertFalse((self.data / "outside").exists())
+
     def test_runtime_archive_rejects_path_traversal_before_writing(self) -> None:
         output = BytesIO()
         with tarfile.open(fileobj=output, mode="w:gz") as archive:
@@ -367,6 +415,33 @@ class ManagedSpeechComponentTests(unittest.TestCase):
                 destination,
             )
         self.assertFalse((self.data / "escape").exists())
+
+    def test_external_runtime_change_during_self_check_fails_closed(self) -> None:
+        from app.managed_speech import _external_runtime_identity
+
+        executable = self.data / ("whisper-cli.exe" if os.name == "nt" else "whisper-cli")
+        original = b"runtime-one"
+        replacement = b"runtime-two"
+        self.assertEqual(len(original), len(replacement))
+        executable.write_bytes(original)
+        if os.name != "nt":
+            executable.chmod(0o755)
+
+        def replace_during_check(_path, _expected_version=""):
+            executable.write_bytes(replacement)
+            if os.name != "nt":
+                executable.chmod(0o755)
+            return "whisper.cpp 1.9.4"
+
+        with patch(
+            "app.managed_speech._verify_whisper_cli",
+            side_effect=replace_during_check,
+        ):
+            with self.assertRaisesRegex(
+                ManagedSpeechComponentError,
+                "changed during verification",
+            ):
+                _external_runtime_identity(executable, "fixture")
 
     def test_runtime_status_does_not_offer_managed_install_without_pinned_asset(
         self,
