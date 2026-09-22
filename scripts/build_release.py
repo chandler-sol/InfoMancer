@@ -33,6 +33,7 @@ FILES = (
     "requirements-ocr.txt",
     "SECURITY.md",
     "START-HERE.txt",
+    "THIRD_PARTY_NOTICES.md",
     "Setup-InfoMancer.cmd",
     "Setup-InfoMancer.command",
     "Setup-InfoMancer.ps1",
