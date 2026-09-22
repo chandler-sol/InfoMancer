@@ -860,3 +860,738 @@ def _model_catalog_identity(model_key: str) -> SpeechModelIdentity:
             "quantization": str(entry["quantization"]),
         },
     )
+
+
+
+def _external_runtime_identity(path: Path, source: str) -> SpeechBinaryIdentity:
+    try:
+        resolved = path.expanduser().resolve(strict=True)
+        info = resolved.stat()
+    except OSError as exc:
+        raise ManagedSpeechComponentError(
+            "The configured whisper.cpp executable is unavailable."
+        ) from exc
+    if not stat_module.S_ISREG(info.st_mode):
+        raise ManagedSpeechComponentError(
+            "The configured whisper.cpp executable is not a regular file."
+        )
+    if os.name != "nt" and not os.access(resolved, os.X_OK):
+        raise ManagedSpeechComponentError(
+            "The configured whisper.cpp executable is not executable."
+        )
+    with resolved.open("rb") as stream:
+        digest = _sha256_stream(stream)
+    version_output = _verify_whisper_cli(resolved)
+    match = re.search(r"(?<!\d)(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9._-]+)?)", version_output)
+    version = match.group(1) if match else "external"
+    return SpeechBinaryIdentity(
+        key="whisper.cpp",
+        version=version,
+        sha256=digest,
+        size_bytes=int(info.st_size),
+        source=source,
+        license_id="",
+        details={
+            "source_kind": source,
+            "path": str(resolved),
+            "runtime_tree_sha256": digest,
+        },
+    )
+
+
+class ManagedWhisperCppRuntime:
+    """Resolve, install, and revalidate the local CPU whisper.cpp runtime."""
+
+    def __init__(self, data_directory: Path) -> None:
+        self.data_directory = Path(data_directory)
+        self.layout = ManagedSpeechLayout(self.data_directory)
+
+    def _version_root(self) -> Path:
+        return (
+            self.layout.binary_root
+            / "whisper.cpp"
+            / WHISPERCPP_VERSION
+        )
+
+    def _managed_candidate(
+        self,
+    ) -> tuple[Path, SpeechBinaryIdentity] | None:
+        try:
+            key = whispercpp_platform_key()
+        except ManagedSpeechComponentError:
+            return None
+        asset = WHISPERCPP_ASSETS.get(key)
+        if asset is None:
+            return None
+
+        root = self._version_root()
+        try:
+            if not root.is_dir() or _path_is_redirect(root):
+                return None
+            children = sorted(root.iterdir(), key=lambda item: item.name)
+        except OSError:
+            return None
+
+        for directory in children:
+            if (
+                not directory.is_dir()
+                or _path_is_redirect(directory)
+                or len(directory.name) != 64
+                or any(ch not in "0123456789abcdef" for ch in directory.name.casefold())
+            ):
+                continue
+            manifest = _read_component_json(directory / "component.json")
+            if manifest is None:
+                continue
+            try:
+                if (
+                    manifest.get("component") != "whisper.cpp"
+                    or manifest.get("version") != WHISPERCPP_VERSION
+                    or manifest.get("build_tag") != WHISPERCPP_BUILD_TAG
+                    or manifest.get("commit") != WHISPERCPP_COMMIT
+                    or manifest.get("platform") != key[0]
+                    or manifest.get("architecture") != key[1]
+                    or manifest.get("archive_sha256") != asset["sha256"]
+                    or int(manifest.get("archive_size_bytes", -1))
+                    != int(asset["size_bytes"])
+                ):
+                    continue
+                executable_relative = str(manifest["executable_relative_path"])
+                executable_sha = str(manifest["binary_sha256"]).casefold()
+                executable_size = int(manifest["binary_size_bytes"])
+                tree_digest = str(manifest["runtime_tree_sha256"]).casefold()
+                files = manifest["files"]
+            except (KeyError, TypeError, ValueError):
+                continue
+            if executable_sha != directory.name.casefold():
+                continue
+            if (
+                len(tree_digest) != 64
+                or any(ch not in "0123456789abcdef" for ch in tree_digest)
+                or not isinstance(files, list)
+                or not files
+                or len(files) > _MAX_RUNTIME_FILES
+            ):
+                continue
+
+            identity = SpeechBinaryIdentity(
+                key="whisper.cpp",
+                version=WHISPERCPP_VERSION,
+                sha256=executable_sha,
+                size_bytes=executable_size,
+                source=(
+                    f"{WHISPERCPP_RELEASE_BASE}/"
+                    f"{asset['filename']}"
+                ),
+                license_id="MIT",
+                details={
+                    "platform": key[0],
+                    "architecture": key[1],
+                    "build_tag": WHISPERCPP_BUILD_TAG,
+                    "commit": WHISPERCPP_COMMIT,
+                    "archive_sha256": str(asset["sha256"]),
+                    "runtime_tree_sha256": tree_digest,
+                    "executable_relative_path": executable_relative,
+                },
+            )
+            executable = self.layout.binary_candidate(
+                identity,
+                executable_relative,
+            )
+            if executable is None:
+                continue
+
+            expected_paths: set[str] = set()
+            verified_records: list[dict[str, object]] = []
+            valid = True
+            for record in files:
+                if not isinstance(record, dict):
+                    valid = False
+                    break
+                try:
+                    relative_text = str(record["path"])
+                    relative = _safe_relative_path(
+                        relative_text,
+                        "Speech runtime file",
+                    )
+                    size = int(record["size_bytes"])
+                    digest = str(record["sha256"]).casefold()
+                except (KeyError, TypeError, ValueError, ManagedSpeechComponentError):
+                    valid = False
+                    break
+                candidate = _verified_file(
+                    _trusted_root(self.data_directory),
+                    directory / relative,
+                    digest,
+                    size,
+                    require_executable=(
+                        relative_text.replace("\\", "/")
+                        == executable_relative.replace("\\", "/")
+                    ),
+                )
+                if candidate is None:
+                    valid = False
+                    break
+                normalized = relative.as_posix()
+                expected_paths.add(normalized)
+                verified_records.append(
+                    {
+                        "path": normalized,
+                        "size_bytes": size,
+                        "sha256": digest,
+                    }
+                )
+            if not valid:
+                continue
+
+            try:
+                actual_paths = {
+                    item.relative_to(directory).as_posix()
+                    for item in directory.rglob("*")
+                    if item.is_file()
+                    and item.name
+                    not in {
+                        "component.json",
+                        "WHISPERCPP_LICENSE.txt",
+                        "WHISPERCPP_NOTICE.txt",
+                    }
+                }
+            except OSError:
+                continue
+            if actual_paths != expected_paths:
+                continue
+            if _runtime_tree_sha256(verified_records) != tree_digest:
+                continue
+            return executable, identity
+        return None
+
+    def _override(self) -> str:
+        return os.environ.get("INFOMANCER_WHISPER_CPP", "").strip()
+
+    def _system_candidate(self) -> str:
+        return shutil.which("whisper-cli") or ""
+
+    def status(self) -> ManagedSpeechRuntimeStatus:
+        override = self._override()
+        if override:
+            try:
+                identity = _external_runtime_identity(
+                    Path(override),
+                    "override",
+                )
+                return ManagedSpeechRuntimeStatus(
+                    "override",
+                    True,
+                    identity.version,
+                    str(Path(override).expanduser().resolve()),
+                    "Using the whisper.cpp executable explicitly configured by INFOMANCER_WHISPER_CPP.",
+                    False,
+                    False,
+                    identity,
+                )
+            except ManagedSpeechComponentError as exc:
+                return ManagedSpeechRuntimeStatus(
+                    "override",
+                    False,
+                    "",
+                    override,
+                    str(exc),
+                    False,
+                    False,
+                    None,
+                )
+
+        managed = self._managed_candidate()
+        if managed is not None:
+            path, identity = managed
+            return ManagedSpeechRuntimeStatus(
+                "managed",
+                True,
+                identity.version,
+                str(path),
+                "Using InfoMancer's pinned, private CPU whisper.cpp runtime.",
+                False,
+                True,
+                identity,
+            )
+
+        system = self._system_candidate()
+        if system:
+            try:
+                identity = _external_runtime_identity(
+                    Path(system),
+                    "system",
+                )
+                try:
+                    install_supported = (
+                        WHISPERCPP_ASSETS.get(whispercpp_platform_key())
+                        is not None
+                    )
+                except ManagedSpeechComponentError:
+                    install_supported = False
+                return ManagedSpeechRuntimeStatus(
+                    "system",
+                    True,
+                    identity.version,
+                    str(Path(system).resolve()),
+                    "Using whisper-cli already available on this system.",
+                    install_supported,
+                    False,
+                    identity,
+                )
+            except ManagedSpeechComponentError as exc:
+                return ManagedSpeechRuntimeStatus(
+                    "system",
+                    False,
+                    "",
+                    system,
+                    str(exc),
+                    False,
+                    False,
+                    None,
+                )
+
+        try:
+            key = whispercpp_platform_key()
+            install_supported = WHISPERCPP_ASSETS.get(key) is not None
+        except ManagedSpeechComponentError as exc:
+            return ManagedSpeechRuntimeStatus(
+                "unsupported",
+                False,
+                "",
+                "",
+                str(exc),
+                False,
+                False,
+                None,
+            )
+
+        if not install_supported:
+            return ManagedSpeechRuntimeStatus(
+                "unsupported",
+                False,
+                "",
+                "",
+                (
+                    "InfoMancer can use a custom or system whisper-cli on this "
+                    "platform, but upstream does not publish the pinned CPU CLI "
+                    "artifact needed for managed installation."
+                ),
+                False,
+                False,
+                None,
+            )
+        return ManagedSpeechRuntimeStatus(
+            "unavailable",
+            False,
+            WHISPERCPP_VERSION,
+            "",
+            "whisper.cpp is not available. InfoMancer can install its pinned CPU runtime.",
+            True,
+            False,
+            None,
+        )
+
+    def resolve(self) -> tuple[Path, SpeechBinaryIdentity]:
+        override = self._override()
+        if override:
+            path = Path(override).expanduser().resolve()
+            return path, _external_runtime_identity(path, "override")
+
+        managed = self._managed_candidate()
+        if managed is not None:
+            return managed
+
+        system = self._system_candidate()
+        if system:
+            path = Path(system).resolve()
+            return path, _external_runtime_identity(path, "system")
+
+        raise ManagedSpeechComponentError(
+            "No usable local whisper.cpp runtime is available."
+        )
+
+    def binary_identity(self) -> SpeechBinaryIdentity:
+        return self.resolve()[1]
+
+    def install(self) -> tuple[Path, SpeechBinaryIdentity]:
+        with _COMPONENT_LOCK:
+            return self._install_locked()
+
+    def _install_locked(self) -> tuple[Path, SpeechBinaryIdentity]:
+        if self._override():
+            raise ManagedSpeechComponentError(
+                "INFOMANCER_WHISPER_CPP is configured, so managed installation is disabled."
+            )
+        existing = self._managed_candidate()
+        if existing is not None:
+            return existing
+
+        key = whispercpp_platform_key()
+        asset = WHISPERCPP_ASSETS.get(key)
+        if asset is None:
+            raise ManagedSpeechComponentError(
+                f"No pinned managed whisper.cpp CPU runtime is available for {key[0]}/{key[1]}."
+            )
+
+        archive_url = f"{WHISPERCPP_RELEASE_BASE}/{asset['filename']}"
+        archive = _download_pinned(
+            archive_url,
+            expected_size=int(asset["size_bytes"]),
+            expected_sha256=str(asset["sha256"]),
+            maximum_bytes=_MAX_RUNTIME_ARCHIVE_BYTES,
+            kind="runtime",
+        )
+
+        self.layout.ensure_directories([self.layout.binary_root])
+        staging = Path(
+            tempfile.mkdtemp(
+                prefix=".install-",
+                dir=self.layout.binary_root,
+            )
+        )
+        final: Path | None = None
+        try:
+            runtime_root = staging / "runtime"
+            runtime_root.mkdir()
+            _extract_runtime_archive(
+                archive,
+                str(asset["format"]),
+                runtime_root,
+            )
+            cli = _find_runtime_cli(runtime_root, key[0])
+            _verify_whisper_cli(cli, WHISPERCPP_VERSION)
+
+            raw_records = _runtime_inventory(runtime_root)
+            records = [
+                {
+                    "path": (
+                        Path("runtime") / str(record["path"])
+                    ).as_posix(),
+                    "size_bytes": int(record["size_bytes"]),
+                    "sha256": str(record["sha256"]),
+                }
+                for record in raw_records
+            ]
+            tree_digest = _runtime_tree_sha256(records)
+            cli_relative = cli.relative_to(staging).as_posix()
+            cli_bytes = cli.stat().st_size
+            with cli.open("rb") as stream:
+                cli_digest = _sha256_stream(stream)
+            identity = SpeechBinaryIdentity(
+                key="whisper.cpp",
+                version=WHISPERCPP_VERSION,
+                sha256=cli_digest,
+                size_bytes=int(cli_bytes),
+                source=archive_url,
+                license_id="MIT",
+                details={
+                    "platform": key[0],
+                    "architecture": key[1],
+                    "build_tag": WHISPERCPP_BUILD_TAG,
+                    "commit": WHISPERCPP_COMMIT,
+                    "archive_sha256": str(asset["sha256"]),
+                    "runtime_tree_sha256": tree_digest,
+                    "executable_relative_path": cli_relative,
+                },
+            )
+            final = self.layout.binary_directory(identity)
+            self.layout.ensure_directories([final.parent])
+
+            (staging / "WHISPERCPP_LICENSE.txt").write_text(
+                WHISPERCPP_LICENSE_TEXT,
+                encoding="utf-8",
+            )
+            (staging / "WHISPERCPP_NOTICE.txt").write_text(
+                (
+                    "InfoMancer installed this private CPU-only whisper.cpp runtime "
+                    "for bounded local Episode Identity speech analysis.\n\n"
+                    f"Version: {WHISPERCPP_VERSION}\n"
+                    f"Build tag: {WHISPERCPP_BUILD_TAG}\n"
+                    f"Commit: {WHISPERCPP_COMMIT}\n"
+                    f"Source: {archive_url}\n"
+                ),
+                encoding="utf-8",
+            )
+            (staging / "component.json").write_text(
+                json.dumps(
+                    {
+                        "component": "whisper.cpp",
+                        "version": WHISPERCPP_VERSION,
+                        "build_tag": WHISPERCPP_BUILD_TAG,
+                        "commit": WHISPERCPP_COMMIT,
+                        "platform": key[0],
+                        "architecture": key[1],
+                        "archive_sha256": str(asset["sha256"]),
+                        "archive_size_bytes": int(asset["size_bytes"]),
+                        "binary_sha256": cli_digest,
+                        "binary_size_bytes": int(cli_bytes),
+                        "runtime_tree_sha256": tree_digest,
+                        "executable_relative_path": cli_relative,
+                        "files": records,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            if final.exists():
+                if _path_is_redirect(final) or not final.is_dir():
+                    raise ManagedSpeechComponentError(
+                        "The managed whisper.cpp destination is not a normal directory."
+                    )
+                shutil.rmtree(final)
+            os.replace(staging, final)
+            staging = Path()
+        except ManagedSpeechComponentError:
+            raise
+        except OSError as exc:
+            raise ManagedSpeechComponentError(
+                "InfoMancer could not save the managed whisper.cpp runtime."
+            ) from exc
+        finally:
+            if staging and staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
+
+        resolved = self._managed_candidate()
+        if resolved is None:
+            if final is not None and final.exists():
+                shutil.rmtree(final, ignore_errors=True)
+            raise ManagedSpeechComponentError(
+                "whisper.cpp installation completed without a verifiable runtime."
+            )
+        return resolved
+
+    def launch_environment(self, executable: Path) -> dict[str, str]:
+        env = dict(os.environ)
+        try:
+            resolved = executable.resolve(strict=True)
+            version_root = self._version_root().resolve(strict=True)
+            relative = resolved.relative_to(version_root)
+        except (OSError, ValueError):
+            return env
+        if not relative.parts:
+            return env
+        component_root = version_root / relative.parts[0]
+        manifest = _read_component_json(component_root / "component.json")
+        if manifest is None or not isinstance(manifest.get("files"), list):
+            return env
+
+        directories: set[str] = set()
+        for record in manifest["files"]:
+            if not isinstance(record, dict) or "path" not in record:
+                continue
+            try:
+                member = _safe_relative_path(
+                    str(record["path"]),
+                    "Speech runtime file",
+                )
+            except ManagedSpeechComponentError:
+                continue
+            directories.add(str((component_root / member).parent))
+        if not directories:
+            return env
+        prefix = os.pathsep.join(sorted(directories))
+        variable = "PATH" if os.name == "nt" else "LD_LIBRARY_PATH"
+        current = env.get(variable, "")
+        env[variable] = prefix + (os.pathsep + current if current else "")
+        return env
+
+    def remove(self) -> None:
+        with _COMPONENT_LOCK:
+            root = self._version_root()
+            if not root.exists():
+                return
+            if not _path_is_safe(
+                _trusted_root(self.data_directory),
+                root,
+            ) or _path_is_redirect(root) or not root.is_dir():
+                raise ManagedSpeechComponentError(
+                    "The managed whisper.cpp component path is not a normal directory."
+                )
+            try:
+                shutil.rmtree(root)
+                parent = root.parent
+                if parent.is_dir() and not any(parent.iterdir()):
+                    parent.rmdir()
+            except OSError as exc:
+                raise ManagedSpeechComponentError(
+                    "InfoMancer could not remove the managed whisper.cpp runtime."
+                ) from exc
+
+
+class ManagedWhisperModel:
+    """One separately managed, content-addressed Whisper ggml model."""
+
+    def __init__(
+        self,
+        data_directory: Path,
+        model_key: str = DEFAULT_WHISPER_MODEL,
+    ) -> None:
+        self.data_directory = Path(data_directory)
+        self.layout = ManagedSpeechLayout(self.data_directory)
+        self.model_key = model_key
+        self.identity = _model_catalog_identity(model_key)
+        entry = WHISPER_MODELS[model_key]
+        self.filename = str(entry["filename"])
+
+    def model_path(self) -> Path:
+        return self.layout.model_path(self.identity, self.filename)
+
+    def resolve(self) -> tuple[Path, SpeechModelIdentity]:
+        candidate = self.layout.model_candidate(
+            self.identity,
+            self.filename,
+        )
+        if candidate is None:
+            raise ManagedSpeechComponentError(
+                f"Managed Whisper model {self.model_key} is unavailable or failed integrity verification."
+            )
+        return candidate, self.identity
+
+    def status(self) -> ManagedSpeechModelStatus:
+        candidate = self.layout.model_candidate(
+            self.identity,
+            self.filename,
+        )
+        if candidate is not None:
+            return ManagedSpeechModelStatus(
+                "managed",
+                True,
+                self.model_key,
+                str(candidate),
+                "The pinned Whisper model is installed and verified.",
+                False,
+                True,
+                self.identity,
+            )
+        return ManagedSpeechModelStatus(
+            "unavailable",
+            False,
+            self.model_key,
+            "",
+            "The pinned Whisper model is not installed.",
+            True,
+            False,
+            self.identity,
+        )
+
+    def install(self) -> tuple[Path, SpeechModelIdentity]:
+        with _COMPONENT_LOCK:
+            return self._install_locked()
+
+    def _install_locked(self) -> tuple[Path, SpeechModelIdentity]:
+        existing = self.layout.model_candidate(
+            self.identity,
+            self.filename,
+        )
+        if existing is not None:
+            return existing, self.identity
+
+        entry = WHISPER_MODELS[self.model_key]
+        url = self.identity.source
+        payload = _download_pinned(
+            url,
+            expected_size=int(entry["size_bytes"]),
+            expected_sha256=str(entry["sha256"]),
+            maximum_bytes=_MAX_MODEL_BYTES,
+            kind="model",
+        )
+
+        self.layout.ensure_directories([self.layout.model_root])
+        staging = Path(
+            tempfile.mkdtemp(
+                prefix=".install-",
+                dir=self.layout.model_root,
+            )
+        )
+        final = self.layout.model_directory(self.identity)
+        try:
+            path = staging / self.filename
+            path.write_bytes(payload)
+            if (
+                path.stat().st_size != self.identity.size_bytes
+                or _sha256_bytes(path.read_bytes()) != self.identity.sha256
+            ):
+                raise ManagedSpeechComponentError(
+                    "The staged Whisper model failed integrity verification."
+                )
+            (staging / "MODEL_LICENSE.txt").write_text(
+                OPENAI_WHISPER_LICENSE_TEXT
+                + "\n"
+                + WHISPERCPP_LICENSE_TEXT,
+                encoding="utf-8",
+            )
+            (staging / "MODEL_NOTICE.txt").write_text(
+                (
+                    "InfoMancer installed this ggml Whisper model separately "
+                    "from the speech runtime.\n\n"
+                    f"Model key: {self.model_key}\n"
+                    f"Source: {url}\n"
+                    f"SHA-256: {self.identity.sha256}\n"
+                    f"Original model: {entry['original_model']}\n"
+                    f"Quantization: {entry['quantization']}\n"
+                ),
+                encoding="utf-8",
+            )
+            (staging / "component.json").write_text(
+                json.dumps(
+                    {
+                        "component": "whisper-model",
+                        "model_key": self.model_key,
+                        "revision": WHISPER_MODEL_REVISION,
+                        "filename": self.filename,
+                        "sha256": self.identity.sha256,
+                        "size_bytes": self.identity.size_bytes,
+                        "source": url,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            self.layout.ensure_directories([final.parent])
+            if final.exists():
+                if _path_is_redirect(final) or not final.is_dir():
+                    raise ManagedSpeechComponentError(
+                        "The managed Whisper model destination is not a normal directory."
+                    )
+                shutil.rmtree(final)
+            os.replace(staging, final)
+            staging = Path()
+        except ManagedSpeechComponentError:
+            raise
+        except OSError as exc:
+            raise ManagedSpeechComponentError(
+                "InfoMancer could not save the managed Whisper model."
+            ) from exc
+        finally:
+            if staging and staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
+
+        return self.resolve()
+
+    def remove(self) -> None:
+        with _COMPONENT_LOCK:
+            directory = self.layout.model_directory(self.identity)
+            if not directory.exists():
+                return
+            if not _path_is_safe(
+                _trusted_root(self.data_directory),
+                directory,
+            ) or _path_is_redirect(directory) or not directory.is_dir():
+                raise ManagedSpeechComponentError(
+                    "The managed Whisper model path is not a normal directory."
+                )
+            try:
+                shutil.rmtree(directory)
+                parent = directory.parent
+                if parent.is_dir() and not any(parent.iterdir()):
+                    parent.rmdir()
+            except OSError as exc:
+                raise ManagedSpeechComponentError(
+                    "InfoMancer could not remove the managed Whisper model."
+                ) from exc
