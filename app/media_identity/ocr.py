@@ -34,6 +34,7 @@ class RapidOcrCpuEngine:
         text_score: float = 0.5,
         runner_factory: Callable[..., Any] | None = None,
         package_version: str | None = None,
+        onnxruntime_version: str | None = None,
     ) -> None:
         score = float(text_score)
         if not 0.0 <= score <= 1.0:
@@ -42,6 +43,7 @@ class RapidOcrCpuEngine:
         self._runner_factory = runner_factory
         self._runner: Any | None = None
         self._package_version_override = package_version
+        self._onnxruntime_version_override = onnxruntime_version
 
     @property
     def version(self) -> str:
@@ -60,6 +62,27 @@ class RapidOcrCpuEngine:
             util.find_spec("rapidocr") is not None
             and util.find_spec("onnxruntime") is not None
         )
+
+    def cache_identity(self) -> dict[str, Any]:
+        rapidocr_version = self._package_version_override
+        if rapidocr_version is None:
+            try:
+                rapidocr_version = metadata.version("rapidocr")
+            except metadata.PackageNotFoundError:
+                rapidocr_version = "unavailable"
+        onnxruntime_version = self._onnxruntime_version_override
+        if onnxruntime_version is None:
+            try:
+                onnxruntime_version = metadata.version("onnxruntime")
+            except metadata.PackageNotFoundError:
+                onnxruntime_version = "unavailable"
+        return {
+            "backend": "onnxruntime-cpu",
+            "rapidocr_version": str(rapidocr_version),
+            "onnxruntime_version": str(onnxruntime_version),
+            "text_score": round(float(self.text_score), 6),
+            "model_bundle": "rapidocr-default",
+        }
 
     @staticmethod
     def _cpu_params(engine_type: Any = "onnxruntime") -> dict[str, Any]:
