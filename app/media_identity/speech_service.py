@@ -26,6 +26,7 @@ from .speech_audio import (
     LocalFfmpegSpeechAudioExtractor,
     SpeechAudioStaleError,
     SpeechAudioUnavailable,
+    SpeechBudgetExceeded,
     validate_normal_speech_audio_budget,
     validate_normal_speech_window_plan,
 )
@@ -868,17 +869,20 @@ class NormalSpeechService:
                 raise NormalSpeechStaleError(str(exc)) from exc
             except NormalSpeechStaleError:
                 raise
+            except SpeechBudgetExceeded as exc:
+                failures.append(
+                    _bounded_failure(f"speech:{window.key}", exc)
+                )
+                return NormalSpeechRun(
+                    planned_windows=windows,
+                    observations=tuple(observations),
+                    failures=tuple(failures),
+                    budget_exhausted=True,
+                )
             except (SpeechAudioUnavailable, SpeechIdentityError) as exc:
                 failures.append(
                     _bounded_failure(f"speech:{window.key}", exc)
                 )
-                if "budget" in str(exc).casefold():
-                    return NormalSpeechRun(
-                        planned_windows=windows,
-                        observations=tuple(observations),
-                        failures=tuple(failures),
-                        budget_exhausted=True,
-                    )
             except Exception as exc:
                 # Speech is an optional Normal escalation. Runtime/model/backend
                 # failures must not discard cheaper evidence or previously
