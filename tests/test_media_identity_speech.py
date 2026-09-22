@@ -166,6 +166,36 @@ class SpeechContractTests(unittest.TestCase):
                 1,
             )
 
+    def test_binary_cache_identity_binds_managed_runtime_tree(self) -> None:
+        managed = SpeechBinaryIdentity(
+            key="whisper.cpp",
+            version="1.9.4",
+            sha256="d" * 64,
+            size_bytes=123,
+            details={"runtime_tree_sha256": "e" * 64},
+        )
+        self.assertEqual(
+            managed.cache_identity(),
+            {
+                "key": "whisper.cpp",
+                "version": "1.9.4",
+                "sha256": "d" * 64,
+                "size_bytes": 123,
+                "runtime_tree_sha256": "e" * 64,
+            },
+        )
+
+        external = SpeechBinaryIdentity(
+            key="whisper.cpp",
+            version="external",
+            sha256="f" * 64,
+            size_bytes=456,
+        )
+        self.assertEqual(
+            external.cache_identity()["runtime_tree_sha256"],
+            "f" * 64,
+        )
+
     def test_model_identity_requires_content_hash_and_exact_size(self) -> None:
         self.assertEqual(
             self.model.cache_identity(),
