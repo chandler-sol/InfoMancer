@@ -559,8 +559,7 @@ class NormalIdentityService:
         )
         evidence_rows: list[tuple[Any, ...]] = []
 
-        if usable and corpus.tokens:
-            comparable = 0
+        if usable:
             artifact_ids = [int(item.artifact_id) for item in usable]
             windows = [
                 {
@@ -574,6 +573,9 @@ class NormalIdentityService:
             transcript_excerpt = "\n".join(
                 item.transcript.text.strip() for item in usable
             )[:1200]
+
+        if usable and corpus.tokens:
+            comparable = 0
             for candidate in candidates:
                 details = _json_object(candidate.get("details_json"))
                 overview = str(details.get("overview") or "").strip()
@@ -640,6 +642,30 @@ class NormalIdentityService:
                     aggregate_cache_key,
                     IdentityProfile.NORMAL.value,
                 ))
+        elif usable:
+            evidence_rows.append((
+                int(scan["id"]),
+                "",
+                NORMAL_SPEECH_EVIDENCE_KEY,
+                NORMAL_SPEECH_EVIDENCE_VERSION,
+                EvidenceCategory.SPEECH.value,
+                correlation,
+                EvidenceRelation.NEUTRAL.value,
+                0.0,
+                "local_speech_transcript",
+                f"file:{int(scan['file_id'])}:targeted-windows",
+                None,
+                "Targeted speech contained no lexical tokens usable for synopsis comparison.",
+                _canonical_json({
+                    "artifact_ids": artifact_ids,
+                    "windows": windows,
+                    "transcript_count": len(usable),
+                    "transcript_excerpt": transcript_excerpt,
+                    "correlated_with": ["subtitle-synopsis"],
+                }),
+                aggregate_cache_key,
+                IdentityProfile.NORMAL.value,
+            ))
         else:
             evidence_rows.append((
                 int(scan["id"]),
