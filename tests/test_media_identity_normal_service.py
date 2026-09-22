@@ -1294,6 +1294,73 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertEqual(result.speech_transcript_count, 0)
         self.assertEqual(speech_engine.calls, 0)
 
+    def test_weak_rerun_cannot_discard_existing_speech_backed_normal_state(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        first_engine = FakeNormalSpeechEngine()
+        first_service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=first_engine,
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        )
+        first = first_service.run_scan(self.fast_scan.scan_id)
+        self.assertEqual(first.speech_transcript_count, 8)
+
+        class WeakPreview(FakePreviewSource):
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"unrelated"
+
+        class UnavailableSpeech(FakeNormalSpeechEngine):
+            def __init__(self):
+                super().__init__(available=False)
+
+        weak = WeakPreview()
+        second_service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([weak]),
+            FakeOcr(),
+            limits=NormalResourceLimits(
+                initial_preview_frames=1,
+                expanded_preview_frames=1,
+                max_preview_frames=1,
+                max_preview_bytes_per_frame=9,
+                max_preview_bytes_total=9,
+            ),
+            speech_engine=UnavailableSpeech(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "existing completed Normal evidence was retained",
+        ):
+            second_service.run_scan(self.fast_scan.scan_id)
+
+        with self.database.connect() as conn:
+            scan = conn.execute(
+                """SELECT completed_profile,stage,claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            transcript_count = conn.execute(
+                """SELECT COUNT(*) AS count
+                   FROM media_identity_artifacts
+                   WHERE file_id=1 AND artifact_type='speech_transcript'"""
+            ).fetchone()["count"]
+
+        claimed = json.loads(scan["claimed_identity_json"])
+        self.assertEqual(scan["completed_profile"], "normal")
+        self.assertEqual(scan["stage"], "normal_speech_complete")
+        self.assertEqual(claimed["normal_speech"]["transcript_count"], 8)
+        self.assertEqual(int(transcript_count), 8)
+
     def test_file_change_during_ocr_prevents_artifact_or_evidence_commit(self):
         def mutate_file():
             self.media_path.write_bytes(self.media_path.read_bytes() + b"changed")
