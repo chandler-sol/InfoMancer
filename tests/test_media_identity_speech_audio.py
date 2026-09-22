@@ -7,7 +7,6 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from types import SimpleNamespace
 from unittest.mock import patch
 import wave
 
@@ -344,6 +343,18 @@ class SpeechAudioExtractionTests(unittest.TestCase):
             ):
                 self.extractor().extract(SpeechWindow(0, 2000))
 
+    def test_excessive_wav_container_padding_is_rejected(self) -> None:
+        payload = wav_bytes(duration_ms=1000) + (b"x" * (70 * 1024))
+        with patch(
+            "app.media_identity.speech_audio.subprocess.run",
+            side_effect=self.completed(payload),
+        ):
+            with self.assertRaisesRegex(
+                SpeechAudioUnavailable,
+                "container overhead",
+            ):
+                self.extractor().extract(SpeechWindow(0, 2000))
+
     def test_output_cannot_exceed_requested_duration(self) -> None:
         payload = wav_bytes(duration_ms=2000)
         with patch(
@@ -536,26 +547,52 @@ class SpeechAudioExtractionTests(unittest.TestCase):
         )
         self.assertNotEqual(first_signature, changed_ffmpeg)
 
-    def test_aggregate_audio_byte_budget_is_explicit(self) -> None:
-        window_one = SpeechWindow(0, 60_000)
-        window_two = SpeechWindow(60_000, 120_000)
-        each = MAX_NORMAL_SPEECH_AUDIO_BYTES // 2 + 1
-        fake_identity = SpeechAudioIdentity(
-            "f" * 64,
-            each,
-            SPEECH_AUDIO_FORMAT_KEY,
-            SPEECH_AUDIO_SAMPLE_RATE_HZ,
-            SPEECH_AUDIO_CHANNELS,
-        )
-        artifacts = [
-            SimpleNamespace(window=window_one, identity=fake_identity),
-            SimpleNamespace(window=window_two, identity=fake_identity),
+    def test_aggregate_audio_byte_budget_uses_cleanup_friendly_records(self) -> None:
+        windows = [
+            SpeechWindow(0, 60_000),
+            SpeechWindow(60_000, 120_000),
+            SpeechWindow(120_000, 180_000),
+            SpeechWindow(180_000, 240_000),
+        ]
+        each = MAX_NORMAL_SPEECH_AUDIO_BYTES // 4 + 1
+        self.assertLessEqual(each, MAX_SPEECH_AUDIO_BYTES)
+        records = [
+            (
+                window,
+                SpeechAudioIdentity(
+                    f"{index:x}".rjust(64, "0"),
+                    each,
+                    SPEECH_AUDIO_FORMAT_KEY,
+                    SPEECH_AUDIO_SAMPLE_RATE_HZ,
+                    SPEECH_AUDIO_CHANNELS,
+                ),
+            )
+            for index, window in enumerate(windows, start=1)
         ]
         with self.assertRaisesRegex(
             SpeechAudioUnavailable,
             "aggregate byte",
         ):
-            validate_normal_speech_audio_budget(artifacts)
+            validate_normal_speech_audio_budget(records)
+
+    def test_aggregate_budget_rejects_noncanonical_audio_identity(self) -> None:
+        records = [
+            (
+                SpeechWindow(0, 60_000),
+                SpeechAudioIdentity(
+                    "f" * 64,
+                    100,
+                    "different-format",
+                    SPEECH_AUDIO_SAMPLE_RATE_HZ,
+                    SPEECH_AUDIO_CHANNELS,
+                ),
+            )
+        ]
+        with self.assertRaisesRegex(
+            SpeechAudioUnavailable,
+            "canonical format",
+        ):
+            validate_normal_speech_audio_budget(records)
 
     def test_preferred_language_must_be_stable_text(self) -> None:
         with self.assertRaisesRegex(
