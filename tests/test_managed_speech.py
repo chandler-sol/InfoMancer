@@ -66,7 +66,7 @@ class ManagedSpeechLayoutTests(unittest.TestCase):
         model = self.model_identity(b"model")
         self.assertEqual(
             self.layout.binary_directory(binary),
-            self.data
+            self.layout.data_directory
             / "components"
             / "whispercpp"
             / "whisper.cpp"
@@ -74,7 +74,7 @@ class ManagedSpeechLayoutTests(unittest.TestCase):
         )
         self.assertEqual(
             self.layout.model_directory(model),
-            self.data
+            self.layout.data_directory
             / "components"
             / "whisper-models"
             / "ggml-base.en"
