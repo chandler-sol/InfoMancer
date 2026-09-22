@@ -211,7 +211,12 @@ class ManagedSpeechLayoutTests(unittest.TestCase):
     def test_junction_or_reparse_component_is_rejected(self) -> None:
         payload = b"trusted-model"
         identity = self.model_identity(payload)
-        with patch.object(Path, "is_junction", return_value=True):
+        with patch.object(
+            Path,
+            "is_junction",
+            return_value=True,
+            create=True,
+        ):
             self.assertIsNone(
                 self.layout.model_candidate(identity, "model.bin")
             )
