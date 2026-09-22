@@ -269,9 +269,15 @@ class NormalSpeechService:
         # Canonical JSON round-tripping both validates the identity payload and
         # detaches it from any mutable mapping owned by the live engine.
         identity = json.loads(_canonical_json(dict(raw_identity)))
+        raw_key = getattr(self.engine, "key", "")
+        raw_version = getattr(self.engine, "version", "")
+        if not isinstance(raw_key, str) or not isinstance(raw_version, str):
+            raise SpeechIdentityError(
+                "Speech engines require stable text key and version values."
+            )
         return _SpeechEngineSnapshot(
-            key=str(self.engine.key),
-            version=str(self.engine.version),
+            key=raw_key,
+            version=raw_version,
             binary=binary,
             identity=identity,
         )
@@ -455,8 +461,8 @@ class NormalSpeechService:
             },
             "stream": dict(extractor.stream.cache_identity()),
             "engine": {
-                "key": str(self.engine.key),
-                "version": str(self.engine.version),
+                "key": engine_snapshot.key,
+                "version": engine_snapshot.version,
                 "binary": {
                     **dict(binary_identity.cache_identity()),
                     "source": binary_identity.source,
@@ -639,6 +645,14 @@ class NormalSpeechService:
             except (SpeechAudioError, SpeechIdentityError, OSError) as exc:
                 failures.append(
                     _bounded_failure(f"speech:{window.key}:source", exc)
+                )
+                continue
+            except Exception as exc:
+                # Runtime/model identity can disappear between available() and
+                # this exact-window snapshot. Treat that as optional speech
+                # unavailability rather than failing the Normal scan.
+                failures.append(
+                    _bounded_failure(f"speech:{window.key}:engine", exc)
                 )
                 continue
 
