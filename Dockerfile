@@ -11,7 +11,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 RUN groupadd --gid "${INFOMANCER_GID}" infomancer \
     && useradd --uid "${INFOMANCER_UID}" --gid infomancer --create-home --shell /bin/false infomancer
-COPY requirements.txt requirements-ocr.txt ./
+COPY requirements.txt requirements-ocr.txt THIRD_PARTY_NOTICES.md ./
 RUN pip install --no-cache-dir -r requirements.txt \
     && if [ "$INFOMANCER_INSTALL_OCR" = "true" ]; then \
          pip install --no-cache-dir -r requirements-ocr.txt; \
