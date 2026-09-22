@@ -35,16 +35,10 @@ from .speech_audio import (
 NORMAL_SPEECH_ARTIFACT_KEY = "local-speech-transcript"
 NORMAL_SPEECH_ARTIFACT_VERSION = "1"
 NORMAL_SPEECH_WINDOW_MS = 30_000
-_NORMAL_SPEECH_FRACTIONS = (
-    0.50,
-    0.25,
-    0.75,
-    0.125,
-    0.875,
-    0.375,
-    0.625,
-    0.95,
-)
+# Sample one 30-second window from each eighth of a long runtime. The
+# order intentionally starts near the middle and fans outward so an interrupted
+# run leaves a broadly useful partial transcript set without overlapping windows.
+_NORMAL_SPEECH_SEGMENT_ORDER = (3, 1, 5, 0, 7, 2, 4, 6)
 
 
 class NormalSpeechError(RuntimeError):
@@ -153,15 +147,14 @@ def plan_normal_speech_windows(runtime_seconds: Any) -> tuple[SpeechWindow, ...]
 
     duration = min(NORMAL_SPEECH_WINDOW_MS, runtime_ms)
     planned: list[SpeechWindow] = []
-    seen: set[tuple[int, int]] = set()
-    for ordinal, fraction in enumerate(_NORMAL_SPEECH_FRACTIONS, start=1):
-        center = int(round(runtime_ms * fraction))
+    segment_width = runtime_ms / float(MAX_NORMAL_SPEECH_WINDOWS)
+    for ordinal, segment_index in enumerate(
+        _NORMAL_SPEECH_SEGMENT_ORDER,
+        start=1,
+    ):
+        center = int(round((segment_index + 0.5) * segment_width))
         start = max(0, min(runtime_ms - duration, center - duration // 2))
         end = min(runtime_ms, start + duration)
-        identity = (start, end)
-        if identity in seen or end <= start:
-            continue
-        seen.add(identity)
         planned.append(
             SpeechWindow(
                 start_ms=start,
