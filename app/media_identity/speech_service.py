@@ -416,13 +416,6 @@ class NormalSpeechService:
                 continue
 
             artifact_id = int(row["id"])
-            with self.database.connect() as conn:
-                conn.execute(
-                    """UPDATE media_identity_artifacts
-                       SET last_used_at=CURRENT_TIMESTAMP
-                       WHERE id=?""",
-                    (artifact_id,),
-                )
             return NormalSpeechObservation(
                 window=window,
                 cache_key=expected_cache_key,
@@ -467,6 +460,13 @@ class NormalSpeechService:
         )
         if second_cache_key != first_cache_key:
             return None, second_snapshot, second_cache_key
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE media_identity_artifacts
+                   SET last_used_at=CURRENT_TIMESTAMP
+                   WHERE id=?""",
+                (int(cached.artifact_id),),
+            )
         return cached, second_snapshot, second_cache_key
 
     def _persist_observation(
@@ -578,7 +578,7 @@ class NormalSpeechService:
                     "The media binding changed before transcript persistence."
                 )
 
-            conn.execute(
+            insert_cursor = conn.execute(
                 """INSERT OR IGNORE INTO media_identity_artifacts(
                      file_id,artifact_type,analyzer_key,analyzer_version,
                      cache_key,status,profile,source_kind,source_ref,
@@ -605,6 +605,7 @@ class NormalSpeechService:
                     _canonical_json(payload),
                 ),
             )
+            inserted = insert_cursor.rowcount == 1
             persisted = conn.execute(
                 """SELECT id,text_value,payload_json
                    FROM media_identity_artifacts
@@ -624,6 +625,46 @@ class NormalSpeechService:
                     "InfoMancer could not persist the speech transcript safely."
                 )
             artifact_id = int(persisted["id"])
+            try:
+                persisted_payload = json.loads(
+                    str(persisted["payload_json"] or "{}")
+                )
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise NormalSpeechError(
+                    "Persisted speech transcript metadata is invalid."
+                ) from exc
+            if not isinstance(persisted_payload, Mapping):
+                raise NormalSpeechError(
+                    "Persisted speech transcript metadata is invalid."
+                )
+            persisted_audio = _audio_identity_from_payload(persisted_payload)
+            persisted_transcript = _transcript_from_row(
+                persisted["text_value"],
+                persisted_payload,
+            )
+            if persisted_audio is None or persisted_transcript is None:
+                raise NormalSpeechError(
+                    "Persisted speech transcript could not be reconstructed safely."
+                )
+            persisted_request = SpeechRequest(
+                media=media,
+                window=window,
+                audio=persisted_audio,
+                model=self.model,
+                language=self.language,
+                translate=self.translate,
+                parameters=self.parameters,
+            )
+            if (
+                speech_transcript_cache_key(
+                    persisted_request,
+                    engine_snapshot,
+                )
+                != cache_key
+            ):
+                raise NormalSpeechError(
+                    "Persisted speech transcript does not match its cache identity."
+                )
             conn.execute(
                 """UPDATE media_identity_artifacts
                    SET last_used_at=CURRENT_TIMESTAMP
@@ -634,11 +675,11 @@ class NormalSpeechService:
         return NormalSpeechObservation(
             window=window,
             cache_key=cache_key,
-            source_signature=request.audio.source_signature,
-            transcript=transcript,
-            audio_identity=request.audio,
+            source_signature=persisted_audio.source_signature,
+            transcript=persisted_transcript,
+            audio_identity=persisted_audio,
             artifact_id=artifact_id,
-            reused=False,
+            reused=not inserted,
         )
 
     def run(
