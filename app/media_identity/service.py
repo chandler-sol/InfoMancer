@@ -727,6 +727,75 @@ class MediaIdentityDecisionService:
             )
         claimed = self._claimed_identity(scan)
         resolution = self._resolve_snapshot(scan, candidates, evidence)
+
+        speech_analysis = None
+        speech_metadata = claimed.get("normal_speech")
+        if isinstance(speech_metadata, Mapping):
+            speech_rows = [
+                item for item in evidence
+                if str(item.get("analyzer_key") or "") == "speech-synopsis"
+            ]
+            strongest_details: dict[str, Any] = {}
+            strongest_similarity = 0.0
+            correlation_group = ""
+            for item in speech_rows:
+                details = item.get("details")
+                if not isinstance(details, Mapping):
+                    continue
+                try:
+                    similarity = float(details.get("similarity") or 0.0)
+                except (TypeError, ValueError):
+                    similarity = 0.0
+                if not strongest_details or similarity > strongest_similarity:
+                    strongest_details = dict(details)
+                    strongest_similarity = max(0.0, min(1.0, similarity))
+                    correlation_group = str(item.get("correlation_group") or "")
+
+            def speech_int(key: str) -> int:
+                try:
+                    return max(0, int(speech_metadata.get(key) or 0))
+                except (TypeError, ValueError):
+                    return 0
+
+            raw_windows = strongest_details.get("windows")
+            windows: list[dict[str, int]] = []
+            if isinstance(raw_windows, list):
+                for item in raw_windows[:8]:
+                    if not isinstance(item, Mapping):
+                        continue
+                    try:
+                        start_ms = max(0, int(item.get("start_ms") or 0))
+                        end_ms = max(start_ms, int(item.get("end_ms") or start_ms))
+                    except (TypeError, ValueError):
+                        continue
+                    windows.append({
+                        "start_ms": start_ms,
+                        "end_ms": end_ms,
+                    })
+
+            raw_failures = speech_metadata.get("failures")
+            failures = (
+                [str(item) for item in raw_failures[:8]]
+                if isinstance(raw_failures, list)
+                else []
+            )
+            speech_analysis = {
+                "escalated": bool(speech_metadata.get("escalated")),
+                "planned_windows": speech_int("planned_windows"),
+                "transcript_count": speech_int("transcript_count"),
+                "text_transcript_count": speech_int("text_transcript_count"),
+                "reused_artifact_count": speech_int("reused_artifact_count"),
+                "budget_exhausted": bool(speech_metadata.get("budget_exhausted")),
+                "failures": failures,
+                "evidence_count": len(speech_rows),
+                "strongest_similarity": round(strongest_similarity, 6),
+                "correlation_group": correlation_group,
+                "windows": windows,
+                "transcript_excerpt": str(
+                    strongest_details.get("transcript_excerpt") or ""
+                )[:1200],
+            }
+
         candidate_by_key = {
             str(item["candidate_key"]): item for item in candidates
         }
@@ -746,6 +815,7 @@ class MediaIdentityDecisionService:
                 candidate.get("conflict_strength")
             )
         result["evidence"] = evidence
+        result["speech_analysis"] = speech_analysis
         result["file"] = dict(file_row) if file_row else None
         result["best_candidate"] = best
         result["claimed_candidate_keys"] = list(resolution.claimed_candidate_keys)
