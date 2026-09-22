@@ -625,52 +625,95 @@ class NormalSpeechService:
                     "InfoMancer could not persist the speech transcript safely."
                 )
             artifact_id = int(persisted["id"])
+            persisted_payload: Mapping[str, Any] | None = None
             try:
-                persisted_payload = json.loads(
+                loaded_payload = json.loads(
                     str(persisted["payload_json"] or "{}")
                 )
-            except (TypeError, ValueError, json.JSONDecodeError) as exc:
-                raise NormalSpeechError(
-                    "Persisted speech transcript metadata is invalid."
-                ) from exc
-            if not isinstance(persisted_payload, Mapping):
-                raise NormalSpeechError(
-                    "Persisted speech transcript metadata is invalid."
-                )
-            persisted_audio = _audio_identity_from_payload(persisted_payload)
-            persisted_transcript = _transcript_from_row(
-                persisted["text_value"],
-                persisted_payload,
+                if isinstance(loaded_payload, Mapping):
+                    persisted_payload = loaded_payload
+            except (TypeError, ValueError, json.JSONDecodeError):
+                persisted_payload = None
+
+            persisted_audio = (
+                _audio_identity_from_payload(persisted_payload)
+                if persisted_payload is not None
+                else None
             )
-            if persisted_audio is None or persisted_transcript is None:
-                raise NormalSpeechError(
-                    "Persisted speech transcript could not be reconstructed safely."
+            persisted_transcript = (
+                _transcript_from_row(
+                    persisted["text_value"],
+                    persisted_payload,
                 )
-            persisted_request = SpeechRequest(
-                media=media,
-                window=window,
-                audio=persisted_audio,
-                model=self.model,
-                language=self.language,
-                translate=self.translate,
-                parameters=self.parameters,
+                if persisted_payload is not None
+                else None
             )
-            if (
-                speech_transcript_cache_key(
-                    persisted_request,
-                    engine_snapshot,
+            persisted_matches = False
+            if persisted_audio is not None and persisted_transcript is not None:
+                try:
+                    persisted_request = SpeechRequest(
+                        media=media,
+                        window=window,
+                        audio=persisted_audio,
+                        model=self.model,
+                        language=self.language,
+                        translate=self.translate,
+                        parameters=self.parameters,
+                    )
+                    persisted_matches = (
+                        speech_transcript_cache_key(
+                            persisted_request,
+                            engine_snapshot,
+                        )
+                        == cache_key
+                    )
+                except (SpeechIdentityError, TypeError, ValueError):
+                    persisted_matches = False
+
+            if not persisted_matches:
+                # The cache row is derived data. If its unique cache key blocks
+                # regeneration but its payload is corrupt or identity-mismatched,
+                # repair that exact row from the freshly verified transcript.
+                conn.execute(
+                    """UPDATE media_identity_artifacts
+                       SET status='complete',
+                           profile='normal',
+                           source_kind='local_speech',
+                           source_ref=?,
+                           source_signature=?,
+                           file_size_bytes=?,
+                           file_modified_at=?,
+                           start_ms=?,
+                           end_ms=?,
+                           text_value=?,
+                           payload_json=?,
+                           error='',
+                           updated_at=CURRENT_TIMESTAMP,
+                           last_used_at=CURRENT_TIMESTAMP
+                       WHERE id=? AND cache_key=?""",
+                    (
+                        f"file:{int(transaction_scan['file_id'])}:audio:{extractor.stream.index}",
+                        request.audio.source_signature,
+                        int(transaction_scan["file_size_bytes"] or 0),
+                        transaction_scan["file_modified_at"],
+                        int(window.start_ms),
+                        int(window.end_ms),
+                        transcript.text,
+                        _canonical_json(payload),
+                        artifact_id,
+                        cache_key,
+                    ),
                 )
-                != cache_key
-            ):
-                raise NormalSpeechError(
-                    "Persisted speech transcript does not match its cache identity."
+                persisted_audio = request.audio
+                persisted_transcript = transcript
+                inserted = True
+            else:
+                conn.execute(
+                    """UPDATE media_identity_artifacts
+                       SET last_used_at=CURRENT_TIMESTAMP
+                       WHERE id=?""",
+                    (artifact_id,),
                 )
-            conn.execute(
-                """UPDATE media_identity_artifacts
-                   SET last_used_at=CURRENT_TIMESTAMP
-                   WHERE id=?""",
-                (artifact_id,),
-            )
 
         return NormalSpeechObservation(
             window=window,
