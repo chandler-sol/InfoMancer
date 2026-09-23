@@ -754,8 +754,15 @@ class NormalPreviewOcrExecutor:
                     break
                 text = str(cached.text or "")
                 if len(text) > remaining_chars:
-                    text = text[:remaining_chars]
+                    budget.reserve_text_chars(remaining_chars)
+                    budget.mark_blocked()
+                    total_text_chars = budget.text_chars
+                    coverage_missing = True
                     budget_exhausted = True
+                    failures.append(
+                        f"{source.source_key}:total-ocr-text-limit"
+                    )
+                    break
                 budget.reserve_text_chars(len(text))
                 total_text_chars = budget.text_chars
                 cached_details = dict(cached.details)
@@ -801,8 +808,15 @@ class NormalPreviewOcrExecutor:
 
             text = str(result.text or "")
             if len(text) > remaining_chars:
-                text = text[:remaining_chars]
+                budget.reserve_text_chars(remaining_chars)
+                budget.mark_blocked()
+                total_text_chars = budget.text_chars
+                coverage_missing = True
                 budget_exhausted = True
+                failures.append(
+                    f"{source.source_key}:total-ocr-text-limit"
+                )
+                break
             budget.reserve_text_chars(len(text))
             total_text_chars = budget.text_chars
 
