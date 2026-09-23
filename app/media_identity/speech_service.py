@@ -81,6 +81,11 @@ class NormalSpeechRun:
     observations: tuple[NormalSpeechObservation, ...] = ()
     failures: tuple[str, ...] = ()
     budget_exhausted: bool = False
+    synopsis_language: str = ""
+    preferred_audio_language: str = ""
+    selected_audio_language: str = ""
+    transcription_input_language: str = ""
+    translation_target_language: str = ""
 
     @property
     def reused_artifact_count(self) -> int:
@@ -248,6 +253,9 @@ class NormalSpeechService:
         ),
         language: str = "",
         translate: bool = False,
+        synopsis_language: str | None = None,
+        preferred_audio_language: str | None = None,
+        translation_target_language: str | None = None,
         parameters: Mapping[str, Any] | None = None,
     ) -> None:
         if not isinstance(model, SpeechModelIdentity):
@@ -256,6 +264,15 @@ class NormalSpeechService:
             )
         if not isinstance(language, str):
             raise SpeechIdentityError("Normal speech language must be text.")
+        for label, value in (
+            ("synopsis language", synopsis_language),
+            ("preferred audio language", preferred_audio_language),
+            ("translation target language", translation_target_language),
+        ):
+            if value is not None and not isinstance(value, str):
+                raise SpeechIdentityError(
+                    f"Normal speech {label} must be text."
+                )
         if not isinstance(translate, bool):
             raise SpeechIdentityError("Normal speech translation mode must be boolean.")
         if parameters is not None and not isinstance(parameters, Mapping):
@@ -264,7 +281,34 @@ class NormalSpeechService:
         self.engine = engine
         self.model = model
         self.extractor_factory = extractor_factory
-        self.language = normalize_speech_language(language)
+        legacy_language = normalize_speech_language(language)
+        self.synopsis_language = normalize_speech_language(
+            language if synopsis_language is None else synopsis_language
+        )
+        self.preferred_audio_language = normalize_speech_language(
+            language
+            if preferred_audio_language is None
+            else preferred_audio_language
+        )
+        raw_translation_target = (
+            ""
+            if translation_target_language is None
+            else translation_target_language
+        )
+        self.translation_target_language = (
+            ""
+            if not raw_translation_target.strip()
+            else normalize_speech_language(raw_translation_target)
+        )
+        if (
+            self.translation_target_language
+            and self.translation_target_language != "eng"
+        ):
+            raise SpeechIdentityError(
+                "Normal speech currently supports translation to English only."
+            )
+        # Compatibility aliases for callers/tests using the pre-M06 names.
+        self.language = legacy_language
         self.translate = translate
         self.parameters = dict(parameters or {})
 
@@ -792,7 +836,7 @@ class NormalSpeechService:
             extractor = self.extractor_factory(
                 media,
                 streams,
-                preferred_language=self.language,
+                preferred_language=self.preferred_audio_language,
             )
             selected_language = normalize_speech_language(
                 extractor.stream.language
@@ -802,11 +846,18 @@ class NormalSpeechService:
                 if selected_language == "und"
                 else selected_language
             )
-            synopsis_language = normalize_speech_language(self.language)
+            synopsis_language = self.synopsis_language
+            translation_target = self.translation_target_language
+            if (
+                not translation_target
+                and synopsis_language == "eng"
+                and selected_language != "eng"
+            ):
+                translation_target = "eng"
             request_translate = bool(
                 self.translate
                 or (
-                    synopsis_language == "eng"
+                    translation_target == "eng"
                     and selected_language != "eng"
                 )
             )
@@ -823,6 +874,13 @@ class NormalSpeechService:
                 return NormalSpeechRun(
                     planned_windows=windows,
                     failures=("speech-language-incompatible-with-model",),
+                    synopsis_language=synopsis_language,
+                    preferred_audio_language=self.preferred_audio_language,
+                    selected_audio_language=selected_language,
+                    transcription_input_language=request_language,
+                    translation_target_language=(
+                        "eng" if request_translate else ""
+                    ),
                 )
         except SpeechAudioStaleError as exc:
             raise NormalSpeechStaleError(str(exc)) from exc
@@ -927,6 +985,13 @@ class NormalSpeechService:
                     observations=tuple(observations),
                     failures=tuple(failures),
                     budget_exhausted=True,
+                    synopsis_language=synopsis_language,
+                    preferred_audio_language=self.preferred_audio_language,
+                    selected_audio_language=selected_language,
+                    transcription_input_language=request_language,
+                    translation_target_language=(
+                        "eng" if request_translate else ""
+                    ),
                 )
             except (SpeechAudioUnavailable, SpeechIdentityError) as exc:
                 failures.append(
@@ -950,4 +1015,11 @@ class NormalSpeechService:
             observations=tuple(observations),
             failures=tuple(failures),
             budget_exhausted=False,
+            synopsis_language=synopsis_language,
+            preferred_audio_language=self.preferred_audio_language,
+            selected_audio_language=selected_language,
+            transcription_input_language=request_language,
+            translation_target_language=(
+                "eng" if request_translate else ""
+            ),
         )
