@@ -673,6 +673,88 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             "strong_match_other",
         )
 
+    def test_stale_newer_normal_does_not_hide_older_current_normal(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        decisions = MediaIdentityDecisionService(self.database)
+
+        normal.run_scan(self.fast_scan.scan_id)
+        first_resolution = decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertEqual(
+            first_resolution.state.value,
+            "strong_match_other",
+        )
+        first_normal_id = self.fast_scan.scan_id
+        self.assertTrue(
+            decisions.scan_detail(first_normal_id)["snapshot_current"]
+        )
+
+        second_fast = self.fast.scan_file(1)
+        normal.run_scan(second_fast.scan_id)
+        second_resolution = decisions.resolve_scan(second_fast.scan_id)
+        self.assertEqual(
+            second_resolution.state.value,
+            "strong_match_other",
+        )
+        second_normal_id = second_fast.scan_id
+        self.assertGreater(second_normal_id, first_normal_id)
+
+        # Corrupt only the newer Normal's sealed evidence. The older Normal
+        # still describes the same current media/input identity and remains
+        # independently valid.
+        with self.database.connect() as conn:
+            evidence_id = conn.execute(
+                """SELECT id FROM media_identity_evidence
+                   WHERE scan_id=?
+                   ORDER BY id DESC LIMIT 1""",
+                (second_normal_id,),
+            ).fetchone()["id"]
+            conn.execute(
+                """UPDATE media_identity_evidence
+                   SET strength=CASE
+                         WHEN strength < 0.99 THEN strength + 0.01
+                         ELSE strength - 0.01
+                       END
+                   WHERE id=?""",
+                (evidence_id,),
+            )
+        self.assertFalse(
+            decisions.scan_detail(second_normal_id)["snapshot_current"]
+        )
+        self.assertTrue(
+            decisions.scan_detail(first_normal_id)["snapshot_current"]
+        )
+
+        third_fast = self.fast.scan_file(1)
+        third_resolution = decisions.resolve_scan(third_fast.scan_id)
+        third_detail = decisions.scan_detail(third_fast.scan_id)
+        self.assertEqual(third_detail["completed_profile"], "fast")
+        self.assertTrue(third_detail["snapshot_current"])
+        self.assertNotEqual(
+            third_resolution.state.value,
+            "strong_match_other",
+        )
+        self.assertEqual(
+            decisions.latest_scan_for_file(1)["id"],
+            third_fast.scan_id,
+        )
+
+        findings = decisions.mie_findings()
+        identity_findings = [
+            finding
+            for finding in findings
+            if finding["rule_key"] == "episode-identity-review"
+        ]
+        self.assertEqual(len(identity_findings), 1)
+        self.assertEqual(
+            identity_findings[0]["evidence"]["scan_id"],
+            first_normal_id,
+        )
+
     def test_external_source_config_change_stales_normal_result(self):
         self._seed_jellyfin_config()
         service = NormalIdentityService(
