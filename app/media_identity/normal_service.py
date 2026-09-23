@@ -8,6 +8,7 @@ from typing import Any, Callable, Mapping
 
 from ..db import Database
 from .external import ExternalSourceRegistry, PreviewFrameRef
+from .external_config import external_source_config_signature
 from .decision_snapshot import result_revision, seal_decision_snapshot
 from .local_frames import LOCAL_FRAME_SOURCE_KEY, LocalFfmpegFrameSource
 from .models import (
@@ -47,7 +48,7 @@ from .versions import (
 NORMAL_OCR_ARTIFACT_KEY = "external-preview-ocr"
 NORMAL_OCR_ARTIFACT_VERSION = "1"
 NORMAL_OCR_EVIDENCE_KEY = "preview-ocr-synopsis"
-NORMAL_OCR_EVIDENCE_VERSION = "2"
+NORMAL_OCR_EVIDENCE_VERSION = str(NORMAL_EVIDENCE_ALGORITHM_VERSION)
 NORMAL_OCR_SUPPORT_THRESHOLD = 0.30
 NORMAL_INITIAL_STOP_SIMILARITY = 0.55
 NORMAL_INITIAL_STOP_MARGIN = 0.18
@@ -1078,6 +1079,10 @@ class NormalIdentityService:
                 ).fetchall()
             ]
             claimed_before_normal = _json_object(scan["claimed_identity_json"])
+            external_config_signatures = {
+                key: external_source_config_signature(conn, key) or "unconfigured"
+                for key in ("plex", "jellyfin")
+            }
             base_result_revision = result_revision(claimed_before_normal)
             if base_result_revision <= 0:
                 raise NormalIdentityScanError(
@@ -1235,6 +1240,24 @@ class NormalIdentityService:
                     evidence,
                 )
 
+            selected_external_source = str(run.source_key or "").strip().casefold()
+            if selected_external_source in external_config_signatures:
+                current_config_signature = (
+                    external_source_config_signature(
+                        conn,
+                        selected_external_source,
+                    )
+                    or "unconfigured"
+                )
+                if (
+                    current_config_signature
+                    != external_config_signatures[selected_external_source]
+                ):
+                    raise NormalIdentityScanError(
+                        "External preview-source configuration changed during "
+                        "Normal OCR. Retry verification."
+                    )
+
             current_claimed = _json_object(current_scan["claimed_identity_json"])
             current_previous_normal_evidence = any(
                 str(item.get("analyzer_key") or "") == NORMAL_OCR_EVIDENCE_KEY
@@ -1351,6 +1374,12 @@ class NormalIdentityService:
                     "version": 1,
                     "algorithm_version": NORMAL_EVIDENCE_ALGORITHM_VERSION,
                     "source_key": run.source_key,
+                    "source_config_signature": (
+                        external_config_signatures.get(
+                            str(run.source_key or "").strip().casefold(),
+                            "",
+                        )
+                    ),
                     "engine_key": str(self.engine.key),
                     "engine_version": str(self.engine.version),
                     "max_stage": int(max_stage),
