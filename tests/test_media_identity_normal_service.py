@@ -16,6 +16,10 @@ from app.media_identity.external import (
     PreviewFrameRef,
 )
 from app.media_identity.fast import FastIdentityService
+from app.media_identity.decision_snapshot import (
+    result_revision,
+    seal_decision_snapshot,
+)
 from app.media_identity.normal import (
     NormalIdentityError,
     NormalResourceLimits,
@@ -322,6 +326,21 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temporary.cleanup()
+
+    def _reseal_scan_fixture(self) -> None:
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            seal_decision_snapshot(
+                conn,
+                self.fast_scan.scan_id,
+                revision=result_revision(
+                    {"claimed_identity_json": row["claimed_identity_json"]}
+                ) + 1,
+            )
 
     def test_decision_version_drift_makes_fast_scan_stale(self):
         decisions = MediaIdentityDecisionService(self.database)
@@ -1789,6 +1808,8 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
                 (self.fast_scan.scan_id, candidate["candidate_key"]),
             )
 
+        self._reseal_scan_fixture()
+
         speech_engine = FakeNormalSpeechEngine()
         result = NormalIdentityService(
             self.database,
@@ -1843,6 +1864,8 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
                    )""",
                 rows,
             )
+
+        self._reseal_scan_fixture()
 
         FakeNormalSpeechExtractor.instances.clear()
         speech_engine = FakeNormalSpeechEngine()
@@ -1899,6 +1922,8 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
                    )""",
                 rows,
             )
+
+        self._reseal_scan_fixture()
 
         speech_engine = FakeNormalSpeechEngine()
         result = NormalIdentityService(
