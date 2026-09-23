@@ -27,6 +27,7 @@ from .speech_audio import (
     SpeechAudioStaleError,
     SpeechAudioUnavailable,
     SpeechBudgetExceeded,
+    normalize_speech_language,
     validate_normal_speech_audio_budget,
     validate_normal_speech_window_plan,
 )
@@ -263,7 +264,7 @@ class NormalSpeechService:
         self.engine = engine
         self.model = model
         self.extractor_factory = extractor_factory
-        self.language = language.strip()
+        self.language = normalize_speech_language(language)
         self.translate = translate
         self.parameters = dict(parameters or {})
 
@@ -368,11 +369,12 @@ class NormalSpeechService:
     def _cached_observation(
         self,
         scan: Mapping[str, Any],
-        media: MediaIdentityFile,
-        window: SpeechWindow,
-        source_signature: str,
+        request: SpeechRequest,
         engine_snapshot: _SpeechEngineSnapshot,
     ) -> NormalSpeechObservation | None:
+        media = request.media
+        window = request.window
+        source_signature = request.audio.source_signature
         with self.database.connect() as conn:
             rows = conn.execute(
                 """SELECT id,cache_key,source_signature,file_size_bytes,
@@ -421,9 +423,9 @@ class NormalSpeechService:
                 window=window,
                 audio=audio_identity,
                 model=self.model,
-                language=self.language,
-                translate=self.translate,
-                parameters=self.parameters,
+                language=request.language,
+                translate=request.translate,
+                parameters=request.parameters,
             )
             try:
                 expected_cache_key = speech_transcript_cache_key(
@@ -465,9 +467,7 @@ class NormalSpeechService:
         )
         cached = self._cached_observation(
             scan,
-            media,
-            request.window,
-            request.audio.source_signature,
+            request,
             first_snapshot,
         )
         if cached is None or cached.cache_key != first_cache_key:
@@ -538,9 +538,9 @@ class NormalSpeechService:
                 "details": self.model.details_payload(),
             },
             "request": {
-                "language": self.language,
-                "translate": self.translate,
-                "parameters": dict(self.parameters),
+                "language": request.language,
+                "translate": request.translate,
+                "parameters": dict(request.parameters),
             },
             "transcript": {
                 "language": transcript.language,
@@ -679,9 +679,9 @@ class NormalSpeechService:
                         window=window,
                         audio=persisted_audio,
                         model=self.model,
-                        language=self.language,
-                        translate=self.translate,
-                        parameters=self.parameters,
+                        language=request.language,
+                        translate=request.translate,
+                        parameters=request.parameters,
                     )
                     persisted_matches = (
                         speech_transcript_cache_key(
@@ -794,6 +794,36 @@ class NormalSpeechService:
                 streams,
                 preferred_language=self.language,
             )
+            selected_language = normalize_speech_language(
+                extractor.stream.language
+            )
+            request_language = (
+                ""
+                if selected_language == "und"
+                else selected_language
+            )
+            synopsis_language = normalize_speech_language(self.language)
+            request_translate = bool(
+                self.translate
+                or (
+                    synopsis_language == "eng"
+                    and selected_language not in {"eng", "und"}
+                )
+            )
+            model_multilingual = bool(
+                self.model.details_payload().get("multilingual", False)
+            )
+            if (
+                not model_multilingual
+                and (
+                    request_translate
+                    or selected_language not in {"eng", "und"}
+                )
+            ):
+                return NormalSpeechRun(
+                    planned_windows=windows,
+                    failures=("speech-language-incompatible-with-model",),
+                )
         except SpeechAudioStaleError as exc:
             raise NormalSpeechStaleError(str(exc)) from exc
         except (SpeechAudioUnavailable, SpeechIdentityError, OSError) as exc:
@@ -821,8 +851,8 @@ class NormalSpeechService:
                     window=window,
                     audio=prepared.identity,
                     model=self.model,
-                    language=self.language,
-                    translate=self.translate,
+                    language=request_language,
+                    translate=request_translate,
                     parameters=self.parameters,
                 )
                 exact_cached, engine_snapshot, cache_key = (
