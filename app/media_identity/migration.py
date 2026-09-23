@@ -251,6 +251,8 @@ def repair_legacy_media_identity_confirmation_provenance(
         )
     }
     required = {
+        "source_scan_id",
+        "confirmed_at",
         "source_scan_snapshot_id",
         "source_result_revision",
         "source_decision_snapshot_sha256",
