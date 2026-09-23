@@ -3,9 +3,24 @@ from __future__ import annotations
 from dataclasses import replace
 import unittest
 
-from app.media_identity.external import PreviewFrameRef
+from app.media_identity.external import (
+    ExternalCapability,
+    ExternalMediaRef,
+    ExternalSourceRegistry,
+    ExternalSourceStatus,
+    PreviewFrameRef,
+)
+from app.media_identity.models import (
+    AnalyzerContext,
+    IdentityProfile,
+    IdentityReference,
+    MediaIdentityFile,
+)
+from app.media_identity.sources.jellyfin import JellyfinAdapterError
+from app.media_identity.sources.plex import PlexBifError
 from app.media_identity.normal import (
     NormalIdentityError,
+    NormalPreviewOcrExecutor,
     NormalResourceLimits,
     NormalSamplingStage,
     OcrEngine,
@@ -205,6 +220,113 @@ class NormalOcrFoundationTests(unittest.TestCase):
             parameters={"language": "eng", "rotate": False},
         )
         self.assertNotEqual(changed_engine_config, baseline)
+
+    def test_adapter_specific_resolution_errors_fall_through_to_next_source(self) -> None:
+        class BrokenSource:
+            version = "1"
+
+            def __init__(self, source_key, error):
+                self.source_key = source_key
+                self.error = error
+
+            def status(self):
+                return ExternalSourceStatus(
+                    source_key=self.source_key,
+                    available=True,
+                    capabilities=frozenset({ExternalCapability.PREVIEW_FRAMES}),
+                )
+
+            def resolve_media(self, _context):
+                raise self.error
+
+            def preview_frames(self, _media):
+                return ()
+
+            def read_preview(self, _frame):
+                return b""
+
+            def subtitles(self, _media):
+                return ()
+
+            def read_subtitle(self, _subtitle):
+                return b""
+
+            def media_metadata(self, _media):
+                return {}
+
+            def fingerprints(self, _media):
+                return ()
+
+            def known_identity(self, _media):
+                return None
+
+        class GoodSource(BrokenSource):
+            def __init__(self):
+                super().__init__("fallback", RuntimeError("unused"))
+
+            def resolve_media(self, _context):
+                return ExternalMediaRef(
+                    source_key=self.source_key,
+                    item_id="episode-1",
+                    source_signature="fallback-media-v1",
+                )
+
+            def preview_frames(self, _media):
+                return (PreviewFrameRef(
+                    source_key=self.source_key,
+                    item_id="episode-1",
+                    timestamp_ms=1000,
+                    asset_ref="frame:1",
+                    source_signature="fallback-preview-v1",
+                    width=320,
+                    height=180,
+                ),)
+
+            def read_preview(self, _frame):
+                return b"usable fallback text"
+
+        context = AnalyzerContext(
+            media=MediaIdentityFile(
+                file_id=1,
+                title_id=1,
+                path="/media/episode.mkv",
+                size_bytes=100,
+                modified_at=1.0,
+            ),
+            claimed_identity=IdentityReference(
+                identity_kind="episode",
+                season=1,
+                episode=1,
+                display_name="Episode",
+            ),
+            profile=IdentityProfile.NORMAL,
+        )
+
+        for source_key, error in (
+            ("plex", PlexBifError("ambiguous Plex media parts")),
+            ("jellyfin", JellyfinAdapterError("ambiguous Jellyfin media source")),
+        ):
+            with self.subTest(source_key=source_key):
+                run = NormalPreviewOcrExecutor(
+                    ExternalSourceRegistry([
+                        BrokenSource(source_key, error),
+                        GoodSource(),
+                    ]),
+                    DummyOcr(),
+                    limits=NormalResourceLimits(
+                        initial_preview_frames=1,
+                        expanded_preview_frames=1,
+                        max_preview_frames=1,
+                    ),
+                ).run(context)
+                self.assertEqual(run.source_key, "fallback")
+                self.assertTrue(run.has_text)
+                self.assertTrue(
+                    any(
+                        item.startswith(f"{source_key}:resolve:")
+                        for item in run.failures
+                    )
+                )
 
     def test_ocr_cache_key_requires_stable_engine_identity(self) -> None:
         class MissingVersion(DummyOcr):
