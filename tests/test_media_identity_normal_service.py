@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.db import Database
+from app.mie import MediaIntelligenceEngine
 from app.media_identity.external import (
     ExternalCapability,
     ExternalMediaRef,
@@ -456,6 +457,47 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "changed after this identity scan"):
             decisions.confirm_best(self.fast_scan.scan_id, None)
+
+    def test_mie_uses_external_preview_freshness_boundary(self):
+        class MutablePreview(FakePreviewSource):
+            def __init__(self):
+                super().__init__()
+                self.payload = b"bronze harbor lantern meadow quartz thunder"
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return self.payload
+
+        self._seed_jellyfin_config()
+        source = MutablePreview()
+        registry_factory = lambda: ExternalSourceRegistry([source])
+        normal = NormalIdentityService(
+            self.database,
+            registry_factory(),
+            FakeOcr(),
+        )
+        normal.run_scan(self.fast_scan.scan_id)
+
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=registry_factory,
+        )
+        resolution = decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertEqual(resolution.state.value, "strong_match_other")
+
+        mie = MediaIntelligenceEngine(
+            self.database,
+            external_registry_factory=registry_factory,
+        )
+        before = mie.identity_decisions.mie_findings()
+        self.assertEqual(len(before), 1)
+        self.assertEqual(
+            before[0]["evidence"]["scan_id"],
+            self.fast_scan.scan_id,
+        )
+
+        source.payload = b"amber falcon orchard glacier velvet compass"
+        self.assertEqual(mie.identity_decisions.mie_findings(), [])
 
     def test_external_source_config_change_stales_normal_result(self):
         self._seed_jellyfin_config()
