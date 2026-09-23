@@ -1132,6 +1132,52 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         )
         local_factory.assert_not_called()
 
+    def test_global_frame_budget_prevents_extra_local_fallback_read(self):
+        class WeakExternal(FakePreviewSource):
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"unrelated sponsor graphic weather logo"
+
+        class StrongLocal(FakePreviewSource):
+            source_key = LOCAL_FRAME_SOURCE_KEY
+
+            def resolve_media(self, _context):
+                return ExternalMediaRef(
+                    source_key=self.source_key,
+                    item_id="file:1",
+                    path=str(self_path),
+                    source_signature="local-budget-v1",
+                )
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"bronze harbor lantern meadow quartz thunder"
+
+        self_path = self.media_path
+        external = WeakExternal()
+        local = StrongLocal()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([external]),
+            FakeOcr(),
+            limits=NormalResourceLimits(
+                initial_preview_frames=1,
+                expanded_preview_frames=1,
+                max_preview_frames=1,
+            ),
+        )
+
+        with patch(
+            "app.media_identity.normal_service.LocalFfmpegFrameSource",
+            return_value=local,
+        ):
+            result = service.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(external.read_calls, 1)
+        self.assertEqual(local.read_calls, 0)
+        self.assertEqual(result.visual_frame_attempt_count, 1)
+        self.assertTrue(result.budget_exhausted)
+
     def test_weak_external_ocr_falls_back_to_stronger_local_frames(self):
         class WeakExternal(FakePreviewSource):
             def read_preview(self, _frame):
