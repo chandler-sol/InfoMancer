@@ -171,10 +171,13 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
             ),
         ):
             source = self.source()
-            media = source.resolve_media(self.context)
-            frame = source.preview_frames(media)[0]
-            with self.assertRaisesRegex(LocalFrameUnavailable, "timed out"):
-                source.read_preview(frame)
+            try:
+                media = source.resolve_media(self.context)
+                frame = source.preview_frames(media)[0]
+                with self.assertRaisesRegex(LocalFrameUnavailable, "timed out"):
+                    source.read_preview(frame)
+            finally:
+                source.close()
 
     def test_ffmpeg_change_invalidates_prepared_source_and_cache_signature(self):
         source = self.source()
