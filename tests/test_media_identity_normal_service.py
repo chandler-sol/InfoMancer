@@ -59,6 +59,55 @@ from app.media_identity.visual_budget import (
 )
 
 
+def _reviewed_action_kwargs(
+    decisions: MediaIdentityDecisionService,
+    scan_id: int,
+) -> dict[str, object]:
+    detail = decisions.scan_detail(
+        int(scan_id),
+        verify_actionable_content=False,
+        include_confirmation=False,
+    )
+    candidate_key = str(detail.get("best_candidate_key") or "")
+    if not candidate_key:
+        candidates = list(detail.get("candidates") or [])
+        candidate_key = (
+            str(candidates[0].get("candidate_key") or "")
+            if candidates
+            else "unavailable"
+        )
+    return {
+        "expected_result_revision": int(
+            detail.get("result_revision") or 0
+        ),
+        "expected_decision_snapshot_sha256": str(
+            detail.get("decision_snapshot_sha256") or ""
+        ),
+        "expected_candidate_key": candidate_key,
+    }
+
+
+def _confirm_best(
+    decisions: MediaIdentityDecisionService,
+    scan_id: int,
+):
+    return decisions.confirm_best(
+        int(scan_id),
+        None,
+        **_reviewed_action_kwargs(decisions, scan_id),
+    )
+
+
+def _rename_preview(
+    decisions: MediaIdentityDecisionService,
+    scan_id: int,
+):
+    return decisions.rename_preview(
+        int(scan_id),
+        **_reviewed_action_kwargs(decisions, scan_id),
+    )
+
+
 class FakeOcr:
     key = "fake-ocr"
     version = "1"
@@ -456,11 +505,11 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertFalse(after["snapshot_current"])
         self.assertFalse(after["actionable"])
         self.assertEqual(
-            decisions.rename_preview(self.fast_scan.scan_id)["status"],
+            _rename_preview(decisions, self.fast_scan.scan_id)["status"],
             "stale",
         )
         with self.assertRaisesRegex(ValueError, "changed after this identity scan"):
-            decisions.confirm_best(self.fast_scan.scan_id, None)
+            _confirm_best(decisions, self.fast_scan.scan_id)
 
     def test_mie_uses_external_preview_freshness_boundary(self):
         class MutablePreview(FakePreviewSource):
@@ -565,19 +614,19 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertGreater(result.observation_count, 0)
 
         source.read_calls = 0
-        preview = decisions.rename_preview(self.fast_scan.scan_id)
+        preview = _rename_preview(decisions, self.fast_scan.scan_id)
         self.assertEqual(preview["status"], "ready")
         self.assertEqual(source.read_calls, result.observation_count)
 
         source.read_calls = 0
-        confirmation = decisions.confirm_best(self.fast_scan.scan_id, None)
+        confirmation = _confirm_best(decisions, self.fast_scan.scan_id)
         self.assertTrue(confirmation["current"])
         self.assertEqual(source.read_calls, result.observation_count)
 
         # An existing alternate confirmation must not make rename preview
         # re-read the same external evidence during preparation and final action.
         source.read_calls = 0
-        confirmed_preview = decisions.rename_preview(self.fast_scan.scan_id)
+        confirmed_preview = _rename_preview(decisions, self.fast_scan.scan_id)
         self.assertEqual(confirmed_preview["status"], "ready")
         self.assertEqual(source.read_calls, result.observation_count)
 
@@ -2865,7 +2914,7 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertFalse(after["snapshot_current"])
         self.assertFalse(after["actionable"])
         self.assertEqual(
-            decisions.rename_preview(self.fast_scan.scan_id)["status"],
+            _rename_preview(decisions, self.fast_scan.scan_id)["status"],
             "stale",
         )
 
