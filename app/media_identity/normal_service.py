@@ -82,6 +82,10 @@ class NormalScanResult:
     highest_observed_stage: NormalSamplingStage | None
     failures: tuple[str, ...]
     budget_exhausted: bool
+    visual_frame_attempt_count: int = 0
+    visual_source_bytes: int = 0
+    visual_image_bytes: int = 0
+    visual_text_chars: int = 0
     speech_escalated: bool = False
     speech_planned_window_count: int = 0
     speech_transcript_count: int = 0
@@ -171,6 +175,12 @@ class NormalIdentityService:
                 else ()
             ),
             budget_exhausted=bool(normal_ocr.get("budget_exhausted")),
+            visual_frame_attempt_count=_count(
+                normal_ocr, "frame_attempt_count"
+            ),
+            visual_source_bytes=_count(normal_ocr, "source_bytes"),
+            visual_image_bytes=_count(normal_ocr, "image_bytes"),
+            visual_text_chars=_count(normal_ocr, "text_chars"),
             speech_escalated=bool(normal_speech.get("escalated")),
             speech_planned_window_count=_count(normal_speech, "planned_windows"),
             speech_transcript_count=_count(normal_speech, "transcript_count"),
@@ -1479,6 +1489,10 @@ class NormalIdentityService:
                     "reused_artifact_count": sum(
                         1 for item in run.observations if item.reused
                     ),
+                    "frame_attempt_count": int(run.total_frame_attempts),
+                    "source_bytes": int(run.total_source_bytes),
+                    "image_bytes": int(run.total_image_bytes),
+                    "text_chars": int(run.total_text_chars),
                     "failures": list(run.failures),
                     "budget_exhausted": bool(run.budget_exhausted),
                 }
@@ -1557,6 +1571,10 @@ class NormalIdentityService:
             ),
             failures=run.failures,
             budget_exhausted=run.budget_exhausted,
+            visual_frame_attempt_count=int(run.total_frame_attempts),
+            visual_source_bytes=int(run.total_source_bytes),
+            visual_image_bytes=int(run.total_image_bytes),
+            visual_text_chars=int(run.total_text_chars),
             speech_escalated=speech_escalated,
             speech_planned_window_count=len(speech_run.planned_windows),
             speech_transcript_count=speech_run.transcript_count,
