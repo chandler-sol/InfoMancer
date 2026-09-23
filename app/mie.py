@@ -4,7 +4,7 @@ import json
 import re
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 
 from .db import Database
 from .duplicates import DuplicateService
@@ -92,10 +92,19 @@ def _identity_evidence(title: dict[str, Any], files: list[dict[str, Any]]) -> di
 class MediaIntelligenceEngine:
     """Explainable, read-only analysis over facts already stored in the catalog."""
 
-    def __init__(self, database: Database):
+    def __init__(
+        self,
+        database: Database,
+        *,
+        external_registry_factory: Callable[[], Any] | None = None,
+    ):
         self.database = database
         self.duplicates = DuplicateService(database)
-        self.identity_decisions = MediaIdentityDecisionService(database)
+        self.external_registry_factory = external_registry_factory
+        self.identity_decisions = MediaIdentityDecisionService(
+            database,
+            external_registry_factory=external_registry_factory,
+        )
 
     def analyze(self) -> int:
         analyzed_at = _utc_now()
