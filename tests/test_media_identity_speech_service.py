@@ -495,6 +495,81 @@ class NormalSpeechServiceTests(unittest.TestCase):
         self.assertIn("dialogue", rows[0]["text_value"])
         self.assertTrue(rows[0]["source_signature"])
 
+    def test_speech_cache_reuses_older_exact_artifact_after_a_b_a(self):
+        class CyclingExtractor(FakeExtractor):
+            instances = []
+            payload_tag = "A"
+
+            def extract(self, window):
+                self.extract_calls += 1
+                source_signature = self.source_signature(window)
+                payload = (
+                    f"wav:{self.payload_tag}:"
+                    f"{window.start_ms}:{window.end_ms}"
+                ).encode()
+                identity = SpeechAudioIdentity(
+                    sha256=hashlib.sha256(payload).hexdigest(),
+                    size_bytes=len(payload),
+                    format_key="wav-pcm-s16le",
+                    sample_rate_hz=16_000,
+                    channels=1,
+                    source_signature=source_signature,
+                    details={"payload_tag": self.payload_tag},
+                )
+                prepared = FakePreparedAudio(identity)
+                self.prepared.append(prepared)
+                return prepared
+
+        engine = FakeSpeechEngine()
+        service = NormalSpeechService(
+            self.database,
+            engine,
+            self.model,
+            extractor_factory=CyclingExtractor,
+            language="eng",
+        )
+
+        CyclingExtractor.payload_tag = "A"
+        first = service.run(
+            1,
+            self.scan,
+            self.media,
+            10,
+            self.streams,
+        )
+        CyclingExtractor.payload_tag = "B"
+        second = service.run(
+            1,
+            self.scan,
+            self.media,
+            10,
+            self.streams,
+        )
+        CyclingExtractor.payload_tag = "A"
+        third = service.run(
+            1,
+            self.scan,
+            self.media,
+            10,
+            self.streams,
+        )
+
+        self.assertEqual(first.reused_artifact_count, 0)
+        self.assertEqual(second.reused_artifact_count, 0)
+        self.assertEqual(third.reused_artifact_count, 1)
+        self.assertEqual(engine.calls, 2)
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """SELECT id,cache_key,payload_json
+                   FROM media_identity_artifacts
+                   WHERE file_id=1
+                     AND artifact_type='speech_transcript'
+                   ORDER BY id"""
+            ).fetchall()
+        self.assertEqual(len(rows), 2)
+        third_artifact_id = third.observations[0].artifact_id
+        self.assertEqual(third_artifact_id, int(rows[0]["id"]))
+
     def test_same_stat_media_change_cannot_reuse_old_transcript(self):
         class ContentAwareExtractor(FakeExtractor):
             instances = []
