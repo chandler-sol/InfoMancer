@@ -11,6 +11,7 @@ from typing import Any, Iterable
 from ..db import Database
 from .candidates import CandidateSet, generate_episode_candidates
 from .decision_snapshot import seal_decision_snapshot
+from .media_generation import media_generation_identity
 from .models import (
     EvidenceCategory,
     EvidenceRelation,
@@ -35,7 +36,7 @@ TEXT_SUPPORT_THRESHOLD = 0.30
 SPECIAL_EXPANSION_THRESHOLD = 0.20
 SIDECAR_ANALYZER_KEY = "sidecar-subtitle"
 SIDECAR_ANALYZER_VERSION = "1"
-SCAN_INPUT_SIGNATURE_VERSION = 2
+SCAN_INPUT_SIGNATURE_VERSION = 3
 
 
 class FastIdentityScanError(RuntimeError):
@@ -193,8 +194,10 @@ def scan_input_signatures(
         "audio_channels", "bitrate", "container", "dynamic_range",
         "media_info_at", "media_info_error",
     )
+    generation = media_generation_identity(str(file_row.get("path") or ""))
     signatures = {
         "catalog": _catalog_snapshot_signature(file_row, streams),
+        "media_generation": _signature(generation or {}),
         "title_provider_identity": _signature({
             "title_id": file_row.get("title_id"),
             "title_kind": file_row.get("title_kind"),
