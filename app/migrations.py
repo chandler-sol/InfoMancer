@@ -8,6 +8,7 @@ from typing import Callable
 from .media_identity.migration import (
     apply_media_identity_confirmation_provenance,
     apply_media_identity_foundation,
+    repair_legacy_media_identity_confirmation_provenance,
 )
 from .media_identity.provider_migration import apply_provider_episode_cache
 from .media_identity.external_migration import (
@@ -419,6 +420,11 @@ MIGRATIONS = (
         23,
         "0.9 media identity confirmation provenance",
         apply_media_identity_confirmation_provenance,
+    ),
+    behavioral_migration(
+        24,
+        "0.9 repair inferred media identity confirmation provenance",
+        repair_legacy_media_identity_confirmation_provenance,
     ),
 )
 
