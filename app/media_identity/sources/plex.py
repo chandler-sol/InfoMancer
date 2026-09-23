@@ -28,6 +28,11 @@ from ..external import (
     PreviewFrameRef,
 )
 from ..models import AnalyzerContext
+from ..visual_budget import (
+    VisualBudgetExceeded,
+    account_source_bytes,
+    source_read_plan,
+)
 
 
 _BIF_MAGIC = b"\x89BIF\r\n\x1a\n"
@@ -784,7 +789,8 @@ def _read_plex_bytes(
         urllib.request.ProxyHandler({}),
         _NoRedirect(),
     )
-    limit = max(1, int(max_bytes))
+    configured_limit = max(1, int(max_bytes))
+    limit, budget_limited = source_read_plan(configured_limit)
     try:
         with opener.open(
             request,
@@ -798,7 +804,28 @@ def _read_plex_bytes(
             content_type = str(
                 response.headers.get("Content-Type", "")
             ).split(";", 1)[0].strip().casefold()
-            payload = response.read(limit + 1)
+            raw_length = response.headers.get("Content-Length")
+            if raw_length not in {None, ""}:
+                try:
+                    content_length = int(raw_length)
+                except (TypeError, ValueError) as exc:
+                    raise PlexSourceFailure(
+                        "Plex response had an invalid Content-Length."
+                    ) from exc
+                if content_length < 0:
+                    raise PlexSourceFailure(
+                        "Plex response had an invalid Content-Length."
+                    )
+                if content_length > limit:
+                    if budget_limited:
+                        raise VisualBudgetExceeded(
+                            "Normal visual source-byte budget cannot admit this Plex response."
+                        )
+                    raise _PlexResponseTooLarge(
+                        "Plex response exceeded the safe size limit."
+                    )
+            payload = response.read(limit if budget_limited else limit + 1)
+            account_source_bytes(len(payload))
     except urllib.error.HTTPError as exc:
         if exc.code in {401, 403}:
             detail = "Plex rejected the access token."
