@@ -42,7 +42,21 @@ def build_router(ctx: RouteContext):
     speech_model_components = ctx.live("speech_model_components")
 
     fast = FastIdentityService(db)
-    decisions = MediaIdentityDecisionService(db)
+
+    def _decision_external_registry():
+        try:
+            secrets = provider_secrets.load()
+        except ProviderSecretError:
+            secrets = {}
+        return build_configured_source_registry(
+            ExternalSourceConfigService(db),
+            secrets,
+        )
+
+    decisions = MediaIdentityDecisionService(
+        db,
+        external_registry_factory=_decision_external_registry,
+    )
 
     def librarian_get(path: str, **kwargs):
         dependencies = list(kwargs.pop("dependencies", ()))
