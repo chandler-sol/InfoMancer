@@ -460,6 +460,27 @@ class MediaIdentityDecisionService:
                 return False, file_row
             if normal_version != NORMAL_EVIDENCE_ALGORITHM_VERSION:
                 return False, file_row
+            if not isinstance(normal_metadata.get("coverage_complete"), bool):
+                return False, file_row
+            try:
+                planned_frame_count = int(
+                    normal_metadata.get("planned_frame_count") or 0
+                )
+                completed_frame_count = int(
+                    normal_metadata.get("completed_frame_count") or 0
+                )
+            except (TypeError, ValueError):
+                return False, file_row
+            if (
+                planned_frame_count < 0
+                or completed_frame_count < 0
+                or completed_frame_count > planned_frame_count
+                or (
+                    bool(normal_metadata.get("coverage_complete"))
+                    and bool(normal_metadata.get("budget_exhausted"))
+                )
+            ):
+                return False, file_row
 
             speech_metadata = claimed.get("normal_speech")
             if not isinstance(speech_metadata, Mapping):
@@ -497,6 +518,33 @@ class MediaIdentityDecisionService:
                 transcript_count < 0
                 or text_transcript_count < 0
                 or text_transcript_count > transcript_count
+            ):
+                return False, file_row
+            if not isinstance(speech_metadata.get("coverage_complete"), bool):
+                return False, file_row
+            try:
+                planned_speech_windows = int(
+                    speech_metadata.get("planned_windows") or 0
+                )
+            except (TypeError, ValueError):
+                return False, file_row
+            speech_failures = speech_metadata.get("failures")
+            if not isinstance(speech_failures, list):
+                return False, file_row
+            speech_coverage_complete = bool(
+                speech_metadata.get("coverage_complete")
+            )
+            if (
+                planned_speech_windows < 0
+                or (
+                    speech_coverage_complete
+                    and (
+                        planned_speech_windows <= 0
+                        or transcript_count != planned_speech_windows
+                        or bool(speech_failures)
+                        or bool(speech_metadata.get("budget_exhausted"))
+                    )
+                )
             ):
                 return False, file_row
 
