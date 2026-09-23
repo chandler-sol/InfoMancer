@@ -1124,6 +1124,44 @@ class MediaIdentityDecisionService:
             return False, file_row
         return current, file_row
 
+    @staticmethod
+    def _confirmation_provenance(
+        scan: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        claimed = _json_object(scan.get("claimed_identity_json"))
+        snapshot = claimed.get("decision_snapshot")
+        if not isinstance(snapshot, Mapping):
+            raise MediaIdentityDecisionError(
+                "Episode Identity confirmation requires a sealed decision snapshot."
+            )
+        try:
+            snapshot_version = int(snapshot.get("version") or 0)
+            snapshot_revision = int(snapshot.get("revision") or 0)
+        except (TypeError, ValueError) as exc:
+            raise MediaIdentityDecisionError(
+                "Episode Identity confirmation has invalid decision provenance."
+            ) from exc
+        revision = result_revision(claimed)
+        digest = str(snapshot.get("sha256") or "").strip().casefold()
+        metadata_signature = str(scan.get("metadata_signature") or "")
+        if (
+            snapshot_version != 1
+            or revision <= 0
+            or snapshot_revision != revision
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+            or not metadata_signature
+        ):
+            raise MediaIdentityDecisionError(
+                "Episode Identity confirmation has incomplete decision provenance."
+            )
+        return {
+            "source_scan_snapshot_id": int(scan["id"]),
+            "source_result_revision": revision,
+            "source_decision_snapshot_sha256": digest,
+            "source_metadata_signature": metadata_signature,
+        }
+
     def confirmation_status(self, file_id: int) -> dict[str, Any] | None:
         with self.database.connect() as conn:
             row = conn.execute(
@@ -1142,7 +1180,43 @@ class MediaIdentityDecisionService:
                 verify_content=True,
             )
             source_scan_id = confirmation.get("source_scan_id")
-            if current and source_scan_id is not None:
+            try:
+                source_scan_snapshot_id = int(
+                    confirmation.get("source_scan_snapshot_id") or 0
+                )
+                source_result_revision = int(
+                    confirmation.get("source_result_revision") or 0
+                )
+            except (TypeError, ValueError):
+                source_scan_snapshot_id = 0
+                source_result_revision = 0
+            source_decision_sha256 = str(
+                confirmation.get("source_decision_snapshot_sha256") or ""
+            ).strip().casefold()
+            source_metadata_signature = str(
+                confirmation.get("source_metadata_signature") or ""
+            )
+            if current and (
+                source_scan_id is None
+                or source_scan_snapshot_id <= 0
+                or source_result_revision <= 0
+                or len(source_decision_sha256) != 64
+                or any(
+                    character not in "0123456789abcdef"
+                    for character in source_decision_sha256
+                )
+                or not source_metadata_signature
+            ):
+                current = False
+            if current:
+                try:
+                    live_source_scan_id = int(source_scan_id)
+                except (TypeError, ValueError):
+                    current = False
+                else:
+                    if live_source_scan_id != source_scan_snapshot_id:
+                        current = False
+            if current:
                 try:
                     scan, _, evidence = self._scan_snapshot(
                         conn, int(source_scan_id)
@@ -1156,6 +1230,28 @@ class MediaIdentityDecisionService:
                         evidence,
                         verify_content=True,
                     )
+                    if current:
+                        try:
+                            live_provenance = self._confirmation_provenance(scan)
+                        except MediaIdentityDecisionError:
+                            current = False
+                        else:
+                            current = (
+                                int(live_provenance["source_scan_snapshot_id"])
+                                == source_scan_snapshot_id
+                                and int(live_provenance["source_result_revision"])
+                                == source_result_revision
+                                and str(
+                                    live_provenance[
+                                        "source_decision_snapshot_sha256"
+                                    ]
+                                )
+                                == source_decision_sha256
+                                and str(
+                                    live_provenance["source_metadata_signature"]
+                                )
+                                == source_metadata_signature
+                            )
         confirmation["freshness"] = "current" if current else "stale"
         confirmation["current"] = current
         return confirmation
@@ -1202,13 +1298,16 @@ class MediaIdentityDecisionService:
                 raise MediaIdentityDecisionError(
                     "The media file or supporting evidence changed after this identity scan. Run verification again before confirming it."
                 )
+            provenance = self._confirmation_provenance(scan)
             conn.execute(
                 """INSERT INTO media_identity_confirmations(
                      file_id,identity_kind,provider,provider_item_id,
                      expected_episode_id,order_namespace,season,episode,display_name,
-                     source_scan_id,confirmed_size_bytes,confirmed_modified_at,
-                     confirmed_sha256,confirmed_by,confirmed_at
-                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                     source_scan_id,source_scan_snapshot_id,
+                     source_result_revision,source_decision_snapshot_sha256,
+                     source_metadata_signature,confirmed_size_bytes,
+                     confirmed_modified_at,confirmed_sha256,confirmed_by,confirmed_at
+                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
                    ON CONFLICT(file_id) DO UPDATE SET
                      identity_kind=excluded.identity_kind,
                      provider=excluded.provider,
@@ -1219,6 +1318,10 @@ class MediaIdentityDecisionService:
                      episode=excluded.episode,
                      display_name=excluded.display_name,
                      source_scan_id=excluded.source_scan_id,
+                     source_scan_snapshot_id=excluded.source_scan_snapshot_id,
+                     source_result_revision=excluded.source_result_revision,
+                     source_decision_snapshot_sha256=excluded.source_decision_snapshot_sha256,
+                     source_metadata_signature=excluded.source_metadata_signature,
                      confirmed_size_bytes=excluded.confirmed_size_bytes,
                      confirmed_modified_at=excluded.confirmed_modified_at,
                      confirmed_sha256=excluded.confirmed_sha256,
@@ -1235,6 +1338,10 @@ class MediaIdentityDecisionService:
                     candidate["episode"],
                     candidate["display_name"] or "",
                     int(scan_id),
+                    int(provenance["source_scan_snapshot_id"]),
+                    int(provenance["source_result_revision"]),
+                    str(provenance["source_decision_snapshot_sha256"]),
+                    str(provenance["source_metadata_signature"]),
                     int(scan["file_size_bytes"] or 0),
                     scan["file_modified_at"],
                     scan["file_sha256"],
