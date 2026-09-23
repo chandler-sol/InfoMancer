@@ -19,6 +19,7 @@ from PIL import Image, UnidentifiedImageError
 
 from ...path_mapping import ExternalPathMapper, PathMappingError, parse_absolute_path
 from ..external import (
+    ExternalAnalysisError,
     ExternalCapability,
     ExternalMediaRef,
     ExternalPreviewUnavailable,
@@ -46,7 +47,7 @@ _PLEX_PAGE_SIZE = 256
 _PLEX_MEDIA_HASH = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
-class PlexBifError(ValueError):
+class PlexBifError(ExternalAnalysisError):
     """Raised when a Plex source operation is malformed, unsafe, or unavailable."""
 
 
@@ -1424,10 +1425,15 @@ class PlexBifSource:
     def resolve_media(self, context: AnalyzerContext) -> ExternalMediaRef | None:
         if not self.status().available:
             return None
-        translation = self.mapper.reverse_translate(
-            self.source_key,
-            context.media.path,
-        )
+        try:
+            translation = self.mapper.reverse_translate(
+                self.source_key,
+                context.media.path,
+            )
+        except PathMappingError as exc:
+            raise PlexSourceFailure(
+                f"Plex path mapping could not resolve this media unambiguously: {exc}"
+            ) from exc
         if translation is None:
             return None
         candidates = fetch_plex_path_candidates(
