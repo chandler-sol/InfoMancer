@@ -9,6 +9,11 @@ from typing import Any, Mapping
 from ..db import Database
 from ..naming import contained_destination, plex_episode_filename
 from .candidates import generate_episode_candidates
+from .decision_snapshot import (
+    decision_snapshot_matches,
+    result_revision,
+    seal_decision_snapshot,
+)
 from .fast import (
     SCAN_INPUT_SIGNATURE_VERSION,
     TEXT_SUPPORT_THRESHOLD,
@@ -161,6 +166,13 @@ class MediaIdentityDecisionService:
                 raise MediaIdentityDecisionError(
                     "Only a complete Episode Identity scan can be resolved."
                 )
+            current, _ = self._scan_snapshot_is_current(conn, scan, evidence)
+            if not current:
+                raise MediaIdentityDecisionError(
+                    "The Episode Identity result changed after publication. "
+                    "Run verification again before resolving it."
+                )
+            revision = result_revision(scan)
             resolution = self._resolve_snapshot(scan, candidates, evidence)
             by_key = {
                 item.candidate_key: item for item in resolution.candidates
@@ -213,6 +225,11 @@ class MediaIdentityDecisionService:
                     resolution.best_candidate_key,
                     int(scan_id),
                 ),
+            )
+            seal_decision_snapshot(
+                conn,
+                int(scan_id),
+                revision=revision,
             )
         return resolution
 
@@ -815,6 +832,9 @@ class MediaIdentityDecisionService:
             combined_scan_input_signature(current_signatures)
             != str(scan.get("metadata_signature") or "")
         ):
+            return False, file_row
+
+        if not decision_snapshot_matches(conn, scan):
             return False, file_row
 
         return True, file_row
