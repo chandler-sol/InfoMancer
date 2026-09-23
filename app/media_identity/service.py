@@ -1611,10 +1611,11 @@ class MediaIdentityDecisionService:
 
     def mie_findings(self) -> list[dict[str, Any]]:
         with self.database.connect() as conn:
-            scan_ids = [
-                int(row["id"])
+            latest_rows = [
+                dict(row)
                 for row in conn.execute(
-                    """SELECT s.id
+                    """SELECT s.id,s.file_id,s.completed_profile,
+                              s.metadata_signature,s.file_size_bytes,s.file_sha256
                        FROM media_identity_scans s
                        WHERE s.status='complete' AND s.result_state IS NOT NULL
                          AND s.id=(
@@ -1624,15 +1625,63 @@ class MediaIdentityDecisionService:
                        ORDER BY s.id"""
                 ).fetchall()
             ]
+            effective_scan_ids: list[tuple[int, int | None]] = []
+            for latest in latest_rows:
+                preserved_normal_id: int | None = None
+                metadata_signature = str(
+                    latest.get("metadata_signature") or ""
+                )
+                file_sha256 = str(latest.get("file_sha256") or "").strip().casefold()
+                if (
+                    str(latest.get("completed_profile") or "") != IdentityProfile.NORMAL.value
+                    and metadata_signature
+                    and len(file_sha256) == 64
+                    and all(
+                        character in "0123456789abcdef"
+                        for character in file_sha256
+                    )
+                ):
+                    preserved = conn.execute(
+                        """SELECT id
+                           FROM media_identity_scans
+                           WHERE file_id=? AND id<?
+                             AND status='complete' AND result_state IS NOT NULL
+                             AND completed_profile='normal'
+                             AND metadata_signature=?
+                             AND file_size_bytes=?
+                             AND COALESCE(file_sha256,'')=?
+                           ORDER BY id DESC LIMIT 1""",
+                        (
+                            int(latest["file_id"]),
+                            int(latest["id"]),
+                            metadata_signature,
+                            int(latest.get("file_size_bytes") or 0),
+                            file_sha256,
+                        ),
+                    ).fetchone()
+                    if preserved is not None:
+                        preserved_normal_id = int(preserved["id"])
+                effective_scan_ids.append(
+                    (int(latest["id"]), preserved_normal_id)
+                )
 
         findings: list[dict[str, Any]] = []
-        for scan_id in scan_ids:
-            detail = self.scan_detail(scan_id)
-            if not detail.get("snapshot_current"):
+        for latest_scan_id, preserved_normal_id in effective_scan_ids:
+            detail = None
+            if preserved_normal_id is not None:
+                preserved_detail = self.scan_detail(preserved_normal_id)
+                if preserved_detail.get("snapshot_current"):
+                    detail = preserved_detail
+            if detail is None:
+                latest_detail = self.scan_detail(latest_scan_id)
+                if latest_detail.get("snapshot_current"):
+                    detail = latest_detail
+            if detail is None:
                 # A scan describes frozen media and supporting-evidence inputs.
                 # Once any of those inputs change, its old conclusion must not be
                 # presented as evidence about the current file.
                 continue
+            scan_id = int(detail["id"])
             state = str(detail.get("result_state") or "")
             if state not in ACTIONABLE_STATES:
                 continue
