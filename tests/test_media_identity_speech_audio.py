@@ -371,6 +371,10 @@ class SpeechAudioExtractionTests(unittest.TestCase):
                     run.call_args.kwargs["stdout"],
                     subprocess.DEVNULL,
                 )
+                self.assertIs(
+                    run.call_args.kwargs["stderr"],
+                    subprocess.DEVNULL,
+                )
             finally:
                 parent = artifact.path.parent
                 artifact.cleanup()
