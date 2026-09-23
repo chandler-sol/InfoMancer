@@ -418,7 +418,7 @@ class NormalSpeechService:
             if audio_identity.source_signature != str(source_signature):
                 continue
 
-            request = SpeechRequest(
+            cached_request = SpeechRequest(
                 media=media,
                 window=window,
                 audio=audio_identity,
@@ -429,7 +429,7 @@ class NormalSpeechService:
             )
             try:
                 expected_cache_key = speech_transcript_cache_key(
-                    request,
+                    cached_request,
                     engine_snapshot,
                 )
             except (SpeechIdentityError, TypeError, ValueError):
