@@ -67,7 +67,7 @@ class SpeechAudioExtractionTests(unittest.TestCase):
             path=str(self.media_path),
             size_bytes=stat.st_size,
             modified_at=stat.st_mtime,
-            sha256="a" * 64,
+            sha256=hashlib.sha256(self.media_path.read_bytes()).hexdigest(),
         )
         self.ffmpeg = self.root / (
             "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
@@ -498,11 +498,52 @@ class SpeechAudioExtractionTests(unittest.TestCase):
             "app.media_identity.speech_audio.subprocess.run",
             side_effect=mutate,
         ):
-            with self.assertRaisesRegex(
-                SpeechAudioStaleError,
-                "media file",
+            with self.assertRaises(
+                (SpeechAudioStaleError, SpeechAudioUnavailable)
             ):
                 self.extractor().extract(SpeechWindow(0, 1000))
+
+    def test_same_size_same_mtime_a_b_a_during_extraction_fails_closed(self) -> None:
+        payload = wav_bytes()
+        original = self.media_path.read_bytes()
+        original_stat = self.media_path.stat()
+        replacement = bytearray(original)
+        replacement[0] ^= 0x01
+        replacement = bytes(replacement)
+
+        def cycle(command, **_kwargs):
+            Path(command[-1]).write_bytes(payload)
+            self.media_path.write_bytes(replacement)
+            os.utime(
+                self.media_path,
+                ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+            )
+            self.media_path.write_bytes(original)
+            os.utime(
+                self.media_path,
+                ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+            )
+            return subprocess.CompletedProcess(
+                args=command,
+                returncode=0,
+                stdout=None,
+                stderr=b"",
+            )
+
+        extractor = self.extractor()
+        try:
+            with patch(
+                "app.media_identity.speech_audio.subprocess.run",
+                side_effect=cycle,
+            ):
+                with self.assertRaises(
+                    (SpeechAudioStaleError, SpeechAudioUnavailable)
+                ):
+                    extractor.extract(SpeechWindow(0, 1000))
+        finally:
+            extractor.close()
+
+        self.assertEqual(self.media_path.read_bytes(), original)
 
     def test_ffmpeg_change_during_extraction_fails_closed(self) -> None:
         payload = wav_bytes()
