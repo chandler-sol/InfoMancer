@@ -252,7 +252,38 @@ class WhisperCppSpeechEngineTests(unittest.TestCase):
         command = run.call_args.args[0]
         self.assertEqual(command[command.index("--language") + 1], "auto")
         self.assertIn("--translate", command)
-        self.assertEqual(transcript.language, "")
+        self.assertEqual(transcript.language, "en")
+
+    def test_translation_keeps_selected_input_language_and_reports_english_output(self) -> None:
+        engine = WhisperCppSpeechEngine(self.runtime, self.model)
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=b"translated spanish dialogue",
+            stderr=b"",
+        )
+        with patch(
+            "app.whisper_cpp_speech._run_bounded_process",
+            return_value=completed,
+        ) as run:
+            transcript = engine.transcribe(
+                str(self.audio),
+                self.request(language="spa", translate=True),
+            )
+
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--language") + 1], "es")
+        self.assertIn("--translate", command)
+        self.assertEqual(transcript.language, "en")
+        self.assertEqual(
+            transcript.details["language_requested"],
+            "spa",
+        )
+        self.assertEqual(
+            transcript.details["language_argument"],
+            "es",
+        )
+        self.assertTrue(transcript.details["translated"])
 
     def test_iso_language_aliases_and_unknown_codes_use_valid_whisper_ids(self) -> None:
         engine = WhisperCppSpeechEngine(self.runtime, self.model)
