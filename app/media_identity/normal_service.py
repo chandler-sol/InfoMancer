@@ -1253,7 +1253,9 @@ class NormalIdentityService:
                         budget=visual_budget,
                     )
             finally:
-                local_source.close()
+                close = getattr(local_source, "close", None)
+                if callable(close):
+                    close()
 
             external_run = run
             combined_failures = (
