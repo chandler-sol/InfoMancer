@@ -55,6 +55,7 @@ ACTIONABLE_STATES = SUGGESTED_CONFIRM_STATES | {
 
 _ACTION_EXTERNAL_PREVIEW_MAX_FRAMES = 12
 _ACTION_EXTERNAL_PREVIEW_MAX_SOURCE_BYTES = 48 * 1024 * 1024
+_MIE_NORMAL_HISTORY_VALIDATION_LIMIT = 8
 
 
 def _same_modified_at(first: Any, second: Any) -> bool:
@@ -1717,9 +1718,12 @@ class MediaIdentityDecisionService:
                        ORDER BY s.id"""
                 ).fetchall()
             ]
-            effective_scan_ids: list[tuple[int, int | None]] = []
+            effective_scan_ids: list[
+                tuple[int, tuple[int, ...], bool]
+            ] = []
             for latest in latest_rows:
-                preserved_normal_id: int | None = None
+                preserved_normal_ids: tuple[int, ...] = ()
+                history_truncated = False
                 metadata_signature = str(
                     latest.get("metadata_signature") or ""
                 )
@@ -1733,7 +1737,7 @@ class MediaIdentityDecisionService:
                         for character in file_sha256
                     )
                 ):
-                    preserved = conn.execute(
+                    preserved_rows = conn.execute(
                         """SELECT id
                            FROM media_identity_scans
                            WHERE file_id=? AND id<?
@@ -1742,28 +1746,86 @@ class MediaIdentityDecisionService:
                              AND metadata_signature=?
                              AND file_size_bytes=?
                              AND COALESCE(file_sha256,'')=?
-                           ORDER BY id DESC LIMIT 1""",
+                           ORDER BY id DESC LIMIT ?""",
                         (
                             int(latest["file_id"]),
                             int(latest["id"]),
                             metadata_signature,
                             int(latest.get("file_size_bytes") or 0),
                             file_sha256,
+                            _MIE_NORMAL_HISTORY_VALIDATION_LIMIT + 1,
                         ),
-                    ).fetchone()
-                    if preserved is not None:
-                        preserved_normal_id = int(preserved["id"])
+                    ).fetchall()
+                    history_truncated = (
+                        len(preserved_rows)
+                        > _MIE_NORMAL_HISTORY_VALIDATION_LIMIT
+                    )
+                    preserved_normal_ids = tuple(
+                        int(row["id"])
+                        for row in preserved_rows[
+                            :_MIE_NORMAL_HISTORY_VALIDATION_LIMIT
+                        ]
+                    )
                 effective_scan_ids.append(
-                    (int(latest["id"]), preserved_normal_id)
+                    (
+                        int(latest["id"]),
+                        preserved_normal_ids,
+                        history_truncated,
+                    )
                 )
 
         findings: list[dict[str, Any]] = []
-        for latest_scan_id, preserved_normal_id in effective_scan_ids:
+        for (
+            latest_scan_id,
+            preserved_normal_ids,
+            history_truncated,
+        ) in effective_scan_ids:
             detail = None
-            if preserved_normal_id is not None:
+            for preserved_normal_id in preserved_normal_ids:
                 preserved_detail = self.scan_detail(preserved_normal_id)
                 if preserved_detail.get("snapshot_current"):
                     detail = preserved_detail
+                    break
+            if detail is None and history_truncated:
+                latest_detail = self.scan_detail(latest_scan_id)
+                file_row = latest_detail.get("file") or {}
+                findings.append({
+                    "fingerprint": (
+                        "episode-identity-history:"
+                        f"file:{int(latest_detail['file_id'])}:"
+                        f"latest:{latest_scan_id}"
+                    ),
+                    "rule_key": "episode-identity-history-uncertain",
+                    "category": "identity",
+                    "severity": "information",
+                    "root_id": file_row.get("root_id"),
+                    "title_id": file_row.get("title_id"),
+                    "file_id": latest_detail["file_id"],
+                    "expected_episode_id": None,
+                    "summary": (
+                        f"{file_row.get('filename')}: Episode Identity history "
+                        "needs a fresh Normal verification"
+                    ),
+                    "explanation": (
+                        "InfoMancer found more matching historical Normal results "
+                        "than it can safely revalidate in one Library Health pass. "
+                        "The checked newer Normal results were stale, so it did not "
+                        "silently fall back to a weaker Fast result."
+                    ),
+                    "recommendation": (
+                        "Run Normal verification again to establish a fresh bounded "
+                        "result before relying on the current identity warning state."
+                    ),
+                    "evidence": {
+                        "latest_scan_id": latest_scan_id,
+                        "normal_history_checked": len(preserved_normal_ids),
+                        "normal_history_validation_limit": (
+                            _MIE_NORMAL_HISTORY_VALIDATION_LIMIT
+                        ),
+                        "history_truncated": True,
+                    },
+                })
+                continue
             if detail is None:
                 latest_detail = self.scan_detail(latest_scan_id)
                 if latest_detail.get("snapshot_current"):
