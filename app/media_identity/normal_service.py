@@ -1295,6 +1295,13 @@ class NormalIdentityService:
                 self.speech_model,
                 extractor_factory=self.speech_extractor_factory,
                 language=speech_language,
+                synopsis_language=speech_language,
+                preferred_audio_language=speech_language,
+                translation_target_language=(
+                    "eng"
+                    if normalize_speech_language(speech_language) == "eng"
+                    else ""
+                ),
             )
             try:
                 speech_run = speech_service.run(
@@ -1521,6 +1528,15 @@ class NormalIdentityService:
                 ],
                 "failures": list(speech_run.failures),
                 "budget_exhausted": bool(speech_run.budget_exhausted),
+                "synopsis_language": speech_run.synopsis_language,
+                "preferred_audio_language": speech_run.preferred_audio_language,
+                "selected_audio_language": speech_run.selected_audio_language,
+                "transcription_input_language": (
+                    speech_run.transcription_input_language
+                ),
+                "translation_target_language": (
+                    speech_run.translation_target_language
+                ),
             }
             conn.execute(
                 """UPDATE media_identity_scans
