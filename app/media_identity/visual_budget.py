@@ -160,10 +160,3 @@ def account_source_bytes(amount: int) -> None:
     budget = current_visual_budget()
     if budget is not None:
         budget.reserve_source_bytes(int(amount))
-
-
-def deny_source_read(detail: str) -> None:
-    budget = current_visual_budget()
-    if budget is not None:
-        budget.mark_blocked()
-    raise VisualBudgetExceeded(str(detail))
