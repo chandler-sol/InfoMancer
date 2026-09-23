@@ -696,6 +696,60 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertFalse(stale["current"])
         self.assertEqual(stale["freshness"], "stale")
 
+    def test_confirmation_source_scan_deletion_preserves_audit_but_stales(self) -> None:
+        self.service.resolve_scan(self.scan_id)
+        confirmation = self.service.confirm_current(self.scan_id, None)
+        self.assertTrue(confirmation["current"])
+        self.assertEqual(confirmation["source_scan_id"], self.scan_id)
+        self.assertEqual(
+            confirmation["source_scan_snapshot_id"],
+            self.scan_id,
+        )
+        self.assertGreater(
+            int(confirmation["source_result_revision"]),
+            0,
+        )
+        audit_digest = confirmation["source_decision_snapshot_sha256"]
+        audit_signature = confirmation["source_metadata_signature"]
+        self.assertEqual(len(audit_digest), 64)
+        self.assertTrue(audit_signature)
+
+        with self.database.connect() as conn:
+            conn.execute(
+                "DELETE FROM media_identity_scans WHERE id=?",
+                (self.scan_id,),
+            )
+            stored = conn.execute(
+                """SELECT source_scan_id,source_scan_snapshot_id,
+                          source_result_revision,
+                          source_decision_snapshot_sha256,
+                          source_metadata_signature
+                   FROM media_identity_confirmations
+                   WHERE file_id=1"""
+            ).fetchone()
+
+        self.assertIsNone(stored["source_scan_id"])
+        self.assertEqual(stored["source_scan_snapshot_id"], self.scan_id)
+        self.assertGreater(int(stored["source_result_revision"]), 0)
+        self.assertEqual(
+            stored["source_decision_snapshot_sha256"],
+            audit_digest,
+        )
+        self.assertEqual(
+            stored["source_metadata_signature"],
+            audit_signature,
+        )
+
+        stale = self.service.confirmation_status(1)
+        self.assertIsNotNone(stale)
+        self.assertFalse(stale["current"])
+        self.assertEqual(stale["freshness"], "stale")
+        self.assertEqual(stale["source_scan_snapshot_id"], self.scan_id)
+        self.assertEqual(
+            stale["source_decision_snapshot_sha256"],
+            audit_digest,
+        )
+
     def test_mark_correct_suppresses_advisory_finding_only_for_current_snapshot(self) -> None:
         self.service.resolve_scan(self.scan_id)
         self.assertEqual(len(self.service.mie_findings()), 1)
