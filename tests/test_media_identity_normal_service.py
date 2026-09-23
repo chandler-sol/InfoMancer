@@ -623,6 +623,21 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertTrue(confirmation["current"])
         self.assertEqual(source.read_calls, result.observation_count)
 
+        source.read_calls = 0
+        confirmed_detail = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertTrue(confirmed_detail["confirmation"]["current"])
+        self.assertEqual(source.read_calls, result.observation_count)
+
+        source.read_calls = 0
+        status = decisions.confirmation_status(1)
+        self.assertTrue(status["current"])
+        self.assertEqual(source.read_calls, result.observation_count)
+
+        source.read_calls = 0
+        findings = decisions.mie_findings()
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(source.read_calls, result.observation_count)
+
         # An existing alternate confirmation must not make rename preview
         # re-read the same external evidence during preparation and final action.
         source.read_calls = 0
