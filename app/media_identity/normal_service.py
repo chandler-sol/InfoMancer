@@ -1226,31 +1226,34 @@ class NormalIdentityService:
                 context,
                 runtime_seconds,
             )
-            local_status = local_source.status()
-            if not local_status.available:
-                local_run = NormalPreviewOcrRun(
-                    failures=(
-                        f"{LOCAL_FRAME_SOURCE_KEY}:unavailable:{local_status.detail}",
-                    ),
-                    total_image_bytes=visual_budget.image_bytes,
-                    total_source_bytes=visual_budget.source_bytes,
-                    total_text_chars=visual_budget.text_chars,
-                    total_frame_attempts=visual_budget.frame_attempts,
-                    budget_exhausted=False,
-                )
-            else:
-                local_executor = NormalPreviewOcrExecutor(
-                    ExternalSourceRegistry([local_source]),
-                    self.engine,
-                    limits=self.limits,
-                    cache_lookup=cache_lookup,
-                )
-                local_run = local_executor.run(
-                    context,
-                    max_stage=max_stage,
-                    stage_sufficient=stage_sufficient,
-                    budget=visual_budget,
-                )
+            try:
+                local_status = local_source.status()
+                if not local_status.available:
+                    local_run = NormalPreviewOcrRun(
+                        failures=(
+                            f"{LOCAL_FRAME_SOURCE_KEY}:unavailable:{local_status.detail}",
+                        ),
+                        total_image_bytes=visual_budget.image_bytes,
+                        total_source_bytes=visual_budget.source_bytes,
+                        total_text_chars=visual_budget.text_chars,
+                        total_frame_attempts=visual_budget.frame_attempts,
+                        budget_exhausted=False,
+                    )
+                else:
+                    local_executor = NormalPreviewOcrExecutor(
+                        ExternalSourceRegistry([local_source]),
+                        self.engine,
+                        limits=self.limits,
+                        cache_lookup=cache_lookup,
+                    )
+                    local_run = local_executor.run(
+                        context,
+                        max_stage=max_stage,
+                        stage_sufficient=stage_sufficient,
+                        budget=visual_budget,
+                    )
+            finally:
+                local_source.close()
 
             external_run = run
             combined_failures = (
