@@ -574,6 +574,13 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertTrue(confirmation["current"])
         self.assertEqual(source.read_calls, result.observation_count)
 
+        # An existing alternate confirmation must not make rename preview
+        # re-read the same external evidence during preparation and final action.
+        source.read_calls = 0
+        confirmed_preview = decisions.rename_preview(self.fast_scan.scan_id)
+        self.assertEqual(confirmed_preview["status"], "ready")
+        self.assertEqual(source.read_calls, result.observation_count)
+
     def test_new_fast_scan_does_not_hide_current_normal_mie_result(self):
         source = FakePreviewSource()
         normal = NormalIdentityService(
