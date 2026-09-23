@@ -34,6 +34,7 @@ from .text import (
     synopsis_similarity_from_corpus,
     text_corpus,
 )
+from .visual_budget import VisualAttemptBudget, visual_budget_scope
 from .versions import (
     EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION,
     NORMAL_EVIDENCE_ALGORITHM_VERSION,
@@ -51,6 +52,9 @@ SUGGESTED_CONFIRM_STATES = {
 ACTIONABLE_STATES = SUGGESTED_CONFIRM_STATES | {
     IdentityResultState.EPISODE_ORDER_CONFLICT.value,
 }
+
+_ACTION_EXTERNAL_PREVIEW_MAX_FRAMES = 12
+_ACTION_EXTERNAL_PREVIEW_MAX_SOURCE_BYTES = 48 * 1024 * 1024
 
 
 def _same_modified_at(first: Any, second: Any) -> bool:
@@ -1046,61 +1050,71 @@ class MediaIdentityDecisionService:
         if source is None:
             return False
 
-        for cache_key in cache_keys:
-            row = by_cache_key[cache_key]
-            if str(row["source_kind"] or "").strip().casefold() != source_key:
-                return False
-            payload = _json_object(row["payload_json"])
-            details = payload.get("details")
-            if not isinstance(details, Mapping):
-                return False
-            expected_sha256 = str(details.get("preview_sha256") or "").strip().casefold()
-            if (
-                len(expected_sha256) != 64
-                or any(character not in "0123456789abcdef" for character in expected_sha256)
-            ):
-                return False
-            item_id = str(payload.get("item_id") or "").strip()
-            source_ref = str(row["source_ref"] or "")
-            source_signature = str(row["source_signature"] or "")
-            try:
-                timestamp_ms = int(row["start_ms"])
-            except (TypeError, ValueError):
-                return False
-            if not item_id or not source_ref or not source_signature or timestamp_ms < 0:
-                return False
-
-            width = height = None
-            try:
-                asset_payload = json.loads(source_ref)
-            except (TypeError, ValueError, json.JSONDecodeError):
-                asset_payload = None
-            if isinstance(asset_payload, Mapping):
+        budget = VisualAttemptBudget(
+            max_frame_attempts=_ACTION_EXTERNAL_PREVIEW_MAX_FRAMES,
+            max_source_bytes=_ACTION_EXTERNAL_PREVIEW_MAX_SOURCE_BYTES,
+            # Freshness does not run OCR, but these fields remain positive so
+            # the same shared budget object can be used by source adapters.
+            max_image_bytes=1,
+            max_text_chars=1,
+        )
+        with visual_budget_scope(budget):
+            for cache_key in cache_keys:
+                row = by_cache_key[cache_key]
+                if str(row["source_kind"] or "").strip().casefold() != source_key:
+                    return False
+                payload = _json_object(row["payload_json"])
+                details = payload.get("details")
+                if not isinstance(details, Mapping):
+                    return False
+                expected_sha256 = str(details.get("preview_sha256") or "").strip().casefold()
+                if (
+                    len(expected_sha256) != 64
+                    or any(character not in "0123456789abcdef" for character in expected_sha256)
+                ):
+                    return False
+                item_id = str(payload.get("item_id") or "").strip()
+                source_ref = str(row["source_ref"] or "")
+                source_signature = str(row["source_signature"] or "")
                 try:
-                    if asset_payload.get("width") is not None:
-                        width = int(asset_payload["width"])
-                    if asset_payload.get("height") is not None:
-                        height = int(asset_payload["height"])
+                    timestamp_ms = int(row["start_ms"])
                 except (TypeError, ValueError):
                     return False
+                if not item_id or not source_ref or not source_signature or timestamp_ms < 0:
+                    return False
 
-            frame = PreviewFrameRef(
-                source_key=source_key,
-                item_id=item_id,
-                timestamp_ms=timestamp_ms,
-                asset_ref=source_ref,
-                source_signature=source_signature,
-                width=width,
-                height=height,
-            )
-            try:
-                current_payload = bytes(source.read_preview(frame))
-            except ExternalAnalysisError:
-                return False
-            except (OSError, TypeError, ValueError):
-                return False
-            if hashlib.sha256(current_payload).hexdigest() != expected_sha256:
-                return False
+                width = height = None
+                try:
+                    asset_payload = json.loads(source_ref)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    asset_payload = None
+                if isinstance(asset_payload, Mapping):
+                    try:
+                        if asset_payload.get("width") is not None:
+                            width = int(asset_payload["width"])
+                        if asset_payload.get("height") is not None:
+                            height = int(asset_payload["height"])
+                    except (TypeError, ValueError):
+                        return False
+
+                frame = PreviewFrameRef(
+                    source_key=source_key,
+                    item_id=item_id,
+                    timestamp_ms=timestamp_ms,
+                    asset_ref=source_ref,
+                    source_signature=source_signature,
+                    width=width,
+                    height=height,
+                )
+                try:
+                    budget.reserve_frame_attempt()
+                    current_payload = bytes(source.read_preview(frame))
+                except ExternalAnalysisError:
+                    return False
+                except (OSError, TypeError, ValueError):
+                    return False
+                if hashlib.sha256(current_payload).hexdigest() != expected_sha256:
+                    return False
         return True
 
     def _review_snapshot_is_current(
@@ -1369,13 +1383,26 @@ class MediaIdentityDecisionService:
                     user_id if user_id and int(user_id) > 0 else None,
                 ),
             )
-        status = self.confirmation_status(int(scan["file_id"]))
-        if status is None:
-            raise MediaIdentityDecisionError("Episode Identity confirmation was not saved.")
+            saved = conn.execute(
+                "SELECT * FROM media_identity_confirmations WHERE file_id=?",
+                (int(scan["file_id"]),),
+            ).fetchone()
+            if saved is None:
+                raise MediaIdentityDecisionError(
+                    "Episode Identity confirmation was not saved."
+                )
+            status = dict(saved)
+        status["freshness"] = "current"
+        status["current"] = True
         return status
 
     def confirm_current(self, scan_id: int, user_id: int | None) -> dict[str, Any]:
-        detail = self.scan_detail(int(scan_id), resolve_if_needed=True)
+        detail = self.scan_detail(
+            int(scan_id),
+            resolve_if_needed=True,
+            verify_actionable_content=False,
+            include_confirmation=False,
+        )
         claimed_keys = list(detail.get("claimed_candidate_keys") or [])
         if len(claimed_keys) != 1:
             raise MediaIdentityDecisionError(
@@ -1392,7 +1419,12 @@ class MediaIdentityDecisionService:
         )
 
     def confirm_best(self, scan_id: int, user_id: int | None) -> dict[str, Any]:
-        detail = self.scan_detail(int(scan_id), resolve_if_needed=True)
+        detail = self.scan_detail(
+            int(scan_id),
+            resolve_if_needed=True,
+            verify_actionable_content=False,
+            include_confirmation=False,
+        )
         if str(detail.get("result_state") or "") not in SUGGESTED_CONFIRM_STATES:
             raise MediaIdentityDecisionError(
                 "This scan is not strong enough to confirm an alternate episode."
@@ -1419,6 +1451,8 @@ class MediaIdentityDecisionService:
         scan_id: int,
         *,
         resolve_if_needed: bool = False,
+        verify_actionable_content: bool = True,
+        include_confirmation: bool = True,
     ) -> dict[str, Any]:
         if resolve_if_needed:
             with self.database.connect() as conn:
@@ -1449,7 +1483,8 @@ class MediaIdentityDecisionService:
                 scan,
                 evidence,
                 verify_content=(
-                    str(scan.get("result_state") or "") in ACTIONABLE_STATES
+                    verify_actionable_content
+                    and str(scan.get("result_state") or "") in ACTIONABLE_STATES
                 ),
             )
         claimed = self._claimed_identity(scan)
@@ -1527,7 +1562,11 @@ class MediaIdentityDecisionService:
             str(item["candidate_key"]): item for item in candidates
         }
         best = candidate_by_key.get(str(scan.get("best_candidate_key") or ""))
-        confirmation = self.confirmation_status(int(scan["file_id"]))
+        confirmation = (
+            self.confirmation_status(int(scan["file_id"]))
+            if include_confirmation
+            else None
+        )
         result = dict(scan)
         result["claimed_identity"] = claimed
         result.pop("claimed_identity_json", None)
@@ -1787,7 +1826,10 @@ class MediaIdentityDecisionService:
         return findings
 
     def rename_preview(self, scan_id: int) -> dict[str, Any]:
-        detail = self.scan_detail(int(scan_id))
+        detail = self.scan_detail(
+            int(scan_id),
+            verify_actionable_content=False,
+        )
         reviewed_revision = int(detail.get("result_revision") or 0)
         reviewed_digest = str(
             detail.get("decision_snapshot_sha256") or ""
