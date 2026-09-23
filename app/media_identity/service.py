@@ -1181,7 +1181,12 @@ class MediaIdentityDecisionService:
             "source_metadata_signature": metadata_signature,
         }
 
-    def confirmation_status(self, file_id: int) -> dict[str, Any] | None:
+    def confirmation_status(
+        self,
+        file_id: int,
+        *,
+        verify_external: bool = True,
+    ) -> dict[str, Any] | None:
         with self.database.connect() as conn:
             row = conn.execute(
                 """SELECT * FROM media_identity_confirmations WHERE file_id=?""",
@@ -1243,12 +1248,20 @@ class MediaIdentityDecisionService:
                 except MediaIdentityDecisionError:
                     current = False
                 else:
-                    current, _ = self._review_snapshot_is_current(
-                        conn,
-                        scan,
-                        evidence,
-                        verify_content=True,
-                    )
+                    if verify_external:
+                        current, _ = self._review_snapshot_is_current(
+                            conn,
+                            scan,
+                            evidence,
+                            verify_content=True,
+                        )
+                    else:
+                        current, _ = self._scan_snapshot_is_current(
+                            conn,
+                            scan,
+                            evidence,
+                            verify_content=True,
+                        )
                     if current:
                         try:
                             live_provenance = self._confirmation_provenance(scan)
@@ -1453,6 +1466,7 @@ class MediaIdentityDecisionService:
         resolve_if_needed: bool = False,
         verify_actionable_content: bool = True,
         include_confirmation: bool = True,
+        verify_confirmation_external: bool = True,
     ) -> dict[str, Any]:
         if resolve_if_needed:
             with self.database.connect() as conn:
@@ -1563,7 +1577,10 @@ class MediaIdentityDecisionService:
         }
         best = candidate_by_key.get(str(scan.get("best_candidate_key") or ""))
         confirmation = (
-            self.confirmation_status(int(scan["file_id"]))
+            self.confirmation_status(
+                int(scan["file_id"]),
+                verify_external=verify_confirmation_external,
+            )
             if include_confirmation
             else None
         )
@@ -1829,6 +1846,7 @@ class MediaIdentityDecisionService:
         detail = self.scan_detail(
             int(scan_id),
             verify_actionable_content=False,
+            verify_confirmation_external=False,
         )
         reviewed_revision = int(detail.get("result_revision") or 0)
         reviewed_digest = str(
