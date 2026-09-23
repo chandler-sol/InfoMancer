@@ -166,6 +166,24 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
             subprocess.PIPE,
         )
 
+    @unittest.skipUnless(os.name == "nt", "Windows lease semantics test")
+    def test_windows_lease_blocks_parent_rename_until_cleanup(self):
+        source = self.source()
+        moved = self.root.with_name(self.root.name + "-moved")
+        try:
+            media = source.resolve_media(self.context)
+            self.assertIsNotNone(media)
+            with self.assertRaises(OSError):
+                os.replace(self.root, moved)
+        finally:
+            source.close()
+
+        os.replace(self.root, moved)
+        try:
+            self.assertTrue((moved / "episode.mkv").is_file())
+        finally:
+            os.replace(moved, self.root)
+
     @unittest.skipIf(os.name == "nt", "POSIX descriptor binding test")
     def test_path_redirection_cannot_change_leased_ffmpeg_input(self):
         payload = jpeg_bytes()
