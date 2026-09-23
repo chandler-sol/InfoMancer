@@ -41,6 +41,7 @@ from .speech_service import (
 )
 from .fast import TEXT_SUPPORT_THRESHOLD
 from .text import TextCorpus, synopsis_similarity_from_corpus, text_corpus
+from .visual_budget import VisualAttemptBudget
 from .versions import (
     NORMAL_EVIDENCE_ALGORITHM_VERSION,
     NORMAL_SPEECH_EVIDENCE_ALGORITHM_VERSION,
@@ -1162,6 +1163,12 @@ class NormalIdentityService:
             frame,
             cache_key,
         )
+        visual_budget = VisualAttemptBudget(
+            max_frame_attempts=int(self.limits.max_preview_frames),
+            max_source_bytes=int(self.limits.max_source_bytes_total),
+            max_image_bytes=int(self.limits.max_preview_bytes_total),
+            max_text_chars=int(self.limits.max_ocr_text_chars),
+        )
         executor = NormalPreviewOcrExecutor(
             self.registry,
             self.engine,
@@ -1188,6 +1195,7 @@ class NormalIdentityService:
             stage_sufficient=stage_sufficient,
             source_sufficient=source_sufficient,
             source_preference=source_preference,
+            budget=visual_budget,
         )
 
         if (
@@ -1205,6 +1213,11 @@ class NormalIdentityService:
                     failures=(
                         f"{LOCAL_FRAME_SOURCE_KEY}:unavailable:{local_status.detail}",
                     ),
+                    total_image_bytes=visual_budget.image_bytes,
+                    total_source_bytes=visual_budget.source_bytes,
+                    total_text_chars=visual_budget.text_chars,
+                    total_frame_attempts=visual_budget.frame_attempts,
+                    budget_exhausted=False,
                 )
             else:
                 local_executor = NormalPreviewOcrExecutor(
@@ -1217,8 +1230,7 @@ class NormalIdentityService:
                     context,
                     max_stage=max_stage,
                     stage_sufficient=stage_sufficient,
-                    initial_image_bytes=run.total_image_bytes,
-                    initial_text_chars=run.total_text_chars,
+                    budget=visual_budget,
                 )
 
             external_run = run
@@ -1235,8 +1247,10 @@ class NormalIdentityService:
                 source_key=preferred.source_key,
                 observations=preferred.observations,
                 failures=combined_failures,
-                total_image_bytes=local_run.total_image_bytes,
-                total_text_chars=local_run.total_text_chars,
+                total_image_bytes=visual_budget.image_bytes,
+                total_source_bytes=visual_budget.source_bytes,
+                total_text_chars=visual_budget.text_chars,
+                total_frame_attempts=visual_budget.frame_attempts,
                 budget_exhausted=local_run.budget_exhausted,
                 planned_frame_count=preferred.planned_frame_count,
                 completed_frame_count=preferred.completed_frame_count,
