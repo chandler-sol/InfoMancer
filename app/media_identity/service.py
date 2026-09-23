@@ -1005,10 +1005,7 @@ class MediaIdentityDecisionService:
         conn: sqlite3.Connection,
         scan: Mapping[str, Any],
     ) -> bool:
-        """Re-read exact external preview bytes when action-time verification is available."""
-        if self.external_registry_factory is None:
-            return True
-
+        """Re-read exact external preview bytes for external-backed decisions."""
         claimed = self._claimed_identity(scan)
         normal_metadata = claimed.get("normal_ocr")
         if not isinstance(normal_metadata, Mapping):
@@ -1025,6 +1022,10 @@ class MediaIdentityDecisionService:
             return False
         if not cache_keys:
             return True
+        if self.external_registry_factory is None:
+            # An external-backed finding cannot remain actionable when this
+            # process has no way to revalidate the exact provider preview bytes.
+            return False
 
         placeholders = ",".join("?" for _ in cache_keys)
         rows = conn.execute(
