@@ -24,9 +24,12 @@ from app.media_identity.normal import (
     NormalIdentityError,
     NormalResourceLimits,
     OcrTextResult,
+    ocr_preview_cache_key,
 )
 from app.media_identity.local_frames import LOCAL_FRAME_SOURCE_KEY
 from app.media_identity.normal_service import (
+    NORMAL_OCR_ARTIFACT_KEY,
+    NORMAL_OCR_ARTIFACT_VERSION,
     NORMAL_OCR_EVIDENCE_KEY,
     NORMAL_SPEECH_EVIDENCE_KEY,
     NormalIdentityService,
@@ -482,6 +485,110 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
                 for row in evidence
             )
         )
+
+    def test_ocr_insert_race_scores_persisted_winner_not_losing_output(self):
+        source = FakePreviewSource()
+        engine = FakeOcr()
+        frame = source.preview_frames(None)[0]
+        with self.database.connect() as conn:
+            scan = conn.execute(
+                """SELECT file_size_bytes,file_modified_at,file_sha256
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            cache_key = ocr_preview_cache_key(
+                frame,
+                engine,
+                parameters={
+                    "file_id": 1,
+                    "size_bytes": int(scan["file_size_bytes"]),
+                    "modified_at": scan["file_modified_at"],
+                    "sha256": str(scan["file_sha256"] or ""),
+                },
+            )
+            winner_text = "amber falcon orchard glacier velvet compass"
+            conn.execute(
+                """INSERT INTO media_identity_artifacts(
+                     file_id,artifact_type,analyzer_key,analyzer_version,
+                     cache_key,status,profile,source_kind,source_ref,
+                     source_signature,file_size_bytes,file_modified_at,
+                     start_ms,end_ms,text_value,payload_json
+                   ) VALUES (
+                     1,'visual_text',?,?,?,'complete','normal',?,?,?,
+                     ?,?,?,?,?,?
+                   )""",
+                (
+                    NORMAL_OCR_ARTIFACT_KEY,
+                    NORMAL_OCR_ARTIFACT_VERSION,
+                    cache_key,
+                    frame.source_key,
+                    frame.asset_ref,
+                    frame.source_signature,
+                    int(scan["file_size_bytes"]),
+                    scan["file_modified_at"],
+                    frame.timestamp_ms,
+                    frame.timestamp_ms,
+                    winner_text,
+                    json.dumps({
+                        "confidence": 1.0,
+                        "stage": 1,
+                        "ordinal": 1,
+                        "image_bytes": 64,
+                        "reused": False,
+                        "item_id": frame.item_id,
+                        "engine_key": engine.key,
+                        "engine_version": engine.version,
+                        "details": {"winner": True},
+                    }, sort_keys=True),
+                ),
+            )
+
+        class ForcedMissService(NormalIdentityService):
+            def _cached_ocr(self, scan, frame, cache_key):
+                return None
+
+        result = ForcedMissService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            engine,
+        ).run_scan(self.fast_scan.scan_id)
+        self.assertEqual(result.observation_count, 1)
+        self.assertEqual(result.reused_artifact_count, 1)
+        self.assertEqual(engine.calls, 1)
+
+        with self.database.connect() as conn:
+            artifact = conn.execute(
+                """SELECT id,text_value FROM media_identity_artifacts
+                   WHERE file_id=1 AND artifact_type='visual_text'
+                     AND analyzer_key=? AND analyzer_version=? AND cache_key=?""",
+                (
+                    NORMAL_OCR_ARTIFACT_KEY,
+                    NORMAL_OCR_ARTIFACT_VERSION,
+                    cache_key,
+                ),
+            ).fetchone()
+            evidence = conn.execute(
+                """SELECT candidate_key,relation,strength,details_json
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key=?
+                   ORDER BY candidate_key""",
+                (self.fast_scan.scan_id, NORMAL_OCR_EVIDENCE_KEY),
+            ).fetchall()
+
+        self.assertEqual(artifact["text_value"], winner_text)
+        supported = [row for row in evidence if row["relation"] == "supports"]
+        self.assertTrue(
+            any(row["candidate_key"].endswith('"1001"]') for row in supported)
+        )
+        self.assertFalse(
+            any(row["candidate_key"].endswith('"1002"]') for row in supported)
+        )
+        excerpts = [
+            json.loads(row["details_json"]).get("text_excerpt", "")
+            for row in evidence
+        ]
+        self.assertTrue(any("amber falcon" in excerpt for excerpt in excerpts))
+        self.assertFalse(any("bronze harbor" in excerpt for excerpt in excerpts))
 
     def test_strong_visual_separation_stops_normal_after_initial_five_frames(self):
         class ManyFrameSource(FakePreviewSource):
