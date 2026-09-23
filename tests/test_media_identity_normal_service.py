@@ -1550,6 +1550,115 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             "subtitle-dialogue:1",
         )
 
+    def test_spanish_only_audio_is_translated_before_english_synopsis_scoring(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        class SpanishExtractor(FakeNormalSpeechExtractor):
+            instances = []
+
+            def __init__(self, media, streams, *, preferred_language=""):
+                super().__init__(
+                    media,
+                    streams,
+                    preferred_language=preferred_language,
+                )
+                self.stream = SpeechAudioStream(
+                    index=0,
+                    language="spa",
+                    channels=2,
+                    sample_rate_hz=48_000,
+                    default=True,
+                )
+
+        class TranslatedEpisodeTwoSpeech(FakeNormalSpeechEngine):
+            def __init__(self):
+                super().__init__()
+                self.requests = []
+
+            def transcribe(self, _audio_path, request):
+                self.calls += 1
+                self.requests.append(request)
+                return SpeechTranscript(
+                    text="bronze harbor lantern meadow quartz thunder",
+                    language="en",
+                )
+
+        speech_engine = TranslatedEpisodeTwoSpeech()
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=speech_engine,
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=SpanishExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertTrue(result.speech_escalated)
+        self.assertEqual(result.speech_transcript_count, 8)
+        self.assertEqual(len(speech_engine.requests), 8)
+        self.assertTrue(
+            all(request.language == "spa" for request in speech_engine.requests)
+        )
+        self.assertTrue(
+            all(request.translate for request in speech_engine.requests)
+        )
+        self.assertEqual(
+            SpanishExtractor.instances[-1].preferred_language,
+            "eng",
+        )
+
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """SELECT candidate_key,relation,strength,details_json
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key=?
+                   ORDER BY candidate_key""",
+                (self.fast_scan.scan_id, NORMAL_SPEECH_EVIDENCE_KEY),
+            ).fetchall()
+        supported = next(
+            row for row in rows
+            if row["candidate_key"].endswith('"1002"]')
+        )
+        self.assertEqual(supported["relation"], "supports")
+        self.assertGreater(float(supported["strength"]), 0.9)
+        details = json.loads(supported["details_json"])
+        self.assertEqual(details["synopsis_language"], "eng")
+        self.assertEqual(details["transcript_languages"], ["eng"])
+
+    def test_speech_corpus_excludes_transcript_in_wrong_synopsis_language(self):
+        audio = SpeechAudioIdentity(
+            sha256="b" * 64,
+            size_bytes=1024,
+            format_key="wav-pcm-s16le",
+            sample_rate_hz=16_000,
+            channels=1,
+            source_signature="fixture-spanish",
+        )
+        run = NormalSpeechRun(
+            observations=(
+                NormalSpeechObservation(
+                    window=SpeechWindow(0, 1000),
+                    cache_key="spanish",
+                    source_signature="fixture-spanish",
+                    transcript=SpeechTranscript(
+                        text="puerto bronce linterna pradera",
+                        language="es",
+                    ),
+                    audio_identity=audio,
+                    artifact_id=1,
+                ),
+            )
+        )
+        corpus, usable, excluded = NormalIdentityService._speech_text_corpus(
+            run,
+            "eng",
+        )
+        self.assertFalse(corpus.tokens)
+        self.assertEqual(usable, [])
+        self.assertEqual(len(excluded), 1)
+
     def test_padded_speech_text_remains_current_with_exact_cache_hash(self):
         class UnavailableOcr(FakeOcr):
             def available(self):
@@ -1655,8 +1764,12 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
                 ),
             )
         )
-        corpus, usable = NormalIdentityService._speech_text_corpus(run)
+        corpus, usable, excluded = NormalIdentityService._speech_text_corpus(
+            run,
+            "eng",
+        )
         self.assertEqual(len(usable), 2)
+        self.assertEqual(excluded, [])
         self.assertIn(("alpha", "cedar"), corpus.bigrams)
         self.assertIn(("bravo", "delta"), corpus.bigrams)
         self.assertNotIn(("cedar", "bravo"), corpus.bigrams)
