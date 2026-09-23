@@ -1094,6 +1094,70 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             any("jellyfin:ocr:no-visual-text" in item for item in result.failures)
         )
 
+    def test_truncated_ocr_is_not_persisted_as_complete_cache(self):
+        class LongOcr(FakeOcr):
+            def recognize(self, image: bytes) -> OcrTextResult:
+                self.calls += 1
+                return OcrTextResult(
+                    text="bronze harbor lantern meadow quartz thunder",
+                    confidence=1.0,
+                    details={"fixture": True},
+                )
+
+        source = FakePreviewSource()
+        engine = LongOcr()
+        limited = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            engine,
+            limits=NormalResourceLimits(
+                initial_preview_frames=1,
+                expanded_preview_frames=1,
+                max_preview_frames=1,
+                max_ocr_text_chars=8,
+            ),
+        )
+        with patch(
+            "app.media_identity.normal_service.LocalFfmpegFrameSource"
+        ) as local_factory:
+            first = limited.run_scan(self.fast_scan.scan_id)
+
+        self.assertTrue(first.budget_exhausted)
+        self.assertEqual(first.observation_count, 0)
+        self.assertEqual(engine.calls, 1)
+        local_factory.assert_not_called()
+        with self.database.connect() as conn:
+            count = conn.execute(
+                """SELECT COUNT(*) AS count
+                   FROM media_identity_artifacts
+                   WHERE file_id=1
+                     AND artifact_type='visual_text'
+                     AND analyzer_key=?""",
+                (NORMAL_OCR_ARTIFACT_KEY,),
+            ).fetchone()["count"]
+        self.assertEqual(int(count), 0)
+
+        retry = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            engine,
+            limits=NormalResourceLimits(
+                initial_preview_frames=1,
+                expanded_preview_frames=1,
+                max_preview_frames=1,
+                max_ocr_text_chars=256,
+            ),
+        )
+        with patch(
+            "app.media_identity.normal_service.LocalFfmpegFrameSource"
+        ) as local_factory:
+            second = retry.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(second.observation_count, 1)
+        self.assertEqual(second.reused_artifact_count, 0)
+        self.assertEqual(engine.calls, 2)
+        local_factory.assert_not_called()
+
     def test_weak_jellyfin_ocr_can_yield_to_stronger_plex_before_ffmpeg(self):
         class WeakJellyfin(FakePreviewSource):
             source_key = "jellyfin"
