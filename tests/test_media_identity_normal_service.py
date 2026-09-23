@@ -32,6 +32,7 @@ from app.media_identity.normal_service import (
     NORMAL_OCR_ARTIFACT_VERSION,
     NORMAL_OCR_EVIDENCE_KEY,
     NORMAL_SPEECH_EVIDENCE_KEY,
+    NormalIdentityScanError,
     NormalIdentityService,
 )
 from app.media_identity.service import MediaIdentityDecisionService
@@ -400,6 +401,79 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         stale = decisions.scan_detail(self.fast_scan.scan_id)
         self.assertFalse(stale["snapshot_current"])
         self.assertFalse(stale["actionable"])
+
+    def _seed_jellyfin_config(self, *, revision=1, server_url="https://jf-one.local"):
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO external_analysis_sources(
+                     source_key,enabled,server_url,metadata_root,config_json,
+                     credential_generation,config_revision,updated_at
+                   ) VALUES ('jellyfin',1,?,'','{}','generation-a',?,CURRENT_TIMESTAMP)
+                   ON CONFLICT(source_key) DO UPDATE SET
+                     enabled=1,server_url=excluded.server_url,
+                     config_json='{}',credential_generation='generation-a',
+                     config_revision=excluded.config_revision,
+                     updated_at=CURRENT_TIMESTAMP""",
+                (server_url, int(revision)),
+            )
+
+    def test_external_source_config_change_stales_normal_result(self):
+        self._seed_jellyfin_config()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([FakePreviewSource()]),
+            FakeOcr(),
+        )
+        service.run_scan(self.fast_scan.scan_id)
+        decisions = MediaIdentityDecisionService(self.database)
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertTrue(
+            decisions.scan_detail(self.fast_scan.scan_id)["snapshot_current"]
+        )
+
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE external_analysis_sources
+                   SET server_url='https://jf-two.local',
+                       config_revision=config_revision+1
+                   WHERE source_key='jellyfin'"""
+            )
+
+        stale = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
+    def test_external_source_config_change_during_ocr_blocks_publication(self):
+        self._seed_jellyfin_config()
+
+        def mutate_config():
+            with self.database.connect() as conn:
+                conn.execute(
+                    """UPDATE external_analysis_sources
+                       SET server_url='https://jf-two.local',
+                           config_revision=config_revision+1
+                       WHERE source_key='jellyfin'"""
+                )
+
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([FakePreviewSource(mutate=mutate_config)]),
+            FakeOcr(),
+        )
+        with self.assertRaisesRegex(
+            NormalIdentityScanError,
+            "configuration changed during Normal OCR",
+        ):
+            service.run_scan(self.fast_scan.scan_id)
+
+        with self.database.connect() as conn:
+            scan = conn.execute(
+                """SELECT completed_profile,stage
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+        self.assertEqual(scan["completed_profile"], "fast")
+        self.assertEqual(scan["stage"], "fast_complete")
 
     def test_normal_speech_orchestration_version_drift_makes_scan_stale(self):
         service = NormalIdentityService(
