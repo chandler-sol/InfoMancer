@@ -1627,6 +1627,10 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         details = json.loads(supported["details_json"])
         self.assertEqual(details["synopsis_language"], "eng")
         self.assertEqual(details["transcript_languages"], ["eng"])
+        review = MediaIdentityDecisionService(self.database).scan_detail(
+            self.fast_scan.scan_id
+        )
+        self.assertTrue(review["snapshot_current"])
 
     def test_speech_corpus_excludes_transcript_in_wrong_synopsis_language(self):
         audio = SpeechAudioIdentity(
