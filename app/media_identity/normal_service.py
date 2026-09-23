@@ -561,7 +561,7 @@ class NormalIdentityService:
         run: NormalPreviewOcrRun,
         stage: NormalSamplingStage,
     ) -> bool:
-        if stage >= NormalSamplingStage.FINAL:
+        if stage >= NormalSamplingStage.FINAL or not run.coverage_complete:
             return False
         metrics = cls._visual_run_metrics(candidates, run)
         if (
@@ -591,7 +591,8 @@ class NormalIdentityService:
     ) -> bool:
         metrics = cls._visual_run_metrics(candidates, run)
         return bool(
-            metrics["has_text"]
+            run.coverage_complete
+            and metrics["has_text"]
             and metrics["fully_calibrated"]
             and metrics["quality"] >= NORMAL_EARLY_STOP_MIN_OCR_CONFIDENCE
             and metrics["best_similarity"] >= NORMAL_FALLBACK_MIN_SIMILARITY
@@ -648,12 +649,14 @@ class NormalIdentityService:
         current_metrics = cls._visual_run_metrics(candidates, current)
         candidate_metrics = cls._visual_run_metrics(candidates, candidate)
         current_key = (
+            int(bool(current.coverage_complete)),
             float(current_metrics["evidence_score"]),
             float(current_metrics["margin"]),
             int(bool(current_metrics["fully_calibrated"])),
             float(current_metrics["best_similarity"]),
         )
         candidate_key = (
+            int(bool(candidate.coverage_complete)),
             float(candidate_metrics["evidence_score"]),
             float(candidate_metrics["margin"]),
             int(bool(candidate_metrics["fully_calibrated"])),
