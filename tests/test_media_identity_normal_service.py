@@ -499,6 +499,49 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         source.payload = b"amber falcon orchard glacier velvet compass"
         self.assertEqual(mie.identity_decisions.mie_findings(), [])
 
+    def test_new_fast_scan_does_not_hide_current_normal_mie_result(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        normal.run_scan(self.fast_scan.scan_id)
+
+        decisions = MediaIdentityDecisionService(self.database)
+        old_resolution = decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertEqual(old_resolution.state.value, "strong_match_other")
+        old_detail = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertEqual(old_detail["completed_profile"], "normal")
+        self.assertTrue(old_detail["snapshot_current"])
+        self.assertTrue(old_detail["actionable"])
+
+        newer_fast = self.fast.scan_file(1)
+        self.assertGreater(newer_fast.scan_id, self.fast_scan.scan_id)
+        newer_resolution = decisions.resolve_scan(newer_fast.scan_id)
+        newer_detail = decisions.scan_detail(newer_fast.scan_id)
+        self.assertEqual(newer_detail["completed_profile"], "fast")
+        self.assertTrue(newer_detail["snapshot_current"])
+        self.assertFalse(newer_detail["actionable"])
+        self.assertNotEqual(
+            newer_resolution.state.value,
+            "strong_match_other",
+        )
+
+        latest = decisions.latest_scan_for_file(1)
+        self.assertEqual(latest["id"], newer_fast.scan_id)
+
+        findings = decisions.mie_findings()
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(
+            findings[0]["evidence"]["scan_id"],
+            self.fast_scan.scan_id,
+        )
+        self.assertEqual(
+            findings[0]["evidence"]["result_state"],
+            "strong_match_other",
+        )
+
     def test_external_source_config_change_stales_normal_result(self):
         self._seed_jellyfin_config()
         service = NormalIdentityService(
