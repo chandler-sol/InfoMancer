@@ -24,7 +24,7 @@ from .fast import (
     scan_input_signatures,
 )
 from .media_generation import media_content_sha256
-from .models import IdentityResultState
+from .models import IdentityProfile, IdentityResultState
 from .scoring import IdentityResolution, resolve_identity
 from .speech_audio import normalize_speech_language
 from .text import (
