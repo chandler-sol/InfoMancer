@@ -525,7 +525,7 @@ class WhisperCppSpeechEngine:
             )
         transcript_language = (
             "en"
-            if not multilingual
+            if request.translate or not multilingual
             else (language if language != "auto" else "")
         )
         return SpeechTranscript(
