@@ -1691,10 +1691,13 @@ class MediaIdentityDecisionService:
                 (best.get("details") or {}).get("resolution")
                 if best else {}
             ) or {}
+            decision_digest = str(
+                detail.get("decision_snapshot_sha256") or ""
+            ).strip().casefold()
             findings.append({
                 "fingerprint": (
                     f"episode-identity:file:{int(detail['file_id'])}:"
-                    f"{detail.get('metadata_signature') or scan_id}"
+                    f"decision:{decision_digest}"
                 ),
                 "rule_key": "episode-identity-review",
                 "category": "identity",
@@ -1711,6 +1714,8 @@ class MediaIdentityDecisionService:
                 "evidence": {
                     "scan_id": scan_id,
                     "result_state": state,
+                    "result_revision": int(detail.get("result_revision") or 0),
+                    "decision_snapshot_sha256": decision_digest,
                     "profile": detail.get("completed_profile") or detail.get("requested_profile"),
                     "claimed_episode": claimed_code or "Not recorded",
                     "best_candidate": (
