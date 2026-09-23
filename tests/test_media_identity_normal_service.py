@@ -417,6 +417,46 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
                 (server_url, int(revision)),
             )
 
+    def test_actionable_external_ocr_revalidates_current_preview_bytes(self):
+        class MutablePreview(FakePreviewSource):
+            def __init__(self):
+                super().__init__()
+                self.payload = b"bronze harbor lantern meadow quartz thunder"
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return self.payload
+
+        self._seed_jellyfin_config()
+        source = MutablePreview()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        service.run_scan(self.fast_scan.scan_id)
+
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        resolution = decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertEqual(resolution.state.value, "strong_match_other")
+        before = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertTrue(before["snapshot_current"])
+        self.assertTrue(before["actionable"])
+
+        source.payload = b"amber falcon orchard glacier velvet compass"
+        after = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(after["snapshot_current"])
+        self.assertFalse(after["actionable"])
+        self.assertEqual(
+            decisions.rename_preview(self.fast_scan.scan_id)["status"],
+            "stale",
+        )
+        with self.assertRaisesRegex(ValueError, "changed after this identity scan"):
+            decisions.confirm_best(self.fast_scan.scan_id, None)
+
     def test_external_source_config_change_stales_normal_result(self):
         self._seed_jellyfin_config()
         service = NormalIdentityService(
