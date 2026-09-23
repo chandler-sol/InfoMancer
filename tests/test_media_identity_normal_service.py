@@ -511,6 +511,32 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "changed after this identity scan"):
             _confirm_best(decisions, self.fast_scan.scan_id)
 
+    def test_external_backed_result_fails_closed_without_registry_factory(self):
+        self._seed_jellyfin_config()
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        normal.run_scan(self.fast_scan.scan_id)
+
+        configured = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        resolution = configured.resolve_scan(self.fast_scan.scan_id)
+        self.assertEqual(resolution.state.value, "strong_match_other")
+        self.assertTrue(
+            configured.scan_detail(self.fast_scan.scan_id)["snapshot_current"]
+        )
+
+        unconfigured = MediaIdentityDecisionService(self.database)
+        detail = unconfigured.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+        self.assertEqual(unconfigured.mie_findings(), [])
+
     def test_mie_uses_external_preview_freshness_boundary(self):
         class MutablePreview(FakePreviewSource):
             def __init__(self):
