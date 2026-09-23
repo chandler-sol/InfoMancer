@@ -17,7 +17,7 @@ from .external import (
 from .models import AnalyzerContext, IdentityProfile
 
 
-NORMAL_OCR_CACHE_VERSION = 1
+NORMAL_OCR_CACHE_VERSION = 2
 
 
 class NormalIdentityError(ValueError):
@@ -284,6 +284,7 @@ def ocr_preview_cache_key(
     engine: OcrEngine,
     *,
     parameters: Mapping[str, Any] | None = None,
+    preview_sha256: str = "",
 ) -> str:
     """Return a deterministic artifact key for derived OCR text.
 
@@ -321,6 +322,7 @@ def ocr_preview_cache_key(
             "source_signature": str(frame.source_signature or ""),
             "width": frame.width,
             "height": frame.height,
+            "content_sha256": str(preview_sha256 or ""),
         },
         "parameters": dict(parameters or {}),
     }
@@ -614,51 +616,6 @@ class NormalPreviewOcrExecutor:
                 ):
                     return partial
                 current_stage = sample.stage
-            cache_key = ocr_preview_cache_key(
-                sample.frame,
-                self.engine,
-                parameters=cache_parameters,
-            )
-            cached = (
-                self.cache_lookup(sample.frame, cache_key)
-                if self.cache_lookup is not None
-                else None
-            )
-            if cached is not None:
-                remaining_chars = self.limits.max_ocr_text_chars - total_text_chars
-                if remaining_chars <= 0:
-                    coverage_missing = True
-                    budget_exhausted = True
-                    failures.append(f"{source.source_key}:total-ocr-text-limit")
-                    break
-                text = str(cached.text or "")
-                if len(text) > remaining_chars:
-                    text = text[:remaining_chars]
-                    budget_exhausted = True
-                total_text_chars += len(text)
-                observations.append(
-                    PreviewOcrObservation(
-                        source_key=str(sample.frame.source_key),
-                        item_id=str(sample.frame.item_id),
-                        timestamp_ms=int(sample.frame.timestamp_ms),
-                        stage=sample.stage,
-                        ordinal=sample.ordinal,
-                        cache_key=cache_key,
-                        source_signature=str(sample.frame.source_signature),
-                        asset_ref=str(sample.frame.asset_ref),
-                        text=text,
-                        confidence=cached.confidence,
-                        image_bytes=0,
-                        reused=True,
-                        details=dict(cached.details),
-                    )
-                )
-                completed_frame_count += 1
-                if budget_exhausted:
-                    failures.append(f"{source.source_key}:total-ocr-text-limit")
-                    break
-                continue
-
             try:
                 payload = bytes(source.read_preview(sample.frame))
             except ExternalPreviewUnavailable as exc:
@@ -701,6 +658,55 @@ class NormalPreviewOcrExecutor:
                 break
 
             total_image_bytes += frame_bytes
+            preview_sha256 = hashlib.sha256(payload).hexdigest()
+            cache_key = ocr_preview_cache_key(
+                sample.frame,
+                self.engine,
+                parameters=cache_parameters,
+                preview_sha256=preview_sha256,
+            )
+            cached = (
+                self.cache_lookup(sample.frame, cache_key)
+                if self.cache_lookup is not None
+                else None
+            )
+            if cached is not None:
+                remaining_chars = self.limits.max_ocr_text_chars - total_text_chars
+                if remaining_chars <= 0:
+                    coverage_missing = True
+                    budget_exhausted = True
+                    failures.append(f"{source.source_key}:total-ocr-text-limit")
+                    break
+                text = str(cached.text or "")
+                if len(text) > remaining_chars:
+                    text = text[:remaining_chars]
+                    budget_exhausted = True
+                total_text_chars += len(text)
+                cached_details = dict(cached.details)
+                cached_details["preview_sha256"] = preview_sha256
+                observations.append(
+                    PreviewOcrObservation(
+                        source_key=str(sample.frame.source_key),
+                        item_id=str(sample.frame.item_id),
+                        timestamp_ms=int(sample.frame.timestamp_ms),
+                        stage=sample.stage,
+                        ordinal=sample.ordinal,
+                        cache_key=cache_key,
+                        source_signature=str(sample.frame.source_signature),
+                        asset_ref=str(sample.frame.asset_ref),
+                        text=text,
+                        confidence=cached.confidence,
+                        image_bytes=frame_bytes,
+                        reused=True,
+                        details=cached_details,
+                    )
+                )
+                completed_frame_count += 1
+                if budget_exhausted:
+                    failures.append(f"{source.source_key}:total-ocr-text-limit")
+                    break
+                continue
+
             try:
                 result = self.engine.recognize(payload)
             except NormalIdentityError as exc:
@@ -736,7 +742,10 @@ class NormalPreviewOcrExecutor:
                     text=text,
                     confidence=result.confidence,
                     image_bytes=frame_bytes,
-                    details=dict(result.details),
+                    details={
+                        **dict(result.details),
+                        "preview_sha256": preview_sha256,
+                    },
                 )
             )
             completed_frame_count += 1
