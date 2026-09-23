@@ -442,7 +442,8 @@ class NormalPreviewOcrExecutor:
             except ValueError as exc:
                 raise NormalIdentityError(str(exc)) from exc
 
-        if budget.exhausted:
+        if not budget.can_attempt_frame:
+            budget.mark_blocked()
             return NormalPreviewOcrRun(
                 failures=("normal:resource-budget-exhausted",),
                 total_image_bytes=budget.image_bytes,
@@ -568,9 +569,9 @@ class NormalPreviewOcrExecutor:
                 observations=best_result.observations,
                 failures=tuple(failures),
                 total_image_bytes=budget.image_bytes,
-                    total_source_bytes=budget.source_bytes,
+                total_source_bytes=budget.source_bytes,
                 total_text_chars=budget.text_chars,
-                    total_frame_attempts=budget.frame_attempts,
+                total_frame_attempts=budget.frame_attempts,
                 budget_exhausted=aggregate_exhausted,
                 planned_frame_count=best_result.planned_frame_count,
                 completed_frame_count=best_result.completed_frame_count,
@@ -581,9 +582,9 @@ class NormalPreviewOcrExecutor:
         return NormalPreviewOcrRun(
             failures=tuple(failures),
             total_image_bytes=budget.image_bytes,
-                    total_source_bytes=budget.source_bytes,
+            total_source_bytes=budget.source_bytes,
             total_text_chars=budget.text_chars,
-                    total_frame_attempts=budget.frame_attempts,
+            total_frame_attempts=budget.frame_attempts,
             budget_exhausted=budget.exhausted,
         )
 
