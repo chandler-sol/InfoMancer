@@ -14,6 +14,7 @@ from .decision_snapshot import (
     result_revision,
     seal_decision_snapshot,
 )
+from .external_config import external_source_config_signature
 from .fast import (
     SCAN_INPUT_SIGNATURE_VERSION,
     TEXT_SUPPORT_THRESHOLD,
@@ -460,6 +461,27 @@ class MediaIdentityDecisionService:
                 return False, file_row
             if normal_version != NORMAL_EVIDENCE_ALGORITHM_VERSION:
                 return False, file_row
+            normal_source_key = str(
+                normal_metadata.get("source_key") or ""
+            ).strip().casefold()
+            expected_source_config_signature = str(
+                normal_metadata.get("source_config_signature") or ""
+            )
+            if normal_source_key in {"plex", "jellyfin"}:
+                if not expected_source_config_signature:
+                    return False, file_row
+                current_source_config_signature = (
+                    external_source_config_signature(
+                        conn,
+                        normal_source_key,
+                    )
+                    or "unconfigured"
+                )
+                if (
+                    current_source_config_signature
+                    != expected_source_config_signature
+                ):
+                    return False, file_row
             if not isinstance(normal_metadata.get("coverage_complete"), bool):
                 return False, file_row
             try:
