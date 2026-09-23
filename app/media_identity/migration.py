@@ -232,3 +232,54 @@ def apply_media_identity_confirmation_provenance(
                source_metadata_signature=''
            WHERE source_scan_id IS NOT NULL"""
     )
+
+
+def repair_legacy_media_identity_confirmation_provenance(
+    conn: sqlite3.Connection,
+) -> None:
+    """Invalidate authority that the original migration 23 could have invented."""
+    table = conn.execute(
+        """SELECT 1 FROM sqlite_master
+           WHERE type='table' AND name='media_identity_confirmations'"""
+    ).fetchone()
+    if table is None:
+        return
+    columns = {
+        str(row["name"])
+        for row in conn.execute(
+            "PRAGMA table_info(media_identity_confirmations)"
+        )
+    }
+    required = {
+        "source_scan_snapshot_id",
+        "source_result_revision",
+        "source_decision_snapshot_sha256",
+        "source_metadata_signature",
+    }
+    if not required.issubset(columns):
+        return
+
+    migration_23 = conn.execute(
+        """SELECT applied_at FROM schema_migrations
+           WHERE version=23"""
+    ).fetchone()
+    if migration_23 is None:
+        return
+    applied_at = str(migration_23["applied_at"] or "")
+    if not applied_at:
+        return
+
+    # Rows confirmed before, or in the same SQLite timestamp second as, the
+    # original migration could only have acquired these fields through that
+    # migration's inference. Preserve source_scan_snapshot_id for audit, but
+    # remove the unprovable authority. Confirmations created later retain the
+    # provenance captured at the actual user action.
+    conn.execute(
+        """UPDATE media_identity_confirmations
+           SET source_result_revision=0,
+               source_decision_snapshot_sha256='',
+               source_metadata_signature=''
+           WHERE source_scan_id IS NOT NULL
+             AND confirmed_at<=?""",
+        (applied_at,),
+    )
