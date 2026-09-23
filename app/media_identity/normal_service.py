@@ -8,6 +8,7 @@ from typing import Any, Callable, Mapping
 
 from ..db import Database
 from .external import ExternalSourceRegistry, PreviewFrameRef
+from .decision_snapshot import result_revision, seal_decision_snapshot
 from .local_frames import LOCAL_FRAME_SOURCE_KEY, LocalFfmpegFrameSource
 from .models import (
     AnalyzerContext,
@@ -110,6 +111,78 @@ def _same_modified_at(first: Any, second: Any) -> bool:
 
 class NormalIdentityService:
     """Extend one fresh Fast scan with bounded external-preview OCR evidence."""
+
+    @staticmethod
+    def _persisted_winner_result(
+        scan: Mapping[str, Any],
+        evidence: list[dict[str, Any]],
+    ) -> NormalScanResult:
+        claimed = _json_object(scan.get("claimed_identity_json"))
+        normal_ocr = claimed.get("normal_ocr")
+        if not isinstance(normal_ocr, Mapping):
+            normal_ocr = {}
+        normal_speech = claimed.get("normal_speech")
+        if not isinstance(normal_speech, Mapping):
+            normal_speech = {}
+
+        def _count(mapping: Mapping[str, Any], key: str) -> int:
+            try:
+                return max(0, int(mapping.get(key) or 0))
+            except (TypeError, ValueError):
+                return 0
+
+        highest_stage = None
+        try:
+            raw_stage = int(normal_ocr.get("highest_observed_stage") or 0)
+            if raw_stage:
+                highest_stage = NormalSamplingStage(raw_stage)
+        except (TypeError, ValueError):
+            highest_stage = None
+
+        ocr_failures = normal_ocr.get("failures")
+        speech_failures = normal_speech.get("failures")
+        completed = (
+            IdentityProfile.NORMAL
+            if str(scan.get("completed_profile") or "") == IdentityProfile.NORMAL.value
+            else IdentityProfile.FAST
+        )
+        return NormalScanResult(
+            scan_id=int(scan["id"]),
+            completed_profile=completed,
+            source_key=str(normal_ocr.get("source_key") or ""),
+            observation_count=_count(normal_ocr, "observation_count"),
+            text_observation_count=_count(normal_ocr, "text_observation_count"),
+            reused_artifact_count=_count(normal_ocr, "reused_artifact_count"),
+            evidence_count=sum(
+                str(item.get("analyzer_key") or "")
+                in {NORMAL_OCR_EVIDENCE_KEY, NORMAL_SPEECH_EVIDENCE_KEY}
+                for item in evidence
+            ),
+            highest_observed_stage=highest_stage,
+            failures=(
+                tuple(str(item) for item in ocr_failures)
+                if isinstance(ocr_failures, list)
+                else ()
+            ),
+            budget_exhausted=bool(normal_ocr.get("budget_exhausted")),
+            speech_escalated=bool(normal_speech.get("escalated")),
+            speech_planned_window_count=_count(normal_speech, "planned_windows"),
+            speech_transcript_count=_count(normal_speech, "transcript_count"),
+            speech_text_transcript_count=_count(
+                normal_speech, "text_transcript_count"
+            ),
+            speech_reused_artifact_count=_count(
+                normal_speech, "reused_artifact_count"
+            ),
+            speech_failures=(
+                tuple(str(item) for item in speech_failures)
+                if isinstance(speech_failures, list)
+                else ()
+            ),
+            speech_budget_exhausted=bool(
+                normal_speech.get("budget_exhausted")
+            ),
+        )
 
     def __init__(
         self,
@@ -906,6 +979,12 @@ class NormalIdentityService:
                 ).fetchall()
             ]
             claimed_before_normal = _json_object(scan["claimed_identity_json"])
+            base_result_revision = result_revision(claimed_before_normal)
+            if base_result_revision <= 0:
+                raise NormalIdentityScanError(
+                    "The Fast result does not have a sealed publication revision. "
+                    "Run Fast verification again before Normal analysis."
+                )
             speech_language = str(
                 claimed_before_normal.get("scan_language") or "eng"
             ).strip().casefold() or "eng"
@@ -1085,6 +1164,12 @@ class NormalIdentityService:
                     "Episode Identity metadata changed during Normal OCR. Retry verification."
                 )
 
+            if result_revision(current_scan) != base_result_revision:
+                return self._persisted_winner_result(
+                    current_scan,
+                    evidence,
+                )
+
             current_previous_normal_evidence = any(
                 str(item.get("analyzer_key") or "") == NORMAL_OCR_EVIDENCE_KEY
                 for item in evidence
@@ -1135,6 +1220,10 @@ class NormalIdentityService:
                     "observation_cache_keys": [
                         item.cache_key for item in run.observations
                     ],
+                    "observation_count": len(run.observations),
+                    "text_observation_count": sum(
+                        1 for item in run.observations if item.text.strip()
+                    ),
                     "reused_artifact_count": sum(
                         1 for item in run.observations if item.reused
                     ),
@@ -1186,6 +1275,11 @@ class NormalIdentityService:
                     _canonical_json(claimed),
                     int(scan_id),
                 ),
+            )
+            seal_decision_snapshot(
+                conn,
+                int(scan_id),
+                revision=base_result_revision + 1,
             )
 
         return NormalScanResult(
