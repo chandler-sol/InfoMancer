@@ -415,31 +415,33 @@ class NormalSpeechService:
         scan: Mapping[str, Any],
         request: SpeechRequest,
         engine_snapshot: _SpeechEngineSnapshot,
+        expected_cache_key: str,
     ) -> NormalSpeechObservation | None:
         media = request.media
         window = request.window
         source_signature = request.audio.source_signature
         with self.database.connect() as conn:
-            rows = conn.execute(
+            row = conn.execute(
                 """SELECT id,cache_key,source_signature,file_size_bytes,
                           file_modified_at,text_value,payload_json
                    FROM media_identity_artifacts
                    WHERE file_id=? AND artifact_type='speech_transcript'
                      AND analyzer_key=? AND analyzer_version=?
-                     AND start_ms=? AND end_ms=? AND status='complete'
-                     AND source_signature=?
-                   ORDER BY id DESC""",
+                     AND cache_key=? AND start_ms=? AND end_ms=?
+                     AND status='complete' AND source_signature=?
+                   ORDER BY id DESC LIMIT 1""",
                 (
                     int(scan["file_id"]),
                     NORMAL_SPEECH_ARTIFACT_KEY,
                     NORMAL_SPEECH_ARTIFACT_VERSION,
+                    str(expected_cache_key),
                     int(window.start_ms),
                     int(window.end_ms),
                     str(source_signature),
                 ),
-            ).fetchall()
+            ).fetchone()
 
-        for row in rows:
+        for row in (() if row is None else (row,)):
             if int(row["file_size_bytes"] or 0) != int(
                 scan["file_size_bytes"] or 0
             ):
@@ -513,6 +515,7 @@ class NormalSpeechService:
             scan,
             request,
             first_snapshot,
+            first_cache_key,
         )
         if cached is None or cached.cache_key != first_cache_key:
             return None, first_snapshot, first_cache_key
