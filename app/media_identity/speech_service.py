@@ -807,7 +807,7 @@ class NormalSpeechService:
                 self.translate
                 or (
                     synopsis_language == "eng"
-                    and selected_language not in {"eng", "und"}
+                    and selected_language != "eng"
                 )
             )
             model_multilingual = bool(
@@ -817,7 +817,7 @@ class NormalSpeechService:
                 not model_multilingual
                 and (
                     request_translate
-                    or selected_language not in {"eng", "und"}
+                    or selected_language != "eng"
                 )
             ):
                 return NormalSpeechRun(
