@@ -25,6 +25,7 @@ from .fast import (
 from .media_generation import media_content_sha256
 from .models import IdentityResultState
 from .scoring import IdentityResolution, resolve_identity
+from .speech_audio import normalize_speech_language
 from .text import (
     TextCorpus,
     discover_sidecar_subtitles,
@@ -708,11 +709,17 @@ class MediaIdentityDecisionService:
                 return False, file_row
 
             if speech_escalated:
+                target_speech_language = normalize_speech_language(language)
                 speech_tokens: set[str] = set()
                 speech_bigrams: set[tuple[str, str]] = set()
                 expected_windows: list[dict[str, Any]] = []
                 cache_observations: list[dict[str, Any]] = []
                 transcript_parts: list[str] = []
+                aligned_artifact_ids: set[int] = set()
+                mismatched_artifact_ids: set[int] = set()
+                aligned_languages: set[str] = set()
+                mismatched_languages: set[str] = set()
+
                 for artifact_id in artifact_ids:
                     artifact_row = artifact_by_id.get(artifact_id)
                     if artifact_row is None:
@@ -723,15 +730,17 @@ class MediaIdentityDecisionService:
                     transcript_text = raw_transcript_text.strip()
                     if not transcript_text:
                         continue
-                    corpus = text_corpus(transcript_text)
-                    speech_tokens.update(corpus.tokens)
-                    speech_bigrams.update(corpus.bigrams)
-                    expected_windows.append({
-                        "artifact_id": artifact_id,
-                        "start_ms": int(artifact_row["start_ms"]),
-                        "end_ms": int(artifact_row["end_ms"]),
-                        "cache_key": str(artifact_row["cache_key"] or ""),
-                    })
+
+                    artifact_payload = _json_object(
+                        artifact_row["payload_json"]
+                    )
+                    transcript_payload = artifact_payload.get("transcript")
+                    if not isinstance(transcript_payload, Mapping):
+                        return False, file_row
+                    transcript_language = normalize_speech_language(
+                        str(transcript_payload.get("language") or "")
+                    )
+
                     cache_observations.append({
                         "cache_key": str(artifact_row["cache_key"] or ""),
                         "source_signature": str(
@@ -743,10 +752,27 @@ class MediaIdentityDecisionService:
                             raw_transcript_text.encode("utf-8")
                         ).hexdigest(),
                     })
+
+                    if transcript_language != target_speech_language:
+                        mismatched_artifact_ids.add(artifact_id)
+                        mismatched_languages.add(transcript_language)
+                        continue
+
+                    aligned_artifact_ids.add(artifact_id)
+                    aligned_languages.add(transcript_language)
+                    corpus = text_corpus(transcript_text)
+                    speech_tokens.update(corpus.tokens)
+                    speech_bigrams.update(corpus.bigrams)
+                    expected_windows.append({
+                        "artifact_id": artifact_id,
+                        "start_ms": int(artifact_row["start_ms"]),
+                        "end_ms": int(artifact_row["end_ms"]),
+                        "cache_key": str(artifact_row["cache_key"] or ""),
+                    })
                     transcript_parts.append(transcript_text)
 
                 expected_speech_cache_key = ""
-                if text_transcript_count:
+                if aligned_artifact_ids:
                     expected_speech_cache_key = hashlib.sha256(
                         json.dumps(
                             {"observations": cache_observations},
@@ -827,7 +853,7 @@ class MediaIdentityDecisionService:
                     except (TypeError, ValueError):
                         return False, file_row
 
-                    if text_transcript_count:
+                    if aligned_artifact_ids:
                         raw_ids = details.get("artifact_ids")
                         if not isinstance(raw_ids, list):
                             return False, file_row
@@ -835,24 +861,62 @@ class MediaIdentityDecisionService:
                             evidence_artifact_ids = {
                                 int(value) for value in raw_ids
                             }
-                        except (TypeError, ValueError):
-                            return False, file_row
-                        try:
                             evidence_transcript_count = int(
                                 details.get("transcript_count") or 0
                             )
                         except (TypeError, ValueError):
                             return False, file_row
                         if (
-                            evidence_artifact_ids != text_artifact_ids
+                            evidence_artifact_ids != aligned_artifact_ids
                             or details.get("windows") != expected_windows
                             or evidence_transcript_count
-                            != text_transcript_count
+                            != len(aligned_artifact_ids)
                             or str(
                                 details.get("transcript_excerpt") or ""
                             ) != expected_excerpt
                             or str(speech_row.get("cache_key") or "")
                             != expected_speech_cache_key
+                            or normalize_speech_language(
+                                str(details.get("synopsis_language") or "")
+                            )
+                            != target_speech_language
+                            or sorted(
+                                str(value)
+                                for value in details.get(
+                                    "transcript_languages", []
+                                )
+                            )
+                            != sorted(aligned_languages)
+                        ):
+                            return False, file_row
+                    elif mismatched_artifact_ids:
+                        raw_ids = details.get("artifact_ids")
+                        raw_languages = details.get("transcript_languages")
+                        if (
+                            not isinstance(raw_ids, list)
+                            or not isinstance(raw_languages, list)
+                        ):
+                            return False, file_row
+                        try:
+                            evidence_artifact_ids = {
+                                int(value) for value in raw_ids
+                            }
+                            evidence_transcript_count = int(
+                                details.get("transcript_count") or 0
+                            )
+                        except (TypeError, ValueError):
+                            return False, file_row
+                        if (
+                            evidence_artifact_ids != mismatched_artifact_ids
+                            or evidence_transcript_count
+                            != len(mismatched_artifact_ids)
+                            or normalize_speech_language(
+                                str(details.get("synopsis_language") or "")
+                            )
+                            != target_speech_language
+                            or sorted(str(value) for value in raw_languages)
+                            != sorted(mismatched_languages)
+                            or str(speech_row.get("cache_key") or "")
                         ):
                             return False, file_row
 
@@ -907,7 +971,8 @@ class MediaIdentityDecisionService:
                         != "neutral"
                         or speech_strength != 0.0
                         or (
-                            not text_transcript_count
+                            not aligned_artifact_ids
+                            and not mismatched_artifact_ids
                             and str(speech_row.get("cache_key") or "")
                         )
                     ):
