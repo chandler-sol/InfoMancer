@@ -22,6 +22,11 @@ from app.media_identity.external import (
     ExternalPreviewUnavailable,
     ExternalSourceFailure,
 )
+from app.media_identity.visual_budget import (
+    VisualAttemptBudget,
+    VisualBudgetExceeded,
+    visual_budget_scope,
+)
 from app.media_identity.models import (
     AnalyzerContext,
     IdentityProfile,
@@ -816,6 +821,38 @@ class PlexBifFoundationTests(unittest.TestCase):
             "/library/parts/501/indexes/sd/10000",
         )
         self.assertNotIn("secret", opener.request.full_url)
+
+    def test_bif_download_cannot_exceed_shared_visual_source_budget(self):
+        bif = build_bif()
+        response = DummyResponse(
+            bif,
+            content_type="application/octet-stream",
+        )
+        response.headers["Content-Length"] = str(len(bif))
+        opener = DummyOpener(response)
+        budget = VisualAttemptBudget(
+            max_frame_attempts=12,
+            max_source_bytes=max(1, len(bif) - 1),
+            max_image_bytes=48 * 1024 * 1024,
+            max_text_chars=64_000,
+        )
+
+        with (
+            patch(
+                "app.media_identity.sources.plex.urllib.request.build_opener",
+                return_value=opener,
+            ),
+            visual_budget_scope(budget),
+        ):
+            with self.assertRaises(VisualBudgetExceeded):
+                fetch_plex_bif_index(
+                    "https://plex.local:32400",
+                    "secret",
+                    "501",
+                )
+
+        self.assertEqual(budget.source_bytes, 0)
+        self.assertTrue(budget.exhausted)
 
     def test_fetch_plex_bif_image_rejects_non_jpeg(self):
         opener = DummyOpener(
