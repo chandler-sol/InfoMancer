@@ -16,7 +16,11 @@ from app.media_identity.external import (
     PreviewFrameRef,
 )
 from app.media_identity.fast import FastIdentityService
-from app.media_identity.normal import NormalResourceLimits, OcrTextResult
+from app.media_identity.normal import (
+    NormalIdentityError,
+    NormalResourceLimits,
+    OcrTextResult,
+)
 from app.media_identity.local_frames import LOCAL_FRAME_SOURCE_KEY
 from app.media_identity.normal_service import (
     NORMAL_OCR_EVIDENCE_KEY,
@@ -1976,6 +1980,95 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertEqual(scan["stage"], "normal_speech_complete")
         self.assertEqual(claimed["normal_speech"]["transcript_count"], 8)
         self.assertEqual(int(transcript_count), 8)
+
+    def test_deleted_normal_ocr_artifact_stales_sealed_result(self):
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([FakePreviewSource()]),
+            FakeOcr(),
+        )
+        result = service.run_scan(self.fast_scan.scan_id)
+        self.assertEqual(result.observation_count, 1)
+
+        decisions = MediaIdentityDecisionService(self.database)
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        before = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertTrue(before["snapshot_current"])
+
+        with self.database.connect() as conn:
+            evidence = conn.execute(
+                """SELECT details_json FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key=?
+                   ORDER BY id LIMIT 1""",
+                (self.fast_scan.scan_id, NORMAL_OCR_EVIDENCE_KEY),
+            ).fetchone()
+            artifact_ids = json.loads(evidence["details_json"])["artifact_ids"]
+            self.assertTrue(artifact_ids)
+            conn.execute(
+                "DELETE FROM media_identity_artifacts WHERE id=?",
+                (int(artifact_ids[0]),),
+            )
+
+        after = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(after["snapshot_current"])
+        self.assertFalse(after["actionable"])
+        self.assertEqual(
+            decisions.rename_preview(self.fast_scan.scan_id)["status"],
+            "stale",
+        )
+
+    def test_superseded_failed_normal_attempt_returns_persisted_winner(self):
+        winner_source = FakePreviewSource()
+        winner_service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([winner_source]),
+            FakeOcr(),
+        )
+        winner_result = None
+
+        class TriggerWinnerThenFail(FakeOcr):
+            def recognize(inner_self, image):
+                nonlocal winner_result
+                inner_self.calls += 1
+                if winner_result is None:
+                    winner_result = winner_service.run_scan(
+                        self.fast_scan.scan_id
+                    )
+                raise NormalIdentityError("fixture loser OCR failure")
+
+        loser = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([FakePreviewSource()]),
+            TriggerWinnerThenFail(),
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertIsNotNone(winner_result)
+        self.assertEqual(winner_result.completed_profile.value, "normal")
+        self.assertEqual(loser.completed_profile.value, "normal")
+        self.assertEqual(loser.observation_count, winner_result.observation_count)
+        self.assertEqual(loser.text_observation_count, winner_result.text_observation_count)
+
+        with self.database.connect() as conn:
+            scan = conn.execute(
+                """SELECT completed_profile,claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            evidence_count = conn.execute(
+                """SELECT COUNT(*) AS count
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key=? AND profile='normal'""",
+                (self.fast_scan.scan_id, NORMAL_OCR_EVIDENCE_KEY),
+            ).fetchone()["count"]
+
+        claimed = json.loads(scan["claimed_identity_json"])
+        self.assertEqual(scan["completed_profile"], "normal")
+        self.assertEqual(claimed["result_revision"], 2)
+        self.assertGreater(int(evidence_count), 0)
+        self.assertEqual(
+            claimed["decision_snapshot"]["revision"],
+            claimed["result_revision"],
+        )
 
     def test_file_change_during_ocr_prevents_artifact_or_evidence_commit(self):
         def mutate_file():
