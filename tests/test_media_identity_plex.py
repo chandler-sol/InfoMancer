@@ -39,6 +39,7 @@ from app.media_identity.sources.plex import (
     PlexBifSource,
     PlexPreviewUnavailable,
     PlexSourceFailure,
+    bif_source_signature,
     enumerate_bif_preview_frames,
     enumerate_plex_http_preview_frames,
     fetch_plex_bif_image,
@@ -50,6 +51,7 @@ from app.media_identity.sources.plex import (
     parse_bif_index,
     plex_bif_path_for_bundle,
     read_bif_index,
+    read_verified_bif_preview,
     resolve_local_bif_path,
     resolve_plex_media_ref,
 )
@@ -229,6 +231,75 @@ class PlexBifFoundationTests(unittest.TestCase):
         self.assertEqual(parsed.image_count, 2)
         self.assertEqual(parsed.file_size, len(bif))
         self.assertTrue(parsed.index_digest)
+
+    def test_local_bif_reads_share_source_budget_and_attempt_cache(self):
+        bif = build_bif()
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "index-sd.bif"
+            path.write_bytes(bif)
+            index_bytes = len(index_prefix(bif))
+            budget = VisualAttemptBudget(
+                max_frame_attempts=4,
+                max_source_bytes=index_bytes + len(FRAME_ZERO) + 1,
+                max_image_bytes=1,
+                max_text_chars=1,
+            )
+            with visual_budget_scope(budget):
+                parsed = read_bif_index(path)
+                self.assertEqual(budget.source_bytes, index_bytes)
+
+                repeated = read_bif_index(path)
+                self.assertEqual(
+                    repeated.index_digest,
+                    parsed.index_digest,
+                )
+                self.assertEqual(budget.source_bytes, index_bytes)
+
+                frame = parsed.frames[0]
+                signature = bif_source_signature(path, parsed)
+                payload = read_verified_bif_preview(
+                    path,
+                    expected_signature=signature,
+                    timestamp_ms=frame.timestamp_ms,
+                    offset=frame.offset,
+                    length=frame.length,
+                )
+                self.assertEqual(payload, FRAME_ZERO)
+                self.assertEqual(
+                    budget.source_bytes,
+                    index_bytes + len(FRAME_ZERO),
+                )
+
+                repeated_payload = read_verified_bif_preview(
+                    path,
+                    expected_signature=signature,
+                    timestamp_ms=frame.timestamp_ms,
+                    offset=frame.offset,
+                    length=frame.length,
+                )
+                self.assertEqual(repeated_payload, FRAME_ZERO)
+                self.assertEqual(
+                    budget.source_bytes,
+                    index_bytes + len(FRAME_ZERO),
+                )
+
+    def test_local_bif_index_fails_before_read_when_source_budget_is_tiny(self):
+        bif = build_bif()
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "index-sd.bif"
+            path.write_bytes(bif)
+            budget = VisualAttemptBudget(
+                max_frame_attempts=1,
+                max_source_bytes=1,
+                max_image_bytes=1,
+                max_text_chars=1,
+            )
+            with visual_budget_scope(budget):
+                with self.assertRaises(VisualBudgetExceeded):
+                    read_bif_index(path)
+
+            self.assertTrue(budget.exhausted)
+            self.assertEqual(budget.source_bytes, 0)
 
     def test_preview_enumeration_keeps_ranges_lazy(self):
         bif = build_bif()
