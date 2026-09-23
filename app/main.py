@@ -97,7 +97,6 @@ bootstrap_tokens = BootstrapTokenManager(
 app_settings = AppSettings(db, settings.search_url_template)
 engagement = EngagementService(db)
 event_log = EventLog(db)
-mie = MediaIntelligenceEngine(db)
 media_hashes = MediaHashService(db)
 duplicates = DuplicateService(db, media_hashes)
 edition_versions = EditionVersionService(db)
@@ -125,6 +124,23 @@ try:
 except ProviderSecretError as exc:
     stored_provider_secrets = {}
     provider_secret_error = str(exc)
+
+
+def _mie_external_registry():
+    try:
+        integration_secrets = provider_secrets.load()
+    except ProviderSecretError:
+        integration_secrets = {}
+    return build_configured_source_registry(
+        external_source_config,
+        integration_secrets,
+    )
+
+
+mie = MediaIntelligenceEngine(
+    db,
+    external_registry_factory=_mie_external_registry,
+)
 APP_VERSION = "0.8.1-beta.2"
 @asynccontextmanager
 async def _infomancer_lifespan(_app: FastAPI):
