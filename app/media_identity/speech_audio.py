@@ -832,52 +832,67 @@ class LocalFfmpegSpeechAudioExtractor:
         path = Path(self.media.path)
         start_seconds = window.start_ms / 1000.0
         duration_seconds = window.duration_ms / 1000.0
-        command = [
-            self.executable,
-            "-nostdin",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-xerror",
-            "-ss",
-            f"{start_seconds:.3f}",
-            "-i",
-            str(path),
-            "-map",
-            f"0:{self.stream.index}",
-            "-t",
-            f"{duration_seconds:.3f}",
-            "-vn",
-            "-sn",
-            "-dn",
-            "-map_metadata",
-            "-1",
-            "-map_chapters",
-            "-1",
-            "-ac",
-            str(SPEECH_AUDIO_CHANNELS),
-            "-ar",
-            str(SPEECH_AUDIO_SAMPLE_RATE_HZ),
-            "-c:a",
-            "pcm_s16le",
-            "-fs",
-            str(MAX_SPEECH_AUDIO_BYTES),
-            "-f",
-            "wav",
-            "-n",
-            str(output_path),
-        ]
-
         try:
-            result = subprocess.run(
-                command,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=self.timeout_seconds,
-                check=False,
-                **_quiet_subprocess_options(),
-            )
+            if self._media_lease is None:
+                raise MediaContentLeaseError(
+                    "The local media content lease is unavailable."
+                )
+            with self._media_lease.ffmpeg_input() as (
+                ffmpeg_input_args,
+                lease_subprocess_options,
+            ):
+                command = [
+                    self.executable,
+                    "-nostdin",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-xerror",
+                    "-ss",
+                    f"{start_seconds:.3f}",
+                    *ffmpeg_input_args,
+                    "-map",
+                    f"0:{self.stream.index}",
+                    "-t",
+                    f"{duration_seconds:.3f}",
+                    "-vn",
+                    "-sn",
+                    "-dn",
+                    "-map_metadata",
+                    "-1",
+                    "-map_chapters",
+                    "-1",
+                    "-ac",
+                    str(SPEECH_AUDIO_CHANNELS),
+                    "-ar",
+                    str(SPEECH_AUDIO_SAMPLE_RATE_HZ),
+                    "-c:a",
+                    "pcm_s16le",
+                    "-fs",
+                    str(MAX_SPEECH_AUDIO_BYTES),
+                    "-f",
+                    "wav",
+                    "-n",
+                    str(output_path),
+                ]
+                subprocess_options = {
+                    **_quiet_subprocess_options(),
+                    **lease_subprocess_options,
+                }
+                result = subprocess.run(
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=self.timeout_seconds,
+                    check=False,
+                    **subprocess_options,
+                )
+        except MediaContentLeaseError as exc:
+            temporary_directory.cleanup()
+            raise SpeechAudioStaleError(
+                "The leased local media input changed before or during speech extraction."
+            ) from exc
         except FileNotFoundError as exc:
             temporary_directory.cleanup()
             raise SpeechAudioUnavailable(
