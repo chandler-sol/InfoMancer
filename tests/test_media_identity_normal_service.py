@@ -870,6 +870,7 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         second = service.run_scan(self.fast_scan.scan_id)
 
         self.assertEqual(second.reused_artifact_count, 1)
+        self.assertEqual(second.visual_frame_attempt_count, 1)
         self.assertEqual(source.read_calls, 2)
         self.assertEqual(engine.calls, 1)
         with self.database.connect() as conn:
