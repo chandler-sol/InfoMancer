@@ -781,6 +781,49 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertTrue(self.service.scan_detail(scan.scan_id)["snapshot_current"])
         return scan, sidecar
 
+    def test_same_size_same_mtime_media_edit_invalidates_actionable_scan(self) -> None:
+        scan, _ = self._resolved_real_fast_scan()
+        before = self.media.stat()
+        original = self.media.read_bytes()
+        replacement = bytes(
+            (value ^ 0x01) if index == 0 else value
+            for index, value in enumerate(original)
+        )
+        self.assertEqual(len(replacement), len(original))
+        self.media.write_bytes(replacement)
+        os.utime(
+            self.media,
+            ns=(before.st_atime_ns, before.st_mtime_ns),
+        )
+
+        detail = self.service.scan_detail(scan.scan_id)
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+        self.assertEqual(
+            self.service.rename_preview(scan.scan_id)["status"],
+            "stale",
+        )
+        with self.assertRaisesRegex(ValueError, "changed after this identity scan"):
+            self.service.confirm_best(scan.scan_id, None)
+
+    def test_equal_size_equal_mtime_sidecar_edit_invalidates_scan(self) -> None:
+        scan, sidecar = self._resolved_real_fast_scan()
+        before = sidecar.stat()
+        original = sidecar.read_bytes()
+        replacement = bytearray(original)
+        replacement[-2] = (
+            ord("x") if replacement[-2] != ord("x") else ord("y")
+        )
+        sidecar.write_bytes(bytes(replacement))
+        os.utime(
+            sidecar,
+            ns=(before.st_atime_ns, before.st_mtime_ns),
+        )
+
+        detail = self.service.scan_detail(scan.scan_id)
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+
     def test_provider_snapshot_change_invalidates_action_and_confirmation(self) -> None:
         scan, _ = self._resolved_real_fast_scan()
         confirmation = self.service.confirm_best(scan.scan_id, None)
