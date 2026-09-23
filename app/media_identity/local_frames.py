@@ -399,7 +399,7 @@ class LocalFfmpegFrameSource:
                 command,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
                 timeout=self.timeout_seconds,
                 check=False,
                 **_quiet_subprocess_options(),
