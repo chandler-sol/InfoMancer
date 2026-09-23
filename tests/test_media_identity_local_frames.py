@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from io import BytesIO
+import hashlib
 import os
 import subprocess
 import tempfile
@@ -53,6 +54,7 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
                 path=str(self.media),
                 size_bytes=stat.st_size,
                 modified_at=stat.st_mtime,
+                sha256=hashlib.sha256(self.media.read_bytes()).hexdigest(),
             ),
             claimed_identity=IdentityReference(
                 identity_kind="episode",
@@ -226,6 +228,47 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
                 "changed during",
             ):
                 source.read_preview(frame)
+
+    def test_same_size_same_mtime_a_b_a_during_extraction_fails_closed(self):
+        payload = jpeg_bytes()
+        original = self.media.read_bytes()
+        original_stat = self.media.stat()
+        replacement = bytearray(original)
+        replacement[0] ^= 0x01
+        replacement = bytes(replacement)
+
+        def cycle_content(*_args, **_kwargs):
+            self.media.write_bytes(replacement)
+            os.utime(
+                self.media,
+                ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+            )
+            self.media.write_bytes(original)
+            os.utime(
+                self.media,
+                ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+            )
+            return subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=payload,
+                stderr=b"",
+            )
+
+        source = self.source()
+        try:
+            media = source.resolve_media(self.context)
+            frame = source.preview_frames(media)[0]
+            with patch(
+                "app.media_identity.local_frames.subprocess.run",
+                side_effect=cycle_content,
+            ):
+                with self.assertRaises(LocalFrameSourceFailure):
+                    source.read_preview(frame)
+        finally:
+            source.close()
+
+        self.assertEqual(self.media.read_bytes(), original)
 
     def test_same_size_same_mtime_file_replacement_is_rejected_when_inode_is_available(self):
         with patch(
