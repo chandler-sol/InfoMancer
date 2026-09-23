@@ -1877,16 +1877,52 @@ class MediaIdentityDecisionService:
             })
         return findings
 
-    def rename_preview(self, scan_id: int) -> dict[str, Any]:
+    def rename_preview(
+        self,
+        scan_id: int,
+        *,
+        expected_result_revision: int,
+        expected_decision_snapshot_sha256: str,
+        expected_candidate_key: str,
+    ) -> dict[str, Any]:
         detail = self.scan_detail(
             int(scan_id),
             verify_actionable_content=False,
             verify_confirmation_external=False,
         )
-        reviewed_revision = int(detail.get("result_revision") or 0)
+        reviewed_revision = int(expected_result_revision)
         reviewed_digest = str(
-            detail.get("decision_snapshot_sha256") or ""
+            expected_decision_snapshot_sha256 or ""
         ).strip().casefold()
+        reviewed_candidate_key = str(expected_candidate_key or "").strip()
+        displayed_result_matches = (
+            reviewed_revision > 0
+            and len(reviewed_digest) == 64
+            and all(
+                character in "0123456789abcdef"
+                for character in reviewed_digest
+            )
+            and bool(reviewed_candidate_key)
+            and int(detail.get("result_revision") or 0) == reviewed_revision
+            and str(
+                detail.get("decision_snapshot_sha256") or ""
+            ).strip().casefold() == reviewed_digest
+            and str(detail.get("best_candidate_key") or "")
+            == reviewed_candidate_key
+        )
+        if not displayed_result_matches:
+            stale_detail = dict(detail)
+            stale_detail["snapshot_current"] = False
+            stale_detail["actionable"] = False
+            return {
+                "available": False,
+                "status": "stale",
+                "reason": (
+                    "The Episode Identity result changed after this page was reviewed. "
+                    "Refresh the scan before previewing a rename."
+                ),
+                "scan": stale_detail,
+            }
         if not detail.get("snapshot_current"):
             return {
                 "available": False,
