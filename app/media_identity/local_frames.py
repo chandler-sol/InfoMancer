@@ -21,6 +21,7 @@ from .external import (
     ExternalSourceStatus,
     PreviewFrameRef,
 )
+from .media_generation import media_generation_identity
 from .models import AnalyzerContext
 
 
@@ -63,6 +64,7 @@ def _media_signature(
     device_id: int | None,
     inode_id: int | None,
     ffmpeg_identity: Mapping[str, Any] | None,
+    generation_identity: Mapping[str, Any] | None,
 ) -> str:
     payload = {
         "version": LOCAL_FRAME_SOURCE_VERSION,
@@ -75,6 +77,7 @@ def _media_signature(
         "device_id": device_id,
         "inode_id": inode_id,
         "ffmpeg_identity": dict(ffmpeg_identity or {}),
+        "media_generation": dict(generation_identity or {}),
     }
     return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
 
@@ -212,6 +215,7 @@ class LocalFfmpegFrameSource:
             else requested_executable
         )
         self.timeout_seconds = max(1, min(int(timeout_seconds), 60))
+        self._media_generation = media_generation_identity(context.media.path)
         path_identity = _stat_identity(Path(context.media.path))
         if path_identity is None:
             self._device_id = None
@@ -225,6 +229,7 @@ class LocalFfmpegFrameSource:
                 device_id=self._device_id,
                 inode_id=self._inode_id,
                 ffmpeg_identity=self._ffmpeg_identity,
+                generation_identity=self._media_generation,
             )
             if runtime > 0
             else ""
@@ -238,11 +243,15 @@ class LocalFfmpegFrameSource:
                 available=False,
                 detail="A positive cataloged runtime is required for generated frames.",
             )
-        if not _stat_matches(
-            path,
-            self.context,
-            device_id=self._device_id,
-            inode_id=self._inode_id,
+        if (
+            self._media_generation is None
+            or media_generation_identity(path) != self._media_generation
+            or not _stat_matches(
+                path,
+                self.context,
+                device_id=self._device_id,
+                inode_id=self._inode_id,
+            )
         ):
             return ExternalSourceStatus(
                 source_key=self.source_key,
@@ -341,11 +350,15 @@ class LocalFfmpegFrameSource:
                 "FFmpeg changed after the generated-frame source was prepared."
             )
         path = Path(self.context.media.path)
-        if not _stat_matches(
-            path,
-            self.context,
-            device_id=self._device_id,
-            inode_id=self._inode_id,
+        if (
+            self._media_generation is None
+            or media_generation_identity(path) != self._media_generation
+            or not _stat_matches(
+                path,
+                self.context,
+                device_id=self._device_id,
+                inode_id=self._inode_id,
+            )
         ):
             raise LocalFrameSourceFailure(
                 "The local media file changed before FFmpeg frame extraction."
@@ -404,11 +417,15 @@ class LocalFfmpegFrameSource:
                 "InfoMancer could not start FFmpeg for generated preview frames."
             ) from exc
 
-        if not _stat_matches(
-            path,
-            self.context,
-            device_id=self._device_id,
-            inode_id=self._inode_id,
+        if (
+            self._media_generation is None
+            or media_generation_identity(path) != self._media_generation
+            or not _stat_matches(
+                path,
+                self.context,
+                device_id=self._device_id,
+                inode_id=self._inode_id,
+            )
         ):
             raise LocalFrameSourceFailure(
                 "The local media file changed during FFmpeg frame extraction."
