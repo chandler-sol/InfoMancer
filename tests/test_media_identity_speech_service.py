@@ -281,6 +281,123 @@ class NormalSpeechServiceTests(unittest.TestCase):
         self.assertEqual(windows[-1].end_ms, 95_000)
         self.assertEqual(sum(item.duration_ms for item in windows), 95_000)
 
+    def test_spanish_only_audio_drives_transcription_language_and_translation(self):
+        class SpanishExtractor(FakeExtractor):
+            instances = []
+
+            def __init__(self, media, streams, *, preferred_language=""):
+                super().__init__(
+                    media,
+                    streams,
+                    preferred_language=preferred_language,
+                )
+                self.stream = SpeechAudioStream(
+                    index=1,
+                    language="spa",
+                    channels=2,
+                    sample_rate_hz=48_000,
+                    default=True,
+                )
+
+        class CapturingEngine(FakeSpeechEngine):
+            def __init__(self):
+                super().__init__()
+                self.requests = []
+
+            def transcribe(self, audio_path, request):
+                self.requests.append(request)
+                return super().transcribe(audio_path, request)
+
+        engine = CapturingEngine()
+        service = NormalSpeechService(
+            self.database,
+            engine,
+            self.model,
+            extractor_factory=SpanishExtractor,
+            language="eng",
+        )
+        result = service.run(
+            1,
+            self.scan,
+            self.media,
+            10,
+            [{
+                **self.streams[0],
+                "language": "spa",
+            }],
+        )
+
+        self.assertEqual(result.transcript_count, 1)
+        self.assertEqual(len(engine.requests), 1)
+        self.assertEqual(engine.requests[0].language, "spa")
+        self.assertTrue(engine.requests[0].translate)
+        self.assertEqual(
+            SpanishExtractor.instances[-1].preferred_language,
+            "eng",
+        )
+        self.assertEqual(
+            SpanishExtractor.instances[-1].stream.language,
+            "spa",
+        )
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT payload_json FROM media_identity_artifacts
+                   WHERE file_id=1 AND artifact_type='speech_transcript'
+                   ORDER BY id DESC LIMIT 1"""
+            ).fetchone()
+        payload = json.loads(row["payload_json"])
+        self.assertEqual(payload["request"]["language"], "spa")
+        self.assertTrue(payload["request"]["translate"])
+
+    def test_english_only_model_refuses_selected_non_english_audio(self):
+        class SpanishExtractor(FakeExtractor):
+            def __init__(self, media, streams, *, preferred_language=""):
+                super().__init__(
+                    media,
+                    streams,
+                    preferred_language=preferred_language,
+                )
+                self.stream = SpeechAudioStream(
+                    index=1,
+                    language="spa",
+                    channels=2,
+                    sample_rate_hz=48_000,
+                    default=True,
+                )
+
+        english_model = SpeechModelIdentity(
+            key="base.en-q5_1",
+            version="fixture",
+            sha256="e" * 64,
+            size_bytes=4096,
+            source="fixture",
+            details={"multilingual": False},
+        )
+        engine = FakeSpeechEngine()
+        result = NormalSpeechService(
+            self.database,
+            engine,
+            english_model,
+            extractor_factory=SpanishExtractor,
+            language="eng",
+        ).run(
+            1,
+            self.scan,
+            self.media,
+            10,
+            [{
+                **self.streams[0],
+                "language": "spa",
+            }],
+        )
+
+        self.assertEqual(result.transcript_count, 0)
+        self.assertIn(
+            "speech-language-incompatible-with-model",
+            result.failures,
+        )
+        self.assertEqual(engine.calls, 0)
+
     def test_transcript_is_persisted_and_second_run_reuses_it(self):
         engine = FakeSpeechEngine()
         service = self._service(engine)
