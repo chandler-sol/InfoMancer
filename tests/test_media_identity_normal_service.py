@@ -2046,6 +2046,177 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertEqual(result.speech_transcript_count, 0)
         self.assertEqual(speech_engine.calls, 0)
 
+    def test_partial_visual_rerun_cannot_replace_complete_normal_result(self):
+        first = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([FakePreviewSource()]),
+            FakeOcr(),
+        ).run_scan(self.fast_scan.scan_id)
+        self.assertEqual(first.completed_profile.value, "normal")
+        decisions = MediaIdentityDecisionService(self.database)
+        decisions.resolve_scan(self.fast_scan.scan_id)
+
+        with self.database.connect() as conn:
+            before_scan = conn.execute(
+                """SELECT claimed_identity_json,result_state,best_candidate_key
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            before_evidence = [
+                tuple(row)
+                for row in conn.execute(
+                    """SELECT candidate_key,relation,strength,details_json,cache_key
+                       FROM media_identity_evidence
+                       WHERE scan_id=? AND analyzer_key=?
+                       ORDER BY id""",
+                    (self.fast_scan.scan_id, NORMAL_OCR_EVIDENCE_KEY),
+                ).fetchall()
+            ]
+
+        class FiveFrameSource(FakePreviewSource):
+            def preview_frames(self, _media):
+                return tuple(
+                    PreviewFrameRef(
+                        source_key=self.source_key,
+                        item_id="episode-1",
+                        timestamp_ms=(index + 1) * 10_000,
+                        asset_ref=f"partial:{index}",
+                        source_signature="preview-partial-v1",
+                        width=320,
+                        height=180,
+                    )
+                    for index in range(5)
+                )
+
+        class OneThenFailOcr(FakeOcr):
+            def recognize(self, image: bytes) -> OcrTextResult:
+                self.calls += 1
+                if self.calls > 1:
+                    raise NormalIdentityError("fixture transient OCR failure")
+                return OcrTextResult(
+                    text=image.decode("utf-8"),
+                    confidence=1.0,
+                    details={"fixture": True},
+                )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "only completed part of its visual coverage",
+        ):
+            NormalIdentityService(
+                self.database,
+                ExternalSourceRegistry([FiveFrameSource()]),
+                OneThenFailOcr(),
+            ).run_scan(self.fast_scan.scan_id)
+
+        with self.database.connect() as conn:
+            after_scan = conn.execute(
+                """SELECT claimed_identity_json,result_state,best_candidate_key
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            after_evidence = [
+                tuple(row)
+                for row in conn.execute(
+                    """SELECT candidate_key,relation,strength,details_json,cache_key
+                       FROM media_identity_evidence
+                       WHERE scan_id=? AND analyzer_key=?
+                       ORDER BY id""",
+                    (self.fast_scan.scan_id, NORMAL_OCR_EVIDENCE_KEY),
+                ).fetchall()
+            ]
+
+        self.assertEqual(dict(after_scan), dict(before_scan))
+        self.assertEqual(after_evidence, before_evidence)
+        self.assertTrue(
+            decisions.scan_detail(self.fast_scan.scan_id)["snapshot_current"]
+        )
+
+    def test_partial_speech_rerun_cannot_replace_complete_eight_window_result(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        class EpisodeTwoSpeech(FakeNormalSpeechEngine):
+            def transcribe(self, _audio_path, request):
+                self.calls += 1
+                return SpeechTranscript(
+                    text="bronze harbor lantern meadow quartz thunder",
+                    language="en",
+                )
+
+        first = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=EpisodeTwoSpeech(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+        self.assertEqual(first.speech_transcript_count, 8)
+
+        decisions = MediaIdentityDecisionService(self.database)
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        with self.database.connect() as conn:
+            before_scan = conn.execute(
+                """SELECT claimed_identity_json,result_state,best_candidate_key
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            before_evidence = [
+                tuple(row)
+                for row in conn.execute(
+                    """SELECT candidate_key,relation,strength,details_json,cache_key
+                       FROM media_identity_evidence
+                       WHERE scan_id=? AND analyzer_key=?
+                       ORDER BY id""",
+                    (self.fast_scan.scan_id, NORMAL_SPEECH_EVIDENCE_KEY),
+                ).fetchall()
+            ]
+
+        class OneThenFailExtractor(FakeNormalSpeechExtractor):
+            def extract(self, window):
+                if self.extract_calls >= 1:
+                    self.extract_calls += 1
+                    raise RuntimeError("fixture transient speech extraction failure")
+                return super().extract(window)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "only completed part of the speech coverage",
+        ):
+            NormalIdentityService(
+                self.database,
+                ExternalSourceRegistry(()),
+                UnavailableOcr(),
+                speech_engine=EpisodeTwoSpeech(),
+                speech_model=fake_normal_speech_model(),
+                speech_extractor_factory=OneThenFailExtractor,
+            ).run_scan(self.fast_scan.scan_id)
+
+        with self.database.connect() as conn:
+            after_scan = conn.execute(
+                """SELECT claimed_identity_json,result_state,best_candidate_key
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            after_evidence = [
+                tuple(row)
+                for row in conn.execute(
+                    """SELECT candidate_key,relation,strength,details_json,cache_key
+                       FROM media_identity_evidence
+                       WHERE scan_id=? AND analyzer_key=?
+                       ORDER BY id""",
+                    (self.fast_scan.scan_id, NORMAL_SPEECH_EVIDENCE_KEY),
+                ).fetchall()
+            ]
+
+        self.assertEqual(dict(after_scan), dict(before_scan))
+        self.assertEqual(after_evidence, before_evidence)
+        detail = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertTrue(detail["snapshot_current"])
+        self.assertTrue(detail["actionable"])
+
     def test_weak_rerun_cannot_discard_existing_speech_backed_normal_state(self):
         class UnavailableOcr(FakeOcr):
             def available(self):
