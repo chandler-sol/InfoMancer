@@ -468,10 +468,49 @@ class NormalPreviewOcrExecutor:
                 return candidate
             return current
 
+        def budget_stop(
+            source_key: str,
+            detail: str,
+        ) -> NormalPreviewOcrRun:
+            budget.mark_blocked()
+            failures.append(f"{source_key}:budget:{detail}")
+            selected = best_result
+            return NormalPreviewOcrRun(
+                source_key=(
+                    selected.source_key
+                    if selected is not None
+                    else str(source_key or "")
+                ),
+                observations=(
+                    selected.observations
+                    if selected is not None
+                    else ()
+                ),
+                failures=tuple(failures),
+                total_image_bytes=budget.image_bytes,
+                total_source_bytes=budget.source_bytes,
+                total_text_chars=budget.text_chars,
+                total_frame_attempts=budget.frame_attempts,
+                budget_exhausted=True,
+                planned_frame_count=(
+                    selected.planned_frame_count
+                    if selected is not None
+                    else 0
+                ),
+                completed_frame_count=(
+                    selected.completed_frame_count
+                    if selected is not None
+                    else 0
+                ),
+                coverage_complete=False,
+            )
+
         for source in self.registry.available_for(ExternalCapability.PREVIEW_FRAMES):
             try:
                 with visual_budget_scope(budget):
                     media = source.resolve_media(context)
+            except VisualBudgetExceeded as exc:
+                return budget_stop(source.source_key, str(exc))
             except ExternalAnalysisError as exc:
                 failures.append(f"{source.source_key}:resolve:{exc}")
                 continue
@@ -480,6 +519,8 @@ class NormalPreviewOcrExecutor:
             try:
                 with visual_budget_scope(budget):
                     frames = tuple(source.preview_frames(media))
+            except VisualBudgetExceeded as exc:
+                return budget_stop(source.source_key, str(exc))
             except ExternalAnalysisError as exc:
                 failures.append(f"{source.source_key}:preview-list:{exc}")
                 continue
@@ -543,6 +584,12 @@ class NormalPreviewOcrExecutor:
             elif result.observations:
                 best_result = choose_result(best_result, result)
                 failures.append(f"{source.source_key}:ocr:no-visual-text")
+
+            if not budget.can_attempt_frame and not result.budget_exhausted:
+                return budget_stop(
+                    source.source_key,
+                    "Normal visual resource ceiling prevents another source or fallback attempt.",
+                )
 
             if result.budget_exhausted or budget.exhausted:
                 selected = best_result or result
