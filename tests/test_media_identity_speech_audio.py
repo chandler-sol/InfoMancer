@@ -788,6 +788,7 @@ class SpeechAudioExtractionTests(unittest.TestCase):
             path=str(real_media),
             size_bytes=stat.st_size,
             modified_at=stat.st_mtime,
+            sha256=hashlib.sha256(real_media.read_bytes()).hexdigest(),
         )
         extractor = LocalFfmpegSpeechAudioExtractor(
             media,
