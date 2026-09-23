@@ -328,6 +328,104 @@ class NormalOcrFoundationTests(unittest.TestCase):
                     )
                 )
 
+    def test_frame_attempt_budget_is_global_across_preview_sources(self) -> None:
+        class CountingOcr(DummyOcr):
+            def __init__(self):
+                self.calls = 0
+
+            def recognize(self, image: bytes) -> OcrTextResult:
+                self.calls += 1
+                return OcrTextResult(text="", confidence=0.75)
+
+        class ManyFramesSource:
+            version = "1"
+
+            def __init__(self, source_key):
+                self.source_key = source_key
+                self.read_calls = 0
+
+            def status(self):
+                return ExternalSourceStatus(
+                    source_key=self.source_key,
+                    available=True,
+                    capabilities=frozenset({ExternalCapability.PREVIEW_FRAMES}),
+                )
+
+            def resolve_media(self, _context):
+                return ExternalMediaRef(
+                    source_key=self.source_key,
+                    item_id=f"{self.source_key}-episode",
+                    source_signature=f"{self.source_key}-media-v1",
+                )
+
+            def preview_frames(self, _media):
+                return tuple(
+                    PreviewFrameRef(
+                        source_key=self.source_key,
+                        item_id=f"{self.source_key}-episode",
+                        timestamp_ms=index * 1000,
+                        asset_ref=f"{self.source_key}:frame:{index}",
+                        source_signature=f"{self.source_key}-preview-v1",
+                        width=320,
+                        height=180,
+                    )
+                    for index in range(20)
+                )
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"frame"
+
+            def subtitles(self, _media):
+                return ()
+
+            def read_subtitle(self, _subtitle):
+                return b""
+
+            def media_metadata(self, _media):
+                return {}
+
+            def fingerprints(self, _media):
+                return ()
+
+            def known_identity(self, _media):
+                return None
+
+        first = ManyFramesSource("aa-first")
+        second = ManyFramesSource("bb-second")
+        engine = CountingOcr()
+        context = AnalyzerContext(
+            media=MediaIdentityFile(
+                file_id=1,
+                title_id=1,
+                path="/media/episode.mkv",
+                size_bytes=100,
+                modified_at=1.0,
+            ),
+            claimed_identity=IdentityReference(
+                identity_kind="episode",
+                season=1,
+                episode=1,
+                display_name="Episode",
+            ),
+            profile=IdentityProfile.NORMAL,
+        )
+        run = NormalPreviewOcrExecutor(
+            ExternalSourceRegistry([first, second]),
+            engine,
+            limits=NormalResourceLimits(
+                initial_preview_frames=5,
+                expanded_preview_frames=9,
+                max_preview_frames=12,
+            ),
+        ).run(context)
+
+        self.assertEqual(first.read_calls, 12)
+        self.assertEqual(second.read_calls, 0)
+        self.assertEqual(engine.calls, 12)
+        self.assertEqual(run.total_frame_attempts, 12)
+        self.assertTrue(run.budget_exhausted)
+
     def test_ocr_cache_key_requires_stable_engine_identity(self) -> None:
         class MissingVersion(DummyOcr):
             version = ""
