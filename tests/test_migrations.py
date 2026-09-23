@@ -7,6 +7,9 @@ from pathlib import Path
 
 from app.db import Database
 from app.migrations import MIGRATIONS, schema_contract
+from app.media_identity.migration import (
+    apply_media_identity_confirmation_provenance,
+)
 
 
 class MigrationTests(unittest.TestCase):
@@ -98,6 +101,73 @@ class MigrationTests(unittest.TestCase):
                     "last_test_status", "last_test_detail", "last_test_server_name",
                     "last_test_version", "last_test_at",
                 }.issubset(external_source_columns))
+
+    def test_legacy_confirmation_migration_does_not_invent_reviewed_revision(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "pre23.db"
+            conn = sqlite3.connect(path)
+            conn.row_factory = sqlite3.Row
+            conn.executescript(
+                """
+                CREATE TABLE media_identity_confirmations (
+                    file_id INTEGER PRIMARY KEY,
+                    identity_kind TEXT NOT NULL,
+                    provider TEXT NOT NULL DEFAULT '',
+                    provider_item_id TEXT NOT NULL DEFAULT '',
+                    expected_episode_id INTEGER,
+                    order_namespace TEXT NOT NULL DEFAULT '',
+                    season INTEGER,
+                    episode INTEGER,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    source_scan_id INTEGER,
+                    confirmed_size_bytes INTEGER NOT NULL DEFAULT 0,
+                    confirmed_modified_at REAL,
+                    confirmed_sha256 TEXT,
+                    confirmed_by INTEGER,
+                    confirmed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE media_identity_scans (
+                    id INTEGER PRIMARY KEY,
+                    claimed_identity_json TEXT NOT NULL DEFAULT '{}',
+                    metadata_signature TEXT NOT NULL DEFAULT ''
+                );
+                """
+            )
+            # The scan has since advanced to a later sealed result. A migration
+            # cannot prove that revision 3 was the result the human reviewed.
+            conn.execute(
+                """INSERT INTO media_identity_scans(
+                     id,claimed_identity_json,metadata_signature
+                   ) VALUES (
+                     5,
+                     '{"result_revision":3,"decision_snapshot":{"version":1,"revision":3,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}',
+                     'current-signature'
+                   )"""
+            )
+            conn.execute(
+                """INSERT INTO media_identity_confirmations(
+                     file_id,identity_kind,provider,provider_item_id,
+                     source_scan_id,confirmed_size_bytes,confirmed_sha256
+                   ) VALUES (
+                     1,'episode','tvdb','1002',5,123,
+                     'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+                   )"""
+            )
+
+            apply_media_identity_confirmation_provenance(conn)
+            row = conn.execute(
+                """SELECT source_scan_snapshot_id,source_result_revision,
+                          source_decision_snapshot_sha256,
+                          source_metadata_signature
+                   FROM media_identity_confirmations
+                   WHERE file_id=1"""
+            ).fetchone()
+            conn.close()
+
+        self.assertEqual(row["source_scan_snapshot_id"], 5)
+        self.assertEqual(row["source_result_revision"], 0)
+        self.assertEqual(row["source_decision_snapshot_sha256"], "")
+        self.assertEqual(row["source_metadata_signature"], "")
 
     def test_existing_migration_21_database_receives_credential_generation(self):
         with tempfile.TemporaryDirectory() as temporary:
