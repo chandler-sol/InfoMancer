@@ -262,7 +262,7 @@ class NormalOcrFoundationTests(unittest.TestCase):
 
         class GoodSource(BrokenSource):
             def __init__(self):
-                super().__init__("fallback", RuntimeError("unused"))
+                super().__init__("zz-fallback", RuntimeError("unused"))
 
             def resolve_media(self, _context):
                 return ExternalMediaRef(
@@ -319,7 +319,7 @@ class NormalOcrFoundationTests(unittest.TestCase):
                         max_preview_frames=1,
                     ),
                 ).run(context)
-                self.assertEqual(run.source_key, "fallback")
+                self.assertEqual(run.source_key, "zz-fallback")
                 self.assertTrue(run.has_text)
                 self.assertTrue(
                     any(
