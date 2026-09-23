@@ -165,6 +165,13 @@ def _language_key(value: str) -> str:
     return _LANGUAGE_ALIASES.get(normalized, normalized)
 
 
+def normalize_speech_language(value: str) -> str:
+    """Return the catalog/audio language in one canonical comparison form."""
+    if not isinstance(value, str):
+        raise SpeechAudioUnavailable("Speech language identifiers must be text.")
+    return _language_key(value) or "und"
+
+
 def _flag(value: object) -> bool:
     if isinstance(value, bool):
         return value
