@@ -146,7 +146,14 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
         self.assertIn("-fs", command)
         self.assertIn("image2pipe", command)
         self.assertIn("mjpeg", command)
-        self.assertIn(str(self.media), command)
+        if os.name == "nt":
+            self.assertIn(str(self.media.resolve()), command)
+            self.assertNotIn("pass_fds", run.call_args.kwargs)
+        else:
+            self.assertIn("-fd", command)
+            self.assertEqual(command[command.index("-i") + 1], "fd:")
+            self.assertNotIn(str(self.media), command)
+            self.assertEqual(len(run.call_args.kwargs["pass_fds"]), 1)
         self.assertNotIn("-hwaccel", command)
         self.assertEqual(run.call_args.kwargs["timeout"], 20)
         self.assertFalse(run.call_args.kwargs["check"])
@@ -158,6 +165,60 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
             run.call_args.kwargs["stdout"],
             subprocess.PIPE,
         )
+
+    @unittest.skipIf(os.name == "nt", "POSIX descriptor binding test")
+    def test_path_redirection_cannot_change_leased_ffmpeg_input(self):
+        payload = jpeg_bytes()
+        original = self.media.read_bytes()
+        alternate = self.root / "alternate.mkv"
+        alternate.write_bytes(b"alternate-media" * 64)
+        alias = self.root / "episode-alias.mkv"
+        alias.symlink_to(self.media)
+        alias_context = replace(
+            self.context,
+            media=replace(self.context.media, path=str(alias)),
+        )
+        source = LocalFfmpegFrameSource(
+            alias_context,
+            1800.0,
+            executable=str(self.ffmpeg),
+        )
+
+        def redirect_alias(command, **kwargs):
+            descriptor = kwargs["pass_fds"][0]
+            alias.unlink()
+            alias.symlink_to(alternate)
+            try:
+                leased_bytes = os.pread(
+                    descriptor,
+                    len(original),
+                    0,
+                )
+                self.assertEqual(leased_bytes, original)
+                self.assertEqual(
+                    command[command.index("-i") + 1],
+                    "fd:",
+                )
+            finally:
+                alias.unlink()
+                alias.symlink_to(self.media)
+            return subprocess.CompletedProcess(
+                args=command,
+                returncode=0,
+                stdout=payload,
+                stderr=b"",
+            )
+
+        try:
+            media = source.resolve_media(alias_context)
+            frame = source.preview_frames(media)[0]
+            with patch(
+                "app.media_identity.local_frames.subprocess.run",
+                side_effect=redirect_alias,
+            ):
+                self.assertEqual(source.read_preview(frame), payload)
+        finally:
+            source.close()
 
     def test_timeout_is_optional_preview_failure(self):
         with (
