@@ -497,6 +497,9 @@ class NormalIdentityService:
             total_image_bytes=run.total_image_bytes,
             total_text_chars=run.total_text_chars,
             budget_exhausted=run.budget_exhausted,
+            planned_frame_count=run.planned_frame_count,
+            completed_frame_count=run.completed_frame_count,
+            coverage_complete=run.coverage_complete,
         )
         return persisted_run, artifact_ids
 
@@ -1163,6 +1166,12 @@ class NormalIdentityService:
                 total_image_bytes=local_run.total_image_bytes,
                 total_text_chars=local_run.total_text_chars,
                 budget_exhausted=local_run.budget_exhausted,
+                planned_frame_count=preferred.planned_frame_count,
+                completed_frame_count=preferred.completed_frame_count,
+                coverage_complete=(
+                    preferred.coverage_complete
+                    and not local_run.budget_exhausted
+                ),
             )
 
         speech_run = NormalSpeechRun()
@@ -1232,7 +1241,16 @@ class NormalIdentityService:
                 str(current_scan.get("completed_profile") or "")
                 == IdentityProfile.NORMAL.value
             )
+            current_previous_ocr_metadata = current_claimed.get("normal_ocr")
             current_previous_speech_metadata = current_claimed.get("normal_speech")
+            previous_ocr_coverage_complete = bool(
+                isinstance(current_previous_ocr_metadata, Mapping)
+                and current_previous_ocr_metadata.get("coverage_complete") is True
+            )
+            previous_speech_coverage_complete = bool(
+                isinstance(current_previous_speech_metadata, Mapping)
+                and current_previous_speech_metadata.get("coverage_complete") is True
+            )
             try:
                 current_previous_speech_count = (
                     int(
@@ -1244,16 +1262,38 @@ class NormalIdentityService:
                 )
             except (TypeError, ValueError):
                 current_previous_speech_count = 0
+            previous_complete_normal_coverage = bool(
+                current_previous_completed_normal
+                and (
+                    (
+                        current_previous_normal_evidence
+                        and previous_ocr_coverage_complete
+                    )
+                    or (
+                        current_previous_speech_count > 0
+                        and previous_speech_coverage_complete
+                    )
+                )
+            )
 
             if (
-                current_previous_completed_normal
-                and current_previous_speech_count > 0
-                and not cheaper_evidence_sufficient
-                and not speech_run.observations
+                previous_complete_normal_coverage
+                and run.observations
+                and not run.coverage_complete
             ):
                 raise NormalIdentityScanError(
-                    "Normal rerun could not revalidate the speech fragments still "
-                    "needed by this scan. The existing completed Normal evidence "
+                    "Normal rerun only completed part of its visual coverage. "
+                    "The existing completed Normal result was retained."
+                )
+
+            if (
+                previous_complete_normal_coverage
+                and speech_escalated
+                and not speech_run.coverage_complete
+            ):
+                raise NormalIdentityScanError(
+                    "Normal rerun only completed part of the speech coverage still "
+                    "needed by this scan. The existing completed Normal result "
                     "was retained."
                 )
 
@@ -1322,6 +1362,9 @@ class NormalIdentityService:
                     "text_observation_count": sum(
                         1 for item in run.observations if item.text.strip()
                     ),
+                    "planned_frame_count": int(run.planned_frame_count),
+                    "completed_frame_count": int(run.completed_frame_count),
+                    "coverage_complete": bool(run.coverage_complete),
                     "reused_artifact_count": sum(
                         1 for item in run.observations if item.reused
                     ),
@@ -1336,6 +1379,7 @@ class NormalIdentityService:
                 "planned_windows": len(speech_run.planned_windows),
                 "transcript_count": speech_run.transcript_count,
                 "text_transcript_count": speech_run.text_transcript_count,
+                "coverage_complete": bool(speech_run.coverage_complete),
                 "reused_artifact_count": speech_run.reused_artifact_count,
                 "artifact_ids": [
                     item.artifact_id for item in speech_run.observations
