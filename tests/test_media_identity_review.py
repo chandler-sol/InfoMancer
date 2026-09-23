@@ -18,6 +18,7 @@ from app.media_identity.models import IdentityProfile, IdentityResultState
 from app.media_identity.normal import NormalSamplingStage
 from app.media_identity.normal_service import NormalIdentityService
 from app.mie import MediaIntelligenceEngine
+from app.mie_history import MediaIntelligenceHistoryEngine
 from app.review_queue import ReviewQueue
 from app.request_security import LOCAL_CSRF_COOKIE
 from app.provider_secrets import ProviderSecretError
@@ -398,6 +399,22 @@ class EpisodeIdentityNormalRouteTests(EpisodeIdentityHttpBindingTests):
         self.assertEqual(response.status_code, 303)
         self.assertIn("Fast", response.headers["location"])
         self.assertIn("OCR", response.headers["location"])
+
+
+class EpisodeIdentityAssemblyTests(unittest.TestCase):
+    def test_application_preserves_configured_history_engine(self) -> None:
+        self.assertIsInstance(
+            main.mie,
+            MediaIntelligenceHistoryEngine,
+        )
+        self.assertIs(
+            main.mie.external_registry_factory,
+            main._mie_external_registry,
+        )
+        self.assertIs(
+            main.mie.identity_decisions.external_registry_factory,
+            main._mie_external_registry,
+        )
 
 
 class EpisodeIdentityReviewContractTests(unittest.TestCase):
