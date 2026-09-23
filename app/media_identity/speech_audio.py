@@ -14,6 +14,11 @@ from typing import Any, Iterable, Mapping, Sequence
 import wave
 
 from ..media_info import _quiet_subprocess_options, ffmpeg_executable
+from .media_generation import (
+    MediaContentLease,
+    MediaContentLeaseError,
+    media_generation_identity,
+)
 from .models import MediaIdentityFile
 from .speech import (
     MAX_NORMAL_SPEECH_TOTAL_MS,
@@ -24,7 +29,7 @@ from .speech import (
 )
 
 
-SPEECH_AUDIO_POLICY_VERSION = 1
+SPEECH_AUDIO_POLICY_VERSION = 2
 SPEECH_AUDIO_FORMAT_KEY = "wav-pcm-s16le"
 SPEECH_AUDIO_SAMPLE_RATE_HZ = 16_000
 SPEECH_AUDIO_CHANNELS = 1
@@ -723,6 +728,8 @@ class LocalFfmpegSpeechAudioExtractor:
             else requested_executable
         )
 
+        self._media_generation = media_generation_identity(media.path)
+        self._media_lease: MediaContentLease | None = None
         path_identity = _stat_identity(Path(media.path))
         if path_identity is None:
             raise SpeechAudioUnavailable(
@@ -730,8 +737,45 @@ class LocalFfmpegSpeechAudioExtractor:
             )
         _, self._device_id, self._inode_id = path_identity
 
+    def acquire_content_lease(self) -> None:
+        if self._media_lease is not None:
+            try:
+                self._media_lease.require_current()
+            except MediaContentLeaseError as exc:
+                raise SpeechAudioStaleError(str(exc)) from exc
+            return
+        try:
+            lease = MediaContentLease(
+                self.media.path,
+                self.media.sha256 or "",
+                expected_generation=self._media_generation,
+            ).acquire()
+        except (MediaContentLeaseError, OSError) as exc:
+            raise SpeechAudioStaleError(
+                "The local media bytes no longer match the exact verified content snapshot."
+            ) from exc
+        self._media_lease = lease
+
+    def close(self) -> None:
+        lease, self._media_lease = self._media_lease, None
+        if lease is not None:
+            lease.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
     def _require_current_inputs(self) -> Mapping[str, Any]:
+        self.acquire_content_lease()
         path = Path(self.media.path)
+        try:
+            self._media_lease.require_current()
+        except (AttributeError, MediaContentLeaseError) as exc:
+            raise SpeechAudioStaleError(
+                "The local media file changed while speech analysis was active."
+            ) from exc
         if not _media_matches(
             path,
             self.media,
