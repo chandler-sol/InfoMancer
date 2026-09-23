@@ -10,6 +10,7 @@ from pathlib import Path
 from app.db import Database
 from app.media_identity.candidates import generate_episode_candidates
 from app.media_identity.decision_snapshot import (
+    DecisionSnapshotError,
     result_revision,
     seal_decision_snapshot,
 )
@@ -921,6 +922,31 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertFalse(detail["actionable"])
         with self.assertRaisesRegex(ValueError, "changed after this identity scan"):
             self.service.confirm_best(self.scan_id, None)
+
+    def test_sealed_result_revision_is_immutable_and_resolution_advances_it(self) -> None:
+        with self.database.connect() as conn:
+            before = conn.execute(
+                "SELECT claimed_identity_json FROM media_identity_scans WHERE id=?",
+                (self.scan_id,),
+            ).fetchone()
+            self.assertEqual(
+                result_revision(
+                    {"claimed_identity_json": before["claimed_identity_json"]}
+                ),
+                1,
+            )
+            with self.assertRaises(DecisionSnapshotError):
+                seal_decision_snapshot(conn, self.scan_id, revision=1)
+
+        self.service.resolve_scan(self.scan_id)
+        with self.database.connect() as conn:
+            after = conn.execute(
+                "SELECT claimed_identity_json FROM media_identity_scans WHERE id=?",
+                (self.scan_id,),
+            ).fetchone()
+        claimed = json.loads(after["claimed_identity_json"])
+        self.assertEqual(claimed["result_revision"], 2)
+        self.assertEqual(claimed["decision_snapshot"]["revision"], 2)
 
     def test_file_change_blocks_confirmation(self) -> None:
         self.service.resolve_scan(self.scan_id)
