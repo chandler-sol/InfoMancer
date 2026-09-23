@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 import stat as stat_module
@@ -80,3 +81,47 @@ def media_generation_matches(
         if normalized != current[field]:
             return False
     return True
+
+
+def media_content_sha256(
+    path: str | Path,
+    *,
+    expected_generation: Mapping[str, Any] | None = None,
+) -> str | None:
+    """Hash exact media bytes while rejecting generation changes during the read."""
+    candidate = Path(path)
+    generation_before = media_generation_identity(candidate)
+    if generation_before is None:
+        return None
+    if (
+        expected_generation is not None
+        and dict(expected_generation) != generation_before
+    ):
+        return None
+
+    try:
+        digest = hashlib.sha256()
+        with candidate.open("rb") as handle:
+            descriptor_before = os.fstat(handle.fileno())
+            if not stat_module.S_ISREG(descriptor_before.st_mode):
+                return None
+            while True:
+                chunk = handle.read(4 * 1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+            descriptor_after = os.fstat(handle.fileno())
+    except OSError:
+        return None
+
+    fields = ("st_size", "st_mtime_ns", "st_ctime_ns", "st_dev", "st_ino")
+    for field in fields:
+        if getattr(descriptor_before, field, None) != getattr(
+            descriptor_after, field, None
+        ):
+            return None
+
+    generation_after = media_generation_identity(candidate)
+    if generation_after != generation_before:
+        return None
+    return digest.hexdigest()
