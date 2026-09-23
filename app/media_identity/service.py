@@ -2032,6 +2032,16 @@ class MediaIdentityDecisionService:
             expected_decision_snapshot_sha256 or ""
         ).strip().casefold()
         reviewed_candidate_key = str(expected_candidate_key or "").strip()
+        if detail.get("decision_pending"):
+            return {
+                "available": False,
+                "status": "unavailable",
+                "reason": (
+                    "This scan is still waiting for the decision resolver. "
+                    "Refresh Library Health before previewing a rename."
+                ),
+                "scan": detail,
+            }
         displayed_result_matches = (
             reviewed_revision > 0
             and len(reviewed_digest) == 64
