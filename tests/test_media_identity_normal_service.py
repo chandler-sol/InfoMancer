@@ -505,6 +505,9 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
                     "modified_at": scan["file_modified_at"],
                     "sha256": str(scan["file_sha256"] or ""),
                 },
+                preview_sha256=hashlib.sha256(
+                    b"bronze harbor lantern meadow quartz thunder"
+                ).hexdigest(),
             )
             winner_text = "amber falcon orchard glacier velvet compass"
             conn.execute(
@@ -737,7 +740,7 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertEqual(result.highest_observed_stage.name, "FINAL")
         self.assertEqual(engine.calls, 12)
 
-    def test_second_normal_run_reuses_derived_ocr_without_rereading_preview(self):
+    def test_second_normal_run_revalidates_preview_bytes_before_reusing_ocr(self):
         source = FakePreviewSource()
         engine = FakeOcr()
         service = NormalIdentityService(
@@ -753,7 +756,7 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         second = service.run_scan(self.fast_scan.scan_id)
 
         self.assertEqual(second.reused_artifact_count, 1)
-        self.assertEqual(source.read_calls, 1)
+        self.assertEqual(source.read_calls, 2)
         self.assertEqual(engine.calls, 1)
         with self.database.connect() as conn:
             artifact_count = conn.execute(
@@ -762,6 +765,43 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
                    WHERE file_id=1 AND artifact_type='visual_text'"""
             ).fetchone()["count"]
         self.assertEqual(int(artifact_count), 1)
+
+    def test_changed_preview_bytes_with_same_reference_do_not_reuse_old_ocr(self):
+        class MutablePreview(FakePreviewSource):
+            def __init__(self):
+                super().__init__()
+                self.payload = b"bronze harbor lantern meadow quartz thunder"
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return self.payload
+
+        source = MutablePreview()
+        engine = FakeOcr()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            engine,
+        )
+        first = service.run_scan(self.fast_scan.scan_id)
+        self.assertEqual(first.reused_artifact_count, 0)
+        self.assertEqual(engine.calls, 1)
+
+        source.payload = b"amber falcon orchard glacier velvet compass"
+        second = service.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(second.reused_artifact_count, 0)
+        self.assertEqual(source.read_calls, 2)
+        self.assertEqual(engine.calls, 2)
+        with self.database.connect() as conn:
+            artifacts = conn.execute(
+                """SELECT cache_key,text_value FROM media_identity_artifacts
+                   WHERE file_id=1 AND artifact_type='visual_text'
+                   ORDER BY id"""
+            ).fetchall()
+        self.assertEqual(len(artifacts), 2)
+        self.assertNotEqual(artifacts[0]["cache_key"], artifacts[1]["cache_key"])
+        self.assertIn("amber falcon", artifacts[1]["text_value"])
 
     def test_failed_rerun_preserves_existing_completed_normal_evidence(self):
         source = FakePreviewSource()
