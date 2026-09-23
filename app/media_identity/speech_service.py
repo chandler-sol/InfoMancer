@@ -835,6 +835,7 @@ class NormalSpeechService:
             )
 
         self._require_fresh_scan(int(scan_id), scan, media)
+        extractor = None
         try:
             extractor = self.extractor_factory(
                 media,
@@ -874,7 +875,7 @@ class NormalSpeechService:
                     or selected_language != "eng"
                 )
             ):
-                return NormalSpeechRun(
+                result = NormalSpeechRun(
                     planned_windows=windows,
                     failures=("speech-language-incompatible-with-model",),
                     synopsis_language=synopsis_language,
@@ -885,9 +886,19 @@ class NormalSpeechService:
                         "eng" if request_translate else ""
                     ),
                 )
+                close = getattr(extractor, "close", None)
+                if callable(close):
+                    close()
+                return result
         except SpeechAudioStaleError as exc:
+            close = getattr(extractor, "close", None)
+            if callable(close):
+                close()
             raise NormalSpeechStaleError(str(exc)) from exc
         except (SpeechAudioUnavailable, SpeechIdentityError, OSError) as exc:
+            close = getattr(extractor, "close", None)
+            if callable(close):
+                close()
             return NormalSpeechRun(
                 planned_windows=windows,
                 failures=(_bounded_failure("speech-audio-unavailable", exc),),
@@ -897,132 +908,137 @@ class NormalSpeechService:
         failures: list[str] = []
         budget_records: list[tuple[SpeechWindow, SpeechAudioIdentity]] = []
 
-        for window in windows:
-            self._require_fresh_scan(int(scan_id), scan, media)
+        try:
+            for window in windows:
+                self._require_fresh_scan(int(scan_id), scan, media)
 
-            # Transcript cache reuse is intentionally checked only after
-            # extraction. The cache key is bound to the exact bounded WAV
-            # bytes, so path/size/mtime provenance alone is never sufficient
-            # to reuse a transcript.
-            prepared: ExtractedSpeechAudio | None = None
-            try:
-                prepared = extractor.extract(window)
-                request = SpeechRequest(
-                    media=media,
-                    window=window,
-                    audio=prepared.identity,
-                    model=self.model,
-                    language=request_language,
-                    translate=request_translate,
-                    parameters=self.parameters,
-                )
-                exact_cached, engine_snapshot, cache_key = (
-                    self._stable_cached_observation(
-                        scan,
-                        media,
+                # Transcript cache reuse is intentionally checked only after
+                # extraction. The cache key is bound to the exact bounded WAV
+                # bytes, so path/size/mtime provenance alone is never sufficient
+                # to reuse a transcript.
+                prepared: ExtractedSpeechAudio | None = None
+                try:
+                    prepared = extractor.extract(window)
+                    request = SpeechRequest(
+                        media=media,
+                        window=window,
+                        audio=prepared.identity,
+                        model=self.model,
+                        language=request_language,
+                        translate=request_translate,
+                        parameters=self.parameters,
+                    )
+                    exact_cached, engine_snapshot, cache_key = (
+                        self._stable_cached_observation(
+                            scan,
+                            media,
+                            request,
+                        )
+                    )
+                    if exact_cached is not None:
+                        validate_normal_speech_audio_budget(
+                            [*budget_records, (window, exact_cached.audio_identity)]
+                        )
+                        self._require_fresh_scan(
+                            int(scan_id),
+                            scan,
+                            media,
+                        )
+                        budget_records.append(
+                            (window, exact_cached.audio_identity)
+                        )
+                        observations.append(exact_cached)
+                        continue
+
+                    validate_normal_speech_audio_budget(
+                        [*budget_records, (window, prepared.identity)]
+                    )
+                    validated_path = prepared.validated_path(request.audio)
+                    transcript = self.engine.transcribe(
+                        validated_path,
                         request,
                     )
-                )
-                if exact_cached is not None:
-                    validate_normal_speech_audio_budget(
-                        [*budget_records, (window, exact_cached.audio_identity)]
-                    )
-                    self._require_fresh_scan(
+                    if not isinstance(transcript, SpeechTranscript):
+                        raise SpeechIdentityError(
+                            "Speech engines must return SpeechTranscript values."
+                        )
+                    post_engine_snapshot = self._engine_snapshot()
+                    if (
+                        speech_transcript_cache_key(
+                            request,
+                            post_engine_snapshot,
+                        )
+                        != cache_key
+                    ):
+                        raise SpeechIdentityError(
+                            "Speech engine identity changed during transcription."
+                        )
+                    self._require_fresh_scan(int(scan_id), scan, media)
+                    observation = self._persist_observation(
                         int(scan_id),
                         scan,
                         media,
-                    )
-                    budget_records.append(
-                        (window, exact_cached.audio_identity)
-                    )
-                    observations.append(exact_cached)
-                    continue
-
-                validate_normal_speech_audio_budget(
-                    [*budget_records, (window, prepared.identity)]
-                )
-                validated_path = prepared.validated_path(request.audio)
-                transcript = self.engine.transcribe(
-                    validated_path,
-                    request,
-                )
-                if not isinstance(transcript, SpeechTranscript):
-                    raise SpeechIdentityError(
-                        "Speech engines must return SpeechTranscript values."
-                    )
-                post_engine_snapshot = self._engine_snapshot()
-                if (
-                    speech_transcript_cache_key(
+                        extractor,
+                        window,
                         request,
+                        cache_key,
+                        transcript,
                         post_engine_snapshot,
                     )
-                    != cache_key
-                ):
-                    raise SpeechIdentityError(
-                        "Speech engine identity changed during transcription."
+                    budget_records.append((window, request.audio))
+                    observations.append(observation)
+                except SpeechAudioStaleError as exc:
+                    raise NormalSpeechStaleError(str(exc)) from exc
+                except NormalSpeechStaleError:
+                    raise
+                except SpeechBudgetExceeded as exc:
+                    failures.append(
+                        _bounded_failure(f"speech:{window.key}", exc)
                     )
-                self._require_fresh_scan(int(scan_id), scan, media)
-                observation = self._persist_observation(
-                    int(scan_id),
-                    scan,
-                    media,
-                    extractor,
-                    window,
-                    request,
-                    cache_key,
-                    transcript,
-                    post_engine_snapshot,
-                )
-                budget_records.append((window, request.audio))
-                observations.append(observation)
-            except SpeechAudioStaleError as exc:
-                raise NormalSpeechStaleError(str(exc)) from exc
-            except NormalSpeechStaleError:
-                raise
-            except SpeechBudgetExceeded as exc:
-                failures.append(
-                    _bounded_failure(f"speech:{window.key}", exc)
-                )
-                return NormalSpeechRun(
-                    planned_windows=windows,
-                    observations=tuple(observations),
-                    failures=tuple(failures),
-                    budget_exhausted=True,
-                    synopsis_language=synopsis_language,
-                    preferred_audio_language=self.preferred_audio_language,
-                    selected_audio_language=selected_language,
-                    transcription_input_language=request_language,
-                    translation_target_language=(
-                        "eng" if request_translate else ""
-                    ),
-                )
-            except (SpeechAudioUnavailable, SpeechIdentityError) as exc:
-                failures.append(
-                    _bounded_failure(f"speech:{window.key}", exc)
-                )
-            except Exception as exc:
-                # Speech is an optional Normal escalation. Runtime/model/backend
-                # failures must not discard cheaper evidence or previously
-                # completed transcript fragments. KeyboardInterrupt/SystemExit
-                # are BaseException subclasses and intentionally propagate so
-                # an interrupted run can resume from persisted fragments.
-                failures.append(
-                    _bounded_failure(f"speech:{window.key}", exc)
-                )
-            finally:
-                if prepared is not None:
-                    prepared.cleanup()
+                    return NormalSpeechRun(
+                        planned_windows=windows,
+                        observations=tuple(observations),
+                        failures=tuple(failures),
+                        budget_exhausted=True,
+                        synopsis_language=synopsis_language,
+                        preferred_audio_language=self.preferred_audio_language,
+                        selected_audio_language=selected_language,
+                        transcription_input_language=request_language,
+                        translation_target_language=(
+                            "eng" if request_translate else ""
+                        ),
+                    )
+                except (SpeechAudioUnavailable, SpeechIdentityError) as exc:
+                    failures.append(
+                        _bounded_failure(f"speech:{window.key}", exc)
+                    )
+                except Exception as exc:
+                    # Speech is an optional Normal escalation. Runtime/model/backend
+                    # failures must not discard cheaper evidence or previously
+                    # completed transcript fragments. KeyboardInterrupt/SystemExit
+                    # are BaseException subclasses and intentionally propagate so
+                    # an interrupted run can resume from persisted fragments.
+                    failures.append(
+                        _bounded_failure(f"speech:{window.key}", exc)
+                    )
+                finally:
+                    if prepared is not None:
+                        prepared.cleanup()
 
-        return NormalSpeechRun(
-            planned_windows=windows,
-            observations=tuple(observations),
-            failures=tuple(failures),
-            budget_exhausted=False,
-            synopsis_language=synopsis_language,
-            preferred_audio_language=self.preferred_audio_language,
-            selected_audio_language=selected_language,
-            transcription_input_language=request_language,
-            translation_target_language=(
-                "eng" if request_translate else ""
-            ),
-        )
+            return NormalSpeechRun(
+                planned_windows=windows,
+                observations=tuple(observations),
+                failures=tuple(failures),
+                budget_exhausted=False,
+                synopsis_language=synopsis_language,
+                preferred_audio_language=self.preferred_audio_language,
+                selected_audio_language=selected_language,
+                transcription_input_language=request_language,
+                translation_target_language=(
+                    "eng" if request_translate else ""
+                ),
+            )
+        finally:
+            close = getattr(extractor, "close", None)
+            if callable(close):
+                close()
