@@ -27,6 +27,7 @@ from ..visual_budget import (
     VisualBudgetExceeded,
     account_source_bytes,
     current_visual_budget,
+    deny_visual_budget,
     source_read_plan,
 )
 
@@ -492,7 +493,7 @@ def fetch_trickplay_tile(
                     )
                 if content_length > limit:
                     if budget_limited:
-                        raise VisualBudgetExceeded(
+                        deny_visual_budget(
                             "Normal visual source-byte budget cannot admit this Jellyfin Trickplay tile."
                         )
                     raise JellyfinPreviewUnavailable(
@@ -793,7 +794,7 @@ def _read_jellyfin_json(
                     )
                 if content_length > limit:
                     if budget_limited:
-                        raise VisualBudgetExceeded(
+                        deny_visual_budget(
                             "Normal visual source-byte budget cannot admit this Jellyfin metadata response."
                         )
                     raise JellyfinSourceFailure(
