@@ -647,9 +647,30 @@ def read_verified_bif_preview(
                     "Plex local BIF frame range changed after preview enumeration."
                 )
 
-            account_source_bytes(count)
-            handle.seek(start)
-            payload = handle.read(count)
+            budget = current_visual_budget()
+            frame_cache_key = (
+                _bif_index_budget_cache_key(
+                    bif_path,
+                    before,
+                )
+                + f":frame:{start}:{count}"
+            )
+            cached_payload = (
+                budget.cached_source_asset(frame_cache_key)
+                if budget is not None
+                else None
+            )
+            if cached_payload is not None:
+                payload = bytes(cached_payload)
+            else:
+                account_source_bytes(count)
+                handle.seek(start)
+                payload = handle.read(count)
+                if len(payload) == count and budget is not None:
+                    budget.cache_source_asset(
+                        frame_cache_key,
+                        payload,
+                    )
             after = os.fstat(handle.fileno())
     except PlexPreviewUnavailable:
         raise
