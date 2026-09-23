@@ -164,17 +164,28 @@
     {% if identity.claimed_candidate_keys|length == 1 %}
     <form method="post" action="/episode-identity/scans/{{ identity.id }}/confirm-current">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="result_revision" value="{{ identity.result_revision }}">
+      <input type="hidden" name="decision_snapshot_sha256" value="{{ identity.decision_snapshot_sha256 }}">
+      <input type="hidden" name="candidate_key" value="{{ identity.claimed_candidate_keys[0] }}">
       <button class="button">Mark current filename correct</button>
     </form>
     {% endif %}
     {% if identity.result_state in ['possible_mismatch', 'likely_mismatch', 'strong_match_other'] and identity.best_candidate and identity.best_candidate.candidate_key not in identity.claimed_candidate_keys %}
     <form method="post" action="/episode-identity/scans/{{ identity.id }}/confirm-best">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="result_revision" value="{{ identity.result_revision }}">
+      <input type="hidden" name="decision_snapshot_sha256" value="{{ identity.decision_snapshot_sha256 }}">
+      <input type="hidden" name="candidate_key" value="{{ identity.best_candidate.candidate_key }}">
       <button class="button primary">Confirm suggested content</button>
     </form>
     {% endif %}
-    {% if identity.actionable %}
-    <a class="button" href="/episode-identity/scans/{{ identity.id }}/rename-preview">Preview rename suggestion</a>
+    {% if identity.actionable and identity.best_candidate %}
+    <form method="get" action="/episode-identity/scans/{{ identity.id }}/rename-preview">
+      <input type="hidden" name="result_revision" value="{{ identity.result_revision }}">
+      <input type="hidden" name="decision_snapshot_sha256" value="{{ identity.decision_snapshot_sha256 }}">
+      <input type="hidden" name="candidate_key" value="{{ identity.best_candidate.candidate_key }}">
+      <button class="button">Preview rename suggestion</button>
+    </form>
     {% endif %}
   </div>
   <p class="legal-note">A rename preview is advisory only. Episode Identity never applies a filesystem change automatically.</p>
