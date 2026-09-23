@@ -769,6 +769,40 @@ class DecisionServiceTests(unittest.TestCase):
             audit_digest,
         )
 
+    def test_dismissed_finding_does_not_suppress_new_decision_snapshot(self) -> None:
+        self.service.resolve_scan(self.scan_id)
+        mie = MediaIntelligenceHistoryEngine(self.database)
+        mie.analyze()
+        first_findings = [
+            item for item in mie.findings()
+            if item["rule_key"] == "episode-identity-review"
+        ]
+        self.assertEqual(len(first_findings), 1)
+        first = first_findings[0]
+        self.assertTrue(
+            mie.dismiss(
+                int(first["id"]),
+                None,
+                reason="expected",
+                scope="finding",
+            )
+        )
+
+        self._advance_scan_revision()
+        mie.analyze()
+        current_findings = [
+            item for item in mie.findings()
+            if item["rule_key"] == "episode-identity-review"
+        ]
+        self.assertEqual(len(current_findings), 1)
+        self.assertNotEqual(
+            current_findings[0]["fingerprint"],
+            first["fingerprint"],
+        )
+        evidence = current_findings[0]["evidence"]
+        self.assertGreater(int(evidence["result_revision"]), 0)
+        self.assertEqual(len(evidence["decision_snapshot_sha256"]), 64)
+
     def test_mark_correct_suppresses_advisory_finding_only_for_current_snapshot(self) -> None:
         self.service.resolve_scan(self.scan_id)
         self.assertEqual(len(self.service.mie_findings()), 1)
