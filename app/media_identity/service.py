@@ -21,6 +21,7 @@ from .fast import (
     combined_scan_input_signature,
     scan_input_signatures,
 )
+from .media_generation import media_content_sha256
 from .models import IdentityResultState
 from .scoring import IdentityResolution, resolve_identity
 from .text import (
@@ -296,6 +297,7 @@ class MediaIdentityDecisionService:
         size_bytes: int,
         modified_at: Any,
         sha256: str | None = None,
+        verify_content: bool = False,
     ) -> tuple[bool, dict[str, Any] | None]:
         row = conn.execute(
             """SELECT id,title_id,path,filename,size_bytes,modified_at,extension,
@@ -323,11 +325,9 @@ class MediaIdentityDecisionService:
             stat_result.st_mtime, modified_at
         ):
             return False, current
-        if sha256:
-            current_hash = MediaIdentityDecisionService._current_hash(
-                conn, int(file_id), int(size_bytes), modified_at
-            )
-            if current_hash != sha256:
+        if sha256 and verify_content:
+            current_hash = media_content_sha256(path)
+            if current_hash != str(sha256):
                 return False, current
         return True, current
 
@@ -336,6 +336,8 @@ class MediaIdentityDecisionService:
         conn: sqlite3.Connection,
         scan: Mapping[str, Any],
         evidence: list[dict[str, Any]],
+        *,
+        verify_content: bool = False,
     ) -> tuple[bool, dict[str, Any] | None]:
         current, file_row = MediaIdentityDecisionService._snapshot_is_current(
             conn,
@@ -343,6 +345,7 @@ class MediaIdentityDecisionService:
             size_bytes=int(scan["file_size_bytes"] or 0),
             modified_at=scan["file_modified_at"],
             sha256=scan["file_sha256"],
+            verify_content=verify_content,
         )
         if not current or file_row is None:
             return False, file_row
@@ -935,6 +938,7 @@ class MediaIdentityDecisionService:
                 size_bytes=int(confirmation["confirmed_size_bytes"] or 0),
                 modified_at=confirmation["confirmed_modified_at"],
                 sha256=confirmation["confirmed_sha256"],
+                verify_content=True,
             )
             source_scan_id = confirmation.get("source_scan_id")
             if current and source_scan_id is not None:
@@ -949,6 +953,7 @@ class MediaIdentityDecisionService:
                         conn,
                         scan,
                         evidence,
+                        verify_content=True,
                     )
         confirmation["freshness"] = "current" if current else "stale"
         confirmation["current"] = current
@@ -990,6 +995,7 @@ class MediaIdentityDecisionService:
                 conn,
                 scan,
                 evidence,
+                verify_content=True,
             )
             if not current:
                 raise MediaIdentityDecisionError(
@@ -1097,6 +1103,9 @@ class MediaIdentityDecisionService:
                 conn,
                 scan,
                 evidence,
+                verify_content=(
+                    str(scan.get("result_state") or "") in ACTIONABLE_STATES
+                ),
             )
         claimed = self._claimed_identity(scan)
         resolution = self._resolve_snapshot(scan, candidates, evidence)
@@ -1452,7 +1461,15 @@ class MediaIdentityDecisionService:
                 conn,
                 scan,
                 evidence,
+                verify_content=True,
             )
+        if not current:
+            return {
+                "available": False,
+                "status": "stale",
+                "reason": "The exact media content or supporting evidence changed after verification.",
+                "scan": self.scan_detail(int(scan_id)),
+            }
         source = Path(str(file_row["path"]))
         raw_extension = str(file_row.get("extension") or "").strip()
         extension = (
