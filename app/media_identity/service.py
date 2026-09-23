@@ -998,6 +998,8 @@ class MediaIdentityDecisionService:
                 self.resolve_scan(int(scan_id))
 
         with self.database.connect() as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN")
             scan, candidates, evidence = self._scan_snapshot(conn, int(scan_id))
             file_row = conn.execute(
                 """SELECT f.id,f.title_id,f.filename,f.path,f.size_bytes,f.modified_at,
