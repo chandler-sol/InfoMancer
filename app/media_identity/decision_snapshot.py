@@ -78,6 +78,27 @@ def _collect_artifact_refs(value: Any) -> set[int]:
     return found
 
 
+def _collect_cache_refs(value: Any) -> set[str]:
+    found: set[str] = set()
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if key in {"cache_keys", "observation_cache_keys"} and isinstance(
+                item, list
+            ):
+                found.update(str(raw) for raw in item if str(raw or ""))
+                continue
+            if key in {"cache_key", "source_cache_key"}:
+                cache_key = str(item or "")
+                if cache_key:
+                    found.add(cache_key)
+                continue
+            found.update(_collect_cache_refs(item))
+    elif isinstance(value, list):
+        for item in value:
+            found.update(_collect_cache_refs(item))
+    return found
+
+
 def _candidate_rows(
     conn: sqlite3.Connection,
     scan_id: int,
@@ -180,7 +201,18 @@ def decision_snapshot_payload(
 
     artifact_ids = _collect_artifact_refs(claimed)
     required_cache_keys: set[str] = set()
-    referenced_cache_keys: set[str] = set()
+    referenced_cache_keys: set[str] = _collect_cache_refs(
+        _without_snapshot(claimed)
+    )
+    normal_ocr = claimed.get("normal_ocr")
+    if isinstance(normal_ocr, Mapping):
+        raw_ocr_cache_keys = normal_ocr.get("observation_cache_keys")
+        if isinstance(raw_ocr_cache_keys, list):
+            required_cache_keys.update(
+                str(raw)
+                for raw in raw_ocr_cache_keys
+                if str(raw or "")
+            )
     for item in evidence:
         artifact_ids.update(_collect_artifact_refs(item.get("details")))
         cache_key = str(item.get("cache_key") or "")
