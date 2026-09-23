@@ -9,7 +9,10 @@ from pathlib import Path
 
 from app.db import Database
 from app.media_identity.candidates import generate_episode_candidates
-from app.media_identity.decision_snapshot import seal_decision_snapshot
+from app.media_identity.decision_snapshot import (
+    result_revision,
+    seal_decision_snapshot,
+)
 from app.media_identity.fast import (
     SCAN_INPUT_SIGNATURE_VERSION,
     FastIdentityService,
@@ -649,7 +652,17 @@ class DecisionServiceTests(unittest.TestCase):
                    ) VALUES (1,?,?,?,'complete',CURRENT_TIMESTAMP)""",
                 (digest, current.st_size, current.st_mtime),
             )
-            seal_decision_snapshot(conn, self.scan_id, revision=1)
+            scan = conn.execute(
+                "SELECT claimed_identity_json FROM media_identity_scans WHERE id=?",
+                (self.scan_id,),
+            ).fetchone()
+            seal_decision_snapshot(
+                conn,
+                self.scan_id,
+                revision=result_revision(
+                    {"claimed_identity_json": scan["claimed_identity_json"]}
+                ) + 1,
+            )
 
         self.assertTrue(self.service.scan_detail(self.scan_id)["snapshot_current"])
         with self.database.connect() as conn:
