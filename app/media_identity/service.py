@@ -1311,9 +1311,18 @@ class MediaIdentityDecisionService:
         candidate_key: str,
         user_id: int | None,
         *,
+        expected_candidate_key: str,
         expected_result_revision: int,
         expected_decision_snapshot_sha256: str,
+        intent_kind: str,
     ) -> dict[str, Any]:
+        reviewed_candidate_key = str(expected_candidate_key or "").strip()
+        candidate_key = str(candidate_key or "").strip()
+        if not reviewed_candidate_key or candidate_key != reviewed_candidate_key:
+            raise MediaIdentityDecisionError(
+                "The reviewed Episode Identity candidate is missing or changed. "
+                "Refresh the scan before confirming it."
+            )
         with self.database.connect() as conn:
             if not conn.in_transaction:
                 conn.execute("BEGIN IMMEDIATE")
@@ -1335,6 +1344,40 @@ class MediaIdentityDecisionService:
                     "The Episode Identity result changed after it was reviewed. "
                     "Refresh the scan before confirming it."
                 )
+
+            resolution = self._resolve_snapshot(scan, candidates, evidence)
+            if (
+                scan.get("result_state") is None
+                or str(scan.get("result_state") or "") != resolution.state.value
+                or str(scan.get("best_candidate_key") or "")
+                != str(resolution.best_candidate_key or "")
+            ):
+                raise MediaIdentityDecisionError(
+                    "The sealed Episode Identity decision no longer matches the "
+                    "reviewed result. Refresh the scan before confirming it."
+                )
+            claimed_keys = tuple(resolution.claimed_candidate_keys)
+            if intent_kind == "current":
+                if len(claimed_keys) != 1 or candidate_key != claimed_keys[0]:
+                    raise MediaIdentityDecisionError(
+                        "The reviewed current-filename candidate is no longer the "
+                        "single catalog claim. Refresh the scan before confirming it."
+                    )
+            elif intent_kind == "best":
+                if (
+                    str(scan.get("result_state") or "") not in SUGGESTED_CONFIRM_STATES
+                    or candidate_key != str(resolution.best_candidate_key or "")
+                    or candidate_key in set(claimed_keys)
+                ):
+                    raise MediaIdentityDecisionError(
+                        "The reviewed suggested candidate is no longer the current "
+                        "alternate decision. Refresh the scan before confirming it."
+                    )
+            else:
+                raise MediaIdentityDecisionError(
+                    "Episode Identity confirmation intent is invalid."
+                )
+
             candidate = self._candidate_for_key(candidates, candidate_key)
             current, _ = self._review_snapshot_is_current(
                 conn,
@@ -1409,54 +1452,46 @@ class MediaIdentityDecisionService:
         status["current"] = True
         return status
 
-    def confirm_current(self, scan_id: int, user_id: int | None) -> dict[str, Any]:
-        detail = self.scan_detail(
-            int(scan_id),
-            resolve_if_needed=True,
-            verify_actionable_content=False,
-            include_confirmation=False,
-        )
-        claimed_keys = list(detail.get("claimed_candidate_keys") or [])
-        if len(claimed_keys) != 1:
-            raise MediaIdentityDecisionError(
-                "The current filename does not map to exactly one content candidate, so InfoMancer cannot mark it correct safely."
-            )
+    def confirm_current(
+        self,
+        scan_id: int,
+        user_id: int | None,
+        *,
+        expected_result_revision: int,
+        expected_decision_snapshot_sha256: str,
+        expected_candidate_key: str,
+    ) -> dict[str, Any]:
         return self._confirm(
             int(scan_id),
-            claimed_keys[0],
+            str(expected_candidate_key or ""),
             user_id,
-            expected_result_revision=int(detail.get("result_revision") or 0),
+            expected_candidate_key=str(expected_candidate_key or ""),
+            expected_result_revision=int(expected_result_revision),
             expected_decision_snapshot_sha256=str(
-                detail.get("decision_snapshot_sha256") or ""
+                expected_decision_snapshot_sha256 or ""
             ),
+            intent_kind="current",
         )
 
-    def confirm_best(self, scan_id: int, user_id: int | None) -> dict[str, Any]:
-        detail = self.scan_detail(
-            int(scan_id),
-            resolve_if_needed=True,
-            verify_actionable_content=False,
-            include_confirmation=False,
-        )
-        if str(detail.get("result_state") or "") not in SUGGESTED_CONFIRM_STATES:
-            raise MediaIdentityDecisionError(
-                "This scan is not strong enough to confirm an alternate episode."
-            )
-        candidate_key = str(detail.get("best_candidate_key") or "")
-        if not candidate_key or candidate_key in set(
-            detail.get("claimed_candidate_keys") or []
-        ):
-            raise MediaIdentityDecisionError(
-                "This scan has no distinct alternate episode to confirm."
-            )
+    def confirm_best(
+        self,
+        scan_id: int,
+        user_id: int | None,
+        *,
+        expected_result_revision: int,
+        expected_decision_snapshot_sha256: str,
+        expected_candidate_key: str,
+    ) -> dict[str, Any]:
         return self._confirm(
             int(scan_id),
-            candidate_key,
+            str(expected_candidate_key or ""),
             user_id,
-            expected_result_revision=int(detail.get("result_revision") or 0),
+            expected_candidate_key=str(expected_candidate_key or ""),
+            expected_result_revision=int(expected_result_revision),
             expected_decision_snapshot_sha256=str(
-                detail.get("decision_snapshot_sha256") or ""
+                expected_decision_snapshot_sha256 or ""
             ),
+            intent_kind="best",
         )
 
     def scan_detail(
