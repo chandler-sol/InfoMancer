@@ -4,7 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from ..db import Database
 from ..naming import contained_destination, plex_episode_filename
@@ -14,6 +14,7 @@ from .decision_snapshot import (
     result_revision,
     seal_decision_snapshot,
 )
+from .external import ExternalAnalysisError, ExternalSourceRegistry, PreviewFrameRef
 from .external_config import external_source_config_signature
 from .fast import (
     SCAN_INPUT_SIGNATURE_VERSION,
@@ -111,8 +112,14 @@ class MediaIdentityDecisionError(ValueError):
 class MediaIdentityDecisionService:
     """Resolve persisted evidence and own explicit human confirmation state."""
 
-    def __init__(self, database: Database) -> None:
+    def __init__(
+        self,
+        database: Database,
+        *,
+        external_registry_factory: Callable[[], ExternalSourceRegistry] | None = None,
+    ) -> None:
         self.database = database
+        self.external_registry_factory = external_registry_factory
 
     @staticmethod
     def _scan_snapshot(
@@ -923,6 +930,135 @@ class MediaIdentityDecisionService:
 
         return True, file_row
 
+    def _external_visual_snapshot_is_current(
+        self,
+        conn: sqlite3.Connection,
+        scan: Mapping[str, Any],
+    ) -> bool:
+        """Re-read exact external preview bytes when action-time verification is available."""
+        if self.external_registry_factory is None:
+            return True
+
+        claimed = self._claimed_identity(scan)
+        normal_metadata = claimed.get("normal_ocr")
+        if not isinstance(normal_metadata, Mapping):
+            return True
+        source_key = str(normal_metadata.get("source_key") or "").strip().casefold()
+        if source_key not in {"plex", "jellyfin"}:
+            return True
+
+        raw_cache_keys = normal_metadata.get("observation_cache_keys")
+        if not isinstance(raw_cache_keys, list):
+            return False
+        cache_keys = [str(value or "") for value in raw_cache_keys]
+        if any(not value for value in cache_keys) or len(set(cache_keys)) != len(cache_keys):
+            return False
+        if not cache_keys:
+            return True
+
+        placeholders = ",".join("?" for _ in cache_keys)
+        rows = conn.execute(
+            f"""SELECT id,cache_key,source_kind,source_ref,source_signature,
+                       start_ms,payload_json
+                FROM media_identity_artifacts
+                WHERE file_id=? AND artifact_type='visual_text'
+                  AND analyzer_key='external-preview-ocr'
+                  AND cache_key IN ({placeholders})
+                  AND status='complete'
+                ORDER BY id""",
+            (int(scan["file_id"]), *cache_keys),
+        ).fetchall()
+        by_cache_key = {str(row["cache_key"] or ""): row for row in rows}
+        if set(by_cache_key) != set(cache_keys):
+            return False
+
+        try:
+            registry = self.external_registry_factory()
+            source = registry.get(source_key)
+        except Exception:
+            return False
+        if source is None:
+            return False
+
+        for cache_key in cache_keys:
+            row = by_cache_key[cache_key]
+            if str(row["source_kind"] or "").strip().casefold() != source_key:
+                return False
+            payload = _json_object(row["payload_json"])
+            details = payload.get("details")
+            if not isinstance(details, Mapping):
+                return False
+            expected_sha256 = str(details.get("preview_sha256") or "").strip().casefold()
+            if (
+                len(expected_sha256) != 64
+                or any(character not in "0123456789abcdef" for character in expected_sha256)
+            ):
+                return False
+            item_id = str(payload.get("item_id") or "").strip()
+            source_ref = str(row["source_ref"] or "")
+            source_signature = str(row["source_signature"] or "")
+            try:
+                timestamp_ms = int(row["start_ms"])
+            except (TypeError, ValueError):
+                return False
+            if not item_id or not source_ref or not source_signature or timestamp_ms < 0:
+                return False
+
+            width = height = None
+            try:
+                asset_payload = json.loads(source_ref)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                asset_payload = None
+            if isinstance(asset_payload, Mapping):
+                try:
+                    if asset_payload.get("width") is not None:
+                        width = int(asset_payload["width"])
+                    if asset_payload.get("height") is not None:
+                        height = int(asset_payload["height"])
+                except (TypeError, ValueError):
+                    return False
+
+            frame = PreviewFrameRef(
+                source_key=source_key,
+                item_id=item_id,
+                timestamp_ms=timestamp_ms,
+                asset_ref=source_ref,
+                source_signature=source_signature,
+                width=width,
+                height=height,
+            )
+            try:
+                current_payload = bytes(source.read_preview(frame))
+            except ExternalAnalysisError:
+                return False
+            except (OSError, TypeError, ValueError):
+                return False
+            if hashlib.sha256(current_payload).hexdigest() != expected_sha256:
+                return False
+        return True
+
+    def _review_snapshot_is_current(
+        self,
+        conn: sqlite3.Connection,
+        scan: Mapping[str, Any],
+        evidence: list[dict[str, Any]],
+        *,
+        verify_content: bool = False,
+    ) -> tuple[bool, dict[str, Any] | None]:
+        current, file_row = self._scan_snapshot_is_current(
+            conn,
+            scan,
+            evidence,
+            verify_content=verify_content,
+        )
+        if (
+            current
+            and verify_content
+            and not self._external_visual_snapshot_is_current(conn, scan)
+        ):
+            return False, file_row
+        return current, file_row
+
     def confirmation_status(self, file_id: int) -> dict[str, Any] | None:
         with self.database.connect() as conn:
             row = conn.execute(
@@ -949,7 +1085,7 @@ class MediaIdentityDecisionService:
                 except MediaIdentityDecisionError:
                     current = False
                 else:
-                    current, _ = self._scan_snapshot_is_current(
+                    current, _ = self._review_snapshot_is_current(
                         conn,
                         scan,
                         evidence,
@@ -991,7 +1127,7 @@ class MediaIdentityDecisionService:
                     "Only a complete Episode Identity scan can be confirmed."
                 )
             candidate = self._candidate_for_key(candidates, candidate_key)
-            current, _ = self._scan_snapshot_is_current(
+            current, _ = self._review_snapshot_is_current(
                 conn,
                 scan,
                 evidence,
@@ -1099,7 +1235,7 @@ class MediaIdentityDecisionService:
                    WHERE f.id=?""",
                 (int(scan["file_id"]),),
             ).fetchone()
-            snapshot_current, _ = self._scan_snapshot_is_current(
+            snapshot_current, _ = self._review_snapshot_is_current(
                 conn,
                 scan,
                 evidence,
@@ -1457,7 +1593,7 @@ class MediaIdentityDecisionService:
 
         with self.database.connect() as conn:
             scan, _, evidence = self._scan_snapshot(conn, int(scan_id))
-            current, _ = self._scan_snapshot_is_current(
+            current, _ = self._review_snapshot_is_current(
                 conn,
                 scan,
                 evidence,
