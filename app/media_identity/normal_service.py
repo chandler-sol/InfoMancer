@@ -1105,46 +1105,6 @@ class NormalIdentityService:
                     "Retry verification."
                 ) from exc
 
-        previous_normal_evidence = any(
-            str(item.get("analyzer_key") or "") == NORMAL_OCR_EVIDENCE_KEY
-            for item in evidence
-        )
-        previous_completed_normal = (
-            str(scan.get("completed_profile") or "") == IdentityProfile.NORMAL.value
-        )
-        previous_speech_metadata = claimed_before_normal.get("normal_speech")
-        try:
-            previous_speech_count = (
-                int(previous_speech_metadata.get("transcript_count") or 0)
-                if isinstance(previous_speech_metadata, Mapping)
-                else 0
-            )
-        except (TypeError, ValueError):
-            previous_speech_count = 0
-
-        if (
-            previous_completed_normal
-            and previous_speech_count > 0
-            and not cheaper_evidence_sufficient
-            and not speech_run.observations
-        ):
-            raise NormalIdentityScanError(
-                "Normal rerun could not revalidate the speech fragments still "
-                "needed by this scan. The existing completed Normal evidence "
-                "was retained."
-            )
-
-        if (
-            not run.observations
-            and not speech_run.observations
-            and previous_completed_normal
-            and previous_normal_evidence
-        ):
-            raise NormalIdentityScanError(
-                "Normal rerun produced no replacement observations. "
-                "The existing completed Normal evidence was retained."
-            )
-
         with self.database.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             current_scan, candidates, evidence = self._scan_rows(conn, int(scan_id))
@@ -1170,10 +1130,51 @@ class NormalIdentityService:
                     evidence,
                 )
 
+            current_claimed = _json_object(current_scan["claimed_identity_json"])
             current_previous_normal_evidence = any(
                 str(item.get("analyzer_key") or "") == NORMAL_OCR_EVIDENCE_KEY
                 for item in evidence
             )
+            current_previous_completed_normal = (
+                str(current_scan.get("completed_profile") or "")
+                == IdentityProfile.NORMAL.value
+            )
+            current_previous_speech_metadata = current_claimed.get("normal_speech")
+            try:
+                current_previous_speech_count = (
+                    int(
+                        current_previous_speech_metadata.get("transcript_count")
+                        or 0
+                    )
+                    if isinstance(current_previous_speech_metadata, Mapping)
+                    else 0
+                )
+            except (TypeError, ValueError):
+                current_previous_speech_count = 0
+
+            if (
+                current_previous_completed_normal
+                and current_previous_speech_count > 0
+                and not cheaper_evidence_sufficient
+                and not speech_run.observations
+            ):
+                raise NormalIdentityScanError(
+                    "Normal rerun could not revalidate the speech fragments still "
+                    "needed by this scan. The existing completed Normal evidence "
+                    "was retained."
+                )
+
+            if (
+                not run.observations
+                and not speech_run.observations
+                and current_previous_completed_normal
+                and current_previous_normal_evidence
+            ):
+                raise NormalIdentityScanError(
+                    "Normal rerun produced no replacement observations. "
+                    "The existing completed Normal evidence was retained."
+                )
+
             retain_previous_visual = (
                 not run.observations
                 and str(current_scan.get("completed_profile") or "")
