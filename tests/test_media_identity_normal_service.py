@@ -53,6 +53,10 @@ from app.media_identity.versions import (
     EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION,
     NORMAL_EVIDENCE_ALGORITHM_VERSION,
 )
+from app.media_identity.visual_budget import (
+    account_source_bytes,
+    current_visual_budget,
+)
 
 
 class FakeOcr:
@@ -498,6 +502,77 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
 
         source.payload = b"amber falcon orchard glacier velvet compass"
         self.assertEqual(mie.identity_decisions.mie_findings(), [])
+
+    def test_action_time_external_freshness_uses_shared_source_budget(self):
+        class BudgetProbeSource(FakePreviewSource):
+            def __init__(self):
+                super().__init__()
+                self.payload = b"bronze harbor lantern meadow quartz thunder"
+                self.observed_budgets = []
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                budget = current_visual_budget()
+                self.observed_budgets.append(budget)
+                account_source_bytes(len(self.payload))
+                return self.payload
+
+        source = BudgetProbeSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        normal.run_scan(self.fast_scan.scan_id)
+
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        resolution = decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertEqual(resolution.state.value, "strong_match_other")
+
+        source.read_calls = 0
+        source.observed_budgets.clear()
+        with patch(
+            "app.media_identity.service._ACTION_EXTERNAL_PREVIEW_MAX_SOURCE_BYTES",
+            len(source.payload) - 1,
+        ):
+            detail = decisions.scan_detail(self.fast_scan.scan_id)
+
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+        self.assertEqual(source.read_calls, 1)
+        self.assertEqual(len(source.observed_budgets), 1)
+        self.assertIsNotNone(source.observed_budgets[0])
+        self.assertTrue(source.observed_budgets[0].exhausted)
+
+    def test_human_actions_revalidate_external_previews_once(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        result = normal.run_scan(self.fast_scan.scan_id)
+
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        resolution = decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertEqual(resolution.state.value, "strong_match_other")
+        self.assertGreater(result.observation_count, 0)
+
+        source.read_calls = 0
+        preview = decisions.rename_preview(self.fast_scan.scan_id)
+        self.assertEqual(preview["status"], "ready")
+        self.assertEqual(source.read_calls, result.observation_count)
+
+        source.read_calls = 0
+        confirmation = decisions.confirm_best(self.fast_scan.scan_id, None)
+        self.assertTrue(confirmation["current"])
+        self.assertEqual(source.read_calls, result.observation_count)
 
     def test_new_fast_scan_does_not_hide_current_normal_mie_result(self):
         source = FakePreviewSource()
