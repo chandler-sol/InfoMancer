@@ -829,7 +829,7 @@ class LocalFfmpegSpeechAudioExtractor:
                 command,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
                 timeout=self.timeout_seconds,
                 check=False,
                 **_quiet_subprocess_options(),
