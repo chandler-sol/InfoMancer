@@ -58,6 +58,29 @@ def build_router(ctx: RouteContext):
         external_registry_factory=_decision_external_registry,
     )
 
+    def _reviewed_intent(values) -> tuple[int, str, str]:
+        try:
+            revision = int(str(values.get("result_revision") or "0"))
+        except (TypeError, ValueError) as exc:
+            raise MediaIdentityDecisionError(
+                "The reviewed Episode Identity revision is missing or invalid."
+            ) from exc
+        digest = str(
+            values.get("decision_snapshot_sha256") or ""
+        ).strip().casefold()
+        candidate_key = str(values.get("candidate_key") or "").strip()
+        if (
+            revision <= 0
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+            or not candidate_key
+        ):
+            raise MediaIdentityDecisionError(
+                "The reviewed Episode Identity decision token is incomplete. "
+                "Refresh the scan before continuing."
+            )
+        return revision, digest, candidate_key
+
     def librarian_get(path: str, **kwargs):
         dependencies = list(kwargs.pop("dependencies", ()))
         dependencies.append(Depends(require_librarian))
@@ -363,9 +386,17 @@ def build_router(ctx: RouteContext):
     )
     def episode_identity_rename_preview(request: Request, scan_id: int):
         try:
-            preview = decisions.rename_preview(int(scan_id))
+            revision, digest, candidate_key = _reviewed_intent(
+                request.query_params
+            )
+            preview = decisions.rename_preview(
+                int(scan_id),
+                expected_result_revision=revision,
+                expected_decision_snapshot_sha256=digest,
+                expected_candidate_key=candidate_key,
+            )
         except MediaIdentityDecisionError as exc:
-            raise HTTPException(404, str(exc)) from exc
+            raise HTTPException(409, str(exc)) from exc
         response = templates.TemplateResponse(
             request,
             "episode_identity_rename_preview.html",
@@ -377,9 +408,17 @@ def build_router(ctx: RouteContext):
     @librarian_post(
         "/episode-identity/scans/{scan_id}/confirm-current"
     )
-    def confirm_current_identity(request: Request, scan_id: int):
+    async def confirm_current_identity(request: Request, scan_id: int):
         try:
-            decisions.confirm_current(int(scan_id), request.state.user.id)
+            form = await request.form()
+            revision, digest, candidate_key = _reviewed_intent(form)
+            decisions.confirm_current(
+                int(scan_id),
+                request.state.user.id,
+                expected_result_revision=revision,
+                expected_decision_snapshot_sha256=digest,
+                expected_candidate_key=candidate_key,
+            )
             findings_refreshed = _refresh_findings(request.state.user.id)
         except MediaIdentityDecisionError as exc:
             return redirect(
@@ -405,9 +444,17 @@ def build_router(ctx: RouteContext):
     @librarian_post(
         "/episode-identity/scans/{scan_id}/confirm-best"
     )
-    def confirm_best_identity(request: Request, scan_id: int):
+    async def confirm_best_identity(request: Request, scan_id: int):
         try:
-            decisions.confirm_best(int(scan_id), request.state.user.id)
+            form = await request.form()
+            revision, digest, candidate_key = _reviewed_intent(form)
+            decisions.confirm_best(
+                int(scan_id),
+                request.state.user.id,
+                expected_result_revision=revision,
+                expected_decision_snapshot_sha256=digest,
+                expected_candidate_key=candidate_key,
+            )
             findings_refreshed = _refresh_findings(request.state.user.id)
         except MediaIdentityDecisionError as exc:
             return redirect(
