@@ -6,6 +6,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app.db import Database
 from app.media_identity.candidates import generate_episode_candidates
@@ -505,6 +506,24 @@ class DecisionServiceTests(unittest.TestCase):
             seal_decision_snapshot(conn, scan_id, revision=1)
         return scan_id
 
+    def _advance_scan_revision(self, scan_id: int | None = None) -> None:
+        target_scan_id = int(scan_id or self.scan_id)
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT claimed_identity_json FROM media_identity_scans WHERE id=?",
+                (target_scan_id,),
+            ).fetchone()
+            self.assertIsNotNone(row)
+            revision = result_revision(
+                {"claimed_identity_json": row["claimed_identity_json"]}
+            )
+            self.assertGreater(revision, 0)
+            seal_decision_snapshot(
+                conn,
+                target_scan_id,
+                revision=revision + 1,
+            )
+
     def _seed_real_fast_mismatch_inputs(self) -> Path:
         with self.database.connect() as conn:
             conn.execute(
@@ -784,6 +803,35 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0]["rule_key"], "episode-identity-review")
 
+    def test_confirm_best_rejects_superseded_review_revision(self) -> None:
+        self.service.resolve_scan(self.scan_id)
+        original_confirm = self.service._confirm
+        advanced = False
+
+        def raced_confirm(*args, **kwargs):
+            nonlocal advanced
+            if not advanced:
+                self._advance_scan_revision()
+                advanced = True
+            return original_confirm(*args, **kwargs)
+
+        with patch.object(
+            self.service,
+            "_confirm",
+            side_effect=raced_confirm,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "changed after it was reviewed",
+            ):
+                self.service.confirm_best(self.scan_id, None)
+
+        with self.database.connect() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM media_identity_confirmations WHERE file_id=1"
+            ).fetchone()[0]
+        self.assertEqual(count, 0)
+
     def test_rename_preview_is_read_only_and_targets_best_candidate(self) -> None:
         self.service.resolve_scan(self.scan_id)
         before = self.media.read_bytes()
@@ -800,6 +848,31 @@ class DecisionServiceTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(file_row["path"], str(self.media))
         self.assertEqual(file_row["episode_start"], 1)
+
+    def test_rename_preview_rejects_superseded_review_revision(self) -> None:
+        self.service.resolve_scan(self.scan_id)
+        original_scan_detail = self.service.scan_detail
+        advanced = False
+
+        def raced_detail(*args, **kwargs):
+            nonlocal advanced
+            detail = original_scan_detail(*args, **kwargs)
+            if not advanced:
+                self._advance_scan_revision()
+                advanced = True
+            return detail
+
+        with patch.object(
+            self.service,
+            "scan_detail",
+            side_effect=raced_detail,
+        ):
+            preview = self.service.rename_preview(self.scan_id)
+
+        self.assertFalse(preview["available"])
+        self.assertEqual(preview["status"], "stale")
+        self.assertFalse(preview["scan"]["snapshot_current"])
+        self.assertFalse(preview["scan"]["actionable"])
 
     def test_real_fast_scan_flows_through_decision_mie_and_sidecar_freshness(self) -> None:
         sidecar = self._seed_real_fast_mismatch_inputs()
