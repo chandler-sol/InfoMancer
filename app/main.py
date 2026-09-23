@@ -56,6 +56,7 @@ from .media_info import MediaInspectionError, inspect_media
 from .mie import CATEGORIES as MIE_CATEGORIES
 from .mie import SEVERITIES as MIE_SEVERITIES
 from .mie import MediaIntelligenceEngine
+from .mie_history import MediaIntelligenceHistoryEngine
 from .maintenance import (
     MaintenanceError, create_database_backup, install_database_backup,
     list_database_backups, read_update_status, resolve_backup,
@@ -137,7 +138,7 @@ def _mie_external_registry():
     )
 
 
-mie = MediaIntelligenceEngine(
+mie = MediaIntelligenceHistoryEngine(
     db,
     external_registry_factory=_mie_external_registry,
 )
