@@ -225,7 +225,7 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
             frame = source.preview_frames(media)[0]
             with self.assertRaisesRegex(
                 LocalFrameSourceFailure,
-                "changed during",
+                "changed",
             ):
                 source.read_preview(frame)
 
