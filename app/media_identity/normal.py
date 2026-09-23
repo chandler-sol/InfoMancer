@@ -15,6 +15,11 @@ from .external import (
     PreviewFrameRef,
 )
 from .models import AnalyzerContext, IdentityProfile
+from .visual_budget import (
+    VisualAttemptBudget,
+    VisualBudgetExceeded,
+    visual_budget_scope,
+)
 
 
 NORMAL_OCR_CACHE_VERSION = 2
@@ -39,6 +44,7 @@ class NormalResourceLimits:
     max_preview_frames: int = 12
     max_preview_bytes_per_frame: int = 8 * 1024 * 1024
     max_preview_bytes_total: int = 48 * 1024 * 1024
+    max_source_bytes_total: int = 48 * 1024 * 1024
     max_ocr_text_chars: int = 64_000
 
     def __post_init__(self) -> None:
@@ -48,6 +54,7 @@ class NormalResourceLimits:
             self.max_preview_frames,
             self.max_preview_bytes_per_frame,
             self.max_preview_bytes_total,
+            self.max_source_bytes_total,
             self.max_ocr_text_chars,
         )
         if any(int(value) <= 0 for value in values):
@@ -352,7 +359,9 @@ class NormalPreviewOcrRun:
     observations: tuple[PreviewOcrObservation, ...] = ()
     failures: tuple[str, ...] = ()
     total_image_bytes: int = 0
+    total_source_bytes: int = 0
     total_text_chars: int = 0
+    total_frame_attempts: int = 0
     budget_exhausted: bool = False
     planned_frame_count: int = 0
     completed_frame_count: int = 0
@@ -403,6 +412,7 @@ class NormalPreviewOcrExecutor:
         ] | None = None,
         initial_image_bytes: int = 0,
         initial_text_chars: int = 0,
+        budget: VisualAttemptBudget | None = None,
     ) -> NormalPreviewOcrRun:
         if not IdentityProfile.parse(context.profile).permits(IdentityProfile.NORMAL):
             raise NormalIdentityError(
@@ -413,23 +423,32 @@ class NormalPreviewOcrExecutor:
                 failures=("ocr-engine-unavailable",),
             )
 
-        spent_image_bytes = max(0, int(initial_image_bytes))
-        spent_text_chars = max(0, int(initial_text_chars))
-        if (
-            spent_image_bytes > self.limits.max_preview_bytes_total
-            or spent_text_chars > self.limits.max_ocr_text_chars
+        if budget is not None and (
+            int(initial_image_bytes) != 0 or int(initial_text_chars) != 0
         ):
             raise NormalIdentityError(
-                "Initial Normal OCR resource usage exceeds configured limits."
+                "Shared Normal visual budgets cannot also use initial counters."
             )
-        if (
-            spent_image_bytes >= self.limits.max_preview_bytes_total
-            or spent_text_chars >= self.limits.max_ocr_text_chars
-        ):
+        if budget is None:
+            try:
+                budget = VisualAttemptBudget(
+                    max_frame_attempts=int(self.limits.max_preview_frames),
+                    max_source_bytes=int(self.limits.max_source_bytes_total),
+                    max_image_bytes=int(self.limits.max_preview_bytes_total),
+                    max_text_chars=int(self.limits.max_ocr_text_chars),
+                    image_bytes=max(0, int(initial_image_bytes)),
+                    text_chars=max(0, int(initial_text_chars)),
+                )
+            except ValueError as exc:
+                raise NormalIdentityError(str(exc)) from exc
+
+        if budget.exhausted:
             return NormalPreviewOcrRun(
                 failures=("normal:resource-budget-exhausted",),
-                total_image_bytes=spent_image_bytes,
-                total_text_chars=spent_text_chars,
+                total_image_bytes=budget.image_bytes,
+                total_source_bytes=budget.source_bytes,
+                total_text_chars=budget.text_chars,
+                total_frame_attempts=budget.frame_attempts,
                 budget_exhausted=True,
             )
 
@@ -450,14 +469,16 @@ class NormalPreviewOcrExecutor:
 
         for source in self.registry.available_for(ExternalCapability.PREVIEW_FRAMES):
             try:
-                media = source.resolve_media(context)
+                with visual_budget_scope(budget):
+                    media = source.resolve_media(context)
             except ExternalAnalysisError as exc:
                 failures.append(f"{source.source_key}:resolve:{exc}")
                 continue
             if media is None:
                 continue
             try:
-                frames = tuple(source.preview_frames(media))
+                with visual_budget_scope(budget):
+                    frames = tuple(source.preview_frames(media))
             except ExternalAnalysisError as exc:
                 failures.append(f"{source.source_key}:preview-list:{exc}")
                 continue
@@ -489,24 +510,20 @@ class NormalPreviewOcrExecutor:
                     "sha256": context.media.sha256 or "",
                 },
                 stage_sufficient=stage_sufficient,
-                initial_image_bytes=spent_image_bytes,
-                initial_text_chars=spent_text_chars,
+                budget=budget,
             )
-            spent_image_bytes = result.total_image_bytes
-            spent_text_chars = result.total_text_chars
             failures = list(result.failures)
-            aggregate_exhausted = (
-                spent_image_bytes >= self.limits.max_preview_bytes_total
-                or spent_text_chars >= self.limits.max_ocr_text_chars
-            )
+            aggregate_exhausted = budget.exhausted
             if aggregate_exhausted and not result.budget_exhausted:
                 failures.append("normal:resource-budget-exhausted")
                 result = NormalPreviewOcrRun(
                     source_key=result.source_key,
                     observations=result.observations,
                     failures=tuple(failures),
-                    total_image_bytes=spent_image_bytes,
-                    total_text_chars=spent_text_chars,
+                    total_image_bytes=budget.image_bytes,
+                    total_source_bytes=budget.source_bytes,
+                    total_text_chars=budget.text_chars,
+                    total_frame_attempts=budget.frame_attempts,
                     budget_exhausted=True,
                     planned_frame_count=result.planned_frame_count,
                     completed_frame_count=result.completed_frame_count,
@@ -526,14 +543,16 @@ class NormalPreviewOcrExecutor:
                 best_result = choose_result(best_result, result)
                 failures.append(f"{source.source_key}:ocr:no-visual-text")
 
-            if result.budget_exhausted:
+            if result.budget_exhausted or budget.exhausted:
                 selected = best_result or result
                 return NormalPreviewOcrRun(
                     source_key=selected.source_key,
                     observations=selected.observations,
                     failures=tuple(failures),
-                    total_image_bytes=spent_image_bytes,
-                    total_text_chars=spent_text_chars,
+                    total_image_bytes=budget.image_bytes,
+                    total_source_bytes=budget.source_bytes,
+                    total_text_chars=budget.text_chars,
+                    total_frame_attempts=budget.frame_attempts,
                     budget_exhausted=True,
                     planned_frame_count=selected.planned_frame_count,
                     completed_frame_count=selected.completed_frame_count,
@@ -542,16 +561,16 @@ class NormalPreviewOcrExecutor:
 
         if best_result is not None:
             aggregate_exhausted = (
-                best_result.budget_exhausted
-                or spent_image_bytes >= self.limits.max_preview_bytes_total
-                or spent_text_chars >= self.limits.max_ocr_text_chars
+                best_result.budget_exhausted or budget.exhausted
             )
             return NormalPreviewOcrRun(
                 source_key=best_result.source_key,
                 observations=best_result.observations,
                 failures=tuple(failures),
-                total_image_bytes=spent_image_bytes,
-                total_text_chars=spent_text_chars,
+                total_image_bytes=budget.image_bytes,
+                    total_source_bytes=budget.source_bytes,
+                total_text_chars=budget.text_chars,
+                    total_frame_attempts=budget.frame_attempts,
                 budget_exhausted=aggregate_exhausted,
                 planned_frame_count=best_result.planned_frame_count,
                 completed_frame_count=best_result.completed_frame_count,
@@ -561,12 +580,11 @@ class NormalPreviewOcrExecutor:
             )
         return NormalPreviewOcrRun(
             failures=tuple(failures),
-            total_image_bytes=spent_image_bytes,
-            total_text_chars=spent_text_chars,
-            budget_exhausted=(
-                spent_image_bytes >= self.limits.max_preview_bytes_total
-                or spent_text_chars >= self.limits.max_ocr_text_chars
-            ),
+            total_image_bytes=budget.image_bytes,
+                    total_source_bytes=budget.source_bytes,
+            total_text_chars=budget.text_chars,
+                    total_frame_attempts=budget.frame_attempts,
+            budget_exhausted=budget.exhausted,
         )
 
     def _run_source(
@@ -579,13 +597,12 @@ class NormalPreviewOcrExecutor:
         stage_sufficient: Callable[
             [NormalPreviewOcrRun, NormalSamplingStage], bool
         ] | None,
-        initial_image_bytes: int,
-        initial_text_chars: int,
+        budget: VisualAttemptBudget,
     ) -> NormalPreviewOcrRun:
         observations: list[PreviewOcrObservation] = []
         failures = list(prior_failures)
-        total_image_bytes = int(initial_image_bytes)
-        total_text_chars = int(initial_text_chars)
+        total_image_bytes = int(budget.image_bytes)
+        total_text_chars = int(budget.text_chars)
         budget_exhausted = False
         coverage_missing = False
         completed_frame_count = 0
@@ -596,8 +613,10 @@ class NormalPreviewOcrExecutor:
                 source_key=str(getattr(source, "source_key", "") or ""),
                 observations=tuple(observations),
                 failures=tuple(failures),
-                total_image_bytes=total_image_bytes,
-                total_text_chars=total_text_chars,
+                total_image_bytes=budget.image_bytes,
+                total_source_bytes=budget.source_bytes,
+                total_text_chars=budget.text_chars,
+                total_frame_attempts=budget.frame_attempts,
                 budget_exhausted=budget_exhausted,
                 planned_frame_count=len(samples),
                 completed_frame_count=completed_frame_count,
@@ -617,7 +636,16 @@ class NormalPreviewOcrExecutor:
                     return partial
                 current_stage = sample.stage
             try:
-                payload = bytes(source.read_preview(sample.frame))
+                budget.reserve_frame_attempt()
+                with visual_budget_scope(budget):
+                    payload = bytes(source.read_preview(sample.frame))
+            except VisualBudgetExceeded as exc:
+                coverage_missing = True
+                budget_exhausted = True
+                failures.append(
+                    f"{source.source_key}:budget:{exc}"
+                )
+                break
             except ExternalPreviewUnavailable as exc:
                 coverage_missing = True
                 failures.append(
@@ -648,16 +676,15 @@ class NormalPreviewOcrExecutor:
                     f"{source.source_key}:preview:{sample.ordinal}:frame-byte-limit"
                 )
                 continue
-            if (
-                total_image_bytes + frame_bytes
-                > self.limits.max_preview_bytes_total
-            ):
+            try:
+                budget.reserve_image_bytes(frame_bytes)
+            except VisualBudgetExceeded:
                 coverage_missing = True
                 budget_exhausted = True
                 failures.append(f"{source.source_key}:total-preview-byte-limit")
                 break
 
-            total_image_bytes += frame_bytes
+            total_image_bytes = budget.image_bytes
             preview_sha256 = hashlib.sha256(payload).hexdigest()
             cache_key = ocr_preview_cache_key(
                 sample.frame,
@@ -671,7 +698,7 @@ class NormalPreviewOcrExecutor:
                 else None
             )
             if cached is not None:
-                remaining_chars = self.limits.max_ocr_text_chars - total_text_chars
+                remaining_chars = budget.remaining_text_chars
                 if remaining_chars <= 0:
                     coverage_missing = True
                     budget_exhausted = True
@@ -681,7 +708,8 @@ class NormalPreviewOcrExecutor:
                 if len(text) > remaining_chars:
                     text = text[:remaining_chars]
                     budget_exhausted = True
-                total_text_chars += len(text)
+                budget.reserve_text_chars(len(text))
+                total_text_chars = budget.text_chars
                 cached_details = dict(cached.details)
                 cached_details["preview_sha256"] = preview_sha256
                 observations.append(
@@ -716,7 +744,7 @@ class NormalPreviewOcrExecutor:
                 )
                 continue
 
-            remaining_chars = self.limits.max_ocr_text_chars - total_text_chars
+            remaining_chars = budget.remaining_text_chars
             if remaining_chars <= 0:
                 coverage_missing = True
                 budget_exhausted = True
@@ -727,7 +755,8 @@ class NormalPreviewOcrExecutor:
             if len(text) > remaining_chars:
                 text = text[:remaining_chars]
                 budget_exhausted = True
-            total_text_chars += len(text)
+            budget.reserve_text_chars(len(text))
+            total_text_chars = budget.text_chars
 
             observations.append(
                 PreviewOcrObservation(
