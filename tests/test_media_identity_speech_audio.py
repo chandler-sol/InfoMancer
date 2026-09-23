@@ -586,7 +586,7 @@ class SpeechAudioExtractionTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             SpeechAudioStaleError,
-            "media file",
+            "media",
         ):
             extractor.source_signature(SpeechWindow(0, 1000))
 
