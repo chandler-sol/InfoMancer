@@ -30,7 +30,10 @@ from .normal import (
 )
 from .service import MediaIdentityDecisionService
 from .speech import SpeechEngine, SpeechModelIdentity
-from .speech_audio import LocalFfmpegSpeechAudioExtractor
+from .speech_audio import (
+    LocalFfmpegSpeechAudioExtractor,
+    normalize_speech_language,
+)
 from .speech_service import (
     NormalSpeechRun,
     NormalSpeechService,
@@ -689,10 +692,21 @@ class NormalIdentityService:
     @staticmethod
     def _speech_text_corpus(
         run: NormalSpeechRun,
-    ) -> tuple[TextCorpus, list[Any]]:
-        usable = [
+        synopsis_language: str,
+    ) -> tuple[TextCorpus, list[Any], list[Any]]:
+        target_language = normalize_speech_language(synopsis_language)
+        text_observations = [
             item for item in run.observations
             if item.transcript.text.strip()
+        ]
+        usable = [
+            item for item in text_observations
+            if normalize_speech_language(item.transcript.language)
+            == target_language
+        ]
+        excluded = [
+            item for item in text_observations
+            if item not in usable
         ]
         tokens: set[str] = set()
         bigrams: set[tuple[str, str]] = set()
@@ -706,6 +720,7 @@ class NormalIdentityService:
                 bigrams=frozenset(bigrams),
             ),
             usable,
+            excluded,
         )
 
     def _persist_speech_evidence(
@@ -716,6 +731,7 @@ class NormalIdentityService:
         run: NormalSpeechRun,
         *,
         escalated: bool,
+        synopsis_language: str,
     ) -> int:
         conn.execute(
             """DELETE FROM media_identity_evidence
@@ -726,7 +742,10 @@ class NormalIdentityService:
             return 0
 
         correlation = f"subtitle-dialogue:{int(scan['file_id'])}"
-        corpus, usable = self._speech_text_corpus(run)
+        corpus, usable, language_mismatched = self._speech_text_corpus(
+            run,
+            synopsis_language,
+        )
         aggregate_cache_key = (
             self._speech_aggregate_cache_key(run) if usable else ""
         )
@@ -786,6 +805,13 @@ class NormalIdentityService:
                         "transcript_count": len(usable),
                         "transcript_excerpt": transcript_excerpt,
                         "correlated_with": ["subtitle-synopsis"],
+                        "synopsis_language": normalize_speech_language(
+                            synopsis_language
+                        ),
+                        "transcript_languages": sorted({
+                            normalize_speech_language(item.transcript.language)
+                            for item in usable
+                        }),
                     }),
                     aggregate_cache_key,
                     IdentityProfile.NORMAL.value,
@@ -811,10 +837,48 @@ class NormalIdentityService:
                         "transcript_count": len(usable),
                         "transcript_excerpt": transcript_excerpt,
                         "correlated_with": ["subtitle-synopsis"],
+                        "synopsis_language": normalize_speech_language(
+                            synopsis_language
+                        ),
+                        "transcript_languages": sorted({
+                            normalize_speech_language(item.transcript.language)
+                            for item in usable
+                        }),
                     }),
                     aggregate_cache_key,
                     IdentityProfile.NORMAL.value,
                 ))
+        elif language_mismatched:
+            evidence_rows.append((
+                int(scan["id"]),
+                "",
+                NORMAL_SPEECH_EVIDENCE_KEY,
+                NORMAL_SPEECH_EVIDENCE_VERSION,
+                EvidenceCategory.SPEECH.value,
+                correlation,
+                EvidenceRelation.NEUTRAL.value,
+                0.0,
+                "local_speech_transcript",
+                f"file:{int(scan['file_id'])}:targeted-windows",
+                None,
+                "Targeted speech language did not align with the candidate synopsis language.",
+                _canonical_json({
+                    "artifact_ids": [
+                        int(item.artifact_id) for item in language_mismatched
+                    ],
+                    "transcript_count": len(language_mismatched),
+                    "synopsis_language": normalize_speech_language(
+                        synopsis_language
+                    ),
+                    "transcript_languages": sorted({
+                        normalize_speech_language(item.transcript.language)
+                        for item in language_mismatched
+                    }),
+                    "correlated_with": ["subtitle-synopsis"],
+                }),
+                "",
+                IdentityProfile.NORMAL.value,
+            ))
         elif usable:
             evidence_rows.append((
                 int(scan["id"]),
@@ -1365,6 +1429,7 @@ class NormalIdentityService:
                 candidates,
                 speech_run,
                 escalated=(speech_escalated and completed_normal),
+                synopsis_language=speech_language,
             )
             evidence_count += speech_evidence_count
 
