@@ -370,6 +370,59 @@ class DecisionServiceTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    def _reviewed_action_kwargs(
+        self,
+        scan_id: int,
+        *,
+        current: bool = False,
+    ) -> dict[str, object]:
+        detail = self.service.scan_detail(
+            int(scan_id),
+            verify_actionable_content=False,
+            include_confirmation=False,
+        )
+        if current:
+            claimed_keys = list(detail.get("claimed_candidate_keys") or [])
+            candidate_key = claimed_keys[0] if len(claimed_keys) == 1 else ""
+        else:
+            candidate_key = str(detail.get("best_candidate_key") or "")
+            if not candidate_key:
+                candidates = list(detail.get("candidates") or [])
+                candidate_key = (
+                    str(candidates[0].get("candidate_key") or "")
+                    if candidates
+                    else "unavailable"
+                )
+        return {
+            "expected_result_revision": int(
+                detail.get("result_revision") or 0
+            ),
+            "expected_decision_snapshot_sha256": str(
+                detail.get("decision_snapshot_sha256") or ""
+            ),
+            "expected_candidate_key": candidate_key,
+        }
+
+    def _confirm_current(self, scan_id: int):
+        return self.service.confirm_current(
+            int(scan_id),
+            None,
+            **self._reviewed_action_kwargs(scan_id, current=True),
+        )
+
+    def _confirm_best(self, scan_id: int):
+        return self.service.confirm_best(
+            int(scan_id),
+            None,
+            **self._reviewed_action_kwargs(scan_id),
+        )
+
+    def _rename_preview(self, scan_id: int):
+        return self.service.rename_preview(
+            int(scan_id),
+            **self._reviewed_action_kwargs(scan_id),
+        )
+
     def _insert_mismatch_scan(self, stat_result) -> int:
         claimed_ref = IdentityReference(
             "episode", "tvdb", "1001", expected_episode_id=1,
@@ -582,7 +635,7 @@ class DecisionServiceTests(unittest.TestCase):
         return sidecar
 
     def test_rename_preview_does_not_resolve_a_completed_pending_scan(self) -> None:
-        preview = self.service.rename_preview(self.scan_id)
+        preview = self._rename_preview(self.scan_id)
         self.assertFalse(preview["available"])
         self.assertEqual(preview["status"], "unavailable")
         self.assertTrue(preview["scan"]["decision_pending"])
@@ -701,7 +754,7 @@ class DecisionServiceTests(unittest.TestCase):
 
     def test_confirmation_is_snapshot_bound_and_becomes_stale(self) -> None:
         self.service.resolve_scan(self.scan_id)
-        confirmation = self.service.confirm_current(self.scan_id, None)
+        confirmation = self._confirm_current(self.scan_id)
         self.assertTrue(confirmation["current"])
 
         original = self.media.stat()
@@ -717,7 +770,7 @@ class DecisionServiceTests(unittest.TestCase):
 
     def test_confirmation_source_scan_deletion_preserves_audit_but_stales(self) -> None:
         self.service.resolve_scan(self.scan_id)
-        confirmation = self.service.confirm_current(self.scan_id, None)
+        confirmation = self._confirm_current(self.scan_id)
         self.assertTrue(confirmation["current"])
         self.assertEqual(confirmation["source_scan_id"], self.scan_id)
         self.assertEqual(
@@ -806,12 +859,12 @@ class DecisionServiceTests(unittest.TestCase):
     def test_mark_correct_suppresses_advisory_finding_only_for_current_snapshot(self) -> None:
         self.service.resolve_scan(self.scan_id)
         self.assertEqual(len(self.service.mie_findings()), 1)
-        self.service.confirm_current(self.scan_id, None)
+        self._confirm_current(self.scan_id)
         self.assertEqual(self.service.mie_findings(), [])
         detail = self.service.scan_detail(self.scan_id)
         self.assertTrue(detail["confirmed_claimed"])
         self.assertFalse(detail["actionable"])
-        preview = self.service.rename_preview(self.scan_id)
+        preview = self._rename_preview(self.scan_id)
         self.assertFalse(preview["available"])
         self.assertEqual(preview["status"], "unavailable")
 
@@ -827,11 +880,11 @@ class DecisionServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(
             ValueError, "not strong enough to confirm an alternate episode"
         ):
-            self.service.confirm_best(self.scan_id, None)
+            self._confirm_best(self.scan_id)
 
     def test_confirm_best_keeps_reviewable_filename_disagreement(self) -> None:
         self.service.resolve_scan(self.scan_id)
-        confirmation = self.service.confirm_best(self.scan_id, None)
+        confirmation = self._confirm_best(self.scan_id)
         self.assertTrue(confirmation["current"])
         findings = self.service.mie_findings()
         self.assertEqual(len(findings), 1)
@@ -839,26 +892,18 @@ class DecisionServiceTests(unittest.TestCase):
 
     def test_confirm_best_rejects_superseded_review_revision(self) -> None:
         self.service.resolve_scan(self.scan_id)
-        original_confirm = self.service._confirm
-        advanced = False
+        displayed = self._reviewed_action_kwargs(self.scan_id)
+        self._advance_scan_revision()
 
-        def raced_confirm(*args, **kwargs):
-            nonlocal advanced
-            if not advanced:
-                self._advance_scan_revision()
-                advanced = True
-            return original_confirm(*args, **kwargs)
-
-        with patch.object(
-            self.service,
-            "_confirm",
-            side_effect=raced_confirm,
+        with self.assertRaisesRegex(
+            ValueError,
+            "changed after it was reviewed",
         ):
-            with self.assertRaisesRegex(
-                ValueError,
-                "changed after it was reviewed",
-            ):
-                self.service.confirm_best(self.scan_id, None)
+            self.service.confirm_best(
+                self.scan_id,
+                None,
+                **displayed,
+            )
 
         with self.database.connect() as conn:
             count = conn.execute(
@@ -869,7 +914,7 @@ class DecisionServiceTests(unittest.TestCase):
     def test_rename_preview_is_read_only_and_targets_best_candidate(self) -> None:
         self.service.resolve_scan(self.scan_id)
         before = self.media.read_bytes()
-        preview = self.service.rename_preview(self.scan_id)
+        preview = self._rename_preview(self.scan_id)
         self.assertEqual(preview["status"], "ready")
         self.assertEqual(preview["target_episode"], 2)
         self.assertIn("S01E02", Path(preview["destination"]).name)
@@ -885,23 +930,13 @@ class DecisionServiceTests(unittest.TestCase):
 
     def test_rename_preview_rejects_superseded_review_revision(self) -> None:
         self.service.resolve_scan(self.scan_id)
-        original_scan_detail = self.service.scan_detail
-        advanced = False
+        displayed = self._reviewed_action_kwargs(self.scan_id)
+        self._advance_scan_revision()
 
-        def raced_detail(*args, **kwargs):
-            nonlocal advanced
-            detail = original_scan_detail(*args, **kwargs)
-            if not advanced:
-                self._advance_scan_revision()
-                advanced = True
-            return detail
-
-        with patch.object(
-            self.service,
-            "scan_detail",
-            side_effect=raced_detail,
-        ):
-            preview = self.service.rename_preview(self.scan_id)
+        preview = self.service.rename_preview(
+            self.scan_id,
+            **displayed,
+        )
 
         self.assertFalse(preview["available"])
         self.assertEqual(preview["status"], "stale")
@@ -923,7 +958,7 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0]["evidence"]["scan_id"], scan.scan_id)
         self.assertEqual(findings[0]["evidence"]["result_state"], "strong_match_other")
-        preview = self.service.rename_preview(scan.scan_id)
+        preview = self._rename_preview(scan.scan_id)
         self.assertEqual(preview["status"], "ready")
         self.assertEqual(preview["target_episode"], 2)
 
@@ -940,8 +975,8 @@ class DecisionServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(
             ValueError, "changed after this identity scan"
         ):
-            self.service.confirm_best(scan.scan_id, None)
-        stale_preview = self.service.rename_preview(scan.scan_id)
+            self._confirm_best(scan.scan_id)
+        stale_preview = self._rename_preview(scan.scan_id)
         self.assertFalse(stale_preview["available"])
         self.assertEqual(stale_preview["status"], "stale")
 
@@ -971,11 +1006,11 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertFalse(detail["snapshot_current"])
         self.assertFalse(detail["actionable"])
         self.assertEqual(
-            self.service.rename_preview(scan.scan_id)["status"],
+            self._rename_preview(scan.scan_id)["status"],
             "stale",
         )
         with self.assertRaisesRegex(ValueError, "changed after this identity scan"):
-            self.service.confirm_best(scan.scan_id, None)
+            self._confirm_best(scan.scan_id)
 
     def test_equal_size_equal_mtime_sidecar_edit_invalidates_scan(self) -> None:
         scan, sidecar = self._resolved_real_fast_scan()
@@ -997,7 +1032,7 @@ class DecisionServiceTests(unittest.TestCase):
 
     def test_provider_snapshot_change_invalidates_action_and_confirmation(self) -> None:
         scan, _ = self._resolved_real_fast_scan()
-        confirmation = self.service.confirm_best(scan.scan_id, None)
+        confirmation = self._confirm_best(scan.scan_id)
         self.assertTrue(confirmation["current"])
 
         with self.database.connect() as conn:
@@ -1015,8 +1050,8 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertIsNotNone(stale_confirmation)
         self.assertFalse(stale_confirmation["current"])
         with self.assertRaisesRegex(ValueError, "changed after this identity scan"):
-            self.service.confirm_best(scan.scan_id, None)
-        self.assertEqual(self.service.rename_preview(scan.scan_id)["status"], "stale")
+            self._confirm_best(scan.scan_id)
+        self.assertEqual(self._rename_preview(scan.scan_id)["status"], "stale")
 
     def test_title_provider_identity_change_invalidates_scan(self) -> None:
         scan, _ = self._resolved_real_fast_scan()
@@ -1065,7 +1100,7 @@ class DecisionServiceTests(unittest.TestCase):
         detail = self.service.scan_detail(scan.scan_id)
         self.assertFalse(detail["snapshot_current"])
         self.assertFalse(detail["actionable"])
-        self.assertEqual(self.service.rename_preview(scan.scan_id)["status"], "stale")
+        self.assertEqual(self._rename_preview(scan.scan_id)["status"], "stale")
 
     def test_legacy_scan_without_complete_input_manifest_is_non_actionable(self) -> None:
         self.service.resolve_scan(self.scan_id)
@@ -1088,7 +1123,7 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertFalse(detail["snapshot_current"])
         self.assertFalse(detail["actionable"])
         self.assertEqual(self.service.mie_findings(), [])
-        self.assertEqual(self.service.rename_preview(self.scan_id)["status"], "stale")
+        self.assertEqual(self._rename_preview(self.scan_id)["status"], "stale")
 
     def test_persisted_candidate_identity_tamper_stales_resolved_result(self) -> None:
         self.service.resolve_scan(self.scan_id)
@@ -1108,9 +1143,9 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertEqual(detail["result_state"], "strong_match_other")
         self.assertFalse(detail["snapshot_current"])
         self.assertFalse(detail["actionable"])
-        self.assertEqual(self.service.rename_preview(self.scan_id)["status"], "stale")
+        self.assertEqual(self._rename_preview(self.scan_id)["status"], "stale")
         with self.assertRaisesRegex(ValueError, "changed after this identity scan"):
-            self.service.confirm_best(self.scan_id, None)
+            self._confirm_best(self.scan_id)
 
     def test_persisted_evidence_tamper_cannot_leave_stored_mismatch_actionable(self) -> None:
         self.service.resolve_scan(self.scan_id)
@@ -1135,7 +1170,7 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertFalse(detail["snapshot_current"])
         self.assertFalse(detail["actionable"])
         with self.assertRaisesRegex(ValueError, "changed after this identity scan"):
-            self.service.confirm_best(self.scan_id, None)
+            self._confirm_best(self.scan_id)
 
     def test_sealed_result_revision_is_immutable_and_resolution_advances_it(self) -> None:
         with self.database.connect() as conn:
@@ -1166,7 +1201,7 @@ class DecisionServiceTests(unittest.TestCase):
         self.service.resolve_scan(self.scan_id)
         self.media.write_bytes(b"changed")
         with self.assertRaisesRegex(ValueError, "changed after this identity scan"):
-            self.service.confirm_current(self.scan_id, None)
+            self._confirm_current(self.scan_id)
 
 
 if __name__ == "__main__":
