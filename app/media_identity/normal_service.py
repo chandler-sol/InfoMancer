@@ -21,6 +21,7 @@ from .models import (
 from .normal import (
     NormalPreviewOcrExecutor,
     NormalPreviewOcrRun,
+    PreviewOcrObservation,
     NormalResourceLimits,
     NormalSamplingStage,
     OcrEngine,
@@ -341,8 +342,9 @@ class NormalIdentityService:
         conn: sqlite3.Connection,
         scan: Mapping[str, Any],
         run: NormalPreviewOcrRun,
-    ) -> list[int]:
+    ) -> tuple[NormalPreviewOcrRun, list[int]]:
         artifact_ids: list[int] = []
+        persisted_observations: list[PreviewOcrObservation] = []
         for item in run.observations:
             payload = {
                 "confidence": item.confidence,
@@ -355,7 +357,7 @@ class NormalIdentityService:
                 "engine_version": str(self.engine.version),
                 "details": dict(item.details),
             }
-            conn.execute(
+            cursor = conn.execute(
                 """INSERT OR IGNORE INTO media_identity_artifacts(
                      file_id,artifact_type,analyzer_key,analyzer_version,
                      cache_key,status,profile,source_kind,source_ref,
@@ -381,8 +383,13 @@ class NormalIdentityService:
                     _canonical_json(payload),
                 ),
             )
+            inserted = cursor.rowcount == 1
             row = conn.execute(
-                """SELECT id FROM media_identity_artifacts
+                """SELECT id,file_id,artifact_type,analyzer_key,analyzer_version,
+                          cache_key,status,profile,source_kind,source_ref,
+                          source_signature,file_size_bytes,file_modified_at,
+                          start_ms,end_ms,text_value,payload_json
+                   FROM media_identity_artifacts
                    WHERE file_id=? AND artifact_type='visual_text'
                      AND analyzer_key=? AND analyzer_version=? AND cache_key=?
                    ORDER BY id DESC LIMIT 1""",
@@ -397,6 +404,66 @@ class NormalIdentityService:
                 raise NormalIdentityScanError(
                     "InfoMancer could not persist the OCR artifact safely."
                 )
+
+            persisted_payload = _json_object(row["payload_json"])
+            details = persisted_payload.get("details")
+            confidence = persisted_payload.get("confidence")
+            try:
+                normalized_confidence = (
+                    None if confidence is None else float(confidence)
+                )
+            except (TypeError, ValueError) as exc:
+                raise NormalIdentityScanError(
+                    "The persisted OCR winner has invalid confidence metadata."
+                ) from exc
+            if (
+                normalized_confidence is not None
+                and not 0.0 <= normalized_confidence <= 1.0
+            ):
+                raise NormalIdentityScanError(
+                    "The persisted OCR winner has invalid confidence metadata."
+                )
+            try:
+                persisted_start = int(row["start_ms"])
+                persisted_end = int(row["end_ms"])
+                image_bytes = int(persisted_payload.get("image_bytes") or 0)
+            except (TypeError, ValueError) as exc:
+                raise NormalIdentityScanError(
+                    "The persisted OCR winner has invalid frame provenance."
+                ) from exc
+
+            if (
+                int(row["file_id"]) != int(scan["file_id"])
+                or str(row["artifact_type"] or "") != "visual_text"
+                or str(row["analyzer_key"] or "") != NORMAL_OCR_ARTIFACT_KEY
+                or str(row["analyzer_version"] or "") != NORMAL_OCR_ARTIFACT_VERSION
+                or str(row["cache_key"] or "") != str(item.cache_key)
+                or str(row["status"] or "") != "complete"
+                or str(row["profile"] or "") != IdentityProfile.NORMAL.value
+                or str(row["source_kind"] or "") != str(item.source_key)
+                or str(row["source_ref"] or "") != str(item.asset_ref)
+                or str(row["source_signature"] or "") != str(item.source_signature)
+                or int(row["file_size_bytes"] or 0)
+                != int(scan["file_size_bytes"] or 0)
+                or not _same_modified_at(
+                    row["file_modified_at"],
+                    scan["file_modified_at"],
+                )
+                or persisted_start != int(item.timestamp_ms)
+                or persisted_end != int(item.timestamp_ms)
+                or str(persisted_payload.get("item_id") or "") != str(item.item_id)
+                or str(persisted_payload.get("engine_key") or "")
+                != str(self.engine.key)
+                or str(persisted_payload.get("engine_version") or "")
+                != str(self.engine.version)
+                or not isinstance(details, Mapping)
+                or image_bytes < 0
+            ):
+                raise NormalIdentityScanError(
+                    "The persisted OCR winner does not match the current frame "
+                    "and engine provenance."
+                )
+
             artifact_id = int(row["id"])
             artifact_ids.append(artifact_id)
             conn.execute(
@@ -405,7 +472,33 @@ class NormalIdentityService:
                    WHERE id=?""",
                 (artifact_id,),
             )
-        return artifact_ids
+            persisted_observations.append(
+                PreviewOcrObservation(
+                    source_key=str(row["source_kind"] or ""),
+                    item_id=str(persisted_payload["item_id"]),
+                    timestamp_ms=persisted_start,
+                    stage=item.stage,
+                    ordinal=item.ordinal,
+                    cache_key=str(row["cache_key"] or ""),
+                    source_signature=str(row["source_signature"] or ""),
+                    asset_ref=str(row["source_ref"] or ""),
+                    text=str(row["text_value"] or ""),
+                    confidence=normalized_confidence,
+                    image_bytes=image_bytes,
+                    reused=(bool(item.reused) or not inserted),
+                    details=dict(details),
+                )
+            )
+
+        persisted_run = NormalPreviewOcrRun(
+            source_key=run.source_key,
+            observations=tuple(persisted_observations),
+            failures=run.failures,
+            total_image_bytes=run.total_image_bytes,
+            total_text_chars=run.total_text_chars,
+            budget_exhausted=run.budget_exhausted,
+        )
+        return persisted_run, artifact_ids
 
     @staticmethod
     def _visual_run_metrics(
@@ -1184,7 +1277,11 @@ class NormalIdentityService:
             if retain_previous_visual:
                 evidence_count = 0
             else:
-                artifact_ids = self._persist_artifacts(conn, current_scan, run)
+                run, artifact_ids = self._persist_artifacts(
+                    conn,
+                    current_scan,
+                    run,
+                )
                 evidence_count = self._persist_visual_evidence(
                     conn,
                     current_scan,
