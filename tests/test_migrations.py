@@ -9,6 +9,7 @@ from app.db import Database
 from app.migrations import MIGRATIONS, schema_contract
 from app.media_identity.migration import (
     apply_media_identity_confirmation_provenance,
+    repair_legacy_media_identity_confirmation_provenance,
 )
 
 
@@ -47,6 +48,7 @@ class MigrationTests(unittest.TestCase):
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=20").fetchone())
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=21").fetchone())
                 self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=23").fetchone())
+                self.assertIsNotNone(upgraded.execute("SELECT 1 FROM schema_migrations WHERE version=24").fetchone())
                 confirmation_columns = {
                     row["name"]
                     for row in upgraded.execute(
@@ -169,6 +171,83 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(row["source_decision_snapshot_sha256"], "")
         self.assertEqual(row["source_metadata_signature"], "")
 
+    def test_migration_24_repairs_authority_inferred_by_old_migration_23(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            );
+            INSERT INTO schema_migrations(version,name,applied_at)
+            VALUES (
+                23,
+                '0.9 media identity confirmation provenance',
+                '2026-09-20 12:00:00'
+            );
+            CREATE TABLE media_identity_confirmations (
+                file_id INTEGER PRIMARY KEY,
+                source_scan_id INTEGER,
+                confirmed_at TEXT NOT NULL,
+                source_scan_snapshot_id INTEGER NOT NULL DEFAULT 0,
+                source_result_revision INTEGER NOT NULL DEFAULT 0,
+                source_decision_snapshot_sha256 TEXT NOT NULL DEFAULT '',
+                source_metadata_signature TEXT NOT NULL DEFAULT ''
+            );
+            """
+        )
+        conn.executemany(
+            """INSERT INTO media_identity_confirmations(
+                 file_id,source_scan_id,confirmed_at,source_scan_snapshot_id,
+                 source_result_revision,source_decision_snapshot_sha256,
+                 source_metadata_signature
+               ) VALUES (?,?,?,?,?,?,?)""",
+            [
+                (
+                    1,
+                    5,
+                    "2026-09-19 12:00:00",
+                    5,
+                    3,
+                    "a" * 64,
+                    "inferred-signature",
+                ),
+                (
+                    2,
+                    6,
+                    "2026-09-21 12:00:00",
+                    6,
+                    4,
+                    "b" * 64,
+                    "captured-signature",
+                ),
+            ],
+        )
+
+        repair_legacy_media_identity_confirmation_provenance(conn)
+        legacy = conn.execute(
+            """SELECT * FROM media_identity_confirmations
+               WHERE file_id=1"""
+        ).fetchone()
+        later = conn.execute(
+            """SELECT * FROM media_identity_confirmations
+               WHERE file_id=2"""
+        ).fetchone()
+        conn.close()
+
+        self.assertEqual(legacy["source_scan_snapshot_id"], 5)
+        self.assertEqual(legacy["source_result_revision"], 0)
+        self.assertEqual(legacy["source_decision_snapshot_sha256"], "")
+        self.assertEqual(legacy["source_metadata_signature"], "")
+        self.assertEqual(later["source_result_revision"], 4)
+        self.assertEqual(later["source_decision_snapshot_sha256"], "b" * 64)
+        self.assertEqual(
+            later["source_metadata_signature"],
+            "captured-signature",
+        )
+
     def test_existing_migration_21_database_receives_credential_generation(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "catalog.db"
@@ -245,7 +324,7 @@ class MigrationTests(unittest.TestCase):
                     ).fetchone()
                 )
 
-    def test_migrations_17_through_23_preserve_safe_downgrade_semantics(self):
+    def test_migrations_17_through_24_preserve_safe_downgrade_semantics(self):
         migration_17 = next(item for item in MIGRATIONS if item.version == 17)
         self.assertEqual(migration_17.compatibility, "behavioral")
         self.assertEqual(migration_17.minimum_reader_schema, 1)
@@ -259,8 +338,14 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(migration.minimum_writer_schema, 1)
             self.assertEqual(migration.downgrade_policy, "compatible")
 
+        migration_24 = next(item for item in MIGRATIONS if item.version == 24)
+        self.assertEqual(migration_24.compatibility, "behavioral")
+        self.assertEqual(migration_24.minimum_reader_schema, 1)
+        self.assertEqual(migration_24.minimum_writer_schema, 1)
+        self.assertEqual(migration_24.downgrade_policy, "compatible")
+
         self.assertEqual(schema_contract(), {
-            "current": 23,
+            "current": 24,
             "minimum_reader_schema": 1,
             "minimum_writer_schema": 1,
             "downgrade_policy": "compatible",
@@ -276,7 +361,7 @@ class MigrationTests(unittest.TestCase):
                         """SELECT migration_version,compatibility,minimum_reader_schema,
                                   minimum_writer_schema,downgrade_policy
                            FROM schema_compatibility
-                           WHERE migration_version IN (17,18,19,20,21,22,23)"""
+                           WHERE migration_version IN (17,18,19,20,21,22,23,24)"""
                     )
                 }
             self.assertEqual(rows[17]["compatibility"], "behavioral")
@@ -285,6 +370,10 @@ class MigrationTests(unittest.TestCase):
                 self.assertEqual(rows[version]["minimum_reader_schema"], 1)
                 self.assertEqual(rows[version]["minimum_writer_schema"], 1)
                 self.assertEqual(rows[version]["downgrade_policy"], "compatible")
+            self.assertEqual(rows[24]["compatibility"], "behavioral")
+            self.assertEqual(rows[24]["minimum_reader_schema"], 1)
+            self.assertEqual(rows[24]["minimum_writer_schema"], 1)
+            self.assertEqual(rows[24]["downgrade_policy"], "compatible")
 
     def test_existing_compatibility_snapshot_is_not_silently_rewritten(self):
         with tempfile.TemporaryDirectory() as temporary:
