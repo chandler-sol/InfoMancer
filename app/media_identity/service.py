@@ -174,6 +174,17 @@ class MediaIdentityDecisionService:
                 )
             revision = result_revision(scan)
             resolution = self._resolve_snapshot(scan, candidates, evidence)
+            if scan.get("result_state") is not None:
+                if (
+                    str(scan.get("result_state") or "") != resolution.state.value
+                    or str(scan.get("best_candidate_key") or "")
+                    != str(resolution.best_candidate_key or "")
+                ):
+                    raise MediaIdentityDecisionError(
+                        "The sealed Episode Identity resolution does not match "
+                        "the current decision algorithm. Run verification again."
+                    )
+                return resolution
             by_key = {
                 item.candidate_key: item for item in resolution.candidates
             }
@@ -229,7 +240,7 @@ class MediaIdentityDecisionService:
             seal_decision_snapshot(
                 conn,
                 int(scan_id),
-                revision=revision,
+                revision=revision + 1,
             )
         return resolution
 
