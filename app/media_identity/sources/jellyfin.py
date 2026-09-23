@@ -14,6 +14,7 @@ from PIL import Image, UnidentifiedImageError
 
 from ...path_mapping import ExternalPathMapper, PathMappingError, parse_absolute_path
 from ..external import (
+    ExternalAnalysisError,
     ExternalCapability,
     ExternalMediaRef,
     ExternalPreviewUnavailable,
@@ -36,7 +37,7 @@ _MAX_EPISODE_CANDIDATES = 4096
 _JELLYFIN_PAGE_SIZE = 256
 
 
-class JellyfinAdapterError(ValueError):
+class JellyfinAdapterError(ExternalAnalysisError):
     """Base Jellyfin adapter error retained for adapter-specific callers."""
 
 
@@ -1030,10 +1031,15 @@ class JellyfinTrickplaySource:
     def resolve_media(self, context: AnalyzerContext) -> ExternalMediaRef | None:
         if not self.status().available:
             return None
-        translation = self.mapper.reverse_translate(
-            self.source_key,
-            context.media.path,
-        )
+        try:
+            translation = self.mapper.reverse_translate(
+                self.source_key,
+                context.media.path,
+            )
+        except PathMappingError as exc:
+            raise JellyfinSourceFailure(
+                f"Jellyfin path mapping could not resolve this media unambiguously: {exc}"
+            ) from exc
         if translation is None:
             return None
         season = context.claimed_identity.season
