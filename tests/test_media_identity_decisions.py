@@ -9,6 +9,7 @@ from pathlib import Path
 
 from app.db import Database
 from app.media_identity.candidates import generate_episode_candidates
+from app.media_identity.decision_snapshot import seal_decision_snapshot
 from app.media_identity.fast import (
     SCAN_INPUT_SIGNATURE_VERSION,
     FastIdentityService,
@@ -497,6 +498,7 @@ class DecisionServiceTests(unittest.TestCase):
                     scan_id,
                 ),
             )
+            seal_decision_snapshot(conn, scan_id, revision=1)
         return scan_id
 
     def _seed_real_fast_mismatch_inputs(self) -> Path:
@@ -647,6 +649,7 @@ class DecisionServiceTests(unittest.TestCase):
                    ) VALUES (1,?,?,?,'complete',CURRENT_TIMESTAMP)""",
                 (digest, current.st_size, current.st_mtime),
             )
+            seal_decision_snapshot(conn, self.scan_id, revision=1)
 
         self.assertTrue(self.service.scan_detail(self.scan_id)["snapshot_current"])
         with self.database.connect() as conn:
@@ -858,6 +861,53 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertFalse(detail["actionable"])
         self.assertEqual(self.service.mie_findings(), [])
         self.assertEqual(self.service.rename_preview(self.scan_id)["status"], "stale")
+
+    def test_persisted_candidate_identity_tamper_stales_resolved_result(self) -> None:
+        self.service.resolve_scan(self.scan_id)
+        with self.database.connect() as conn:
+            best = conn.execute(
+                "SELECT best_candidate_key FROM media_identity_scans WHERE id=?",
+                (self.scan_id,),
+            ).fetchone()
+            conn.execute(
+                """UPDATE media_identity_candidates
+                   SET provider_item_id='tampered-provider-id'
+                   WHERE scan_id=? AND candidate_key=?""",
+                (self.scan_id, best["best_candidate_key"]),
+            )
+
+        detail = self.service.scan_detail(self.scan_id)
+        self.assertEqual(detail["result_state"], "strong_match_other")
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+        self.assertEqual(self.service.rename_preview(self.scan_id)["status"], "stale")
+        with self.assertRaisesRegex(ValueError, "changed after this identity scan"):
+            self.service.confirm_best(self.scan_id, None)
+
+    def test_persisted_evidence_tamper_cannot_leave_stored_mismatch_actionable(self) -> None:
+        self.service.resolve_scan(self.scan_id)
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE media_identity_evidence
+                   SET relation='neutral',strength=0
+                   WHERE scan_id=? AND evidence_category='subtitle_text'""",
+                (self.scan_id,),
+            )
+
+        detail = self.service.scan_detail(self.scan_id)
+        self.assertEqual(detail["result_state"], "strong_match_other")
+        self.assertEqual(detail["resolution_explanation"], self.service._resolve_snapshot(
+            {
+                **detail,
+                "claimed_identity_json": json.dumps(detail["claimed_identity"]),
+            },
+            detail["candidates"],
+            detail["evidence"],
+        ).explanation)
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+        with self.assertRaisesRegex(ValueError, "changed after this identity scan"):
+            self.service.confirm_best(self.scan_id, None)
 
     def test_file_change_blocks_confirmation(self) -> None:
         self.service.resolve_scan(self.scan_id)
