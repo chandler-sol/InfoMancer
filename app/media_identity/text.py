@@ -45,6 +45,7 @@ class SidecarIdentity:
     modified_ns: int
     device_id: int | None
     inode_id: int | None
+    content_sha256: str
 
 
 @dataclass(frozen=True)
@@ -166,6 +167,62 @@ def discover_sidecar_subtitles(media_path: str | Path) -> list[Path]:
     return found
 
 
+def _sidecar_content_sha256(
+    path: Path,
+    expected_stat: os.stat_result,
+) -> str | None:
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    try:
+        path_stat = os.lstat(path)
+        if stat.S_ISLNK(path_stat.st_mode):
+            return None
+        descriptor = os.open(path, flags | nofollow)
+    except OSError:
+        return None
+
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or int(before.st_size) != int(expected_stat.st_size)
+            or int(before.st_mtime_ns) != int(expected_stat.st_mtime_ns)
+            or int(before.st_size) > MAX_SIDECAR_BYTES
+        ):
+            return None
+        for field in ("st_dev", "st_ino"):
+            expected = int(getattr(expected_stat, field, 0) or 0)
+            actual = int(getattr(before, field, 0) or 0)
+            if expected and actual and expected != actual:
+                return None
+
+        digest = hashlib.sha256()
+        total = 0
+        while True:
+            chunk = os.read(descriptor, 64 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_SIDECAR_BYTES:
+                return None
+            digest.update(chunk)
+
+        after = os.fstat(descriptor)
+        if (
+            int(after.st_size) != int(before.st_size)
+            or int(after.st_mtime_ns) != int(before.st_mtime_ns)
+            or int(after.st_ctime_ns) != int(before.st_ctime_ns)
+        ):
+            return None
+        return digest.hexdigest()
+    except OSError:
+        return None
+    finally:
+        os.close(descriptor)
+
+
 def sidecar_identity(path: Path) -> SidecarIdentity | None:
     """Fingerprint a sidecar from path/size/mtime without reading its contents."""
     try:
@@ -179,12 +236,17 @@ def sidecar_identity(path: Path) -> SidecarIdentity | None:
         return None
     device_id = int(getattr(stat, "st_dev", 0) or 0) or None
     inode_id = int(getattr(stat, "st_ino", 0) or 0) or None
+    content_sha256 = _sidecar_content_sha256(path, stat)
+    if not content_sha256:
+        return None
     signature_payload = "\0".join((
         str(resolved),
         str(stat.st_size),
         str(stat.st_mtime_ns),
+        str(getattr(stat, "st_ctime_ns", 0) or 0),
         "" if device_id is None else str(device_id),
         "" if inode_id is None else str(inode_id),
+        content_sha256,
     ))
     source_signature = hashlib.sha256(signature_payload.encode("utf-8")).hexdigest()
     cache_key = hashlib.sha256(
@@ -198,6 +260,7 @@ def sidecar_identity(path: Path) -> SidecarIdentity | None:
         modified_ns=int(stat.st_mtime_ns),
         device_id=device_id,
         inode_id=inode_id,
+        content_sha256=content_sha256,
     )
 
 
@@ -315,6 +378,8 @@ def read_sidecar_text(
 
     data = _read_sidecar_bounded(path, identity)
     if data is None:
+        return None
+    if hashlib.sha256(data).hexdigest() != identity.content_sha256:
         return None
 
     normalized = normalize_subtitle_text(_decode_subtitle(data), path.suffix)
