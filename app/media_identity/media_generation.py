@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import ctypes
+from contextlib import contextmanager
 import hashlib
 import os
 from pathlib import Path
 import stat as stat_module
-from typing import Any, Mapping
+import threading
+from typing import Any, Iterator, Mapping
 
 
 MEDIA_GENERATION_IDENTITY_VERSION = 1
@@ -176,6 +178,7 @@ class MediaContentLease:
         self.generation: dict[str, Any] | None = None
         self._descriptor: int | None = None
         self._windows_handle: int | None = None
+        self._io_lock = threading.Lock()
 
     def _acquire_platform_handle(self, resolved: Path) -> None:
         if os.name == "nt":
@@ -211,6 +214,178 @@ class MediaContentLease:
         flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
         self._descriptor = os.open(resolved, flags)
 
+    @staticmethod
+    def _stat_signature(value: os.stat_result) -> tuple[int, int, int, int, int]:
+        return (
+            stat_module.S_IFMT(value.st_mode),
+            int(value.st_size),
+            int(
+                getattr(
+                    value,
+                    "st_mtime_ns",
+                    int(float(value.st_mtime) * 1_000_000_000),
+                )
+            ),
+            int(getattr(value, "st_dev", 0)),
+            int(getattr(value, "st_ino", 0)),
+        )
+
+    def _hash_posix_descriptor(self) -> str:
+        descriptor = self._descriptor
+        if descriptor is None:
+            raise MediaContentLeaseError(
+                "The local media descriptor lease is unavailable."
+            )
+        with self._io_lock:
+            try:
+                before = os.fstat(descriptor)
+                if not stat_module.S_ISREG(before.st_mode):
+                    raise MediaContentLeaseError(
+                        "The leased local media input is not a regular file."
+                    )
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                digest = hashlib.sha256()
+                while True:
+                    chunk = os.read(descriptor, 4 * 1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                after = os.fstat(descriptor)
+                os.lseek(descriptor, 0, os.SEEK_SET)
+            except MediaContentLeaseError:
+                raise
+            except OSError as exc:
+                raise MediaContentLeaseError(
+                    "InfoMancer could not hash the leased local media descriptor."
+                ) from exc
+            if self._stat_signature(before) != self._stat_signature(after):
+                raise MediaContentLeaseError(
+                    "The leased local media bytes changed while they were hashed."
+                )
+            return digest.hexdigest()
+
+    def _hash_windows_handle(self) -> str:
+        handle = self._windows_handle
+        if handle is None:
+            raise MediaContentLeaseError(
+                "The local media Windows lease handle is unavailable."
+            )
+        try:
+            import msvcrt
+            from ctypes import wintypes
+
+            kernel32 = ctypes.windll.kernel32
+            duplicate_handle = kernel32.DuplicateHandle
+            duplicate_handle.argtypes = (
+                wintypes.HANDLE,
+                wintypes.HANDLE,
+                wintypes.HANDLE,
+                ctypes.POINTER(wintypes.HANDLE),
+                wintypes.DWORD,
+                wintypes.BOOL,
+                wintypes.DWORD,
+            )
+            duplicate_handle.restype = wintypes.BOOL
+            get_current_process = kernel32.GetCurrentProcess
+            get_current_process.restype = wintypes.HANDLE
+            current_process = get_current_process()
+            duplicate = wintypes.HANDLE()
+            if not duplicate_handle(
+                current_process,
+                wintypes.HANDLE(handle),
+                current_process,
+                ctypes.byref(duplicate),
+                0,
+                False,
+                0x00000002,  # DUPLICATE_SAME_ACCESS
+            ):
+                raise OSError(ctypes.get_last_error(), "DuplicateHandle failed")
+            duplicate_value = int(
+                getattr(duplicate, "value", duplicate) or 0
+            )
+            try:
+                descriptor = msvcrt.open_osfhandle(
+                    duplicate_value,
+                    os.O_RDONLY | getattr(os, "O_BINARY", 0),
+                )
+            except Exception:
+                kernel32.CloseHandle(duplicate)
+                raise
+            with os.fdopen(descriptor, "rb", closefd=True) as stream:
+                before = os.fstat(stream.fileno())
+                if not stat_module.S_ISREG(before.st_mode):
+                    raise MediaContentLeaseError(
+                        "The leased local media input is not a regular file."
+                    )
+                digest = hashlib.sha256()
+                while True:
+                    chunk = stream.read(4 * 1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                after = os.fstat(stream.fileno())
+            if self._stat_signature(before) != self._stat_signature(after):
+                raise MediaContentLeaseError(
+                    "The leased local media bytes changed while they were hashed."
+                )
+            return digest.hexdigest()
+        except MediaContentLeaseError:
+            raise
+        except OSError as exc:
+            raise MediaContentLeaseError(
+                "InfoMancer could not hash the leased local media handle."
+            ) from exc
+
+    def _hash_leased_content(self) -> str:
+        if os.name == "nt":
+            return self._hash_windows_handle()
+        return self._hash_posix_descriptor()
+
+    @contextmanager
+    def ffmpeg_input(
+        self,
+    ) -> Iterator[tuple[tuple[str, ...], dict[str, Any]]]:
+        """Yield FFmpeg input arguments bound to this exact leased object."""
+        self.require_current()
+        if os.name == "nt":
+            generation = self.generation or {}
+            resolved = str(generation.get("path") or "")
+            if not resolved or self._windows_handle is None:
+                raise MediaContentLeaseError(
+                    "The local media Windows lease is unavailable."
+                )
+            # The lease was opened without FILE_SHARE_WRITE/DELETE. Windows
+            # therefore keeps the resolved file hierarchy stable while this
+            # handle remains open; use the canonical resolved path rather than
+            # the caller-supplied alias.
+            yield (("-i", resolved), {})
+            self.require_current()
+            return
+
+        descriptor = self._descriptor
+        if descriptor is None:
+            raise MediaContentLeaseError(
+                "The local media descriptor lease is unavailable."
+            )
+        with self._io_lock:
+            try:
+                os.lseek(descriptor, 0, os.SEEK_SET)
+            except OSError as exc:
+                raise MediaContentLeaseError(
+                    "The leased local media descriptor is not seekable."
+                ) from exc
+            try:
+                yield (
+                    ("-fd", str(descriptor), "-i", "fd:"),
+                    {"pass_fds": (descriptor,)},
+                )
+            finally:
+                try:
+                    os.lseek(descriptor, 0, os.SEEK_SET)
+                except OSError:
+                    pass
+        self.require_current()
+
     def acquire(self) -> "MediaContentLease":
         if self.generation is not None:
             return self
@@ -229,10 +404,7 @@ class MediaContentLease:
         try:
             resolved = Path(str(generation["path"]))
             self._acquire_platform_handle(resolved)
-            digest = media_content_sha256(
-                resolved,
-                expected_generation=generation,
-            )
+            digest = self._hash_leased_content()
             if digest != self.expected_sha256:
                 raise MediaContentLeaseError(
                     "The local media bytes no longer match the sealed SHA-256 snapshot."
