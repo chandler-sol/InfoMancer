@@ -1188,6 +1188,7 @@ class MediaIdentityDecisionService:
         file_id: int,
         *,
         verify_external: bool = True,
+        validated_source: Mapping[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         with self.database.connect() as conn:
             row = conn.execute(
@@ -1197,14 +1198,6 @@ class MediaIdentityDecisionService:
             if not row:
                 return None
             confirmation = dict(row)
-            current, _ = self._snapshot_is_current(
-                conn,
-                int(file_id),
-                size_bytes=int(confirmation["confirmed_size_bytes"] or 0),
-                modified_at=confirmation["confirmed_modified_at"],
-                sha256=confirmation["confirmed_sha256"],
-                verify_content=True,
-            )
             source_scan_id = confirmation.get("source_scan_id")
             try:
                 source_scan_snapshot_id = int(
@@ -1222,6 +1215,61 @@ class MediaIdentityDecisionService:
             source_metadata_signature = str(
                 confirmation.get("source_metadata_signature") or ""
             )
+
+            validated_match = False
+            if isinstance(validated_source, Mapping):
+                try:
+                    validated_match = (
+                        bool(validated_source.get("current"))
+                        and bool(validated_source.get("content_verified"))
+                        and int(validated_source.get("file_id") or 0)
+                        == int(file_id)
+                        and int(validated_source.get("scan_id") or 0)
+                        == int(source_scan_id or 0)
+                        and int(validated_source.get("result_revision") or 0)
+                        == source_result_revision
+                        and str(
+                            validated_source.get(
+                                "decision_snapshot_sha256"
+                            ) or ""
+                        ).strip().casefold()
+                        == source_decision_sha256
+                        and str(
+                            validated_source.get("metadata_signature") or ""
+                        )
+                        == source_metadata_signature
+                        and int(
+                            validated_source.get("file_size_bytes") or 0
+                        )
+                        == int(confirmation["confirmed_size_bytes"] or 0)
+                        and _same_modified_at(
+                            validated_source.get("file_modified_at"),
+                            confirmation["confirmed_modified_at"],
+                        )
+                        and str(
+                            validated_source.get("file_sha256") or ""
+                        ).strip().casefold()
+                        == str(
+                            confirmation.get("confirmed_sha256") or ""
+                        ).strip().casefold()
+                    )
+                except (TypeError, ValueError):
+                    validated_match = False
+
+            if validated_match:
+                current = True
+            else:
+                current, _ = self._snapshot_is_current(
+                    conn,
+                    int(file_id),
+                    size_bytes=int(
+                        confirmation["confirmed_size_bytes"] or 0
+                    ),
+                    modified_at=confirmation["confirmed_modified_at"],
+                    sha256=confirmation["confirmed_sha256"],
+                    verify_content=True,
+                )
+
             if current and (
                 source_scan_id is None
                 or source_scan_snapshot_id <= 0
@@ -1250,20 +1298,21 @@ class MediaIdentityDecisionService:
                 except MediaIdentityDecisionError:
                     current = False
                 else:
-                    if verify_external:
-                        current, _ = self._review_snapshot_is_current(
-                            conn,
-                            scan,
-                            evidence,
-                            verify_content=True,
-                        )
-                    else:
-                        current, _ = self._scan_snapshot_is_current(
-                            conn,
-                            scan,
-                            evidence,
-                            verify_content=True,
-                        )
+                    if not validated_match:
+                        if verify_external:
+                            current, _ = self._review_snapshot_is_current(
+                                conn,
+                                scan,
+                                evidence,
+                                verify_content=True,
+                            )
+                        else:
+                            current, _ = self._scan_snapshot_is_current(
+                                conn,
+                                scan,
+                                evidence,
+                                verify_content=True,
+                            )
                     if current:
                         try:
                             live_provenance = self._confirmation_provenance(scan)
@@ -1540,6 +1589,31 @@ class MediaIdentityDecisionService:
             )
         claimed = self._claimed_identity(scan)
         resolution = self._resolve_snapshot(scan, candidates, evidence)
+        result_revision_value, decision_digest = self._decision_token(claimed)
+        content_verified = bool(
+            verify_actionable_content
+            and str(scan.get("result_state") or "") in ACTIONABLE_STATES
+        )
+        validated_source = (
+            {
+                "current": True,
+                "content_verified": True,
+                "scan_id": int(scan["id"]),
+                "file_id": int(scan["file_id"]),
+                "result_revision": result_revision_value,
+                "decision_snapshot_sha256": decision_digest,
+                "metadata_signature": str(
+                    scan.get("metadata_signature") or ""
+                ),
+                "file_size_bytes": int(
+                    scan.get("file_size_bytes") or 0
+                ),
+                "file_modified_at": scan.get("file_modified_at"),
+                "file_sha256": str(scan.get("file_sha256") or ""),
+            }
+            if snapshot_current and content_verified
+            else None
+        )
 
         speech_analysis = None
         speech_metadata = claimed.get("normal_speech")
@@ -1617,6 +1691,7 @@ class MediaIdentityDecisionService:
             self.confirmation_status(
                 int(scan["file_id"]),
                 verify_external=verify_confirmation_external,
+                validated_source=validated_source,
             )
             if include_confirmation
             else None
@@ -1624,7 +1699,6 @@ class MediaIdentityDecisionService:
         result = dict(scan)
         result["claimed_identity"] = claimed
         result.pop("claimed_identity_json", None)
-        result_revision_value, decision_digest = self._decision_token(claimed)
         result["result_revision"] = result_revision_value
         result["decision_snapshot_sha256"] = decision_digest
         result["candidates"] = candidates
