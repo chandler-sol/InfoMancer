@@ -202,7 +202,7 @@ class MediaContentLease:
                 None,
             )
             invalid = ctypes.c_void_p(-1).value
-            raw_handle = int(handle) if handle else 0
+            raw_handle = int(getattr(handle, "value", handle) or 0)
             if not raw_handle or raw_handle == invalid:
                 raise OSError(ctypes.get_last_error(), "CreateFileW failed")
             self._windows_handle = raw_handle
