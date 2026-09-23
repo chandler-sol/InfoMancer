@@ -93,6 +93,25 @@ class NormalSpeechRun:
     def text_transcript_count(self) -> int:
         return sum(1 for item in self.observations if item.transcript.text.strip())
 
+    @property
+    def coverage_complete(self) -> bool:
+        if (
+            not self.planned_windows
+            or self.failures
+            or self.budget_exhausted
+            or len(self.observations) != len(self.planned_windows)
+        ):
+            return False
+        expected = {
+            (int(window.start_ms), int(window.end_ms))
+            for window in self.planned_windows
+        }
+        observed = {
+            (int(item.window.start_ms), int(item.window.end_ms))
+            for item in self.observations
+        }
+        return observed == expected
+
 
 def _canonical_json(value: Any) -> str:
     return json.dumps(
