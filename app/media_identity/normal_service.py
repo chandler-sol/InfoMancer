@@ -910,6 +910,13 @@ class NormalIdentityService:
                     "transcript_count": len(usable),
                     "transcript_excerpt": transcript_excerpt,
                     "correlated_with": ["subtitle-synopsis"],
+                    "synopsis_language": normalize_speech_language(
+                        synopsis_language
+                    ),
+                    "transcript_languages": sorted({
+                        normalize_speech_language(item.transcript.language)
+                        for item in usable
+                    }),
                 }),
                 aggregate_cache_key,
                 IdentityProfile.NORMAL.value,
