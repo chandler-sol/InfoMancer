@@ -637,7 +637,7 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertFalse(detail["actionable"])
         self.assertEqual(self.service.mie_findings(), [])
 
-    def test_snapshot_sha_requires_current_matching_hash_record(self) -> None:
+    def test_snapshot_sha_does_not_trust_or_require_cached_hash_record(self) -> None:
         self.service.resolve_scan(self.scan_id)
         digest = hashlib.sha256(self.media.read_bytes()).hexdigest()
         current = self.media.stat()
@@ -668,6 +668,16 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertTrue(self.service.scan_detail(self.scan_id)["snapshot_current"])
         with self.database.connect() as conn:
             conn.execute("DELETE FROM media_file_hashes WHERE file_id=1")
+        self.assertTrue(self.service.scan_detail(self.scan_id)["snapshot_current"])
+
+        original = self.media.stat()
+        payload = bytearray(self.media.read_bytes())
+        payload[0] ^= 0x01
+        self.media.write_bytes(bytes(payload))
+        os.utime(
+            self.media,
+            ns=(original.st_atime_ns, original.st_mtime_ns),
+        )
         self.assertFalse(self.service.scan_detail(self.scan_id)["snapshot_current"])
 
     def test_confirmation_is_snapshot_bound_and_becomes_stale(self) -> None:
