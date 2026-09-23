@@ -1283,7 +1283,7 @@ class NormalIdentityService:
             ):
                 raise NormalIdentityScanError(
                     "Normal rerun only completed part of its visual coverage. "
-                    "The existing completed Normal result was retained."
+                    "The existing completed Normal evidence was retained."
                 )
 
             if (
@@ -1293,7 +1293,7 @@ class NormalIdentityService:
             ):
                 raise NormalIdentityScanError(
                     "Normal rerun only completed part of the speech coverage still "
-                    "needed by this scan. The existing completed Normal result "
+                    "needed by this scan. The existing completed Normal evidence "
                     "was retained."
                 )
 
