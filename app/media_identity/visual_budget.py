@@ -22,6 +22,7 @@ class VisualAttemptBudget:
     source_bytes: int = 0
     image_bytes: int = 0
     text_chars: int = 0
+    blocked: bool = False
     _source_cache: dict[str, bytes] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
@@ -63,45 +64,36 @@ class VisualAttemptBudget:
     def remaining_text_chars(self) -> int:
         return max(0, self.max_text_chars - self.text_chars)
 
+    def _deny(self, detail: str) -> None:
+        self.blocked = True
+        raise VisualBudgetExceeded(detail)
+
     def reserve_frame_attempt(self) -> None:
         if self.remaining_frame_attempts <= 0:
-            raise VisualBudgetExceeded(
-                "Normal visual frame-attempt budget is exhausted."
-            )
+            self._deny("Normal visual frame-attempt budget is exhausted.")
         self.frame_attempts += 1
 
     def reserve_source_bytes(self, amount: int) -> None:
         value = int(amount)
         if value < 0 or value > self.remaining_source_bytes:
-            raise VisualBudgetExceeded(
-                "Normal visual source-byte budget is exhausted."
-            )
+            self._deny("Normal visual source-byte budget is exhausted.")
         self.source_bytes += value
 
     def reserve_image_bytes(self, amount: int) -> None:
         value = int(amount)
         if value < 0 or value > self.remaining_image_bytes:
-            raise VisualBudgetExceeded(
-                "Normal visual OCR-image byte budget is exhausted."
-            )
+            self._deny("Normal visual OCR-image byte budget is exhausted.")
         self.image_bytes += value
 
     def reserve_text_chars(self, amount: int) -> None:
         value = int(amount)
         if value < 0 or value > self.remaining_text_chars:
-            raise VisualBudgetExceeded(
-                "Normal visual OCR-text budget is exhausted."
-            )
+            self._deny("Normal visual OCR-text budget is exhausted.")
         self.text_chars += value
 
     @property
     def exhausted(self) -> bool:
-        return (
-            self.remaining_frame_attempts <= 0
-            or self.remaining_source_bytes <= 0
-            or self.remaining_image_bytes <= 0
-            or self.remaining_text_chars <= 0
-        )
+        return bool(self.blocked)
 
     def cached_source_asset(self, key: str) -> bytes | None:
         return self._source_cache.get(str(key))
@@ -139,9 +131,7 @@ def source_read_plan(static_limit: int) -> tuple[int, bool]:
         return limit, False
     remaining = budget.remaining_source_bytes
     if remaining <= 0:
-        raise VisualBudgetExceeded(
-            "Normal visual source-byte budget is exhausted."
-        )
+        budget._deny("Normal visual source-byte budget is exhausted.")
     if remaining <= limit:
         return remaining, True
     return limit, False
