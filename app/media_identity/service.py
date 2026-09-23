@@ -10,6 +10,7 @@ from ..db import Database
 from ..naming import contained_destination, plex_episode_filename
 from .candidates import generate_episode_candidates
 from .decision_snapshot import (
+    DECISION_SNAPSHOT_VERSION,
     decision_snapshot_matches,
     result_revision,
     seal_decision_snapshot,
@@ -1125,33 +1126,37 @@ class MediaIdentityDecisionService:
         return current, file_row
 
     @staticmethod
-    def _confirmation_provenance(
-        scan: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        claimed = _json_object(scan.get("claimed_identity_json"))
+    def _decision_token(
+        claimed: Mapping[str, Any],
+    ) -> tuple[int, str]:
         snapshot = claimed.get("decision_snapshot")
         if not isinstance(snapshot, Mapping):
-            raise MediaIdentityDecisionError(
-                "Episode Identity confirmation requires a sealed decision snapshot."
-            )
+            return 0, ""
         try:
             snapshot_version = int(snapshot.get("version") or 0)
             snapshot_revision = int(snapshot.get("revision") or 0)
-        except (TypeError, ValueError) as exc:
-            raise MediaIdentityDecisionError(
-                "Episode Identity confirmation has invalid decision provenance."
-            ) from exc
+        except (TypeError, ValueError):
+            return 0, ""
         revision = result_revision(claimed)
         digest = str(snapshot.get("sha256") or "").strip().casefold()
-        metadata_signature = str(scan.get("metadata_signature") or "")
         if (
-            snapshot_version != 1
+            snapshot_version != DECISION_SNAPSHOT_VERSION
             or revision <= 0
             or snapshot_revision != revision
             or len(digest) != 64
             or any(character not in "0123456789abcdef" for character in digest)
-            or not metadata_signature
         ):
+            return 0, ""
+        return revision, digest
+
+    @staticmethod
+    def _confirmation_provenance(
+        scan: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        claimed = _json_object(scan.get("claimed_identity_json"))
+        revision, digest = MediaIdentityDecisionService._decision_token(claimed)
+        metadata_signature = str(scan.get("metadata_signature") or "")
+        if revision <= 0 or not digest or not metadata_signature:
             raise MediaIdentityDecisionError(
                 "Episode Identity confirmation has incomplete decision provenance."
             )
@@ -1278,6 +1283,9 @@ class MediaIdentityDecisionService:
         scan_id: int,
         candidate_key: str,
         user_id: int | None,
+        *,
+        expected_result_revision: int,
+        expected_decision_snapshot_sha256: str,
     ) -> dict[str, Any]:
         with self.database.connect() as conn:
             if not conn.in_transaction:
@@ -1286,6 +1294,19 @@ class MediaIdentityDecisionService:
             if scan["status"] != "complete":
                 raise MediaIdentityDecisionError(
                     "Only a complete Episode Identity scan can be confirmed."
+                )
+            current_claimed = self._claimed_identity(scan)
+            current_revision, current_digest = self._decision_token(
+                current_claimed
+            )
+            if (
+                current_revision != int(expected_result_revision)
+                or current_digest
+                != str(expected_decision_snapshot_sha256 or "").strip().casefold()
+            ):
+                raise MediaIdentityDecisionError(
+                    "The Episode Identity result changed after it was reviewed. "
+                    "Refresh the scan before confirming it."
                 )
             candidate = self._candidate_for_key(candidates, candidate_key)
             current, _ = self._review_snapshot_is_current(
@@ -1360,7 +1381,15 @@ class MediaIdentityDecisionService:
             raise MediaIdentityDecisionError(
                 "The current filename does not map to exactly one content candidate, so InfoMancer cannot mark it correct safely."
             )
-        return self._confirm(int(scan_id), claimed_keys[0], user_id)
+        return self._confirm(
+            int(scan_id),
+            claimed_keys[0],
+            user_id,
+            expected_result_revision=int(detail.get("result_revision") or 0),
+            expected_decision_snapshot_sha256=str(
+                detail.get("decision_snapshot_sha256") or ""
+            ),
+        )
 
     def confirm_best(self, scan_id: int, user_id: int | None) -> dict[str, Any]:
         detail = self.scan_detail(int(scan_id), resolve_if_needed=True)
@@ -1375,7 +1404,15 @@ class MediaIdentityDecisionService:
             raise MediaIdentityDecisionError(
                 "This scan has no distinct alternate episode to confirm."
             )
-        return self._confirm(int(scan_id), candidate_key, user_id)
+        return self._confirm(
+            int(scan_id),
+            candidate_key,
+            user_id,
+            expected_result_revision=int(detail.get("result_revision") or 0),
+            expected_decision_snapshot_sha256=str(
+                detail.get("decision_snapshot_sha256") or ""
+            ),
+        )
 
     def scan_detail(
         self,
@@ -1494,6 +1531,9 @@ class MediaIdentityDecisionService:
         result = dict(scan)
         result["claimed_identity"] = claimed
         result.pop("claimed_identity_json", None)
+        result_revision_value, decision_digest = self._decision_token(claimed)
+        result["result_revision"] = result_revision_value
+        result["decision_snapshot_sha256"] = decision_digest
         result["candidates"] = candidates
         for item in evidence:
             item["strength_label"] = _strength_label(item.get("strength"))
@@ -1694,6 +1734,10 @@ class MediaIdentityDecisionService:
 
     def rename_preview(self, scan_id: int) -> dict[str, Any]:
         detail = self.scan_detail(int(scan_id))
+        reviewed_revision = int(detail.get("result_revision") or 0)
+        reviewed_digest = str(
+            detail.get("decision_snapshot_sha256") or ""
+        ).strip().casefold()
         if not detail.get("snapshot_current"):
             return {
                 "available": False,
@@ -1765,18 +1809,36 @@ class MediaIdentityDecisionService:
 
         with self.database.connect() as conn:
             scan, _, evidence = self._scan_snapshot(conn, int(scan_id))
-            current, _ = self._review_snapshot_is_current(
-                conn,
-                scan,
-                evidence,
-                verify_content=True,
+            current_claimed = self._claimed_identity(scan)
+            current_revision, current_digest = self._decision_token(
+                current_claimed
             )
+            same_reviewed_result = (
+                reviewed_revision > 0
+                and bool(reviewed_digest)
+                and current_revision == reviewed_revision
+                and current_digest == reviewed_digest
+            )
+            current = False
+            if same_reviewed_result:
+                current, _ = self._review_snapshot_is_current(
+                    conn,
+                    scan,
+                    evidence,
+                    verify_content=True,
+                )
         if not current:
+            stale_detail = dict(detail)
+            stale_detail["snapshot_current"] = False
+            stale_detail["actionable"] = False
             return {
                 "available": False,
                 "status": "stale",
-                "reason": "The exact media content or supporting evidence changed after verification.",
-                "scan": self.scan_detail(int(scan_id)),
+                "reason": (
+                    "The Episode Identity result, exact media content, or supporting "
+                    "evidence changed after review."
+                ),
+                "scan": stale_detail,
             }
         source = Path(str(file_row["path"]))
         raw_extension = str(file_row.get("extension") or "").strip()
