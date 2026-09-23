@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 
 
@@ -174,3 +175,79 @@ def apply_media_identity_foundation(conn: sqlite3.Connection) -> None:
         """CREATE INDEX IF NOT EXISTS idx_media_identity_confirmations_provider
            ON media_identity_confirmations(identity_kind,provider,provider_item_id)"""
     )
+
+
+def apply_media_identity_confirmation_provenance(
+    conn: sqlite3.Connection,
+) -> None:
+    """Persist immutable confirmation-time scan provenance outside the scan FK."""
+    existing = {
+        str(row["name"])
+        for row in conn.execute(
+            "PRAGMA table_info(media_identity_confirmations)"
+        )
+    }
+    additions = {
+        "source_scan_snapshot_id": "INTEGER NOT NULL DEFAULT 0 CHECK(source_scan_snapshot_id>=0)",
+        "source_result_revision": "INTEGER NOT NULL DEFAULT 0 CHECK(source_result_revision>=0)",
+        "source_decision_snapshot_sha256": "TEXT NOT NULL DEFAULT ''",
+        "source_metadata_signature": "TEXT NOT NULL DEFAULT ''",
+    }
+    for name, definition in additions.items():
+        if name not in existing:
+            conn.execute(
+                f"ALTER TABLE media_identity_confirmations ADD COLUMN {name} {definition}"
+            )
+
+    rows = conn.execute(
+        """SELECT c.file_id,c.source_scan_id,s.claimed_identity_json,
+                  s.metadata_signature
+           FROM media_identity_confirmations c
+           LEFT JOIN media_identity_scans s ON s.id=c.source_scan_id
+           WHERE c.source_scan_id IS NOT NULL"""
+    ).fetchall()
+    for row in rows:
+        source_scan_id = int(row["source_scan_id"] or 0)
+        revision = 0
+        digest = ""
+        try:
+            claimed = json.loads(str(row["claimed_identity_json"] or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            claimed = {}
+        if isinstance(claimed, dict):
+            try:
+                revision = max(0, int(claimed.get("result_revision") or 0))
+            except (TypeError, ValueError):
+                revision = 0
+            snapshot = claimed.get("decision_snapshot")
+            if isinstance(snapshot, dict):
+                try:
+                    snapshot_revision = int(snapshot.get("revision") or 0)
+                except (TypeError, ValueError):
+                    snapshot_revision = 0
+                candidate_digest = str(snapshot.get("sha256") or "")
+                if (
+                    snapshot_revision == revision
+                    and len(candidate_digest) == 64
+                    and all(
+                        character in "0123456789abcdef"
+                        for character in candidate_digest.casefold()
+                    )
+                ):
+                    digest = candidate_digest.casefold()
+
+        conn.execute(
+            """UPDATE media_identity_confirmations
+               SET source_scan_snapshot_id=?,
+                   source_result_revision=?,
+                   source_decision_snapshot_sha256=?,
+                   source_metadata_signature=?
+               WHERE file_id=?""",
+            (
+                source_scan_id,
+                revision,
+                digest,
+                str(row["metadata_signature"] or ""),
+                int(row["file_id"]),
+            ),
+        )
