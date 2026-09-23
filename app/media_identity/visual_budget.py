@@ -149,6 +149,13 @@ def source_read_plan(static_limit: int) -> tuple[int, bool]:
     return limit, False
 
 
+def deny_visual_budget(detail: str) -> None:
+    budget = current_visual_budget()
+    if budget is not None:
+        budget._deny(str(detail))
+    raise VisualBudgetExceeded(str(detail))
+
+
 def account_source_bytes(amount: int) -> None:
     budget = current_visual_budget()
     if budget is not None:
