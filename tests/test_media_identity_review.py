@@ -119,7 +119,19 @@ class EpisodeIdentityReviewAdapterTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(first["scope"], "finding")
 
-        self.assertTrue(engine.restore(1))
+        # Reset the fixture directly so this test stays focused on feedback
+        # scope. Episode Identity restore now reconciles the finding against
+        # the current sealed decision before it may become active again.
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE mie_feedback SET active=0
+                   WHERE finding_fingerprint='episode-identity:file:1:fixture'"""
+            )
+            conn.execute(
+                """UPDATE mie_findings
+                   SET status='active',dismissed_at=NULL,dismissed_by=NULL
+                   WHERE id=1"""
+            )
         self.assertTrue(
             engine.dismiss(1, None, reason="incorrect", scope="source")
         )
@@ -131,6 +143,27 @@ class EpisodeIdentityReviewAdapterTests(unittest.TestCase):
                    ORDER BY id DESC LIMIT 1"""
             ).fetchone()
         self.assertEqual(second["scope"], "finding")
+
+    def test_episode_identity_restore_keeps_superseded_fingerprint_historical(self) -> None:
+        engine = MediaIntelligenceEngine(self.database)
+        self.assertTrue(
+            engine.dismiss(1, None, reason="expected", scope="finding")
+        )
+
+        self.assertTrue(engine.restore(1))
+
+        with self.database.connect() as conn:
+            finding = conn.execute(
+                "SELECT status,dismissed_at FROM mie_findings WHERE id=1"
+            ).fetchone()
+            active_feedback = conn.execute(
+                """SELECT COUNT(*) FROM mie_feedback
+                   WHERE finding_fingerprint='episode-identity:file:1:fixture'
+                     AND active=1"""
+            ).fetchone()[0]
+        self.assertEqual(finding["status"], "resolved")
+        self.assertIsNone(finding["dismissed_at"])
+        self.assertEqual(active_feedback, 0)
 
     def test_health_action_routes_identity_finding_to_exact_scan(self) -> None:
         self.assertEqual(
@@ -187,7 +220,7 @@ class EpisodeIdentityHttpBindingTests(unittest.TestCase):
             )
         self.assertEqual(
             [response.status_code for response in responses[:4]],
-            [404, 404, 404, 404],
+            [404, 404, 404, 409],
         )
         self.assertEqual(
             [response.status_code for response in responses[4:]],
@@ -406,6 +439,9 @@ class EpisodeIdentityReviewContractTests(unittest.TestCase):
         self.assertIn("identity.snapshot_current", identity)
         self.assertIn("Run Normal", identity)
         self.assertIn("bounded CPU OCR", identity)
+        self.assertIn('name="result_revision"', identity)
+        self.assertIn('name="decision_snapshot_sha256"', identity)
+        self.assertIn('name="candidate_key"', identity)
         self.assertIn("finding.rule_key == 'episode-identity-review'", health)
         self.assertIn('name="scope" value="finding"', health)
         self.assertNotIn("source.rename(", routes)
