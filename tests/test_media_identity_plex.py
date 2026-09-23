@@ -905,6 +905,42 @@ class PlexBifFoundationTests(unittest.TestCase):
                             0,
                         )
 
+    def test_ambiguous_path_mapping_is_normalized_as_plex_source_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            local_root = Path(temporary) / "tv"
+            local_path = local_root / "Show" / "Episode.mkv"
+            mapper = ExternalPathMapper([
+                PathMapping("plex", "/srv/tv-a", str(local_root), priority=1),
+                PathMapping("plex", "/srv/tv-b", str(local_root), priority=1),
+            ])
+            source = PlexBifSource(
+                "https://plex.local:32400",
+                "secret",
+                mapper,
+            )
+            context = AnalyzerContext(
+                media=MediaIdentityFile(
+                    file_id=1,
+                    title_id=1,
+                    path=str(local_path),
+                    size_bytes=1,
+                    modified_at=1.0,
+                ),
+                claimed_identity=IdentityReference(
+                    identity_kind="episode",
+                    season=1,
+                    episode=1,
+                    display_name="Episode",
+                ),
+                profile=IdentityProfile.NORMAL,
+            )
+            with self.assertRaisesRegex(
+                PlexSourceFailure,
+                "path mapping.*unambiguously",
+            ) as caught:
+                source.resolve_media(context)
+            self.assertIsInstance(caught.exception, ExternalSourceFailure)
+
     def test_configured_plex_source_resolves_and_reads_exact_part_preview(self):
         bif = build_bif()
         expected_external = "/srv/tv/Show/Season 01/Episode.mkv"
