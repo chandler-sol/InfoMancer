@@ -890,6 +890,31 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0]["rule_key"], "episode-identity-review")
 
+    def test_confirm_current_rejects_superseded_review_revision(self) -> None:
+        self.service.resolve_scan(self.scan_id)
+        displayed = self._reviewed_action_kwargs(
+            self.scan_id,
+            current=True,
+        )
+        self._advance_scan_revision()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "changed after it was reviewed",
+        ):
+            self.service.confirm_current(
+                self.scan_id,
+                None,
+                **displayed,
+            )
+
+        with self.database.connect() as conn:
+            count = conn.execute(
+                """SELECT COUNT(*) FROM media_identity_confirmations
+                   WHERE file_id=1"""
+            ).fetchone()[0]
+        self.assertEqual(count, 0)
+
     def test_confirm_best_rejects_superseded_review_revision(self) -> None:
         self.service.resolve_scan(self.scan_id)
         displayed = self._reviewed_action_kwargs(self.scan_id)
