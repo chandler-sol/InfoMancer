@@ -95,6 +95,18 @@ class VisualAttemptBudget:
     def exhausted(self) -> bool:
         return bool(self.blocked)
 
+    @property
+    def can_attempt_frame(self) -> bool:
+        return (
+            self.remaining_frame_attempts > 0
+            and self.remaining_source_bytes > 0
+            and self.remaining_image_bytes > 0
+            and self.remaining_text_chars > 0
+        )
+
+    def mark_blocked(self) -> None:
+        self.blocked = True
+
     def cached_source_asset(self, key: str) -> bytes | None:
         return self._source_cache.get(str(key))
 
