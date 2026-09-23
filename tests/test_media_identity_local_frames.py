@@ -148,6 +148,14 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
         self.assertNotIn("-hwaccel", command)
         self.assertEqual(run.call_args.kwargs["timeout"], 20)
         self.assertFalse(run.call_args.kwargs["check"])
+        self.assertIs(
+            run.call_args.kwargs["stderr"],
+            subprocess.DEVNULL,
+        )
+        self.assertIs(
+            run.call_args.kwargs["stdout"],
+            subprocess.PIPE,
+        )
 
     def test_timeout_is_optional_preview_failure(self):
         with (
