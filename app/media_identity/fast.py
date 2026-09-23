@@ -10,6 +10,7 @@ from typing import Any, Iterable
 
 from ..db import Database
 from .candidates import CandidateSet, generate_episode_candidates
+from .decision_snapshot import seal_decision_snapshot
 from .models import (
     EvidenceCategory,
     EvidenceRelation,
@@ -992,6 +993,7 @@ class FastIdentityService:
                    WHERE id=?""",
                 (scan_id,),
             )
+            seal_decision_snapshot(conn, scan_id, revision=1)
 
         return FastScanResult(
             scan_id=scan_id,
