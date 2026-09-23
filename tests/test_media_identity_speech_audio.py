@@ -362,6 +362,22 @@ class SpeechAudioExtractionTests(unittest.TestCase):
                 )
                 self.assertIn("-map_metadata", command)
                 self.assertIn("-map_chapters", command)
+                if os.name == "nt":
+                    self.assertEqual(
+                        command[command.index("-i") + 1],
+                        str(self.media_path.resolve()),
+                    )
+                    self.assertNotIn("pass_fds", run.call_args.kwargs)
+                else:
+                    self.assertIn("-fd", command)
+                    self.assertEqual(
+                        command[command.index("-i") + 1],
+                        "fd:",
+                    )
+                    self.assertEqual(
+                        len(run.call_args.kwargs["pass_fds"]),
+                        1,
+                    )
                 self.assertNotIn("-hwaccel", command)
                 self.assertEqual(
                     run.call_args.kwargs["timeout"],
@@ -379,6 +395,62 @@ class SpeechAudioExtractionTests(unittest.TestCase):
                 parent = artifact.path.parent
                 artifact.cleanup()
                 self.assertFalse(parent.exists())
+
+    @unittest.skipIf(os.name == "nt", "POSIX descriptor binding test")
+    def test_path_redirection_cannot_change_leased_ffmpeg_input(self) -> None:
+        payload = wav_bytes(duration_ms=1000)
+        original = self.media_path.read_bytes()
+        alternate = self.root / "alternate.mkv"
+        alternate.write_bytes(b"alternate-media-content")
+        alias = self.root / "episode-alias.mkv"
+        alias.symlink_to(self.media_path)
+        alias_media = replace(self.media, path=str(alias))
+        extractor = LocalFfmpegSpeechAudioExtractor(
+            alias_media,
+            self.streams,
+            preferred_language="eng",
+            executable=str(self.ffmpeg),
+        )
+
+        def redirect_alias(command, **kwargs):
+            Path(command[-1]).write_bytes(payload)
+            descriptor = kwargs["pass_fds"][0]
+            alias.unlink()
+            alias.symlink_to(alternate)
+            try:
+                self.assertEqual(
+                    os.pread(descriptor, len(original), 0),
+                    original,
+                )
+                self.assertEqual(
+                    command[command.index("-i") + 1],
+                    "fd:",
+                )
+            finally:
+                alias.unlink()
+                alias.symlink_to(self.media_path)
+            return subprocess.CompletedProcess(
+                args=command,
+                returncode=0,
+                stdout=None,
+                stderr=b"",
+            )
+
+        try:
+            with patch(
+                "app.media_identity.speech_audio.subprocess.run",
+                side_effect=redirect_alias,
+            ):
+                artifact = extractor.extract(SpeechWindow(0, 1000))
+            try:
+                self.assertEqual(
+                    artifact.identity.sha256,
+                    hashlib.sha256(payload).hexdigest(),
+                )
+            finally:
+                artifact.cleanup()
+        finally:
+            extractor.close()
 
     def test_output_must_be_valid_canonical_wav(self) -> None:
         invalid_payloads = [
