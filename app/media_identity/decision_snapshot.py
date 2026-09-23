@@ -265,6 +265,13 @@ def seal_decision_snapshot(
         raise DecisionSnapshotError("Episode Identity scan was not found.")
 
     claimed = _json_object(row["claimed_identity_json"])
+    current_revision = result_revision(claimed)
+    existing_snapshot = claimed.get("decision_snapshot")
+    if isinstance(existing_snapshot, Mapping) and int(revision) <= current_revision:
+        raise DecisionSnapshotError(
+            "Episode Identity result revisions are immutable and must increase."
+        )
+
     claimed["result_revision"] = int(revision)
     claimed.pop("decision_snapshot", None)
     conn.execute(
