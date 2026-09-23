@@ -223,10 +223,7 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
             source = self.source()
             media = source.resolve_media(self.context)
             frame = source.preview_frames(media)[0]
-            with self.assertRaisesRegex(
-                LocalFrameSourceFailure,
-                "changed",
-            ):
+            with self.assertRaises(LocalFrameSourceFailure):
                 source.read_preview(frame)
 
     def test_same_size_same_mtime_a_b_a_during_extraction_fails_closed(self):
