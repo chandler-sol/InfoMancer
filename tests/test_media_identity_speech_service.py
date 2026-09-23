@@ -349,6 +349,53 @@ class NormalSpeechServiceTests(unittest.TestCase):
         self.assertEqual(payload["request"]["language"], "spa")
         self.assertTrue(payload["request"]["translate"])
 
+    def test_unknown_audio_uses_auto_detection_with_english_translation(self):
+        class UnknownExtractor(FakeExtractor):
+            def __init__(self, media, streams, *, preferred_language=""):
+                super().__init__(
+                    media,
+                    streams,
+                    preferred_language=preferred_language,
+                )
+                self.stream = SpeechAudioStream(
+                    index=1,
+                    language="und",
+                    channels=2,
+                    sample_rate_hz=48_000,
+                    default=True,
+                )
+
+        class CapturingEngine(FakeSpeechEngine):
+            def __init__(self):
+                super().__init__()
+                self.requests = []
+
+            def transcribe(self, audio_path, request):
+                self.requests.append(request)
+                return super().transcribe(audio_path, request)
+
+        engine = CapturingEngine()
+        result = NormalSpeechService(
+            self.database,
+            engine,
+            self.model,
+            extractor_factory=UnknownExtractor,
+            language="eng",
+        ).run(
+            1,
+            self.scan,
+            self.media,
+            10,
+            [{
+                **self.streams[0],
+                "language": "und",
+            }],
+        )
+
+        self.assertEqual(result.transcript_count, 1)
+        self.assertEqual(engine.requests[0].language, "")
+        self.assertTrue(engine.requests[0].translate)
+
     def test_english_only_model_refuses_selected_non_english_audio(self):
         class SpanishExtractor(FakeExtractor):
             def __init__(self, media, streams, *, preferred_language=""):
