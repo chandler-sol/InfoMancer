@@ -10,6 +10,6 @@ from __future__ import annotations
 # the speech evidence version whenever transcript-to-candidate evidence or its
 # correlation semantics change.
 EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION = 1
-NORMAL_EVIDENCE_ALGORITHM_VERSION = 2
+NORMAL_EVIDENCE_ALGORITHM_VERSION = 3
 NORMAL_SPEECH_ORCHESTRATION_VERSION = 2
 NORMAL_SPEECH_EVIDENCE_ALGORITHM_VERSION = 1
