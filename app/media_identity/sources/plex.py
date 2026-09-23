@@ -31,6 +31,7 @@ from ..models import AnalyzerContext
 from ..visual_budget import (
     VisualBudgetExceeded,
     account_source_bytes,
+    deny_visual_budget,
     source_read_plan,
 )
 
@@ -818,7 +819,7 @@ def _read_plex_bytes(
                     )
                 if content_length > limit:
                     if budget_limited:
-                        raise VisualBudgetExceeded(
+                        deny_visual_budget(
                             "Normal visual source-byte budget cannot admit this Plex response."
                         )
                     raise _PlexResponseTooLarge(
