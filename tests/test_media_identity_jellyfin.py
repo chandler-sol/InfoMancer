@@ -461,6 +461,42 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
                 )
         self.assertIsInstance(caught.exception, ExternalSourceFailure)
 
+    def test_ambiguous_path_mapping_is_normalized_as_jellyfin_source_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            local_root = Path(temporary) / "tv"
+            local_path = local_root / "Show" / "Episode.mkv"
+            mapper = ExternalPathMapper([
+                PathMapping("jellyfin", "/srv/tv-a", str(local_root), priority=1),
+                PathMapping("jellyfin", "/srv/tv-b", str(local_root), priority=1),
+            ])
+            source = JellyfinTrickplaySource(
+                "https://jellyfin.local:8096",
+                "jf-secret",
+                mapper,
+            )
+            context = AnalyzerContext(
+                media=MediaIdentityFile(
+                    file_id=1,
+                    title_id=1,
+                    path=str(local_path),
+                    size_bytes=1,
+                    modified_at=1.0,
+                ),
+                claimed_identity=IdentityReference(
+                    identity_kind="episode",
+                    season=1,
+                    episode=1,
+                    display_name="Episode",
+                ),
+                profile=IdentityProfile.NORMAL,
+            )
+            with self.assertRaisesRegex(
+                JellyfinSourceFailure,
+                "path mapping.*unambiguously",
+            ) as caught:
+                source.resolve_media(context)
+            self.assertIsInstance(caught.exception, ExternalSourceFailure)
+
     def test_configured_source_resolves_exact_mapped_episode_and_enumerates_trickplay(self):
         item_id = "11111111111111111111111111111111"
         media_source_id = "22222222222222222222222222222222"
