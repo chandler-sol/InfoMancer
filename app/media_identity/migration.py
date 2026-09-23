@@ -181,6 +181,16 @@ def apply_media_identity_confirmation_provenance(
     conn: sqlite3.Connection,
 ) -> None:
     """Persist immutable confirmation-time scan provenance outside the scan FK."""
+    confirmation_table = conn.execute(
+        """SELECT 1 FROM sqlite_master
+           WHERE type='table' AND name='media_identity_confirmations'"""
+    ).fetchone()
+    if confirmation_table is None:
+        # Repair databases whose historical migration ledger claims the
+        # foundation ran even though its tables are absent. The foundation is
+        # idempotent and uses CREATE IF NOT EXISTS throughout.
+        apply_media_identity_foundation(conn)
+
     existing = {
         str(row["name"])
         for row in conn.execute(
