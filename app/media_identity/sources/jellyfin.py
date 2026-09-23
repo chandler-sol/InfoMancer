@@ -436,7 +436,6 @@ def fetch_trickplay_tile(
     configured_limit = int(max_bytes)
     if configured_limit <= 0 or configured_limit > _MAX_TILE_JPEG_BYTES:
         raise JellyfinAdapterError("Jellyfin Trickplay response limit is invalid.")
-    limit, budget_limited = source_read_plan(configured_limit)
     secure_base = _credential_transport_url(
         server_url,
         allow_insecure_http=allow_insecure_http,
@@ -448,6 +447,7 @@ def fetch_trickplay_tile(
         cached_tile = visual_budget.cached_source_asset(cache_key)
         if cached_tile is not None:
             return cached_tile
+    limit, budget_limited = source_read_plan(configured_limit)
     request = urllib.request.Request(
         url,
         headers={
@@ -486,7 +486,15 @@ def fetch_trickplay_tile(
                     raise JellyfinSourceFailure(
                         "Jellyfin Trickplay response had an invalid Content-Length."
                     ) from exc
-                if content_length < 0 or content_length > limit:
+                if content_length < 0:
+                    raise JellyfinSourceFailure(
+                        "Jellyfin Trickplay response had an invalid Content-Length."
+                    )
+                if content_length > limit:
+                    if budget_limited:
+                        raise VisualBudgetExceeded(
+                            "Normal visual source-byte budget cannot admit this Jellyfin Trickplay tile."
+                        )
                     raise JellyfinPreviewUnavailable(
                         "Jellyfin Trickplay tile exceeded the safe response-size limit."
                     )
@@ -779,7 +787,15 @@ def _read_jellyfin_json(
                     raise JellyfinSourceFailure(
                         "Jellyfin metadata response had an invalid Content-Length."
                     ) from exc
-                if content_length < 0 or content_length > limit:
+                if content_length < 0:
+                    raise JellyfinSourceFailure(
+                        "Jellyfin metadata response had an invalid Content-Length."
+                    )
+                if content_length > limit:
+                    if budget_limited:
+                        raise VisualBudgetExceeded(
+                            "Normal visual source-byte budget cannot admit this Jellyfin metadata response."
+                        )
                     raise JellyfinSourceFailure(
                         "Jellyfin metadata response exceeded the safe response-size limit."
                     )
