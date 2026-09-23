@@ -418,45 +418,60 @@ class LocalFfmpegFrameSource:
             )
 
         timestamp_seconds = max(0.0, float(frame.timestamp_ms) / 1000.0)
-        command = [
-            self.executable,
-            "-nostdin",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-ss",
-            f"{timestamp_seconds:.3f}",
-            "-i",
-            str(path),
-            "-map",
-            "0:v:0",
-            "-frames:v",
-            "1",
-            "-vf",
-            (
-                "scale=w='min(1280,iw)':h='min(720,ih)':"
-                "force_original_aspect_ratio=decrease:force_divisible_by=2"
-            ),
-            "-q:v",
-            "4",
-            "-fs",
-            str(_MAX_GENERATED_JPEG_BYTES),
-            "-f",
-            "image2pipe",
-            "-vcodec",
-            "mjpeg",
-            "pipe:1",
-        ]
         try:
-            result = subprocess.run(
-                command,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                timeout=self.timeout_seconds,
-                check=False,
-                **_quiet_subprocess_options(),
-            )
+            if self._media_lease is None:
+                raise MediaContentLeaseError(
+                    "The local media content lease is unavailable."
+                )
+            with self._media_lease.ffmpeg_input() as (
+                ffmpeg_input_args,
+                lease_subprocess_options,
+            ):
+                command = [
+                    self.executable,
+                    "-nostdin",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-ss",
+                    f"{timestamp_seconds:.3f}",
+                    *ffmpeg_input_args,
+                    "-map",
+                    "0:v:0",
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    (
+                        "scale=w='min(1280,iw)':h='min(720,ih)':"
+                        "force_original_aspect_ratio=decrease:force_divisible_by=2"
+                    ),
+                    "-q:v",
+                    "4",
+                    "-fs",
+                    str(_MAX_GENERATED_JPEG_BYTES),
+                    "-f",
+                    "image2pipe",
+                    "-vcodec",
+                    "mjpeg",
+                    "pipe:1",
+                ]
+                subprocess_options = {
+                    **_quiet_subprocess_options(),
+                    **lease_subprocess_options,
+                }
+                result = subprocess.run(
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    timeout=self.timeout_seconds,
+                    check=False,
+                    **subprocess_options,
+                )
+        except MediaContentLeaseError as exc:
+            raise LocalFrameSourceFailure(
+                "The leased local media input changed before or during FFmpeg frame extraction."
+            ) from exc
         except FileNotFoundError as exc:
             raise LocalFrameSourceFailure(
                 "FFmpeg is unavailable for generated Normal preview frames."
