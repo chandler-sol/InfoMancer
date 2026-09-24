@@ -22,6 +22,7 @@ from app.media_identity.fingerprint import (
     fingerprint_from_payload,
 )
 from app.media_identity.fingerprint_local import (
+    LocalFingerprintError,
     dhash64_from_gray9x8,
     plan_video_fingerprint_timestamps,
 )
@@ -337,10 +338,16 @@ class FakeVideoFingerprintExtractor:
             30_000 + index * 60_000
             for index in range(6)
         )
+        stat = Path(media.path).stat()
+        self._generation = (
+            int(stat.st_size),
+            int(getattr(stat, "st_mtime_ns", 0)),
+        )
         self.source_signature = hashlib.sha256(
             (
                 f"fake-fingerprint:{media.file_id}:"
-                f"{media.sha256}:{self.runtime_ms}"
+                f"{media.sha256}:{self.runtime_ms}:"
+                f"{self._generation[0]}:{self._generation[1]}"
             ).encode()
         ).hexdigest()
 
@@ -348,6 +355,24 @@ class FakeVideoFingerprintExtractor:
         return True
 
     def extract(self) -> ContentFingerprint:
+        current = Path(self.media.path).stat()
+        if (
+            int(current.st_size),
+            int(getattr(current, "st_mtime_ns", 0)),
+        ) != self._generation:
+            raise LocalFingerprintError(
+                "fixture media generation changed"
+            )
+        if (
+            int(current.st_size) != int(self.media.size_bytes)
+            or (
+                self.media.modified_at is not None
+                and float(current.st_mtime) != float(self.media.modified_at)
+            )
+        ):
+            raise LocalFingerprintError(
+                "fixture media no longer matches catalog snapshot"
+            )
         file_id = int(self.media.file_id)
         self.__class__.extract_calls[file_id] = (
             self.__class__.extract_calls.get(file_id, 0) + 1
