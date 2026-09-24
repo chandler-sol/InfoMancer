@@ -83,6 +83,30 @@ class DeepCandidatePolicy:
                 "Deep specials limit exceeds the supported bound."
             )
 
+    def identity_payload(self) -> dict[str, Any]:
+        return {
+            "adjacent_season_radius": self.adjacent_season_radius,
+            "include_specials": self.include_specials,
+            "max_candidates": self.max_candidates,
+            "max_specials": self.max_specials,
+        }
+
+    @classmethod
+    def from_payload(cls, value: object) -> "DeepCandidatePolicy":
+        if not isinstance(value, Mapping):
+            raise DeepIdentityError("Deep candidate policy metadata is missing.")
+        try:
+            return cls(
+                adjacent_season_radius=value["adjacent_season_radius"],
+                include_specials=value["include_specials"],
+                max_candidates=value["max_candidates"],
+                max_specials=value["max_specials"],
+            )
+        except KeyError as exc:
+            raise DeepIdentityError(
+                "Deep candidate policy metadata is incomplete."
+            ) from exc
+
     def adjacent_seasons(self, claimed_season: int) -> tuple[int, ...]:
         claimed = _strict_int(claimed_season, name="Claimed season")
         if claimed <= 0 or self.adjacent_season_radius == 0:
