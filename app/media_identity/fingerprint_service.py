@@ -7,6 +7,7 @@ import sqlite3
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from ..db import Database
+from ..file_hashes import MediaHashService
 from .decision_snapshot import result_revision
 from .fingerprint import (
     ContentFingerprint,
@@ -480,8 +481,29 @@ class DeepFingerprintArtifactService:
         scan_id: int | None = None,
         expected_revision: int | None = None,
     ) -> DeepFingerprintRun:
+        try:
+            with self.database.connect() as conn:
+                snapshot = self._file_snapshot(conn, int(file_id))
+        except DeepFingerprintError as exc:
+            if "current exact file SHA-256" not in str(exc):
+                raise
+            try:
+                MediaHashService(self.database).hash_file(int(file_id))
+            except (OSError, ValueError) as hash_exc:
+                return DeepFingerprintRun(
+                    file_id=int(file_id),
+                    artifact_id=None,
+                    fingerprint=None,
+                    reused=False,
+                    failure=(
+                        "fingerprint-hash-unavailable:"
+                        f"{type(hash_exc).__name__}:{hash_exc}"
+                    ),
+                )
+            with self.database.connect() as conn:
+                snapshot = self._file_snapshot(conn, int(file_id))
+
         with self.database.connect() as conn:
-            snapshot = self._file_snapshot(conn, int(file_id))
             if scan_id is not None:
                 scan = self._require_scan_binding(
                     conn,
