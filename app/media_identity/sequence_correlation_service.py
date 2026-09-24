@@ -453,6 +453,10 @@ class DeepSequenceCorrelationService:
                         )
                     )
                 if hypothesis is None:
+                    if item.file_id == int(target_scan["file_id"]):
+                        raise DeepSequenceCorrelationError(
+                            "J4.2 target resolver snapshot is invalid."
+                        )
                     if had_scan:
                         invalid.append(item.file_id)
                     else:
