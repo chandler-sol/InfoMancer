@@ -191,6 +191,21 @@ class IdentityCycleObservation:
             raise CorrelationPatternError(
                 "Identity cycle targets do not form a closed file cycle."
             )
+        edge = dict(zip(self.file_ids, self.target_file_ids))
+        visited: set[int] = set()
+        current = self.file_ids[0]
+        for _ in range(len(self.file_ids)):
+            if current in visited or current not in edge:
+                break
+            visited.add(current)
+            current = edge[current]
+        if (
+            current != self.file_ids[0]
+            or visited != set(self.file_ids)
+        ):
+            raise CorrelationPatternError(
+                "Identity cycle targets do not form one complete directed cycle."
+            )
 
 
 @dataclass(frozen=True)
@@ -205,6 +220,27 @@ class CorrelationPatternAnalysis:
         if self.version != DEEP_PATTERN_CORRELATION_VERSION:
             raise CorrelationPatternError(
                 "Correlation pattern analysis version is stale."
+            )
+        if any(
+            not isinstance(item, DuplicatePatternObservation)
+            for item in self.duplicate_observations
+        ):
+            raise CorrelationPatternError(
+                "Correlation duplicate observations are malformed."
+            )
+        if any(
+            not isinstance(item, SwapPatternObservation)
+            for item in self.swap_observations
+        ):
+            raise CorrelationPatternError(
+                "Correlation swap observations are malformed."
+            )
+        if any(
+            not isinstance(item, IdentityCycleObservation)
+            for item in self.identity_cycles
+        ):
+            raise CorrelationPatternError(
+                "Correlation identity-cycle observations are malformed."
             )
         duplicate_pairs = [
             (item.left_file_id, item.right_file_id)
