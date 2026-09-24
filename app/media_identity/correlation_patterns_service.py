@@ -198,7 +198,7 @@ def correlate_deep_patterns(
         != sequence.correlation_plan_signature
     ):
         raise DeepCorrelationPatternError(
-            "J4.3 inputs do not share one sealed scan/cohort baseline."
+            "J4.3 inputs must share the same sealed scan/cohort baseline."
         )
 
     try:
