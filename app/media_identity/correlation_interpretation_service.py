@@ -33,6 +33,98 @@ class DeepCorrelationInterpretationRun:
     planned_pair_count: int
     pairs: tuple[PairInterpretation, ...]
 
+    def __post_init__(self) -> None:
+        for label, value in (
+            ("scan ID", self.scan_id),
+            ("result revision", self.result_revision),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 1
+            ):
+                raise CorrelationInterpretationError(
+                    f"J4 interpretation {label} must be a positive integer."
+                )
+        if (
+            self.interpretation_version
+            != DEEP_CORRELATION_INTERPRETATION_VERSION
+        ):
+            raise CorrelationInterpretationError(
+                "J4 interpretation version is stale."
+            )
+        for label, digest in (
+            ("correlation-plan signature", self.correlation_plan_signature),
+            ("policy signature", self.policy_signature),
+        ):
+            normalized = str(digest or "").strip().casefold()
+            if (
+                len(normalized) != 64
+                or any(
+                    character not in "0123456789abcdef"
+                    for character in normalized
+                )
+            ):
+                raise CorrelationInterpretationError(
+                    f"J4 interpretation {label} is invalid."
+                )
+        if not isinstance(self.policy_identity, Mapping):
+            raise CorrelationInterpretationError(
+                "J4 interpretation policy identity is malformed."
+            )
+        expected_policy_signature = hashlib.sha256(
+            _canonical_json_bytes(self.policy_identity)
+        ).hexdigest()
+        if expected_policy_signature != self.policy_signature:
+            raise CorrelationInterpretationError(
+                "J4 interpretation policy signature does not match its identity."
+            )
+        if (
+            len(set(self.complete_modalities))
+            != len(self.complete_modalities)
+            or any(
+                item not in {"video", "audio"}
+                for item in self.complete_modalities
+            )
+        ):
+            raise CorrelationInterpretationError(
+                "J4 interpretation complete modalities are invalid."
+            )
+        if (
+            isinstance(self.planned_pair_count, bool)
+            or not isinstance(self.planned_pair_count, int)
+            or self.planned_pair_count < 0
+        ):
+            raise CorrelationInterpretationError(
+                "J4 interpretation planned pair count is invalid."
+            )
+        if any(
+            not isinstance(item, PairInterpretation)
+            for item in self.pairs
+        ):
+            raise CorrelationInterpretationError(
+                "J4 interpretation pairs are malformed."
+            )
+        pair_keys = tuple(
+            (item.left_file_id, item.right_file_id)
+            for item in self.pairs
+        )
+        if len(set(pair_keys)) != len(pair_keys):
+            raise CorrelationInterpretationError(
+                "J4 interpretation contains duplicate pairs."
+            )
+        if len(self.pairs) > self.planned_pair_count:
+            raise CorrelationInterpretationError(
+                "J4 interpretation exceeds its planned pair count."
+            )
+        if (
+            self.complete_modalities
+            and len(self.pairs) != self.planned_pair_count
+        ):
+            raise CorrelationInterpretationError(
+                "J4 complete modality coverage is missing planned pairs."
+            )
+
     @property
     def pair_count(self) -> int:
         return len(self.pairs)
