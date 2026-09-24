@@ -49,6 +49,102 @@ class DeepSequenceCorrelationRun:
     hypotheses: tuple[SequenceHypothesis, ...]
     analysis: SequenceOffsetAnalysis
 
+    def __post_init__(self) -> None:
+        for label, value in (
+            ("scan ID", self.scan_id),
+            ("target file ID", self.target_file_id),
+            ("result revision", self.result_revision),
+            ("planned file count", self.planned_file_count),
+            ("hypothesis count", self.hypothesis_count),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 1
+            ):
+                raise DeepSequenceCorrelationError(
+                    f"Sequence run {label} must be a positive integer."
+                )
+        for label, digest in (
+            (
+                "correlation-plan signature",
+                self.correlation_plan_signature,
+            ),
+            (
+                "sequence-policy signature",
+                self.sequence_policy_signature,
+            ),
+        ):
+            normalized = str(digest or "").strip().casefold()
+            if (
+                len(normalized) != 64
+                or any(
+                    character not in "0123456789abcdef"
+                    for character in normalized
+                )
+            ):
+                raise DeepSequenceCorrelationError(
+                    f"Sequence run {label} is invalid."
+                )
+        if not isinstance(self.sequence_policy_identity, Mapping):
+            raise DeepSequenceCorrelationError(
+                "Sequence run policy identity is malformed."
+            )
+        if len(self.hypotheses) != self.hypothesis_count:
+            raise DeepSequenceCorrelationError(
+                "Sequence run hypothesis count is inconsistent."
+            )
+        hypothesis_ids = tuple(item.file_id for item in self.hypotheses)
+        if (
+            len(set(hypothesis_ids)) != len(hypothesis_ids)
+            or any(
+                not isinstance(item, SequenceHypothesis)
+                for item in self.hypotheses
+            )
+        ):
+            raise DeepSequenceCorrelationError(
+                "Sequence run hypotheses are malformed."
+            )
+        missing = set(self.missing_scan_file_ids)
+        invalid = set(self.invalid_scan_file_ids)
+        if (
+            len(missing) != len(self.missing_scan_file_ids)
+            or len(invalid) != len(self.invalid_scan_file_ids)
+            or missing & invalid
+            or missing & set(hypothesis_ids)
+            or invalid & set(hypothesis_ids)
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 1
+                for value in (*missing, *invalid)
+            )
+        ):
+            raise DeepSequenceCorrelationError(
+                "Sequence run missing/invalid file classifications overlap."
+            )
+        if (
+            self.hypothesis_count
+            + len(self.missing_scan_file_ids)
+            + len(self.invalid_scan_file_ids)
+            != self.planned_file_count
+        ):
+            raise DeepSequenceCorrelationError(
+                "Sequence run cohort accounting is inconsistent."
+            )
+        if self.target_file_id not in set(hypothesis_ids):
+            raise DeepSequenceCorrelationError(
+                "Sequence run is missing its target hypothesis."
+            )
+        if not isinstance(self.analysis, SequenceOffsetAnalysis):
+            raise DeepSequenceCorrelationError(
+                "Sequence run analysis is malformed."
+            )
+        if self.analysis.hypothesis_count != self.hypothesis_count:
+            raise DeepSequenceCorrelationError(
+                "Sequence run analysis does not match its hypothesis set."
+            )
+
     @property
     def target_hypothesis(self) -> SequenceHypothesis | None:
         return next(
