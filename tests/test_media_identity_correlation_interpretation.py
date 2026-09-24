@@ -12,7 +12,18 @@ from app.media_identity.correlation_interpretation import (
     interpret_modality,
     interpret_pair,
 )
-from app.media_identity.fingerprint import FingerprintComparison
+from app.media_identity.fingerprint import (
+    AUDIO_ENVELOPE_DHASH64_V1,
+    VIDEO_DHASH64_V1,
+    FingerprintComparison,
+)
+from app.media_identity.fingerprint_bundle import DeepFingerprintBundleRun
+from app.media_identity.fingerprint_correlation import (
+    DeepFingerprintCorrelationRun,
+)
+from app.media_identity.correlation_interpretation_service import (
+    interpret_fingerprint_bundle,
+)
 
 
 def _comparison(
@@ -497,6 +508,200 @@ class MatrixInterpretationTests(unittest.TestCase):
                 audio=[],
             )
 
+
+
+
+def _correlation_run(
+    *,
+    algorithm_key: str,
+    comparisons: tuple[FingerprintComparison, ...],
+    signature: str = "a" * 64,
+    coverage_complete: bool = True,
+    planned_file_count: int = 2,
+    planned_pair_count: int = 1,
+) -> DeepFingerprintCorrelationRun:
+    return DeepFingerprintCorrelationRun(
+        scan_id=11,
+        algorithm_key=algorithm_key,
+        correlation_plan_signature=signature,
+        planned_file_count=planned_file_count,
+        completed_file_count=(
+            planned_file_count if coverage_complete else 1
+        ),
+        planned_pair_count=planned_pair_count,
+        completed_pair_count=len(comparisons),
+        reused_fingerprint_count=0,
+        generated_fingerprint_count=planned_file_count,
+        manifest_artifact_id=(101 if coverage_complete else None),
+        coverage_complete=coverage_complete,
+        missing_file_ids=(() if coverage_complete else (2,)),
+        comparisons=comparisons,
+        failures=(() if coverage_complete else ("missing-peer",)),
+    )
+
+
+def _bundle(
+    *,
+    video: DeepFingerprintCorrelationRun | None = None,
+    audio: DeepFingerprintCorrelationRun | None = None,
+    signature: str = "a" * 64,
+) -> DeepFingerprintBundleRun:
+    video = video or _correlation_run(
+        algorithm_key=VIDEO_DHASH64_V1.key,
+        comparisons=(
+            _comparison(
+                algorithm_key=VIDEO_DHASH64_V1.key,
+                algorithm_version=VIDEO_DHASH64_V1.version,
+            ),
+        ),
+        signature=signature,
+    )
+    audio = audio or _correlation_run(
+        algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+        comparisons=(
+            _comparison(
+                algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                algorithm_version=AUDIO_ENVELOPE_DHASH64_V1.version,
+            ),
+        ),
+        signature=signature,
+    )
+    return DeepFingerprintBundleRun(
+        scan_id=11,
+        result_revision=7,
+        correlation_plan_signature=signature,
+        video=video,
+        audio=audio,
+    )
+
+
+class CorrelationInterpretationServiceTests(unittest.TestCase):
+    def test_bundle_interpretation_is_bound_to_policy_revision_and_plan(self) -> None:
+        result = interpret_fingerprint_bundle(_bundle())
+
+        self.assertEqual(result.scan_id, 11)
+        self.assertEqual(result.result_revision, 7)
+        self.assertEqual(result.correlation_plan_signature, "a" * 64)
+        self.assertEqual(result.interpretation_version, 1)
+        self.assertEqual(len(result.policy_signature), 64)
+        self.assertEqual(result.complete_modalities, ("video", "audio"))
+        self.assertTrue(result.fully_multimodal)
+        self.assertEqual(result.planned_pair_count, 1)
+        self.assertEqual(result.pair_count, 1)
+        self.assertEqual(result.both_high_count, 1)
+        self.assertEqual(result.contradiction_count, 0)
+
+    def test_policy_identity_is_deeply_immutable(self) -> None:
+        result = interpret_fingerprint_bundle(_bundle())
+
+        with self.assertRaises(TypeError):
+            result.policy_identity["video"]["high_mean"] = 0.1
+
+    def test_wrong_video_algorithm_is_rejected(self) -> None:
+        bundle = _bundle(
+            video=_correlation_run(
+                algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                comparisons=(),
+            )
+        )
+
+        with self.assertRaisesRegex(
+            CorrelationInterpretationError,
+            "wrong fingerprint algorithm",
+        ):
+            interpret_fingerprint_bundle(bundle)
+
+    def test_wrong_audio_algorithm_is_rejected(self) -> None:
+        bundle = _bundle(
+            audio=_correlation_run(
+                algorithm_key=VIDEO_DHASH64_V1.key,
+                comparisons=(),
+            )
+        )
+
+        with self.assertRaisesRegex(
+            CorrelationInterpretationError,
+            "wrong fingerprint algorithm",
+        ):
+            interpret_fingerprint_bundle(bundle)
+
+    def test_mismatched_correlation_plan_signatures_are_rejected(self) -> None:
+        bundle = _bundle(
+            audio=_correlation_run(
+                algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                comparisons=(),
+                signature="b" * 64,
+            )
+        )
+
+        with self.assertRaisesRegex(
+            CorrelationInterpretationError,
+            "same scan and correlation plan",
+        ):
+            interpret_fingerprint_bundle(bundle)
+
+    def test_mismatched_planned_cohort_sizes_are_rejected(self) -> None:
+        bundle = _bundle(
+            audio=_correlation_run(
+                algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                comparisons=(),
+                planned_file_count=3,
+                planned_pair_count=3,
+            )
+        )
+
+        with self.assertRaisesRegex(
+            CorrelationInterpretationError,
+            "planned correlation cohort",
+        ):
+            interpret_fingerprint_bundle(bundle)
+
+    def test_incomplete_audio_remains_single_modality_without_fabrication(self) -> None:
+        audio = _correlation_run(
+            algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+            comparisons=(),
+            coverage_complete=False,
+        )
+        result = interpret_fingerprint_bundle(
+            _bundle(audio=audio)
+        )
+
+        self.assertEqual(result.complete_modalities, ("video",))
+        self.assertFalse(result.fully_multimodal)
+        self.assertEqual(result.pair_count, 1)
+        self.assertEqual(
+            result.pairs[0].agreement,
+            MultimodalAgreement.SINGLE_MODALITY,
+        )
+
+    def test_contradictory_bundle_counts_contradiction_without_verdict(self) -> None:
+        audio = _correlation_run(
+            algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+            comparisons=(
+                _comparison(
+                    algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                    algorithm_version=AUDIO_ENVELOPE_DHASH64_V1.version,
+                    mean=0.50,
+                    median=0.50,
+                ),
+            ),
+        )
+        result = interpret_fingerprint_bundle(
+            _bundle(audio=audio)
+        )
+
+        self.assertEqual(result.contradiction_count, 1)
+        self.assertEqual(result.both_high_count, 0)
+        self.assertTrue(result.pairs[0].contradictory)
+
+    def test_invalid_bundle_plan_signature_fails_closed(self) -> None:
+        bundle = _bundle(signature="not-a-sha")
+
+        with self.assertRaisesRegex(
+            CorrelationInterpretationError,
+            "valid correlation-plan signature",
+        ):
+            interpret_fingerprint_bundle(bundle)
 
 if __name__ == "__main__":
     unittest.main()
