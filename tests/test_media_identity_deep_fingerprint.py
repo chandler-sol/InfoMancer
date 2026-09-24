@@ -21,6 +21,7 @@ from app.media_identity.fingerprint import (
     VIDEO_DHASH64_V1,
     bounded_fingerprint_matches,
     compare_content_fingerprints,
+    fingerprint_comparison_from_payload,
     fingerprint_from_payload,
 )
 from app.media_identity.fingerprint_local import (
@@ -120,6 +121,50 @@ class FingerprintContractTests(unittest.TestCase):
             "contract version",
         ):
             fingerprint_from_payload(payload)
+
+    def test_resealed_malformed_sample_types_still_fail_closed(self) -> None:
+        original = _fingerprint(
+            1,
+            ["0" * 16] * 6,
+            sha_char="a",
+        )
+        payload = original.persisted_payload()
+        payload["samples"][0]["informative"] = 1
+        body = dict(payload)
+        body.pop("fingerprint_output_sha256", None)
+        payload["fingerprint_output_sha256"] = hashlib.sha256(
+            json.dumps(
+                body,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+
+        with self.assertRaisesRegex(
+            FingerprintError,
+            "informativeness",
+        ):
+            fingerprint_from_payload(payload)
+
+    def test_persisted_comparison_rejects_boolean_file_id(self) -> None:
+        with self.assertRaisesRegex(
+            FingerprintError,
+            "left file ID",
+        ):
+            fingerprint_comparison_from_payload({
+                "left_file_id": True,
+                "right_file_id": 2,
+                "algorithm_key": VIDEO_DHASH64_V1.key,
+                "algorithm_version": VIDEO_DHASH64_V1.version,
+                "compared_samples": 6,
+                "alignment_shift": 0,
+                "coverage": 1.0,
+                "mean_similarity": 1.0,
+                "median_similarity": 1.0,
+                "minimum_similarity": 1.0,
+            })
 
     def test_tampered_sample_fails_output_seal(self) -> None:
         original = _fingerprint(
