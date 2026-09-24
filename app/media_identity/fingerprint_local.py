@@ -48,7 +48,7 @@ def _canonical_json(value: Any) -> str:
     )
 
 
-def _resolve_ffmpeg_identity(executable: str) -> dict[str, Any] | None:
+def fingerprint_ffmpeg_identity(executable: str) -> dict[str, Any] | None:
     raw = str(executable or "").strip()
     if not raw:
         return None
@@ -175,7 +175,7 @@ class LocalVideoFingerprintExtractor:
             sample_count=sample_count,
         )
         requested = str(executable or ffmpeg_executable())
-        self.ffmpeg_identity = _resolve_ffmpeg_identity(requested)
+        self.ffmpeg_identity = fingerprint_ffmpeg_identity(requested)
         self.executable = (
             str(self.ffmpeg_identity["path"])
             if self.ffmpeg_identity is not None
