@@ -1298,21 +1298,42 @@ class MediaIdentityDecisionService:
                 except MediaIdentityDecisionError:
                     current = False
                 else:
-                    if not validated_match:
-                        if verify_external:
-                            current, _ = self._review_snapshot_is_current(
+                    scan_matches_confirmed_file = (
+                        int(scan.get("file_size_bytes") or 0)
+                        == int(confirmation["confirmed_size_bytes"] or 0)
+                        and _same_modified_at(
+                            scan.get("file_modified_at"),
+                            confirmation["confirmed_modified_at"],
+                        )
+                        and str(
+                            scan.get("file_sha256") or ""
+                        ).strip().casefold()
+                        == str(
+                            confirmation.get("confirmed_sha256") or ""
+                        ).strip().casefold()
+                    )
+                    if not scan_matches_confirmed_file:
+                        current = False
+                    elif not validated_match:
+                        # The exact current media bytes were already hashed
+                        # against the confirmation snapshot above. If the source
+                        # scan names that identical size/mtime/SHA snapshot, do
+                        # not hash the same file a second time in this request.
+                        current, _ = self._scan_snapshot_is_current(
+                            conn,
+                            scan,
+                            evidence,
+                            verify_content=False,
+                        )
+                        if (
+                            current
+                            and verify_external
+                            and not self._external_visual_snapshot_is_current(
                                 conn,
                                 scan,
-                                evidence,
-                                verify_content=True,
                             )
-                        else:
-                            current, _ = self._scan_snapshot_is_current(
-                                conn,
-                                scan,
-                                evidence,
-                                verify_content=True,
-                            )
+                        ):
+                            current = False
                     if current:
                         try:
                             live_provenance = self._confirmation_provenance(scan)
