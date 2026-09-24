@@ -385,9 +385,9 @@ class FakeVideoFingerprintExtractor:
     def __init__(self, media, runtime_ms) -> None:
         self.media = media
         self.runtime_ms = int(runtime_ms)
-        self.timestamps = tuple(
-            30_000 + index * 60_000
-            for index in range(6)
+        self.timestamps = plan_video_fingerprint_timestamps(
+            self.runtime_ms,
+            sample_count=6,
         )
         stat = Path(media.path).stat()
         self._generation = (
