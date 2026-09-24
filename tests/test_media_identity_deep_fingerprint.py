@@ -9,6 +9,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 from app.db import Database
+from app.media_identity.decision_snapshot import result_revision
 from app.media_identity.fast import FastIdentityService
 from app.media_identity.fingerprint import (
     MAX_FINGERPRINT_CANDIDATES,
@@ -1128,6 +1129,76 @@ class DeepFingerprintCorrelationServiceTests(unittest.TestCase):
             len(repaired["manifest_output_sha256"]),
             64,
         )
+
+    def test_transaction_validator_binds_manifest_children_and_comparisons(self) -> None:
+        result = self.correlation.run(self.scan1.scan_id)
+        self.assertTrue(result.coverage_complete)
+        assert result.manifest_artifact_id is not None
+
+        with self.database.connect() as conn:
+            scan = dict(conn.execute(
+                "SELECT * FROM media_identity_scans WHERE id=?",
+                (self.scan1.scan_id,),
+            ).fetchone())
+            revision = result_revision(scan)
+            self.assertTrue(
+                self.correlation.validate_manifest_artifact(
+                    conn,
+                    result.manifest_artifact_id,
+                    scan_id=self.scan1.scan_id,
+                    result_revision=revision,
+                    plan_signature=result.correlation_plan_signature,
+                    expected_comparisons=result.comparisons,
+                )
+            )
+            self.assertFalse(
+                self.correlation.validate_manifest_artifact(
+                    conn,
+                    result.manifest_artifact_id,
+                    scan_id=self.scan1.scan_id,
+                    result_revision=revision,
+                    plan_signature=result.correlation_plan_signature,
+                    expected_comparisons=(),
+                )
+            )
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT payload_json FROM media_identity_artifacts
+                   WHERE id=?""",
+                (result.manifest_artifact_id,),
+            ).fetchone()
+            payload = json.loads(row["payload_json"])
+            child_id = int(
+                payload["identity"]["fingerprints"][0]["artifact_id"]
+            )
+            child = conn.execute(
+                """SELECT payload_json FROM media_identity_artifacts
+                   WHERE id=?""",
+                (child_id,),
+            ).fetchone()
+            child_payload = json.loads(child["payload_json"])
+            child_payload["samples"][0]["value"] = "f" * 16
+            conn.execute(
+                """UPDATE media_identity_artifacts
+                   SET payload_json=? WHERE id=?""",
+                (
+                    json.dumps(child_payload, sort_keys=True),
+                    child_id,
+                ),
+            )
+
+        with self.database.connect() as conn:
+            self.assertFalse(
+                self.correlation.validate_manifest_artifact(
+                    conn,
+                    result.manifest_artifact_id,
+                    scan_id=self.scan1.scan_id,
+                    result_revision=revision,
+                    plan_signature=result.correlation_plan_signature,
+                    expected_comparisons=result.comparisons,
+                )
+            )
 
     def test_tampered_manifest_is_repaired_from_current_children(self) -> None:
         first = self.correlation.run(self.scan1.scan_id)
