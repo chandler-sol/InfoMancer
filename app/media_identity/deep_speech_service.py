@@ -655,6 +655,30 @@ class DeepSpeechSamplingService:
                     "Deep candidate or correlation inputs changed during speech."
                 )
 
+            raw_observations = payload.get("observations")
+            if not isinstance(raw_observations, list):
+                raise DeepSpeechSamplingError(
+                    "Deep speech completion metadata is malformed."
+                )
+            for sample, item in zip(plan.samples, raw_observations):
+                if not isinstance(item, Mapping):
+                    raise DeepSpeechSamplingError(
+                        "Deep speech completion metadata is malformed."
+                    )
+                child = conn.execute(
+                    "SELECT * FROM media_identity_artifacts WHERE id=?",
+                    (int(item["artifact_id"]),),
+                ).fetchone()
+                if child is None or not self._artifact_matches_manifest(
+                    dict(child),
+                    scan=current,
+                    sample=sample,
+                    item=item,
+                ):
+                    raise DeepSpeechSamplingError(
+                        "A Deep speech transcript changed before manifest publication."
+                    )
+
             cursor = conn.execute(
                 """INSERT OR IGNORE INTO media_identity_artifacts(
                      file_id,artifact_type,analyzer_key,analyzer_version,
