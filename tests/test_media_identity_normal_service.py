@@ -677,9 +677,17 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         # An existing alternate confirmation must not make rename preview
         # re-read the same external evidence during preparation and final action.
         source.read_calls = 0
-        confirmed_preview = _rename_preview(decisions, self.fast_scan.scan_id)
+        with patch(
+            "app.media_identity.service.media_content_sha256",
+            wraps=media_content_sha256,
+        ) as media_hash:
+            confirmed_preview = _rename_preview(
+                decisions,
+                self.fast_scan.scan_id,
+            )
         self.assertEqual(confirmed_preview["status"], "ready")
         self.assertEqual(source.read_calls, result.observation_count)
+        self.assertEqual(media_hash.call_count, 1)
 
     def test_new_fast_scan_does_not_hide_current_normal_mie_result(self):
         source = FakePreviewSource()
