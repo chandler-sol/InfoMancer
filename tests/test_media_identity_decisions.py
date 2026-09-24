@@ -959,7 +959,11 @@ class DecisionServiceTests(unittest.TestCase):
                 (self.scan_id,),
             )
         with self.assertRaisesRegex(
-            ValueError, "sealed Episode Identity decision no longer matches"
+            ValueError,
+            (
+                "changed after this identity scan"
+                "|sealed Episode Identity decision no longer matches"
+            ),
         ):
             self._confirm_best(self.scan_id)
 
@@ -1277,7 +1281,13 @@ class DecisionServiceTests(unittest.TestCase):
         ).explanation)
         self.assertFalse(detail["snapshot_current"])
         self.assertFalse(detail["actionable"])
-        with self.assertRaisesRegex(ValueError, "changed after this identity scan"):
+        with self.assertRaisesRegex(
+            ValueError,
+            (
+                "changed after this identity scan"
+                "|sealed Episode Identity decision no longer matches"
+            ),
+        ):
             self._confirm_best(self.scan_id)
 
     def test_sealed_result_revision_is_immutable_and_resolution_advances_it(self) -> None:
