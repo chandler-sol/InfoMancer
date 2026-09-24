@@ -19,6 +19,7 @@ from app.media_identity.fingerprint import (
 from app.media_identity.fingerprint_audio import (
     LocalFingerprintError,
     audio_envelope_dhash64_from_pcm_s16le,
+    audio_pcm_is_informative,
     plan_audio_fingerprint_timestamps,
 )
 from app.media_identity.fingerprint_audio_service import (
@@ -72,6 +73,21 @@ class AudioFingerprintPrimitiveTests(unittest.TestCase):
             audio_envelope_dhash64_from_pcm_s16le(_pcm(base)),
             audio_envelope_dhash64_from_pcm_s16le(_pcm(scaled)),
         )
+
+    def test_silence_is_marked_non_informative(self) -> None:
+        silence = _pcm([0] * 330)
+
+        self.assertFalse(audio_pcm_is_informative(silence))
+
+    def test_low_level_dynamic_audio_is_informative(self) -> None:
+        dynamic = _pcm(
+            [
+                80 if index % 2 else -80
+                for index in range(330)
+            ]
+        )
+
+        self.assertTrue(audio_pcm_is_informative(dynamic))
 
     def test_pcm_contract_rejects_odd_and_too_short_payloads(self) -> None:
         with self.assertRaisesRegex(FingerprintError, "complete 16-bit"):
@@ -162,6 +178,15 @@ class FakeAudioExtractor:
                 "stream": dict(self.stream.cache_identity()),
                 "feature_bins": 33,
             },
+            comparison_parameters={
+                "sample_count": len(self.timestamps),
+                "lattice": "interior-10-90-window-centers",
+                "window_ms": 4_000,
+                "sample_rate_hz": 8_000,
+                "channels": 1,
+                "feature_bins": 33,
+                "features": "mean-abs+zero-crossing-dhash64",
+            },
         )
 
 
@@ -215,6 +240,12 @@ class FakeVideoExtractor:
                 "extractor_version": 1,
                 "sample_count": len(self.timestamps),
                 "filter": "fixture",
+            },
+            comparison_parameters={
+                "sample_count": len(self.timestamps),
+                "lattice": "interior-10-90",
+                "filter": "fixture",
+                "hash": "horizontal-dhash64",
             },
         )
 
