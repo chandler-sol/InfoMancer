@@ -50,6 +50,7 @@ class DeepVisualObservation:
     text: str
     confidence: float | None
     preview_sha256: str
+    artifact_digest: str
     reused: bool
 
 
@@ -362,6 +363,12 @@ class DeepSamplingService:
             and not 0.0 <= normalized_confidence <= 1.0
         ):
             return None
+        artifact_digest = hashlib.sha256(
+            _canonical_json({
+                "text_value": str(row.get("text_value") or ""),
+                "payload": payload,
+            }).encode("utf-8")
+        ).hexdigest()
         return DeepVisualObservation(
             sample=sample,
             artifact_id=int(row["id"]),
@@ -369,6 +376,7 @@ class DeepSamplingService:
             text=str(row.get("text_value") or ""),
             confidence=normalized_confidence,
             preview_sha256=preview_sha256,
+            artifact_digest=artifact_digest,
             reused=reused,
         )
 
@@ -593,6 +601,8 @@ class DeepSamplingService:
                 or observation.cache_key != str(item.get("cache_key") or "")
                 or observation.preview_sha256
                 != str(item.get("preview_sha256") or "")
+                or observation.artifact_digest
+                != str(item.get("artifact_digest") or "")
             ):
                 return None
             observations.append(observation)
@@ -642,7 +652,9 @@ class DeepSamplingService:
                 or payload.get("identity") != dict(identity)
                 or payload.get("coverage_complete") is not True
             ):
-                return None
+                raise DeepSamplingScanError(
+                    "The persisted Deep sampling manifest failed provenance validation."
+                )
             observations = self._manifest_observations(
                 conn,
                 baseline=baseline,
@@ -651,7 +663,9 @@ class DeepSamplingService:
                 payload=payload,
             )
             if observations is None:
-                return None
+                raise DeepSamplingScanError(
+                    "The persisted Deep sampling manifest failed artifact integrity validation."
+                )
             conn.execute(
                 """UPDATE media_identity_artifacts
                    SET last_used_at=CURRENT_TIMESTAMP WHERE id=?""",
@@ -681,6 +695,7 @@ class DeepSamplingService:
                     "artifact_id": item.artifact_id,
                     "cache_key": item.cache_key,
                     "preview_sha256": item.preview_sha256,
+                    "artifact_digest": item.artifact_digest,
                     "timestamp_ms": int(item.sample.frame.timestamp_ms),
                     "inherited_normal": bool(item.sample.inherited_normal),
                 }
@@ -746,7 +761,9 @@ class DeepSamplingService:
                 ),
             )
             row = conn.execute(
-                """SELECT id FROM media_identity_artifacts
+                """SELECT id,status,profile,source_kind,source_ref,source_signature,
+                          file_size_bytes,file_modified_at,payload_json
+                   FROM media_identity_artifacts
                    WHERE file_id=? AND artifact_type='deep_sampling_manifest'
                      AND analyzer_key=? AND analyzer_version=? AND cache_key=?
                    ORDER BY id DESC LIMIT 1""",
@@ -762,24 +779,30 @@ class DeepSamplingService:
                     "InfoMancer could not persist the Deep sampling manifest."
                 )
             manifest_id = int(row["id"])
-            # The exact cache identity permits repair of a malformed/tampered row
-            # only after every child observation has been revalidated above.
+            persisted_payload = _json_object(row["payload_json"])
+            if (
+                str(row["status"] or "") != "complete"
+                or str(row["profile"] or "") != IdentityProfile.DEEP.value
+                or str(row["source_kind"] or "") != LOCAL_FRAME_SOURCE_KEY
+                or str(row["source_ref"] or "")
+                != f"scan:{int(baseline['id'])}"
+                or str(row["source_signature"] or "")
+                != visual_plan.plan_signature
+                or int(row["file_size_bytes"] or 0)
+                != int(baseline["file_size_bytes"] or 0)
+                or not _same_modified_at(
+                    row["file_modified_at"],
+                    baseline["file_modified_at"],
+                )
+                or persisted_payload != payload
+            ):
+                raise DeepSamplingScanError(
+                    "A conflicting Deep sampling manifest already exists."
+                )
             conn.execute(
                 """UPDATE media_identity_artifacts
-                   SET status='complete',profile='deep',source_kind=?,
-                       source_ref=?,source_signature=?,file_size_bytes=?,
-                       file_modified_at=?,payload_json=?,error='',
-                       updated_at=CURRENT_TIMESTAMP,last_used_at=CURRENT_TIMESTAMP
-                   WHERE id=?""",
-                (
-                    LOCAL_FRAME_SOURCE_KEY,
-                    f"scan:{int(baseline['id'])}",
-                    visual_plan.plan_signature,
-                    int(baseline["file_size_bytes"] or 0),
-                    baseline["file_modified_at"],
-                    _canonical_json(payload),
-                    manifest_id,
-                ),
+                   SET last_used_at=CURRENT_TIMESTAMP WHERE id=?""",
+                (manifest_id,),
             )
             return manifest_id
 
