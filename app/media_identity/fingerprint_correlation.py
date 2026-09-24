@@ -254,7 +254,11 @@ class DeepFingerprintCorrelationService:
         except DeepFingerprintError:
             return False
         return (
-            str(snapshot["current_sha256"]) == expected.file_sha256
+            self.artifact_service._fingerprint_matches_snapshot(
+                expected,
+                snapshot,
+            )
+            and str(snapshot["current_sha256"]) == expected.file_sha256
             and int(snapshot["runtime_ms"]) == expected.runtime_ms
             and int(snapshot["size_bytes"] or 0)
             == int(item.get("file_size_bytes") or 0)
