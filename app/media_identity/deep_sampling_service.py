@@ -24,7 +24,14 @@ from .decision_snapshot import result_revision
 from .external import ExternalAnalysisError, ExternalPreviewUnavailable, ExternalSourceFailure
 from .local_frames import LOCAL_FRAME_SOURCE_KEY, LocalFfmpegFrameSource
 from .models import AnalyzerContext, IdentityProfile, IdentityReference, MediaIdentityFile
-from .normal import OcrEngine, OcrTextResult, ocr_preview_cache_key
+from .normal import (
+    OCR_ARTIFACT_OUTPUT_SEAL_FIELD,
+    OcrEngine,
+    OcrTextResult,
+    ocr_artifact_output_is_sealed,
+    ocr_artifact_output_seal,
+    ocr_preview_cache_key,
+)
 from .normal_service import NORMAL_OCR_ARTIFACT_KEY, NORMAL_OCR_ARTIFACT_VERSION
 from .service import MediaIdentityDecisionService
 from .visual_budget import VisualAttemptBudget, VisualBudgetExceeded, visual_budget_scope
@@ -352,23 +359,14 @@ class DeepSamplingService:
             return None
 
         artifact_profile = str(row.get("profile") or "")
-        if artifact_profile == IdentityProfile.DEEP.value:
-            output_sha256 = str(
-                payload.get("artifact_output_sha256") or ""
-            ).strip().casefold()
-            digest_payload = dict(payload)
-            digest_payload.pop("artifact_output_sha256", None)
-            expected_output_sha256 = hashlib.sha256(
-                _canonical_json({
-                    "text_value": str(row.get("text_value") or ""),
-                    "payload": digest_payload,
-                }).encode("utf-8")
-            ).hexdigest()
-            if (
-                not _valid_sha256(output_sha256)
-                or output_sha256 != expected_output_sha256
-            ):
-                return None
+        if (
+            artifact_profile == IdentityProfile.DEEP.value
+            and not ocr_artifact_output_is_sealed(
+                row.get("text_value"),
+                payload,
+            )
+        ):
+            return None
 
         confidence = payload.get("confidence")
         try:
@@ -474,12 +472,10 @@ class DeepSamplingService:
                 "preview_sha256": str(preview_sha256),
             },
         }
-        payload["artifact_output_sha256"] = hashlib.sha256(
-            _canonical_json({
-                "text_value": str(result.text or ""),
-                "payload": payload,
-            }).encode("utf-8")
-        ).hexdigest()
+        payload[OCR_ARTIFACT_OUTPUT_SEAL_FIELD] = ocr_artifact_output_seal(
+            result.text,
+            payload,
+        )
         with self.database.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             self._require_current_baseline(
@@ -1063,6 +1059,9 @@ class DeepSamplingService:
                         cached_after_read is not None
                         and cached_after_read.cache_key == cache_key
                     ):
+                        budget.reserve_text_chars(
+                            len(cached_after_read.text)
+                        )
                         observations.append(cached_after_read)
                         continue
 
