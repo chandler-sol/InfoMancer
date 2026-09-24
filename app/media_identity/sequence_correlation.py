@@ -190,9 +190,8 @@ class SequenceHypothesis:
         return self.hypothesis_episode - self.claimed_episode
 
     def usable(self, policy: SequenceOffsetPolicy) -> bool:
-        offset = self.offset
         return (
-            offset is not None
+            self.single_episode
             and self.claimed_season > 0
             and self.result_state in _SEQUENCE_ELIGIBLE_STATES
             and self.content_support
@@ -330,9 +329,9 @@ def detect_sequence_offsets(
         by_offset: dict[int, list[SequenceHypothesis]] = {}
         for item in season_hypotheses:
             offset = item.offset
-            assert offset is not None
             if (
-                offset == 0
+                offset is None
+                or offset == 0
                 or abs(offset) > policy.max_abs_offset
             ):
                 continue
