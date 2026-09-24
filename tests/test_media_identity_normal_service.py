@@ -780,6 +780,19 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             decisions.scan_detail(first_normal_id)["snapshot_current"]
         )
 
+        # Even while the stale Normal is itself the latest completed scan,
+        # Library Health must walk backward to the newest still-current Normal.
+        latest_normal_findings = [
+            finding
+            for finding in decisions.mie_findings()
+            if finding["rule_key"] == "episode-identity-review"
+        ]
+        self.assertEqual(len(latest_normal_findings), 1)
+        self.assertEqual(
+            latest_normal_findings[0]["evidence"]["scan_id"],
+            first_normal_id,
+        )
+
         third_fast = self.fast.scan_file(1)
         third_resolution = decisions.resolve_scan(third_fast.scan_id)
         third_detail = decisions.scan_detail(third_fast.scan_id)
