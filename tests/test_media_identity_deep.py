@@ -398,6 +398,46 @@ class DeepIdentityPlanningTests(unittest.TestCase):
 
         self.assertNotEqual(before.plan_signature, after.plan_signature)
 
+    def test_correlation_rejects_non_tv_catalog_rows(self) -> None:
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO titles(
+                     id,root_id,kind,title,folder_path
+                   ) VALUES (3,1,'movie','Not An Episode','/tv/Not An Episode')"""
+            )
+            conn.execute(
+                """INSERT INTO files(
+                     id,title_id,path,filename,extension,size_bytes,modified_at,
+                     season,episode_start,episode_end,parsed_title,seen_scan
+                   ) VALUES (
+                     7,3,'/tv/Not An Episode/movie.mkv','movie.mkv','mkv',
+                     107,7,2,1,1,'Not An Episode','scan'
+                   )"""
+            )
+            with self.assertRaisesRegex(
+                DeepIdentityError,
+                "requires a TV title",
+            ):
+                plan_deep_correlation(conn, file_id=7)
+
+    def test_deep_candidate_input_coordinates_fail_closed(self) -> None:
+        with self.database.connect() as conn:
+            with self.assertRaises(DeepIdentityError):
+                generate_deep_episode_candidates(
+                    conn,
+                    title_id=1,
+                    season=-1,
+                    episode_start=1,
+                )
+            with self.assertRaises(DeepIdentityError):
+                generate_deep_episode_candidates(
+                    conn,
+                    title_id=1,
+                    season=2,
+                    episode_start=2,
+                    episode_end=1,
+                )
+
     def test_correlation_policy_rejects_unbounded_or_incomplete_work(self) -> None:
         bad = (
             {"season_radius": 3},
