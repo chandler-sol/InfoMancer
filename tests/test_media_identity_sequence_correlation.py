@@ -6,6 +6,7 @@ from app.media_identity.models import IdentityResultState
 from app.media_identity.sequence_correlation import (
     SequenceCorrelationError,
     SequenceHypothesis,
+    SequenceOffsetAnalysis,
     SequenceOffsetPolicy,
     detect_sequence_offsets,
 )
@@ -137,6 +138,22 @@ class SequenceHypothesisTests(unittest.TestCase):
         )
 
         self.assertFalse(item.usable(SequenceOffsetPolicy()))
+
+
+class SequenceAnalysisValidationTests(unittest.TestCase):
+    def test_analysis_rejects_inconsistent_excluded_count(self) -> None:
+        with self.assertRaisesRegex(
+            SequenceCorrelationError,
+            "excluded-file count",
+        ):
+            SequenceOffsetAnalysis(
+                policy=SequenceOffsetPolicy(),
+                hypothesis_count=3,
+                usable_count=2,
+                excluded_file_ids=(),
+                observations=(),
+                conflicted_seasons=(),
+            )
 
 
 class SequenceOffsetDetectionTests(unittest.TestCase):
