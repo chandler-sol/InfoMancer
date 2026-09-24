@@ -54,8 +54,16 @@ class SequenceOffsetPolicy:
                 raise SequenceCorrelationError(
                     f"Sequence {label} is outside the supported bound."
                 )
+        if (
+            isinstance(self.minimum_support_ratio, bool)
+            or not isinstance(self.minimum_support_ratio, (int, float))
+            or not math.isfinite(float(self.minimum_support_ratio))
+            or not 0.50 <= float(self.minimum_support_ratio) <= 1.0
+        ):
+            raise SequenceCorrelationError(
+                "Sequence minimum support ratio must be between 0.50 and 1."
+            )
         for label, value in (
-            ("minimum support ratio", self.minimum_support_ratio),
             ("minimum support strength", self.minimum_support_strength),
             ("maximum conflict strength", self.maximum_conflict_strength),
             ("minimum margin", self.minimum_margin),
