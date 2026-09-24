@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import hashlib
-from itertools import combinations
+from itertools import combinations, islice
 import json
 import sqlite3
 from typing import Any
@@ -139,12 +139,15 @@ def _with_deep_origin(
 ) -> IdentityCandidate:
     details = dict(candidate.details)
     prior_origins = details.get("origins")
-    origins = {
-        str(item)
-        for item in prior_origins
+    origins = (
+        {
+            str(item)
+            for item in prior_origins
+            if str(item).strip()
+        }
         if isinstance(prior_origins, (list, tuple, set))
-        and str(item).strip()
-    }
+        else set()
+    )
     origins.difference_update({
         "claimed_coordinate",
         "nearby_same_season",
@@ -470,9 +473,11 @@ def plan_deep_correlation(
     peers = tuple(_file_snapshot(row) for row in rows)
     file_ids = [target.file_id, *(item.file_id for item in peers)]
     pairs = tuple(
-        pair
-        for pair in combinations(file_ids, 2)
-    )[:policy.max_pairwise_comparisons]
+        islice(
+            combinations(file_ids, 2),
+            policy.max_pairwise_comparisons,
+        )
+    )
 
     payload = {
         "version": DEEP_ORCHESTRATION_VERSION,
