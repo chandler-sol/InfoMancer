@@ -454,7 +454,10 @@ class NormalIdentityService:
                 or str(row["analyzer_version"] or "") != NORMAL_OCR_ARTIFACT_VERSION
                 or str(row["cache_key"] or "") != str(item.cache_key)
                 or str(row["status"] or "") != "complete"
-                or str(row["profile"] or "") != IdentityProfile.NORMAL.value
+                or str(row["profile"] or "") not in {
+                    IdentityProfile.NORMAL.value,
+                    IdentityProfile.DEEP.value,
+                }
                 or str(row["source_kind"] or "") != str(item.source_key)
                 or str(row["source_ref"] or "") != str(item.asset_ref)
                 or str(row["source_signature"] or "") != str(item.source_signature)
