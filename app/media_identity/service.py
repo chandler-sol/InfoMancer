@@ -9,6 +9,7 @@ from typing import Any, Callable, Mapping
 from ..db import Database
 from ..naming import contained_destination, plex_episode_filename
 from .candidates import generate_episode_candidates
+from .deep import deep_plan_metadata_is_current
 from .decision_snapshot import (
     DECISION_SNAPSHOT_VERSION,
     decision_snapshot_matches,
@@ -466,7 +467,8 @@ class MediaIdentityDecisionService:
         if decision_version != EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION:
             return False, file_row
 
-        if str(scan.get("completed_profile") or "") == "normal":
+        completed_profile = str(scan.get("completed_profile") or "")
+        if completed_profile in {"normal", "deep"}:
             normal_metadata = claimed.get("normal_ocr")
             if not isinstance(normal_metadata, Mapping):
                 return False, file_row
@@ -983,6 +985,21 @@ class MediaIdentityDecisionService:
                         )
                     ):
                         return False, file_row
+
+        if completed_profile == "deep":
+            if not deep_plan_metadata_is_current(
+                conn,
+                file_id=int(scan["file_id"]),
+                title_id=int(full_file["title_id"]),
+                season=int(full_file["season"]),
+                episode_start=int(full_file["episode_start"]),
+                episode_end=int(
+                    full_file["episode_end"] or full_file["episode_start"]
+                ),
+                language=language,
+                metadata=claimed.get("deep_identity"),
+            ):
+                return False, file_row
 
         normalized_expected = {
             str(key): str(value)
