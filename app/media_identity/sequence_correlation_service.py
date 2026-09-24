@@ -174,10 +174,29 @@ class DeepSequenceCorrelationRun:
         )
 
 
+def _json_ready_policy_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _json_ready_policy_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, tuple):
+        return [
+            _json_ready_policy_value(item)
+            for item in value
+        ]
+    if isinstance(value, list):
+        return [
+            _json_ready_policy_value(item)
+            for item in value
+        ]
+    return value
+
+
 def _canonical_json_bytes(value: object) -> bytes:
     try:
         return json.dumps(
-            value,
+            _json_ready_policy_value(value),
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
