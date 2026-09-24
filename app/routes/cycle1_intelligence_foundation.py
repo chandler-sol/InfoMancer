@@ -19,7 +19,7 @@ def build_router(ctx: RouteContext):
     media_info_lock = ctx.live("media_info_lock")
     record_event = ctx.live("record_event")
 
-    mie = ctx.live("mie")
+    mie = ctx.get("mie")
     media_streams = MediaStreamService(db)
 
     def run_media_inspection(file_ids: list[int] | None = None) -> None:
