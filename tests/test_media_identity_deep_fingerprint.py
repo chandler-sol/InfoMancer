@@ -4,6 +4,7 @@ import hashlib
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from app.db import Database
@@ -866,7 +867,14 @@ class DeepFingerprintCorrelationServiceTests(unittest.TestCase):
 
     def test_second_cohort_run_reuses_all_fingerprints_and_manifest(self) -> None:
         first = self.correlation.run(self.scan1.scan_id)
-        second = self.correlation.run(self.scan1.scan_id)
+        with patch(
+            "app.media_identity.fingerprint_correlation."
+            "compare_content_fingerprints",
+            side_effect=AssertionError(
+                "sealed correlation matrix should be reused"
+            ),
+        ):
+            second = self.correlation.run(self.scan1.scan_id)
 
         self.assertTrue(first.coverage_complete)
         self.assertTrue(second.coverage_complete)
@@ -876,6 +884,7 @@ class DeepFingerprintCorrelationServiceTests(unittest.TestCase):
         )
         self.assertEqual(second.reused_fingerprint_count, 3)
         self.assertEqual(second.generated_fingerprint_count, 0)
+        self.assertEqual(second.comparisons, first.comparisons)
 
     def test_one_failed_peer_keeps_matrix_non_authoritative(self) -> None:
         FakeVideoFingerprintExtractor.fail_files = {3}
@@ -932,6 +941,54 @@ class DeepFingerprintCorrelationServiceTests(unittest.TestCase):
                      AND artifact_type='deep_fingerprint_manifest'"""
             ).fetchone()[0]
         self.assertEqual(count, 0)
+
+    def test_tampered_similarity_invalidates_cached_matrix(self) -> None:
+        first = self.correlation.run(self.scan1.scan_id)
+        self.assertTrue(first.coverage_complete)
+        assert first.manifest_artifact_id is not None
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT payload_json FROM media_identity_artifacts
+                   WHERE id=?""",
+                (first.manifest_artifact_id,),
+            ).fetchone()
+            payload = json.loads(row["payload_json"])
+            payload["comparisons"][0]["mean_similarity"] = 0.123456
+            conn.execute(
+                """UPDATE media_identity_artifacts
+                   SET payload_json=? WHERE id=?""",
+                (
+                    json.dumps(payload, sort_keys=True),
+                    first.manifest_artifact_id,
+                ),
+            )
+
+        second = self.correlation.run(self.scan1.scan_id)
+
+        self.assertTrue(second.coverage_complete)
+        self.assertEqual(
+            second.manifest_artifact_id,
+            first.manifest_artifact_id,
+        )
+        self.assertEqual(
+            second.comparisons[0].mean_similarity,
+            first.comparisons[0].mean_similarity,
+        )
+        with self.database.connect() as conn:
+            repaired = json.loads(conn.execute(
+                """SELECT payload_json FROM media_identity_artifacts
+                   WHERE id=?""",
+                (first.manifest_artifact_id,),
+            ).fetchone()["payload_json"])
+        self.assertNotEqual(
+            repaired["comparisons"][0]["mean_similarity"],
+            0.123456,
+        )
+        self.assertEqual(
+            len(repaired["manifest_output_sha256"]),
+            64,
+        )
 
     def test_tampered_manifest_is_repaired_from_current_children(self) -> None:
         first = self.correlation.run(self.scan1.scan_id)
