@@ -5,8 +5,10 @@ import unittest
 from app.media_identity.correlation_interpretation import (
     CorrelationInterpretationError,
     CorrelationInterpretationPolicy,
+    ModalityInterpretation,
     ModalityThresholds,
     MultimodalAgreement,
+    PairInterpretation,
     SimilarityBand,
     interpret_matrix,
     interpret_modality,
@@ -240,6 +242,69 @@ class ModalityInterpretationTests(unittest.TestCase):
             interpret_modality(
                 _comparison(),
                 modality="subtitle",
+            )
+
+
+class InterpretationRecordValidationTests(unittest.TestCase):
+    def test_modality_band_and_sufficiency_must_agree(self) -> None:
+        with self.assertRaisesRegex(
+            CorrelationInterpretationError,
+            "band and sufficiency disagree",
+        ):
+            ModalityInterpretation(
+                modality="video",
+                left_file_id=1,
+                right_file_id=2,
+                band=SimilarityBand.HIGH,
+                compared_samples=6,
+                coverage=1.0,
+                mean_similarity=0.95,
+                median_similarity=0.95,
+                minimum_similarity=0.70,
+                alignment_shift=0,
+                sufficient=False,
+            )
+
+    def test_pair_record_rejects_non_normalized_ids(self) -> None:
+        video = interpret_modality(
+            _comparison(
+                left=2,
+                right=1,
+                algorithm_key=VIDEO_DHASH64_V1.key,
+                algorithm_version=VIDEO_DHASH64_V1.version,
+            ),
+            modality="video",
+        )
+        with self.assertRaisesRegex(
+            CorrelationInterpretationError,
+            "normalized ascending order",
+        ):
+            PairInterpretation(
+                left_file_id=2,
+                right_file_id=1,
+                video=video,
+                audio=None,
+                agreement=MultimodalAgreement.SINGLE_MODALITY,
+            )
+
+    def test_pair_record_rejects_fabricated_agreement(self) -> None:
+        video = interpret_modality(
+            _comparison(
+                algorithm_key=VIDEO_DHASH64_V1.key,
+                algorithm_version=VIDEO_DHASH64_V1.version,
+            ),
+            modality="video",
+        )
+        with self.assertRaisesRegex(
+            CorrelationInterpretationError,
+            "agreement does not match",
+        ):
+            PairInterpretation(
+                left_file_id=1,
+                right_file_id=2,
+                video=video,
+                audio=None,
+                agreement=MultimodalAgreement.BOTH_HIGH,
             )
 
 
