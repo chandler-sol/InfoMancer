@@ -132,6 +132,18 @@ def plan_video_fingerprint_timestamps(
     return tuple(planned)
 
 
+def gray9x8_is_informative(payload: bytes) -> bool:
+    raw = bytes(payload)
+    if len(raw) != _RAW_FRAME_BYTES:
+        raise FingerprintError(
+            "Video dHash requires exactly one 9x8 grayscale frame."
+        )
+    return (
+        max(raw) - min(raw) >= 8
+        and len(set(raw)) >= 4
+    )
+
+
 def dhash64_from_gray9x8(payload: bytes) -> str:
     raw = bytes(payload)
     if len(raw) != _RAW_FRAME_BYTES:
@@ -303,11 +315,13 @@ class LocalVideoFingerprintExtractor:
                 samples = tuple(
                     FingerprintSample(
                         timestamp_ms=timestamp_ms,
-                        value=dhash64_from_gray9x8(
-                            self._extract_raw_frame(lease, timestamp_ms)
-                        ),
+                        value=dhash64_from_gray9x8(raw_frame),
+                        informative=gray9x8_is_informative(raw_frame),
                     )
                     for timestamp_ms in self.timestamps
+                    for raw_frame in (
+                        self._extract_raw_frame(lease, timestamp_ms),
+                    )
                 )
                 lease.require_current()
         except (MediaContentLeaseError, FingerprintError) as exc:
@@ -329,5 +343,11 @@ class LocalVideoFingerprintExtractor:
                 "extractor_version": VIDEO_FINGERPRINT_EXTRACTOR_VERSION,
                 "sample_count": len(self.timestamps),
                 "filter": "scale=9:8:flags=area,format=gray",
+            },
+            comparison_parameters={
+                "sample_count": len(self.timestamps),
+                "lattice": "interior-10-90",
+                "filter": "scale=9:8:flags=area,format=gray",
+                "hash": "horizontal-dhash64",
             },
         )
