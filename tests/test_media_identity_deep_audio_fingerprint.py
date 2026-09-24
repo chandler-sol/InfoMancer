@@ -29,6 +29,10 @@ from app.media_identity.fingerprint_audio_service import (
 from app.media_identity.fingerprint_correlation import (
     DeepFingerprintCorrelationService,
 )
+from app.media_identity.fingerprint_bundle import (
+    DeepFingerprintBundleError,
+    DeepFingerprintBundleService,
+)
 from app.media_identity.fingerprint_local import (
     plan_video_fingerprint_timestamps,
 )
@@ -438,6 +442,80 @@ class AudioFingerprintServiceTests(unittest.TestCase):
                 AUDIO_ENVELOPE_DHASH64_V1.key,
             },
         )
+
+    def test_bundle_binds_both_modalities_to_same_revision_and_cohort(self) -> None:
+        video_service = DeepFingerprintCorrelationService(
+            self.database,
+            artifact_service=self.video,
+        )
+        audio_service = DeepAudioFingerprintCorrelationService(
+            self.database,
+            artifact_service=self.audio,
+        )
+        bundle = DeepFingerprintBundleService(
+            self.database,
+            video_service=video_service,
+            audio_service=audio_service,
+        )
+
+        result = bundle.run(self.scan1.scan_id)
+
+        self.assertEqual(result.complete_modalities, ("video", "audio"))
+        self.assertTrue(result.video.coverage_complete)
+        self.assertTrue(result.audio.coverage_complete)
+        self.assertEqual(
+            result.video.correlation_plan_signature,
+            result.audio.correlation_plan_signature,
+        )
+        self.assertEqual(
+            result.correlation_plan_signature,
+            result.video.correlation_plan_signature,
+        )
+
+    def test_bundle_rejects_revision_change_between_modalities(self) -> None:
+        video_service = DeepFingerprintCorrelationService(
+            self.database,
+            artifact_service=self.video,
+        )
+        original_run = video_service.run
+
+        def changing_run(scan_id):
+            result = original_run(scan_id)
+            with self.database.connect() as conn:
+                row = conn.execute(
+                    """SELECT claimed_identity_json
+                       FROM media_identity_scans WHERE id=?""",
+                    (self.scan1.scan_id,),
+                ).fetchone()
+                claimed = json.loads(row["claimed_identity_json"])
+                claimed["result_revision"] = int(
+                    claimed.get("result_revision") or 1
+                ) + 1
+                conn.execute(
+                    """UPDATE media_identity_scans
+                       SET claimed_identity_json=? WHERE id=?""",
+                    (
+                        json.dumps(claimed, sort_keys=True),
+                        self.scan1.scan_id,
+                    ),
+                )
+            return result
+
+        video_service.run = changing_run
+        bundle = DeepFingerprintBundleService(
+            self.database,
+            video_service=video_service,
+            audio_service=DeepAudioFingerprintCorrelationService(
+                self.database,
+                artifact_service=self.audio,
+            ),
+        )
+
+        with self.assertRaisesRegex(
+            DeepFingerprintBundleError,
+            "publication changed",
+        ):
+            bundle.run(self.scan1.scan_id)
 
     def test_video_and_audio_correlation_manifests_do_not_collide(self) -> None:
         common = (
