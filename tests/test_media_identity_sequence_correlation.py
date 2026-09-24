@@ -239,14 +239,27 @@ class SequenceOffsetDetectionTests(unittest.TestCase):
 
         self.assertEqual(analysis.usable_count, 0)
 
-    def test_cross_season_hypotheses_do_not_participate(self) -> None:
+    def test_cross_season_hypotheses_count_against_same_season_shift(self) -> None:
         analysis = detect_sequence_offsets([
             _hypothesis(1, 1, 1, hypothesis_season=2),
             _hypothesis(2, 2, 2, hypothesis_season=2),
             _hypothesis(3, 3, 3, hypothesis_season=2),
         ])
 
-        self.assertEqual(analysis.usable_count, 0)
+        self.assertEqual(analysis.usable_count, 3)
+        self.assertEqual(analysis.observations, ())
+
+    def test_cross_season_competitors_can_defeat_false_shift(self) -> None:
+        analysis = detect_sequence_offsets([
+            _hypothesis(1, 1, 2),
+            _hypothesis(2, 2, 3),
+            _hypothesis(3, 3, 4),
+            _hypothesis(4, 4, 4, hypothesis_season=2),
+            _hypothesis(5, 5, 5, hypothesis_season=2),
+        ])
+
+        self.assertEqual(analysis.usable_count, 5)
+        self.assertEqual(analysis.observations, ())
 
     def test_out_of_bound_offset_counts_against_supported_ratio(self) -> None:
         analysis = detect_sequence_offsets([
