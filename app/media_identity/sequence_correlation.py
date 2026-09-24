@@ -259,6 +259,76 @@ class SequenceOffsetAnalysis:
     observations: tuple[SequenceOffsetObservation, ...]
     conflicted_seasons: tuple[int, ...]
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.policy, SequenceOffsetPolicy):
+            raise SequenceCorrelationError(
+                "Sequence analysis requires a SequenceOffsetPolicy."
+            )
+        for label, value in (
+            ("hypothesis count", self.hypothesis_count),
+            ("usable count", self.usable_count),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 0
+            ):
+                raise SequenceCorrelationError(
+                    f"Sequence analysis {label} must be a non-negative integer."
+                )
+        if self.usable_count > self.hypothesis_count:
+            raise SequenceCorrelationError(
+                "Sequence analysis usable count exceeds its hypothesis count."
+            )
+        if (
+            len(self.excluded_file_ids)
+            != self.hypothesis_count - self.usable_count
+        ):
+            raise SequenceCorrelationError(
+                "Sequence analysis excluded-file count is inconsistent."
+            )
+        if (
+            len(set(self.excluded_file_ids))
+            != len(self.excluded_file_ids)
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 1
+                for value in self.excluded_file_ids
+            )
+        ):
+            raise SequenceCorrelationError(
+                "Sequence analysis excluded file IDs are invalid."
+            )
+        if any(
+            not isinstance(item, SequenceOffsetObservation)
+            for item in self.observations
+        ):
+            raise SequenceCorrelationError(
+                "Sequence analysis observations are malformed."
+            )
+        expected_conflicts = tuple(sorted({
+            item.season
+            for item in self.observations
+            if item.conflicted
+        }))
+        if self.conflicted_seasons != expected_conflicts:
+            raise SequenceCorrelationError(
+                "Sequence analysis conflicted seasons are inconsistent."
+            )
+        by_season: dict[int, int] = {}
+        for item in self.observations:
+            by_season[item.season] = by_season.get(item.season, 0) + 1
+            if item.usable_count > self.usable_count:
+                raise SequenceCorrelationError(
+                    "Sequence observation exceeds the analysis usable count."
+                )
+        for season, count in by_season.items():
+            if (count > 1) != (season in set(self.conflicted_seasons)):
+                raise SequenceCorrelationError(
+                    "Sequence analysis conflict markers are inconsistent."
+                )
+
     @property
     def authoritative_observations(
         self,
