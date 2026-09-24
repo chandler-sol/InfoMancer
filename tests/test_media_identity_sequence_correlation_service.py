@@ -166,6 +166,7 @@ class DeepSequenceCorrelationServiceTests(unittest.TestCase):
             coordinate = self.service._candidate_default_coordinate(
                 conn,
                 candidate,
+                title_id=1,
             )
 
         self.assertEqual(coordinate, (1, 2))
@@ -258,7 +259,7 @@ class DeepSequenceCorrelationServiceTests(unittest.TestCase):
         with patch.object(
             MediaIdentityDecisionService,
             "_scan_snapshot_is_current",
-            return_value=(True, {}),
+            return_value=(True, {"title_id": 1}),
         ):
             result = self.service.run(
                 self.scan.scan_id,
@@ -302,7 +303,7 @@ class DeepSequenceCorrelationServiceTests(unittest.TestCase):
         with patch.object(
             MediaIdentityDecisionService,
             "_scan_snapshot_is_current",
-            return_value=(True, {}),
+            return_value=(True, {"title_id": 1}),
         ):
             result = self.service.run(
                 self.scan.scan_id,
@@ -372,7 +373,7 @@ class DeepSequenceCorrelationServiceTests(unittest.TestCase):
         with patch.object(
             MediaIdentityDecisionService,
             "_scan_snapshot_is_current",
-            return_value=(True, {}),
+            return_value=(True, {"title_id": 1}),
         ):
             with self.assertRaisesRegex(
                 DeepSequenceCorrelationError,
@@ -431,7 +432,7 @@ class DeepSequenceCorrelationServiceTests(unittest.TestCase):
         ), patch.object(
             MediaIdentityDecisionService,
             "_scan_snapshot_is_current",
-            return_value=(True, {}),
+            return_value=(True, {"title_id": 1}),
         ), patch.object(
             MediaIdentityDecisionService,
             "_decision_token",
