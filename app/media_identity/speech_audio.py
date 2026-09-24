@@ -278,55 +278,103 @@ def select_speech_audio_stream(
     return min(pool, key=lambda stream: stream.index)
 
 
-def validate_normal_speech_window_plan(
+def validate_speech_window_plan(
     windows: Iterable[SpeechWindow],
+    *,
+    max_windows: int,
+    max_total_ms: int,
+    profile_label: str,
 ) -> tuple[SpeechWindow, ...]:
-    """Validate the complete bounded Normal transcription plan before extraction."""
+    """Validate one bounded speech plan without changing profile semantics."""
+
+    if (
+        isinstance(max_windows, bool)
+        or not isinstance(max_windows, int)
+        or max_windows < 1
+        or isinstance(max_total_ms, bool)
+        or not isinstance(max_total_ms, int)
+        or max_total_ms < 1
+    ):
+        raise SpeechIdentityError("Speech plan limits must be positive integers.")
+    label = str(profile_label or "Speech").strip() or "Speech"
     planned = tuple(windows)
-    if len(planned) > MAX_NORMAL_SPEECH_WINDOWS:
+    if len(planned) > max_windows:
         raise SpeechIdentityError(
-            "Normal speech plans cannot exceed 8 targeted windows."
+            f"{label} speech plans cannot exceed {max_windows} targeted windows."
         )
 
     seen: set[tuple[int, int]] = set()
     total_ms = 0
-
     for window in planned:
         if not isinstance(window, SpeechWindow):
             raise SpeechIdentityError(
-                "Normal speech plans require SpeechWindow values."
+                f"{label} speech plans require SpeechWindow values."
             )
         identity = (window.start_ms, window.end_ms)
         if identity in seen:
             raise SpeechIdentityError(
-                "Normal speech plans cannot repeat the same audio window."
+                f"{label} speech plans cannot repeat the same audio window."
             )
         seen.add(identity)
         total_ms += window.duration_ms
 
-    if total_ms > MAX_NORMAL_SPEECH_TOTAL_MS:
+    if total_ms > max_total_ms:
         raise SpeechIdentityError(
-            "Normal speech plans cannot exceed 240 seconds in aggregate."
+            f"{label} speech plans cannot exceed "
+            f"{max_total_ms // 1000} seconds in aggregate."
         )
     return planned
 
 
-def validate_normal_speech_audio_budget(
+def validate_normal_speech_window_plan(
+    windows: Iterable[SpeechWindow],
+) -> tuple[SpeechWindow, ...]:
+    """Validate the complete bounded Normal transcription plan before extraction."""
+
+    return validate_speech_window_plan(
+        windows,
+        max_windows=MAX_NORMAL_SPEECH_WINDOWS,
+        max_total_ms=MAX_NORMAL_SPEECH_TOTAL_MS,
+        profile_label="Normal",
+    )
+
+
+def validate_speech_audio_budget(
     records: Iterable[tuple[SpeechWindow, SpeechAudioIdentity]],
+    *,
+    max_windows: int,
+    max_total_ms: int,
+    max_total_bytes: int,
+    profile_label: str,
 ) -> tuple[tuple[SpeechWindow, SpeechAudioIdentity], ...]:
-    """Validate retained provenance records without keeping temp WAV files alive."""
+    """Validate retained audio provenance against one explicit profile budget."""
+
+    if (
+        isinstance(max_total_bytes, bool)
+        or not isinstance(max_total_bytes, int)
+        or max_total_bytes < 1
+    ):
+        raise SpeechIdentityError(
+            "Speech audio byte limits must be positive integers."
+        )
+    label = str(profile_label or "Speech").strip() or "Speech"
     prepared = tuple(records)
-    validate_normal_speech_window_plan(window for window, _ in prepared)
+    validate_speech_window_plan(
+        (window for window, _ in prepared),
+        max_windows=max_windows,
+        max_total_ms=max_total_ms,
+        profile_label=label,
+    )
 
     total_bytes = 0
     for _, identity in prepared:
         if not isinstance(identity, SpeechAudioIdentity):
             raise SpeechAudioUnavailable(
-                "Normal speech audio budgets require SpeechAudioIdentity values."
+                f"{label} speech audio budgets require SpeechAudioIdentity values."
             )
         if identity.size_bytes > MAX_SPEECH_AUDIO_BYTES:
             raise SpeechBudgetExceeded(
-                "Prepared Normal speech audio exceeded the per-window byte limit."
+                f"Prepared {label} speech audio exceeded the per-window byte limit."
             )
         if (
             identity.format_key != SPEECH_AUDIO_FORMAT_KEY
@@ -334,15 +382,30 @@ def validate_normal_speech_audio_budget(
             or identity.channels != SPEECH_AUDIO_CHANNELS
         ):
             raise SpeechAudioUnavailable(
-                "Prepared Normal speech audio does not match the bounded canonical format."
+                f"Prepared {label} speech audio does not match the bounded "
+                "canonical format."
             )
         total_bytes += identity.size_bytes
 
-    if total_bytes > MAX_NORMAL_SPEECH_AUDIO_BYTES:
+    if total_bytes > max_total_bytes:
         raise SpeechBudgetExceeded(
-            "Prepared Normal speech audio exceeded the aggregate byte limit."
+            f"Prepared {label} speech audio exceeded the aggregate byte limit."
         )
     return prepared
+
+
+def validate_normal_speech_audio_budget(
+    records: Iterable[tuple[SpeechWindow, SpeechAudioIdentity]],
+) -> tuple[tuple[SpeechWindow, SpeechAudioIdentity], ...]:
+    """Validate retained provenance records without keeping temp WAV files alive."""
+
+    return validate_speech_audio_budget(
+        records,
+        max_windows=MAX_NORMAL_SPEECH_WINDOWS,
+        max_total_ms=MAX_NORMAL_SPEECH_TOTAL_MS,
+        max_total_bytes=MAX_NORMAL_SPEECH_AUDIO_BYTES,
+        profile_label="Normal",
+    )
 
 
 def _canonical_json(value: Any) -> str:
