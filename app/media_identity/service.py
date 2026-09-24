@@ -56,7 +56,8 @@ ACTIONABLE_STATES = SUGGESTED_CONFIRM_STATES | {
 
 _ACTION_EXTERNAL_PREVIEW_MAX_FRAMES = 12
 _ACTION_EXTERNAL_PREVIEW_MAX_SOURCE_BYTES = 48 * 1024 * 1024
-_MIE_NORMAL_HISTORY_VALIDATION_LIMIT = 8
+_MIE_PROFILE_HISTORY_VALIDATION_LIMIT = 8
+_MIE_NORMAL_HISTORY_VALIDATION_LIMIT = _MIE_PROFILE_HISTORY_VALIDATION_LIMIT
 
 
 def _same_modified_at(first: Any, second: Any) -> bool:
@@ -1831,15 +1832,25 @@ class MediaIdentityDecisionService:
                 ).fetchall()
             ]
             effective_scan_ids: list[
-                tuple[int, tuple[int, ...], bool]
+                tuple[
+                    int,
+                    tuple[int, ...],
+                    bool,
+                    tuple[int, ...],
+                    bool,
+                ]
             ] = []
             for latest in latest_rows:
+                preserved_deep_ids: tuple[int, ...] = ()
+                deep_history_truncated = False
                 preserved_normal_ids: tuple[int, ...] = ()
-                history_truncated = False
+                normal_history_truncated = False
                 metadata_signature = str(
                     latest.get("metadata_signature") or ""
                 )
-                file_sha256 = str(latest.get("file_sha256") or "").strip().casefold()
+                file_sha256 = str(
+                    latest.get("file_sha256") or ""
+                ).strip().casefold()
                 if (
                     metadata_signature
                     and len(file_sha256) == 64
@@ -1848,63 +1859,129 @@ class MediaIdentityDecisionService:
                         for character in file_sha256
                     )
                 ):
-                    preserved_rows = conn.execute(
-                        """SELECT id
-                           FROM media_identity_scans
-                           WHERE file_id=? AND id<=?
-                             AND status='complete' AND result_state IS NOT NULL
-                             AND completed_profile='normal'
-                             AND metadata_signature=?
-                             AND file_size_bytes=?
-                             AND COALESCE(file_sha256,'')=?
-                           ORDER BY id DESC LIMIT ?""",
-                        (
-                            int(latest["file_id"]),
-                            int(latest["id"]),
-                            metadata_signature,
-                            int(latest.get("file_size_bytes") or 0),
-                            file_sha256,
-                            _MIE_NORMAL_HISTORY_VALIDATION_LIMIT + 1,
-                        ),
-                    ).fetchall()
-                    history_truncated = (
-                        len(preserved_rows)
-                        > _MIE_NORMAL_HISTORY_VALIDATION_LIMIT
-                    )
-                    preserved_normal_ids = tuple(
-                        int(row["id"])
-                        for row in preserved_rows[
-                            :_MIE_NORMAL_HISTORY_VALIDATION_LIMIT
-                        ]
-                    )
+                    history_by_profile: dict[
+                        str, tuple[tuple[int, ...], bool]
+                    ] = {}
+                    for profile in ("deep", "normal"):
+                        preserved_rows = conn.execute(
+                            """SELECT id
+                               FROM media_identity_scans
+                               WHERE file_id=? AND id<=?
+                                 AND status='complete'
+                                 AND result_state IS NOT NULL
+                                 AND completed_profile=?
+                                 AND metadata_signature=?
+                                 AND file_size_bytes=?
+                                 AND COALESCE(file_sha256,'')=?
+                               ORDER BY id DESC LIMIT ?""",
+                            (
+                                int(latest["file_id"]),
+                                int(latest["id"]),
+                                profile,
+                                metadata_signature,
+                                int(latest.get("file_size_bytes") or 0),
+                                file_sha256,
+                                _MIE_PROFILE_HISTORY_VALIDATION_LIMIT + 1,
+                            ),
+                        ).fetchall()
+                        history_by_profile[profile] = (
+                            tuple(
+                                int(row["id"])
+                                for row in preserved_rows[
+                                    :_MIE_PROFILE_HISTORY_VALIDATION_LIMIT
+                                ]
+                            ),
+                            len(preserved_rows)
+                            > _MIE_PROFILE_HISTORY_VALIDATION_LIMIT,
+                        )
+                    (
+                        preserved_deep_ids,
+                        deep_history_truncated,
+                    ) = history_by_profile["deep"]
+                    (
+                        preserved_normal_ids,
+                        normal_history_truncated,
+                    ) = history_by_profile["normal"]
                 effective_scan_ids.append(
                     (
                         int(latest["id"]),
+                        preserved_deep_ids,
+                        deep_history_truncated,
                         preserved_normal_ids,
-                        history_truncated,
+                        normal_history_truncated,
                     )
                 )
 
         findings: list[dict[str, Any]] = []
         for (
             latest_scan_id,
+            preserved_deep_ids,
+            deep_history_truncated,
             preserved_normal_ids,
-            history_truncated,
+            normal_history_truncated,
         ) in effective_scan_ids:
             detail = None
-            for preserved_normal_id in preserved_normal_ids:
-                preserved_detail = self.scan_detail(preserved_normal_id)
+            for preserved_deep_id in preserved_deep_ids:
+                preserved_detail = self.scan_detail(preserved_deep_id)
                 if preserved_detail.get("snapshot_current"):
                     detail = preserved_detail
                     break
-            if detail is None and history_truncated:
+            if detail is None and deep_history_truncated:
                 latest_detail = self.scan_detail(latest_scan_id)
                 file_row = latest_detail.get("file") or {}
                 findings.append({
                     "fingerprint": (
                         "episode-identity-history:"
                         f"file:{int(latest_detail['file_id'])}:"
-                        f"latest:{latest_scan_id}"
+                        f"latest:{latest_scan_id}:profile:deep"
+                    ),
+                    "rule_key": "episode-identity-history-uncertain",
+                    "category": "identity",
+                    "severity": "information",
+                    "root_id": file_row.get("root_id"),
+                    "title_id": file_row.get("title_id"),
+                    "file_id": latest_detail["file_id"],
+                    "expected_episode_id": None,
+                    "summary": (
+                        f"{file_row.get('filename')}: Episode Identity history "
+                        "needs a fresh Deep verification"
+                    ),
+                    "explanation": (
+                        "InfoMancer found more matching historical Deep results "
+                        "than it can safely revalidate in one Library Health pass. "
+                        "The checked newer Deep results were stale, so it did not "
+                        "silently fall back to a weaker Normal or Fast result."
+                    ),
+                    "recommendation": (
+                        "Run Deep verification again to establish a fresh bounded "
+                        "result before relying on the current identity warning state."
+                    ),
+                    "evidence": {
+                        "latest_scan_id": latest_scan_id,
+                        "profile": "deep",
+                        "deep_history_checked": len(preserved_deep_ids),
+                        "deep_history_validation_limit": (
+                            _MIE_PROFILE_HISTORY_VALIDATION_LIMIT
+                        ),
+                        "history_truncated": True,
+                    },
+                })
+                continue
+
+            if detail is None:
+                for preserved_normal_id in preserved_normal_ids:
+                    preserved_detail = self.scan_detail(preserved_normal_id)
+                    if preserved_detail.get("snapshot_current"):
+                        detail = preserved_detail
+                        break
+            if detail is None and normal_history_truncated:
+                latest_detail = self.scan_detail(latest_scan_id)
+                file_row = latest_detail.get("file") or {}
+                findings.append({
+                    "fingerprint": (
+                        "episode-identity-history:"
+                        f"file:{int(latest_detail['file_id'])}:"
+                        f"latest:{latest_scan_id}:profile:normal"
                     ),
                     "rule_key": "episode-identity-history-uncertain",
                     "category": "identity",
@@ -1929,9 +2006,10 @@ class MediaIdentityDecisionService:
                     ),
                     "evidence": {
                         "latest_scan_id": latest_scan_id,
+                        "profile": "normal",
                         "normal_history_checked": len(preserved_normal_ids),
                         "normal_history_validation_limit": (
-                            _MIE_NORMAL_HISTORY_VALIDATION_LIMIT
+                            _MIE_PROFILE_HISTORY_VALIDATION_LIMIT
                         ),
                         "history_truncated": True,
                     },
