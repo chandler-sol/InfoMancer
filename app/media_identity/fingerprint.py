@@ -429,6 +429,7 @@ def compare_content_fingerprints(
     policy = policy or FingerprintMatchPolicy()
     if (
         left.algorithm.identity_payload() != right.algorithm.identity_payload()
+        or _json_ready(left.parameters) != _json_ready(right.parameters)
         or len(left.samples) > policy.max_samples_per_fingerprint
         or len(right.samples) > policy.max_samples_per_fingerprint
     ):
