@@ -217,6 +217,7 @@ class DeepSequenceCorrelationServiceTests(unittest.TestCase):
             coordinate = self.service._candidate_default_coordinate(
                 conn,
                 candidate,
+                title_id=1,
             )
 
         self.assertEqual(coordinate, (1, 4))
@@ -246,6 +247,7 @@ class DeepSequenceCorrelationServiceTests(unittest.TestCase):
             coordinate = self.service._candidate_default_coordinate(
                 conn,
                 candidate,
+                title_id=1,
             )
 
         self.assertIsNone(coordinate)
