@@ -25,6 +25,7 @@ from .media_generation import (
     media_generation_identity,
 )
 from .models import MediaIdentityFile
+from .speech_audio import SpeechAudioStream
 
 
 DEFAULT_AUDIO_FINGERPRINT_SAMPLES = 8
@@ -164,6 +165,7 @@ class LocalAudioFingerprintExtractor:
         media: MediaIdentityFile,
         runtime_ms: int,
         *,
+        stream: SpeechAudioStream,
         executable: str | None = None,
         sample_count: int = DEFAULT_AUDIO_FINGERPRINT_SAMPLES,
         timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
@@ -176,7 +178,12 @@ class LocalAudioFingerprintExtractor:
             raise FingerprintError(
                 "Local audio fingerprinting requires an exact media SHA-256."
             )
+        if not isinstance(stream, SpeechAudioStream):
+            raise FingerprintError(
+                "Audio fingerprinting requires a selected catalog audio stream."
+            )
         self.media = media
+        self.stream = stream
         self.runtime_ms = int(runtime_ms)
         self.timestamps = plan_audio_fingerprint_timestamps(
             self.runtime_ms,
@@ -211,7 +218,7 @@ class LocalAudioFingerprintExtractor:
             "ffmpeg": self.ffmpeg_identity,
             "timestamps": list(self.timestamps),
             "window_ms": AUDIO_FINGERPRINT_WINDOW_MS,
-            "stream_selector": "0:a:0",
+            "stream": dict(self.stream.cache_identity()),
             "format": {
                 "codec": "pcm_s16le",
                 "sample_rate_hz": AUDIO_FINGERPRINT_SAMPLE_RATE_HZ,
@@ -265,7 +272,7 @@ class LocalAudioFingerprintExtractor:
                     f"{float(start_ms) / 1000.0:.3f}",
                     *input_args,
                     "-map",
-                    "0:a:0",
+                    f"0:{self.stream.index}",
                     "-t",
                     f"{float(AUDIO_FINGERPRINT_WINDOW_MS) / 1000.0:.3f}",
                     "-ac",
@@ -361,7 +368,7 @@ class LocalAudioFingerprintExtractor:
                 "window_ms": AUDIO_FINGERPRINT_WINDOW_MS,
                 "sample_rate_hz": AUDIO_FINGERPRINT_SAMPLE_RATE_HZ,
                 "channels": AUDIO_FINGERPRINT_CHANNELS,
-                "stream_selector": "0:a:0",
+                "stream": dict(self.stream.cache_identity()),
                 "feature_bins": _AUDIO_FEATURE_BINS,
             },
         )
