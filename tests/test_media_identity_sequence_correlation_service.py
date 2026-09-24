@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -7,6 +8,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.db import Database
+from app.media_identity.correlation_interpretation import (
+    CorrelationInterpretationPolicy,
+)
 from app.media_identity.correlation_interpretation_service import (
     DeepCorrelationInterpretationRun,
 )
@@ -24,6 +28,20 @@ from app.media_identity.sequence_correlation_service import (
     DeepSequenceCorrelationService,
 )
 from app.media_identity.service import MediaIdentityDecisionService
+
+
+def _interpretation_policy_identity():
+    payload = CorrelationInterpretationPolicy().identity_payload()
+    signature = hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    return payload, signature
 
 
 def _hypothesis(
@@ -128,14 +146,17 @@ class DeepSequenceCorrelationServiceTests(unittest.TestCase):
                 file_id=1,
             )
         self.revision = result_revision(self.scan_row)
+        policy_identity, policy_signature = (
+            _interpretation_policy_identity()
+        )
         self.interpretation = DeepCorrelationInterpretationRun(
             scan_id=self.scan.scan_id,
             result_revision=self.revision,
             correlation_plan_signature=self.plan.plan_signature,
             interpretation_version=1,
-            policy_signature="a" * 64,
-            policy_identity={},
-            complete_modalities=("video", "audio"),
+            policy_signature=policy_signature,
+            policy_identity=policy_identity,
+            complete_modalities=(),
             planned_pair_count=len(self.plan.comparison_pairs),
             pairs=(),
         )
@@ -362,8 +383,16 @@ class DeepSequenceCorrelationServiceTests(unittest.TestCase):
                 target_file_id=1,
                 result_revision=1,
                 correlation_plan_signature="a" * 64,
-                sequence_policy_signature="b" * 64,
-                sequence_policy_identity={},
+                sequence_policy_signature=hashlib.sha256(
+                    json.dumps(
+                        analysis.policy.identity_payload(),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    ).encode("utf-8")
+                ).hexdigest(),
+                sequence_policy_identity=analysis.policy.identity_payload(),
                 planned_file_count=3,
                 hypothesis_count=1,
                 missing_scan_file_ids=(2,),
@@ -378,9 +407,9 @@ class DeepSequenceCorrelationServiceTests(unittest.TestCase):
             result_revision=self.revision + 1,
             correlation_plan_signature=self.plan.plan_signature,
             interpretation_version=1,
-            policy_signature="a" * 64,
-            policy_identity={},
-            complete_modalities=("video", "audio"),
+            policy_signature=self.interpretation.policy_signature,
+            policy_identity=self.interpretation.policy_identity,
+            complete_modalities=(),
             planned_pair_count=len(self.plan.comparison_pairs),
             pairs=(),
         )
@@ -394,26 +423,25 @@ class DeepSequenceCorrelationServiceTests(unittest.TestCase):
                 stale,
             )
 
-    def test_stale_interpretation_version_is_rejected(self) -> None:
-        stale = DeepCorrelationInterpretationRun(
-            scan_id=self.interpretation.scan_id,
-            result_revision=self.revision,
-            correlation_plan_signature=self.plan.plan_signature,
-            interpretation_version=999,
-            policy_signature="a" * 64,
-            policy_identity={},
-            complete_modalities=("video", "audio"),
-            planned_pair_count=len(self.plan.comparison_pairs),
-            pairs=(),
+    def test_stale_interpretation_version_is_rejected_at_handoff(self) -> None:
+        from app.media_identity.correlation_interpretation import (
+            CorrelationInterpretationError,
         )
 
         with self.assertRaisesRegex(
-            DeepSequenceCorrelationError,
-            "semantics are stale",
+            CorrelationInterpretationError,
+            "version is stale",
         ):
-            self.service.run(
-                self.scan.scan_id,
-                stale,
+            DeepCorrelationInterpretationRun(
+                scan_id=self.interpretation.scan_id,
+                result_revision=self.revision,
+                correlation_plan_signature=self.plan.plan_signature,
+                interpretation_version=999,
+                policy_signature=self.interpretation.policy_signature,
+                policy_identity=self.interpretation.policy_identity,
+                complete_modalities=(),
+                planned_pair_count=len(self.plan.comparison_pairs),
+                pairs=(),
             )
 
     def test_plan_signature_drift_is_rejected(self) -> None:
@@ -422,9 +450,9 @@ class DeepSequenceCorrelationServiceTests(unittest.TestCase):
             result_revision=self.revision,
             correlation_plan_signature="b" * 64,
             interpretation_version=1,
-            policy_signature="a" * 64,
-            policy_identity={},
-            complete_modalities=("video", "audio"),
+            policy_signature=self.interpretation.policy_signature,
+            policy_identity=self.interpretation.policy_identity,
+            complete_modalities=(),
             planned_pair_count=len(self.plan.comparison_pairs),
             pairs=(),
         )
