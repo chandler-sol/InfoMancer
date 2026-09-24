@@ -894,6 +894,49 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertIsNotNone(historical)
         self.assertEqual(historical["status"], "resolved")
 
+    def test_delete_feedback_reconciles_obsolete_episode_identity_fingerprint(
+        self,
+    ) -> None:
+        self.service.resolve_scan(self.scan_id)
+        mie = MediaIntelligenceHistoryEngine(self.database)
+        mie.analyze()
+        first = next(
+            item
+            for item in mie.findings()
+            if item["rule_key"] == "episode-identity-review"
+        )
+        self.assertTrue(
+            mie.dismiss(
+                int(first["id"]),
+                None,
+                reason="expected",
+                scope="finding",
+            )
+        )
+        feedback = next(
+            item
+            for item in mie.feedback()
+            if item["finding_fingerprint"] == first["fingerprint"]
+        )
+
+        self._advance_scan_revision()
+        self.assertTrue(mie.delete_feedback(int(feedback["id"])))
+
+        active = [
+            item
+            for item in mie.findings()
+            if item["rule_key"] == "episode-identity-review"
+        ]
+        self.assertEqual(len(active), 1)
+        self.assertNotEqual(active[0]["fingerprint"], first["fingerprint"])
+        with self.database.connect() as conn:
+            historical = conn.execute(
+                "SELECT status FROM mie_findings WHERE id=?",
+                (int(first["id"]),),
+            ).fetchone()
+        self.assertIsNotNone(historical)
+        self.assertEqual(historical["status"], "resolved")
+
     def test_mark_correct_suppresses_advisory_finding_only_for_current_snapshot(self) -> None:
         self.service.resolve_scan(self.scan_id)
         self.assertEqual(len(self.service.mie_findings()), 1)
