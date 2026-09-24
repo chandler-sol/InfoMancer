@@ -756,6 +756,31 @@ class CorrelationInterpretationServiceTests(unittest.TestCase):
         ):
             interpret_fingerprint_bundle(bundle)
 
+    def test_partial_unsealed_audio_comparison_is_ignored(self) -> None:
+        audio = _correlation_run(
+            algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+            comparisons=(
+                _comparison(
+                    algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                    algorithm_version=AUDIO_ENVELOPE_DHASH64_V1.version,
+                    mean=1.0,
+                    median=1.0,
+                ),
+            ),
+            coverage_complete=False,
+        )
+        result = interpret_fingerprint_bundle(
+            _bundle(audio=audio)
+        )
+
+        self.assertEqual(result.complete_modalities, ("video",))
+        self.assertEqual(result.pair_count, 1)
+        self.assertIsNone(result.pairs[0].audio)
+        self.assertEqual(
+            result.pairs[0].agreement,
+            MultimodalAgreement.SINGLE_MODALITY,
+        )
+
     def test_incomplete_audio_remains_single_modality_without_fabrication(self) -> None:
         audio = _correlation_run(
             algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
