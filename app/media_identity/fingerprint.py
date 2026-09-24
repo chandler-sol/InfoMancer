@@ -27,6 +27,7 @@ class FingerprintError(ValueError):
 
 class FingerprintFamily(str, Enum):
     PERCEPTUAL_VIDEO = "perceptual_video"
+    PERCEPTUAL_AUDIO = "perceptual_audio"
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,14 @@ VIDEO_DHASH64_V1 = FingerprintAlgorithm(
     family=FingerprintFamily.PERCEPTUAL_VIDEO,
     bits_per_sample=64,
     max_samples=24,
+)
+
+AUDIO_ENVELOPE_DHASH64_V1 = FingerprintAlgorithm(
+    key="audio-envelope-dhash64-sequence",
+    version="1",
+    family=FingerprintFamily.PERCEPTUAL_AUDIO,
+    bits_per_sample=64,
+    max_samples=16,
 )
 
 
