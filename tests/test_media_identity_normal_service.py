@@ -1159,6 +1159,10 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         ]
         self.assertEqual(len(uncertain), 1)
         self.assertEqual(
+            uncertain[0]["fingerprint"],
+            f"episode-identity-history:file:1:latest:{latest_fast.scan_id}",
+        )
+        self.assertEqual(
             uncertain[0]["evidence"]["latest_scan_id"],
             latest_fast.scan_id,
         )
