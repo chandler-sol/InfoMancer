@@ -19,7 +19,6 @@ from .fingerprint import (
     fingerprint_from_payload,
 )
 from .fingerprint_local import (
-    DEFAULT_VIDEO_FINGERPRINT_SAMPLES,
     LocalFingerprintError,
     LocalVideoFingerprintExtractor,
     plan_video_fingerprint_timestamps,
@@ -270,7 +269,7 @@ class DeepFingerprintArtifactService:
         *,
         snapshot: Mapping[str, Any],
         source_signature: str | None,
-        expected_timestamps: Sequence[int],
+        expected_timestamps: Sequence[int] | None,
     ) -> ContentFingerprint | None:
         if (
             int(row.get("file_id") or 0) != int(snapshot["id"])
@@ -315,14 +314,37 @@ class DeepFingerprintArtifactService:
             )
             or str(row.get("source_signature") or "")
             != fingerprint.source_signature
-            or tuple(
-                sample.timestamp_ms for sample in fingerprint.samples
+            or (
+                expected_timestamps is not None
+                and tuple(
+                    sample.timestamp_ms for sample in fingerprint.samples
+                )
+                != tuple(int(value) for value in expected_timestamps)
             )
-            != tuple(int(value) for value in expected_timestamps)
             or str(row.get("cache_key") or "")
             != fingerprint.cache_key()
         ):
             return None
+        if expected_timestamps is None:
+            try:
+                sample_count = int(
+                    fingerprint.parameters.get("sample_count")
+                )
+            except (TypeError, ValueError):
+                return None
+            if sample_count != len(fingerprint.samples):
+                return None
+            try:
+                planned_timestamps = plan_video_fingerprint_timestamps(
+                    int(snapshot["runtime_ms"]),
+                    sample_count=sample_count,
+                )
+            except FingerprintError:
+                return None
+            if tuple(
+                sample.timestamp_ms for sample in fingerprint.samples
+            ) != planned_timestamps:
+                return None
         return fingerprint
 
     def _load_current(
@@ -330,7 +352,7 @@ class DeepFingerprintArtifactService:
         snapshot: Mapping[str, Any],
         *,
         source_signature: str | None,
-        expected_timestamps: Sequence[int],
+        expected_timestamps: Sequence[int] | None,
     ) -> tuple[int, ContentFingerprint] | None:
         with self.database.connect() as conn:
             rows = conn.execute(
@@ -525,14 +547,10 @@ class DeepFingerprintArtifactService:
                     expected_revision = result_revision(scan)
             media = self._media(snapshot)
 
-        expected_timestamps = plan_video_fingerprint_timestamps(
-            int(snapshot["runtime_ms"]),
-            sample_count=DEFAULT_VIDEO_FINGERPRINT_SAMPLES,
-        )
         cached_any = self._load_current(
             snapshot,
             source_signature=None,
-            expected_timestamps=expected_timestamps,
+            expected_timestamps=None,
         )
         if cached_any is not None:
             artifact_id, fingerprint = cached_any
@@ -647,14 +665,10 @@ class DeepFingerprintArtifactService:
     ) -> ContentFingerprint | None:
         with self.database.connect() as conn:
             snapshot = self._file_snapshot(conn, int(file_id))
-        expected_timestamps = plan_video_fingerprint_timestamps(
-            int(snapshot["runtime_ms"]),
-            sample_count=DEFAULT_VIDEO_FINGERPRINT_SAMPLES,
-        )
         existing = self._load_current(
             snapshot,
             source_signature=None,
-            expected_timestamps=expected_timestamps,
+            expected_timestamps=None,
         )
         return None if existing is None else existing[1]
 
