@@ -106,9 +106,9 @@ def plan_audio_fingerprint_timestamps(
     return tuple(planned)
 
 
-def audio_envelope_dhash64_from_pcm_s16le(payload: bytes) -> str:
-    """Hash relative short-term energy and zero-crossing shape into 64 bits."""
-
+def _audio_envelope_hash_and_informative(
+    payload: bytes,
+) -> tuple[str, bool]:
     raw = bytes(payload)
     if len(raw) % AUDIO_FINGERPRINT_SAMPLE_WIDTH_BYTES:
         raise FingerprintError(
@@ -126,6 +126,9 @@ def audio_envelope_dhash64_from_pcm_s16le(payload: bytes) -> str:
     energy: list[int] = []
     zero_crossings: list[int] = []
     count = len(samples)
+    absolute_total = 0
+    minimum = 32767
+    maximum = -32768
     for index in range(_AUDIO_FEATURE_BINS):
         start = (index * count) // _AUDIO_FEATURE_BINS
         end = ((index + 1) * count) // _AUDIO_FEATURE_BINS
@@ -138,7 +141,11 @@ def audio_envelope_dhash64_from_pcm_s16le(payload: bytes) -> str:
         previous = int(samples[start])
         for position in range(start, end):
             value = int(samples[position])
-            total += abs(value)
+            magnitude = abs(value)
+            total += magnitude
+            absolute_total += magnitude
+            minimum = min(minimum, value)
+            maximum = max(maximum, value)
             if position > start and (
                 (previous < 0 <= value)
                 or (previous >= 0 > value)
@@ -154,7 +161,23 @@ def audio_envelope_dhash64_from_pcm_s16le(payload: bytes) -> str:
             value <<= 1
             if features[index] > features[index + 1]:
                 value |= 1
-    return f"{value:016x}"
+
+    mean_abs = absolute_total / float(count)
+    informative = (
+        maximum - minimum >= 128
+        and mean_abs >= 16.0
+    )
+    return f"{value:016x}", informative
+
+
+def audio_envelope_dhash64_from_pcm_s16le(payload: bytes) -> str:
+    """Hash relative short-term energy and zero-crossing shape into 64 bits."""
+
+    return _audio_envelope_hash_and_informative(payload)[0]
+
+
+def audio_pcm_is_informative(payload: bytes) -> bool:
+    return _audio_envelope_hash_and_informative(payload)[1]
 
 
 class LocalAudioFingerprintExtractor:
@@ -340,11 +363,15 @@ class LocalAudioFingerprintExtractor:
                 samples = tuple(
                     FingerprintSample(
                         timestamp_ms=center_ms,
-                        value=audio_envelope_dhash64_from_pcm_s16le(
+                        value=sample_result[0],
+                        informative=sample_result[1],
+                    )
+                    for center_ms in self.timestamps
+                    for sample_result in (
+                        _audio_envelope_hash_and_informative(
                             self._extract_pcm_window(lease, center_ms)
                         ),
                     )
-                    for center_ms in self.timestamps
                 )
                 lease.require_current()
         except (MediaContentLeaseError, FingerprintError) as exc:
@@ -370,5 +397,14 @@ class LocalAudioFingerprintExtractor:
                 "channels": AUDIO_FINGERPRINT_CHANNELS,
                 "stream": dict(self.stream.cache_identity()),
                 "feature_bins": _AUDIO_FEATURE_BINS,
+            },
+            comparison_parameters={
+                "sample_count": len(self.timestamps),
+                "lattice": "interior-10-90-window-centers",
+                "window_ms": AUDIO_FINGERPRINT_WINDOW_MS,
+                "sample_rate_hz": AUDIO_FINGERPRINT_SAMPLE_RATE_HZ,
+                "channels": AUDIO_FINGERPRINT_CHANNELS,
+                "feature_bins": _AUDIO_FEATURE_BINS,
+                "features": "mean-abs+zero-crossing-dhash64",
             },
         )
