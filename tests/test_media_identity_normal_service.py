@@ -689,6 +689,94 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertEqual(source.read_calls, result.observation_count)
         self.assertEqual(media_hash.call_count, 1)
 
+    def test_validated_confirmation_snapshot_requires_every_identity_field(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        result = normal.run_scan(self.fast_scan.scan_id)
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        confirmation = _confirm_best(decisions, self.fast_scan.scan_id)
+        self.assertTrue(confirmation["current"])
+
+        with self.database.connect() as conn:
+            scan = dict(conn.execute(
+                """SELECT id,file_id,claimed_identity_json,metadata_signature,
+                          file_size_bytes,file_modified_at,file_sha256
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone())
+        claimed = json.loads(scan["claimed_identity_json"])
+        validated = {
+            "current": True,
+            "content_verified": True,
+            "scan_id": int(scan["id"]),
+            "file_id": int(scan["file_id"]),
+            "result_revision": result_revision(claimed),
+            "decision_snapshot_sha256": str(
+                claimed["decision_snapshot"]["sha256"]
+            ),
+            "metadata_signature": str(scan["metadata_signature"] or ""),
+            "file_size_bytes": int(scan["file_size_bytes"] or 0),
+            "file_modified_at": scan["file_modified_at"],
+            "file_sha256": str(scan["file_sha256"] or ""),
+        }
+        altered = {
+            "current": False,
+            "content_verified": False,
+            "scan_id": int(validated["scan_id"]) + 1,
+            "file_id": int(validated["file_id"]) + 1,
+            "result_revision": int(validated["result_revision"]) + 1,
+            "decision_snapshot_sha256": "0" * 64,
+            "metadata_signature": str(validated["metadata_signature"]) + "-changed",
+            "file_size_bytes": int(validated["file_size_bytes"]) + 1,
+            "file_modified_at": 0,
+            "file_sha256": "0" * 64,
+        }
+
+        source.read_calls = 0
+        with patch(
+            "app.media_identity.service.media_content_sha256",
+            wraps=media_content_sha256,
+        ) as media_hash:
+            status = decisions.confirmation_status(
+                1,
+                validated_source=validated,
+            )
+        self.assertTrue(status["current"])
+        self.assertEqual(media_hash.call_count, 0)
+        self.assertEqual(source.read_calls, 0)
+
+        for field in validated:
+            for mode in ("missing", "altered"):
+                with self.subTest(field=field, mode=mode):
+                    probe = dict(validated)
+                    if mode == "missing":
+                        probe.pop(field)
+                    else:
+                        probe[field] = altered[field]
+                    source.read_calls = 0
+                    with patch(
+                        "app.media_identity.service.media_content_sha256",
+                        wraps=media_content_sha256,
+                    ) as media_hash:
+                        status = decisions.confirmation_status(
+                            1,
+                            validated_source=probe,
+                        )
+                    self.assertTrue(status["current"])
+                    self.assertEqual(media_hash.call_count, 1)
+                    self.assertEqual(
+                        source.read_calls,
+                        result.observation_count,
+                    )
+
     def test_new_fast_scan_does_not_hide_current_normal_mie_result(self):
         source = FakePreviewSource()
         normal = NormalIdentityService(
@@ -832,6 +920,88 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             identity_findings[0]["evidence"]["scan_id"],
             first_normal_id,
         )
+
+    def test_normal_history_limit_fails_closed_before_older_current_result(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+
+        normal.run_scan(self.fast_scan.scan_id)
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        oldest_current_normal_id = self.fast_scan.scan_id
+        self.assertTrue(
+            decisions.scan_detail(oldest_current_normal_id)["snapshot_current"]
+        )
+
+        stale_normal_ids = []
+        for _ in range(8):
+            newer_fast = self.fast.scan_file(1)
+            normal.run_scan(newer_fast.scan_id)
+            decisions.resolve_scan(newer_fast.scan_id)
+            stale_normal_ids.append(newer_fast.scan_id)
+            with self.database.connect() as conn:
+                evidence_id = conn.execute(
+                    """SELECT id FROM media_identity_evidence
+                       WHERE scan_id=? ORDER BY id DESC LIMIT 1""",
+                    (newer_fast.scan_id,),
+                ).fetchone()["id"]
+                conn.execute(
+                    """UPDATE media_identity_evidence
+                       SET strength=CASE
+                         WHEN strength < 0.99 THEN strength + 0.01
+                         ELSE strength - 0.01
+                       END
+                       WHERE id=?""",
+                    (evidence_id,),
+                )
+            self.assertFalse(
+                decisions.scan_detail(newer_fast.scan_id)["snapshot_current"]
+            )
+
+        self.assertTrue(
+            decisions.scan_detail(oldest_current_normal_id)["snapshot_current"]
+        )
+
+        latest_fast = self.fast.scan_file(1)
+        decisions.resolve_scan(latest_fast.scan_id)
+        self.assertEqual(
+            decisions.latest_scan_for_file(1)["id"],
+            latest_fast.scan_id,
+        )
+
+        findings = decisions.mie_findings()
+        uncertain = [
+            finding
+            for finding in findings
+            if finding["rule_key"] == "episode-identity-history-uncertain"
+        ]
+        self.assertEqual(len(uncertain), 1)
+        self.assertEqual(
+            uncertain[0]["evidence"]["latest_scan_id"],
+            latest_fast.scan_id,
+        )
+        self.assertEqual(
+            uncertain[0]["evidence"]["normal_history_checked"],
+            len(stale_normal_ids),
+        )
+        self.assertEqual(
+            uncertain[0]["evidence"]["normal_history_validation_limit"],
+            len(stale_normal_ids),
+        )
+        self.assertTrue(uncertain[0]["evidence"]["history_truncated"])
+        self.assertFalse(any(
+            finding["rule_key"] == "episode-identity-review"
+            and finding.get("evidence", {}).get("scan_id")
+            == oldest_current_normal_id
+            for finding in findings
+        ))
 
     def test_external_source_config_change_stales_normal_result(self):
         self._seed_jellyfin_config()
