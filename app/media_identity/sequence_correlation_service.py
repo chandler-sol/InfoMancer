@@ -90,6 +90,21 @@ class DeepSequenceCorrelationRun:
             raise DeepSequenceCorrelationError(
                 "Sequence run policy identity is malformed."
             )
+        expected_policy_payload = self.analysis.policy.identity_payload()
+        if (
+            _canonical_json_bytes(self.sequence_policy_identity)
+            != _canonical_json_bytes(expected_policy_payload)
+        ):
+            raise DeepSequenceCorrelationError(
+                "Sequence run policy identity does not match its analysis."
+            )
+        expected_policy_signature = hashlib.sha256(
+            _canonical_json_bytes(expected_policy_payload)
+        ).hexdigest()
+        if expected_policy_signature != self.sequence_policy_signature:
+            raise DeepSequenceCorrelationError(
+                "Sequence run policy signature does not match its analysis."
+            )
         if len(self.hypotheses) != self.hypothesis_count:
             raise DeepSequenceCorrelationError(
                 "Sequence run hypothesis count is inconsistent."
