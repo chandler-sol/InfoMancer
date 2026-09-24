@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter
 
 from ..media_info import MediaInspectionError
+from ..mie_history import MediaIntelligenceHistoryEngine
 from ..stream_inventory import MediaStreamService
 from .context import RouteContext
 
@@ -19,7 +20,10 @@ def build_router(ctx: RouteContext):
     media_info_lock = ctx.live("media_info_lock")
     record_event = ctx.live("record_event")
 
-    mie = ctx.get("mie")
+    mie = MediaIntelligenceHistoryEngine(
+        db,
+        external_registry_factory=ctx.get("_mie_external_registry"),
+    )
     media_streams = MediaStreamService(db)
 
     def run_media_inspection(file_ids: list[int] | None = None) -> None:
