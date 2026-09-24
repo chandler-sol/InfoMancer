@@ -709,6 +709,105 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertFalse(detail["actionable"])
         self.assertEqual(self.service.mie_findings(), [])
 
+    def test_deep_history_limit_fails_closed_before_lower_profiles(self) -> None:
+        current = self.media.stat()
+        deep_ids: list[int] = []
+        with self.database.connect() as conn:
+            for _ in range(9):
+                cursor = conn.execute(
+                    """INSERT INTO media_identity_scans(
+                         file_id,identity_kind,requested_profile,completed_profile,
+                         status,stage,claimed_identity_json,file_size_bytes,
+                         file_modified_at,file_sha256,metadata_signature,
+                         result_state,completed_at
+                       ) VALUES (
+                         1,'episode','deep','deep','complete','deep_complete','{}',
+                         ?,? ,?,'deep-history-fixture','strong_match_other',
+                         CURRENT_TIMESTAMP
+                       )""",
+                    (
+                        current.st_size,
+                        current.st_mtime,
+                        "a" * 64,
+                    ),
+                )
+                deep_ids.append(int(cursor.lastrowid))
+            latest = conn.execute(
+                """INSERT INTO media_identity_scans(
+                     file_id,identity_kind,requested_profile,completed_profile,
+                     status,stage,claimed_identity_json,file_size_bytes,
+                     file_modified_at,file_sha256,metadata_signature,
+                     result_state,completed_at
+                   ) VALUES (
+                     1,'episode','fast','fast','complete','resolved','{}',
+                     ?,? ,?,'deep-history-fixture','inconclusive',
+                     CURRENT_TIMESTAMP
+                   )""",
+                (
+                    current.st_size,
+                    current.st_mtime,
+                    "a" * 64,
+                ),
+            )
+            latest_id = int(latest.lastrowid)
+
+        checked_deep_ids = list(reversed(deep_ids[-8:]))
+
+        def fake_detail(scan_id: int, *args, **kwargs):
+            if int(scan_id) == latest_id:
+                return {
+                    "id": latest_id,
+                    "file_id": 1,
+                    "file": {
+                        "root_id": 1,
+                        "title_id": 1,
+                        "filename": self.media.name,
+                    },
+                    "snapshot_current": True,
+                }
+            if int(scan_id) in checked_deep_ids:
+                return {
+                    "id": int(scan_id),
+                    "file_id": 1,
+                    "snapshot_current": False,
+                }
+            raise AssertionError(
+                f"Deep history validation escaped its bound: {scan_id}"
+            )
+
+        with patch.object(
+            self.service,
+            "scan_detail",
+            side_effect=fake_detail,
+        ) as scan_detail:
+            findings = self.service.mie_findings()
+
+        self.assertEqual(len(findings), 1)
+        finding = findings[0]
+        self.assertEqual(
+            finding["rule_key"],
+            "episode-identity-history-uncertain",
+        )
+        self.assertEqual(finding["evidence"]["profile"], "deep")
+        self.assertEqual(finding["evidence"]["latest_scan_id"], latest_id)
+        self.assertEqual(finding["evidence"]["deep_history_checked"], 8)
+        self.assertEqual(
+            finding["evidence"]["deep_history_validation_limit"],
+            8,
+        )
+        self.assertTrue(finding["evidence"]["history_truncated"])
+        self.assertEqual(
+            [call.args[0] for call in scan_detail.call_args_list[:-1]],
+            checked_deep_ids,
+        )
+        self.assertEqual(
+            scan_detail.call_args_list[-1].args[0],
+            latest_id,
+        )
+        self.assertNotIn(deep_ids[0], [
+            call.args[0] for call in scan_detail.call_args_list
+        ])
+
     def test_snapshot_sha_does_not_trust_or_require_cached_hash_record(self) -> None:
         self.service.resolve_scan(self.scan_id)
         digest = hashlib.sha256(self.media.read_bytes()).hexdigest()
