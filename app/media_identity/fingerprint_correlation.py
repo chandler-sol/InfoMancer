@@ -22,7 +22,6 @@ from .fingerprint import (
     fingerprint_from_payload,
 )
 from .fingerprint_service import (
-    DEEP_FINGERPRINT_ARTIFACT_KEY,
     DEEP_FINGERPRINT_ARTIFACT_VERSION,
     DeepFingerprintArtifactService,
     DeepFingerprintError,
@@ -36,7 +35,9 @@ from .versions import (
 )
 
 
-DEEP_FINGERPRINT_MANIFEST_KEY = "deep-fingerprint-correlation"
+DEEP_FINGERPRINT_MANIFEST_KEY = (
+    "deep-fingerprint-correlation:video-dhash64-sequence"
+)
 DEEP_FINGERPRINT_MANIFEST_VERSION = str(
     DEEP_FINGERPRINT_CORRELATION_VERSION
 )
@@ -49,6 +50,7 @@ class DeepFingerprintCorrelationError(RuntimeError):
 @dataclass(frozen=True)
 class DeepFingerprintCorrelationRun:
     scan_id: int
+    algorithm_key: str
     correlation_plan_signature: str
     planned_file_count: int
     completed_file_count: int
@@ -123,6 +125,14 @@ class DeepFingerprintCorrelationService:
             correlation_policy or DeepCorrelationPolicy()
         )
         self.match_policy = match_policy or FingerprintMatchPolicy()
+        self.algorithm = self.artifact_service.algorithm
+        self.manifest_key = (
+            f"deep-fingerprint-correlation:{self.algorithm.key}"
+        )
+        self.manifest_version = DEEP_FINGERPRINT_MANIFEST_VERSION
+        self.manifest_source_kind = (
+            f"deep_fingerprint:{self.algorithm.key}"
+        )
 
     @staticmethod
     def _scan_context(
@@ -192,9 +202,9 @@ class DeepFingerprintCorrelationService:
             or str(item.get("artifact_type") or "")
             != "content_fingerprint"
             or str(item.get("analyzer_key") or "")
-            != DEEP_FINGERPRINT_ARTIFACT_KEY
+            != self.artifact_service.analyzer_key
             or str(item.get("analyzer_version") or "")
-            != DEEP_FINGERPRINT_ARTIFACT_VERSION
+            != self.artifact_service.analyzer_version
             or str(item.get("status") or "") != "complete"
             or str(item.get("profile") or "") != "deep"
             or str(item.get("source_kind") or "")
@@ -242,6 +252,7 @@ class DeepFingerprintCorrelationService:
         return {
             "deep_orchestration_version": DEEP_ORCHESTRATION_VERSION,
             "fingerprint_contract_version": DEEP_FINGERPRINT_CONTRACT_VERSION,
+            "fingerprint_algorithm": self.algorithm.identity_payload(),
             "fingerprint_match_version": DEEP_FINGERPRINT_MATCH_VERSION,
             "fingerprint_correlation_version": (
                 DEEP_FINGERPRINT_CORRELATION_VERSION
@@ -303,13 +314,13 @@ class DeepFingerprintCorrelationService:
             or str(row.get("artifact_type") or "")
             != "deep_fingerprint_manifest"
             or str(row.get("analyzer_key") or "")
-            != DEEP_FINGERPRINT_MANIFEST_KEY
+            != self.manifest_key
             or str(row.get("analyzer_version") or "")
-            != DEEP_FINGERPRINT_MANIFEST_VERSION
+            != self.manifest_version
             or str(row.get("status") or "") != "complete"
             or str(row.get("profile") or "") != "deep"
             or str(row.get("source_kind") or "")
-            != "deep_fingerprint"
+            != self.manifest_source_kind
             or str(row.get("source_ref") or "")
             != f"scan:{int(scan['id'])}"
             or str(row.get("source_signature") or "")
@@ -404,13 +415,14 @@ class DeepFingerprintCorrelationService:
                      payload_json
                    ) VALUES (
                      ?,'deep_fingerprint_manifest',?,?,?,'complete','deep',
-                     'deep_fingerprint',?,?,?,?,?
+                     ?,?,?,?,?,?
                    )""",
                 (
                     int(current_scan["file_id"]),
-                    DEEP_FINGERPRINT_MANIFEST_KEY,
-                    DEEP_FINGERPRINT_MANIFEST_VERSION,
+                    self.manifest_key,
+                    self.manifest_version,
                     cache_key,
+                    self.manifest_source_kind,
                     f"scan:{int(current_scan['id'])}",
                     plan.plan_signature,
                     int(target_snapshot["size_bytes"] or 0),
@@ -426,8 +438,8 @@ class DeepFingerprintCorrelationService:
                    ORDER BY id DESC LIMIT 1""",
                 (
                     int(current_scan["file_id"]),
-                    DEEP_FINGERPRINT_MANIFEST_KEY,
-                    DEEP_FINGERPRINT_MANIFEST_VERSION,
+                    self.manifest_key,
+                    self.manifest_version,
                     cache_key,
                 ),
             ).fetchone()
@@ -445,13 +457,14 @@ class DeepFingerprintCorrelationService:
                 repair = conn.execute(
                     """UPDATE media_identity_artifacts
                        SET status='complete',profile='deep',
-                           source_kind='deep_fingerprint',source_ref=?,
+                           source_kind=?,source_ref=?,
                            source_signature=?,file_size_bytes=?,
                            file_modified_at=?,payload_json=?,error='',
                            updated_at=CURRENT_TIMESTAMP,
                            last_used_at=CURRENT_TIMESTAMP
                        WHERE id=? AND cache_key=?""",
                     (
+                        self.manifest_source_kind,
                         f"scan:{int(current_scan['id'])}",
                         plan.plan_signature,
                         int(target_snapshot["size_bytes"] or 0),
@@ -565,6 +578,7 @@ class DeepFingerprintCorrelationService:
 
         return DeepFingerprintCorrelationRun(
             scan_id=int(scan_id),
+            algorithm_key=self.algorithm.key,
             correlation_plan_signature=plan.plan_signature,
             planned_file_count=len(plan.files),
             completed_file_count=len(children),
