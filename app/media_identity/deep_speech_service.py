@@ -687,7 +687,7 @@ class DeepSpeechSamplingService:
                      payload_json
                    ) VALUES (
                      ?,'deep_speech_manifest',?,?,?,'complete','deep',
-                     'local_speech',?,?,?,?,?,?
+                     'local_speech',?,?,?,?,?
                    )""",
                 (
                     int(scan["file_id"]),
