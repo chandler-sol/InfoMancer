@@ -39,8 +39,16 @@ class FingerprintAlgorithm:
     max_samples: int = MAX_FINGERPRINT_SAMPLES
 
     def __post_init__(self) -> None:
-        key = str(self.key or "").strip().casefold()
-        version = str(self.version or "").strip()
+        if (
+            not isinstance(self.key, str)
+            or not isinstance(self.version, str)
+            or not isinstance(self.family, FingerprintFamily)
+        ):
+            raise FingerprintError(
+                "Fingerprint algorithms require text key/version and a known family."
+            )
+        key = self.key.strip().casefold()
+        version = self.version.strip()
         if not key or not version:
             raise FingerprintError(
                 "Fingerprint algorithms require stable key and version values."
@@ -171,7 +179,11 @@ class FingerprintSample:
             raise FingerprintError(
                 "Fingerprint sample timestamps must be non-negative integers."
             )
-        value = str(self.value or "").strip().casefold()
+        if not isinstance(self.value, str):
+            raise FingerprintError(
+                "Fingerprint samples must be hexadecimal text."
+            )
+        value = self.value.strip().casefold()
         if not value or any(ch not in "0123456789abcdef" for ch in value):
             raise FingerprintError(
                 "Fingerprint samples must be hexadecimal values."
@@ -243,8 +255,15 @@ class ContentFingerprint:
             seen.add(sample.timestamp_ms)
             previous = sample.timestamp_ms
 
-        source_kind = str(self.source_kind or "").strip().casefold()
-        source_signature = str(self.source_signature or "").strip()
+        if (
+            not isinstance(self.source_kind, str)
+            or not isinstance(self.source_signature, str)
+        ):
+            raise FingerprintError(
+                "Content fingerprint source provenance must be text."
+            )
+        source_kind = self.source_kind.strip().casefold()
+        source_signature = self.source_signature.strip()
         if not source_kind:
             raise FingerprintError(
                 "Content fingerprints require source provenance."
@@ -326,7 +345,15 @@ def fingerprint_from_payload(value: object) -> ContentFingerprint:
         )
     identity = value.get("identity")
     samples = value.get("samples")
-    if not isinstance(identity, Mapping) or not isinstance(samples, Sequence):
+    if (
+        not isinstance(identity, Mapping)
+        or not isinstance(samples, list)
+        or not isinstance(identity.get("parameters"), Mapping)
+        or not isinstance(
+            identity.get("comparison_parameters"),
+            Mapping,
+        )
+    ):
         raise FingerprintError("Persisted fingerprint payload is incomplete.")
     try:
         contract_version = int(identity.get("contract_version") or 0)
@@ -343,41 +370,33 @@ def fingerprint_from_payload(value: object) -> ContentFingerprint:
         raise FingerprintError("Persisted fingerprint algorithm is missing.")
     try:
         algorithm = FingerprintAlgorithm(
-            key=str(algorithm_raw["key"]),
-            version=str(algorithm_raw["version"]),
-            family=FingerprintFamily(str(algorithm_raw["family"])),
-            bits_per_sample=int(algorithm_raw["bits_per_sample"]),
-            max_samples=int(algorithm_raw["max_samples"]),
+            key=algorithm_raw["key"],
+            version=algorithm_raw["version"],
+            family=FingerprintFamily(algorithm_raw["family"]),
+            bits_per_sample=algorithm_raw["bits_per_sample"],
+            max_samples=algorithm_raw["max_samples"],
         )
+        if not all(isinstance(item, Mapping) for item in samples):
+            raise FingerprintError(
+                "Persisted fingerprint samples are malformed."
+            )
         fingerprint = ContentFingerprint(
-            file_id=int(identity["file_id"]),
-            file_sha256=str(identity["file_sha256"]),
-            runtime_ms=int(identity["runtime_ms"]),
+            file_id=identity["file_id"],
+            file_sha256=identity["file_sha256"],
+            runtime_ms=identity["runtime_ms"],
             algorithm=algorithm,
             samples=tuple(
                 FingerprintSample(
-                    timestamp_ms=int(item["timestamp_ms"]),
-                    value=str(item["value"]),
+                    timestamp_ms=item["timestamp_ms"],
+                    value=item["value"],
                     informative=item["informative"],
                 )
                 for item in samples
-                if isinstance(item, Mapping)
             ),
-            source_kind=str(identity["source_kind"]),
-            source_signature=str(identity["source_signature"]),
-            parameters=(
-                identity.get("parameters")
-                if isinstance(identity.get("parameters"), Mapping)
-                else {}
-            ),
-            comparison_parameters=(
-                identity.get("comparison_parameters")
-                if isinstance(
-                    identity.get("comparison_parameters"),
-                    Mapping,
-                )
-                else {}
-            ),
+            source_kind=identity["source_kind"],
+            source_signature=identity["source_signature"],
+            parameters=identity["parameters"],
+            comparison_parameters=identity["comparison_parameters"],
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise FingerprintError(
@@ -478,8 +497,15 @@ class FingerprintComparison:
             raise FingerprintError(
                 "Fingerprint comparison alignment exceeds the supported bound."
             )
-        algorithm_key = str(self.algorithm_key or "").strip().casefold()
-        algorithm_version = str(self.algorithm_version or "").strip()
+        if (
+            not isinstance(self.algorithm_key, str)
+            or not isinstance(self.algorithm_version, str)
+        ):
+            raise FingerprintError(
+                "Fingerprint comparison algorithm identity must be text."
+            )
+        algorithm_key = self.algorithm_key.strip().casefold()
+        algorithm_version = self.algorithm_version.strip()
         if not algorithm_key or not algorithm_version:
             raise FingerprintError(
                 "Fingerprint comparisons require algorithm identity."
@@ -527,16 +553,16 @@ def fingerprint_comparison_from_payload(
         )
     try:
         return FingerprintComparison(
-            left_file_id=int(value["left_file_id"]),
-            right_file_id=int(value["right_file_id"]),
-            algorithm_key=str(value["algorithm_key"]),
-            algorithm_version=str(value["algorithm_version"]),
-            compared_samples=int(value["compared_samples"]),
-            alignment_shift=int(value["alignment_shift"]),
-            coverage=float(value["coverage"]),
-            mean_similarity=float(value["mean_similarity"]),
-            median_similarity=float(value["median_similarity"]),
-            minimum_similarity=float(value["minimum_similarity"]),
+            left_file_id=value["left_file_id"],
+            right_file_id=value["right_file_id"],
+            algorithm_key=value["algorithm_key"],
+            algorithm_version=value["algorithm_version"],
+            compared_samples=value["compared_samples"],
+            alignment_shift=value["alignment_shift"],
+            coverage=value["coverage"],
+            mean_similarity=value["mean_similarity"],
+            median_similarity=value["median_similarity"],
+            minimum_similarity=value["minimum_similarity"],
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise FingerprintError(
