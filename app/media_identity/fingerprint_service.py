@@ -24,6 +24,7 @@ from .fingerprint_local import (
     LocalVideoFingerprintExtractor,
     plan_video_fingerprint_timestamps,
 )
+from .media_generation import media_generation_matches
 from .models import MediaIdentityFile
 from .service import MediaIdentityDecisionService
 from .versions import DEEP_FINGERPRINT_CONTRACT_VERSION
@@ -137,7 +138,14 @@ class DeepFingerprintArtifactService:
         fingerprint: ContentFingerprint,
         snapshot: Mapping[str, Any],
     ) -> bool:
-        return True
+        generation = fingerprint.parameters.get("media_generation")
+        return (
+            isinstance(generation, Mapping)
+            and media_generation_matches(
+                str(snapshot["path"]),
+                generation,
+            )
+        )
 
     @staticmethod
     def _file_snapshot(
@@ -458,6 +466,13 @@ class DeepFingerprintArtifactService:
             ):
                 raise DeepFingerprintError(
                     "Media snapshot changed before fingerprint publication."
+                )
+            if not self._fingerprint_matches_snapshot(
+                fingerprint,
+                current,
+            ):
+                raise DeepFingerprintError(
+                    "Fingerprint extraction inputs changed before publication."
                 )
             if scan_id is not None:
                 self._require_scan_binding(
