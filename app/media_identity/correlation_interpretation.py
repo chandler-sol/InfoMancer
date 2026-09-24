@@ -5,7 +5,11 @@ from enum import Enum
 import math
 from typing import Any, Iterable, Mapping
 
-from .fingerprint import FingerprintComparison
+from .fingerprint import (
+    AUDIO_ENVELOPE_DHASH64_V1,
+    VIDEO_DHASH64_V1,
+    FingerprintComparison,
+)
 from .versions import DEEP_CORRELATION_INTERPRETATION_VERSION
 
 
@@ -211,11 +215,19 @@ class PairInterpretation:
 def _thresholds_for(
     modality: str,
     policy: CorrelationInterpretationPolicy,
-) -> ModalityThresholds:
+) -> tuple[ModalityThresholds, str, str]:
     if modality == "video":
-        return policy.video
+        return (
+            policy.video,
+            VIDEO_DHASH64_V1.key,
+            VIDEO_DHASH64_V1.version,
+        )
     if modality == "audio":
-        return policy.audio
+        return (
+            policy.audio,
+            AUDIO_ENVELOPE_DHASH64_V1.key,
+            AUDIO_ENVELOPE_DHASH64_V1.version,
+        )
     raise CorrelationInterpretationError(
         "Correlation modality must be video or audio."
     )
@@ -234,7 +246,17 @@ def interpret_modality(
             "Correlation interpretation requires FingerprintComparison values."
         )
     policy = policy or CorrelationInterpretationPolicy()
-    thresholds = _thresholds_for(modality, policy)
+    thresholds, expected_key, expected_version = _thresholds_for(
+        modality,
+        policy,
+    )
+    if (
+        comparison.algorithm_key != expected_key
+        or comparison.algorithm_version != expected_version
+    ):
+        raise CorrelationInterpretationError(
+            f"{modality} correlation uses the wrong fingerprint algorithm."
+        )
     sufficient = (
         comparison.compared_samples >= thresholds.minimum_samples
         and comparison.coverage >= thresholds.minimum_coverage
@@ -326,6 +348,10 @@ def interpret_pair(
     audio: FingerprintComparison | None,
     policy: CorrelationInterpretationPolicy | None = None,
 ) -> PairInterpretation:
+    pair_left, pair_right = _pair_key(
+        left_file_id,
+        right_file_id,
+    )
     policy = policy or CorrelationInterpretationPolicy()
     video_interpretation = interpret_modality(
         video,
@@ -338,8 +364,8 @@ def interpret_pair(
         policy=policy,
     )
     pair = PairInterpretation(
-        left_file_id=left_file_id,
-        right_file_id=right_file_id,
+        left_file_id=pair_left,
+        right_file_id=pair_right,
         video=video_interpretation,
         audio=audio_interpretation,
         agreement=_agreement(
