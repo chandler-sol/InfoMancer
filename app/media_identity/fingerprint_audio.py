@@ -273,12 +273,15 @@ class LocalAudioFingerprintExtractor:
             0,
             center_ms - AUDIO_FINGERPRINT_WINDOW_MS // 2,
         )
-        expected_bytes = (
+        expected_samples = (
             AUDIO_FINGERPRINT_WINDOW_MS
             * AUDIO_FINGERPRINT_SAMPLE_RATE_HZ
+            // 1000
+        )
+        expected_bytes = (
+            expected_samples
             * AUDIO_FINGERPRINT_CHANNELS
             * AUDIO_FINGERPRINT_SAMPLE_WIDTH_BYTES
-            // 1000
         )
         try:
             with lease.ffmpeg_input() as (
@@ -296,12 +299,14 @@ class LocalAudioFingerprintExtractor:
                     *input_args,
                     "-map",
                     f"0:{self.stream.index}",
-                    "-t",
-                    f"{float(AUDIO_FINGERPRINT_WINDOW_MS) / 1000.0:.3f}",
+                    "-af",
+                    (
+                        f"aresample={AUDIO_FINGERPRINT_SAMPLE_RATE_HZ}:async=0,"
+                        f"atrim=start_sample=0:end_sample={expected_samples},"
+                        "asetpts=N/SR/TB"
+                    ),
                     "-ac",
                     str(AUDIO_FINGERPRINT_CHANNELS),
-                    "-ar",
-                    str(AUDIO_FINGERPRINT_SAMPLE_RATE_HZ),
                     "-c:a",
                     "pcm_s16le",
                     "-f",
