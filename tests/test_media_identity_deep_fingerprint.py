@@ -30,6 +30,10 @@ from app.media_identity.fingerprint_service import (
     DeepFingerprintArtifactService,
     DeepFingerprintError,
 )
+from app.media_identity.fingerprint_correlation import (
+    DeepFingerprintCorrelationError,
+    DeepFingerprintCorrelationService,
+)
 
 
 def _fingerprint(
@@ -330,6 +334,7 @@ class FakeVideoFingerprintExtractor:
     values_by_file: dict[int, tuple[str, ...]] = {}
     extract_calls: dict[int, int] = {}
     mutate = None
+    fail_files: set[int] = set()
 
     def __init__(self, media, runtime_ms) -> None:
         self.media = media
@@ -374,6 +379,10 @@ class FakeVideoFingerprintExtractor:
                 "fixture media no longer matches catalog snapshot"
             )
         file_id = int(self.media.file_id)
+        if file_id in self.__class__.fail_files:
+            raise LocalFingerprintError(
+                f"fixture fingerprint failure for file {file_id}"
+            )
         self.__class__.extract_calls[file_id] = (
             self.__class__.extract_calls.get(file_id, 0) + 1
         )
@@ -408,6 +417,7 @@ class DeepFingerprintArtifactServiceTests(unittest.TestCase):
         FakeVideoFingerprintExtractor.values_by_file = {}
         FakeVideoFingerprintExtractor.extract_calls = {}
         FakeVideoFingerprintExtractor.mutate = None
+        FakeVideoFingerprintExtractor.fail_files = set()
 
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
@@ -642,6 +652,214 @@ class DeepFingerprintArtifactServiceTests(unittest.TestCase):
 
         self.assertIsNotNone(current)
         self.assertEqual(current.file_id, 2)
+
+
+
+class DeepFingerprintCorrelationServiceTests(
+    DeepFingerprintArtifactServiceTests
+):
+    def setUp(self) -> None:
+        super().setUp()
+        self.correlation = DeepFingerprintCorrelationService(
+            self.database,
+            artifact_service=self.service,
+        )
+
+    def test_complete_cohort_persists_all_pairs_without_scan_mutation(self) -> None:
+        values = (
+            "0000000000000000",
+            "1111111111111111",
+            "2222222222222222",
+            "3333333333333333",
+            "4444444444444444",
+            "5555555555555555",
+        )
+        FakeVideoFingerprintExtractor.values_by_file = {
+            1: values,
+            2: values,
+            3: (
+                "ffffffffffffffff",
+                "eeeeeeeeeeeeeeee",
+                "dddddddddddddddd",
+                "cccccccccccccccc",
+                "bbbbbbbbbbbbbbbb",
+                "aaaaaaaaaaaaaaaa",
+            ),
+        }
+        with self.database.connect() as conn:
+            before = dict(conn.execute(
+                """SELECT requested_profile,completed_profile,stage,
+                          claimed_identity_json,result_state,best_candidate_key
+                   FROM media_identity_scans WHERE id=?""",
+                (self.scan1.scan_id,),
+            ).fetchone())
+
+        result = self.correlation.run(self.scan1.scan_id)
+
+        self.assertTrue(result.coverage_complete)
+        self.assertEqual(result.planned_file_count, 3)
+        self.assertEqual(result.completed_file_count, 3)
+        self.assertEqual(result.planned_pair_count, 3)
+        self.assertEqual(result.completed_pair_count, 3)
+        self.assertIsNotNone(result.manifest_artifact_id)
+        self.assertEqual(result.missing_file_ids, ())
+        self.assertEqual(result.failures, ())
+        self.assertEqual(
+            {(item.left_file_id, item.right_file_id)
+             for item in result.comparisons},
+            {(1, 2), (1, 3), (2, 3)},
+        )
+        with self.database.connect() as conn:
+            after = dict(conn.execute(
+                """SELECT requested_profile,completed_profile,stage,
+                          claimed_identity_json,result_state,best_candidate_key
+                   FROM media_identity_scans WHERE id=?""",
+                (self.scan1.scan_id,),
+            ).fetchone())
+            peer_hash = conn.execute(
+                """SELECT status,sha256 FROM media_file_hashes
+                   WHERE file_id=3"""
+            ).fetchone()
+        self.assertEqual(before, after)
+        self.assertEqual(peer_hash["status"], "complete")
+        self.assertEqual(len(peer_hash["sha256"]), 64)
+
+    def test_second_cohort_run_reuses_all_fingerprints_and_manifest(self) -> None:
+        first = self.correlation.run(self.scan1.scan_id)
+        second = self.correlation.run(self.scan1.scan_id)
+
+        self.assertTrue(first.coverage_complete)
+        self.assertTrue(second.coverage_complete)
+        self.assertEqual(
+            second.manifest_artifact_id,
+            first.manifest_artifact_id,
+        )
+        self.assertEqual(second.reused_fingerprint_count, 3)
+        self.assertEqual(second.generated_fingerprint_count, 0)
+
+    def test_one_failed_peer_keeps_matrix_non_authoritative(self) -> None:
+        FakeVideoFingerprintExtractor.fail_files = {3}
+
+        result = self.correlation.run(self.scan1.scan_id)
+
+        self.assertFalse(result.coverage_complete)
+        self.assertEqual(result.missing_file_ids, (3,))
+        self.assertIsNone(result.manifest_artifact_id)
+        self.assertEqual(result.completed_pair_count, 0)
+        with self.database.connect() as conn:
+            count = conn.execute(
+                """SELECT COUNT(*) FROM media_identity_artifacts
+                   WHERE file_id=1
+                     AND artifact_type='deep_fingerprint_manifest'"""
+            ).fetchone()[0]
+        self.assertEqual(count, 0)
+
+    def test_target_revision_change_mid_cohort_blocks_manifest(self) -> None:
+        changed = {"done": False}
+
+        def mutate(file_id: int) -> None:
+            if file_id != 2 or changed["done"]:
+                return
+            changed["done"] = True
+            with self.database.connect() as conn:
+                row = conn.execute(
+                    """SELECT claimed_identity_json
+                       FROM media_identity_scans WHERE id=?""",
+                    (self.scan1.scan_id,),
+                ).fetchone()
+                claimed = json.loads(row["claimed_identity_json"])
+                claimed["result_revision"] = int(
+                    claimed.get("result_revision") or 1
+                ) + 1
+                conn.execute(
+                    """UPDATE media_identity_scans
+                       SET claimed_identity_json=? WHERE id=?""",
+                    (
+                        json.dumps(claimed, sort_keys=True),
+                        self.scan1.scan_id,
+                    ),
+                )
+
+        FakeVideoFingerprintExtractor.mutate = mutate
+
+        with self.assertRaises(DeepFingerprintCorrelationError):
+            self.correlation.run(self.scan1.scan_id)
+
+        with self.database.connect() as conn:
+            count = conn.execute(
+                """SELECT COUNT(*) FROM media_identity_artifacts
+                   WHERE file_id=1
+                     AND artifact_type='deep_fingerprint_manifest'"""
+            ).fetchone()[0]
+        self.assertEqual(count, 0)
+
+    def test_tampered_manifest_is_repaired_from_current_children(self) -> None:
+        first = self.correlation.run(self.scan1.scan_id)
+        self.assertTrue(first.coverage_complete)
+        assert first.manifest_artifact_id is not None
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT payload_json FROM media_identity_artifacts
+                   WHERE id=?""",
+                (first.manifest_artifact_id,),
+            ).fetchone()
+            payload = json.loads(row["payload_json"])
+            payload["coverage_complete"] = False
+            conn.execute(
+                """UPDATE media_identity_artifacts
+                   SET payload_json=? WHERE id=?""",
+                (
+                    json.dumps(payload, sort_keys=True),
+                    first.manifest_artifact_id,
+                ),
+            )
+
+        second = self.correlation.run(self.scan1.scan_id)
+
+        self.assertTrue(second.coverage_complete)
+        self.assertEqual(
+            second.manifest_artifact_id,
+            first.manifest_artifact_id,
+        )
+        with self.database.connect() as conn:
+            repaired = json.loads(conn.execute(
+                """SELECT payload_json FROM media_identity_artifacts
+                   WHERE id=?""",
+                (first.manifest_artifact_id,),
+            ).fetchone()["payload_json"])
+        self.assertTrue(repaired["coverage_complete"])
+
+    def test_tampered_child_is_repaired_before_matrix_publication(self) -> None:
+        first = self.correlation.run(self.scan1.scan_id)
+        self.assertTrue(first.coverage_complete)
+
+        with self.database.connect() as conn:
+            child = conn.execute(
+                """SELECT id,payload_json FROM media_identity_artifacts
+                   WHERE file_id=2
+                     AND artifact_type='content_fingerprint'
+                   ORDER BY id DESC LIMIT 1"""
+            ).fetchone()
+            payload = json.loads(child["payload_json"])
+            payload["samples"][0]["value"] = "f" * 16
+            conn.execute(
+                """UPDATE media_identity_artifacts
+                   SET payload_json=? WHERE id=?""",
+                (
+                    json.dumps(payload, sort_keys=True),
+                    int(child["id"]),
+                ),
+            )
+
+        calls_before = FakeVideoFingerprintExtractor.extract_calls.get(2, 0)
+        second = self.correlation.run(self.scan1.scan_id)
+
+        self.assertTrue(second.coverage_complete)
+        self.assertEqual(
+            FakeVideoFingerprintExtractor.extract_calls.get(2, 0),
+            calls_before + 1,
+        )
 
 
 if __name__ == "__main__":
