@@ -8,6 +8,8 @@ from .deep import (
     DeepCorrelationPolicy,
     DeepFileSnapshot,
     DeepIdentityError,
+    build_deep_plan_metadata,
+    deep_plan_metadata_is_current,
     generate_deep_episode_candidates,
     plan_deep_correlation,
 )
@@ -59,6 +61,8 @@ __all__ = [
     "DeepCorrelationPolicy",
     "DeepFileSnapshot",
     "DeepIdentityError",
+    "build_deep_plan_metadata",
+    "deep_plan_metadata_is_current",
     "generate_deep_episode_candidates",
     "plan_deep_correlation",
     "EvidenceCategory",
