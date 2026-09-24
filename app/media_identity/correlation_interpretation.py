@@ -7,6 +7,8 @@ from typing import Any, Iterable, Mapping
 
 from .fingerprint import (
     AUDIO_ENVELOPE_DHASH64_V1,
+    MAX_FINGERPRINT_ALIGNMENT_SHIFT,
+    MAX_FINGERPRINT_SAMPLES,
     VIDEO_DHASH64_V1,
     FingerprintComparison,
 )
@@ -145,6 +147,64 @@ class ModalityInterpretation:
             raise CorrelationInterpretationError(
                 "Correlation modality must be video or audio."
             )
+        if (
+            isinstance(self.left_file_id, bool)
+            or isinstance(self.right_file_id, bool)
+            or not isinstance(self.left_file_id, int)
+            or not isinstance(self.right_file_id, int)
+            or self.left_file_id < 1
+            or self.right_file_id < 1
+            or self.left_file_id == self.right_file_id
+        ):
+            raise CorrelationInterpretationError(
+                "Modality interpretation requires two distinct positive file IDs."
+            )
+        if not isinstance(self.band, SimilarityBand):
+            raise CorrelationInterpretationError(
+                "Modality interpretation requires a SimilarityBand."
+            )
+        if (
+            isinstance(self.compared_samples, bool)
+            or not isinstance(self.compared_samples, int)
+            or self.compared_samples < 1
+            or self.compared_samples > MAX_FINGERPRINT_SAMPLES
+        ):
+            raise CorrelationInterpretationError(
+                "Modality interpretation sample count is outside the supported bound."
+            )
+        if (
+            isinstance(self.alignment_shift, bool)
+            or not isinstance(self.alignment_shift, int)
+            or abs(self.alignment_shift) > MAX_FINGERPRINT_ALIGNMENT_SHIFT
+        ):
+            raise CorrelationInterpretationError(
+                "Modality interpretation alignment exceeds the supported bound."
+            )
+        for label, value in (
+            ("coverage", self.coverage),
+            ("mean similarity", self.mean_similarity),
+            ("median similarity", self.median_similarity),
+            ("minimum similarity", self.minimum_similarity),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or not 0.0 <= float(value) <= 1.0
+            ):
+                raise CorrelationInterpretationError(
+                    f"Modality interpretation {label} must be between 0 and 1."
+                )
+        if not isinstance(self.sufficient, bool):
+            raise CorrelationInterpretationError(
+                "Modality interpretation sufficiency must be boolean."
+            )
+        if self.sufficient != (
+            self.band is not SimilarityBand.INSUFFICIENT
+        ):
+            raise CorrelationInterpretationError(
+                "Modality interpretation band and sufficiency disagree."
+            )
 
     @property
     def supports_similarity(self) -> bool:
@@ -186,6 +246,10 @@ class PairInterpretation:
         expected_pair = frozenset(
             (self.left_file_id, self.right_file_id)
         )
+        if self.left_file_id > self.right_file_id:
+            raise CorrelationInterpretationError(
+                "Pair interpretation file IDs must use normalized ascending order."
+            )
         for item in (self.video, self.audio):
             if item is None:
                 continue
@@ -195,6 +259,15 @@ class PairInterpretation:
                 raise CorrelationInterpretationError(
                     "Modality interpretation belongs to a different file pair."
                 )
+        if not isinstance(self.agreement, MultimodalAgreement):
+            raise CorrelationInterpretationError(
+                "Pair interpretation requires a MultimodalAgreement."
+            )
+        expected_agreement = _agreement(self.video, self.audio)
+        if self.agreement is not expected_agreement:
+            raise CorrelationInterpretationError(
+                "Pair interpretation agreement does not match its modalities."
+            )
 
     @property
     def has_high_multimodal_support(self) -> bool:
