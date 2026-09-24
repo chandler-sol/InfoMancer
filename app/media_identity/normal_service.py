@@ -27,6 +27,7 @@ from .normal import (
     NormalSamplingStage,
     OcrEngine,
     OcrTextResult,
+    ocr_artifact_output_is_sealed,
 )
 from .service import MediaIdentityDecisionService
 from .speech import SpeechEngine, SpeechModelIdentity
@@ -118,32 +119,11 @@ def _deep_ocr_artifact_output_is_valid(
     text_value: object,
     payload: Mapping[str, Any],
 ) -> bool:
-    """Verify the self-seal on OCR artifacts produced by Deep.
-
-    Normal artifacts predate this seal and remain compatible. Deep artifacts are
-    accepted cross-profile only when their persisted output still matches the
-    digest written by the Deep checkpoint producer.
-    """
+    """Require the shared Deep OCR output seal for cross-profile reuse."""
 
     if str(profile or "") != IdentityProfile.DEEP.value:
         return True
-    expected = str(
-        payload.get("artifact_output_sha256") or ""
-    ).strip().casefold()
-    if (
-        len(expected) != 64
-        or any(character not in "0123456789abcdef" for character in expected)
-    ):
-        return False
-    digest_payload = dict(payload)
-    digest_payload.pop("artifact_output_sha256", None)
-    actual = hashlib.sha256(
-        _canonical_json({
-            "text_value": str(text_value or ""),
-            "payload": digest_payload,
-        }).encode("utf-8")
-    ).hexdigest()
-    return actual == expected
+    return ocr_artifact_output_is_sealed(text_value, payload)
 
 
 def _same_modified_at(first: Any, second: Any) -> bool:
