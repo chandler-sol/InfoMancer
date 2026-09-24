@@ -248,11 +248,31 @@ def interpret_fingerprint_bundle(
             "J4 modalities disagree on the planned correlation cohort."
         )
 
+    def sealed_comparisons(run, *, modality: str):
+        if not run.coverage_complete:
+            if run.manifest_artifact_id is not None:
+                raise CorrelationInterpretationError(
+                    f"Incomplete {modality} correlation cannot have a completion manifest."
+                )
+            return ()
+        if (
+            run.manifest_artifact_id is None
+            or run.completed_file_count != run.planned_file_count
+            or run.completed_pair_count != run.planned_pair_count
+            or len(run.comparisons) != run.planned_pair_count
+            or run.missing_file_ids
+            or run.failures
+        ):
+            raise CorrelationInterpretationError(
+                f"Complete {modality} correlation is missing sealed coverage."
+            )
+        return run.comparisons
+
     policy = policy or CorrelationInterpretationPolicy()
     policy_identity, policy_signature = _policy_identity(policy)
     pairs = interpret_matrix(
-        video=video.comparisons,
-        audio=audio.comparisons,
+        video=sealed_comparisons(video, modality="video"),
+        audio=sealed_comparisons(audio, modality="audio"),
         policy=policy,
     )
 
