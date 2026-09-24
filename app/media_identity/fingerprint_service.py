@@ -11,6 +11,7 @@ from ..file_hashes import MediaHashService
 from .decision_snapshot import result_revision
 from .fingerprint import (
     ContentFingerprint,
+    FingerprintAlgorithm,
     FingerprintComparison,
     FingerprintError,
     FingerprintMatchPolicy,
@@ -98,9 +99,28 @@ class DeepFingerprintArtifactService:
         extractor_factory: Callable[..., LocalVideoFingerprintExtractor] = (
             LocalVideoFingerprintExtractor
         ),
+        algorithm: FingerprintAlgorithm = VIDEO_DHASH64_V1,
+        source_kind: str = "local_ffmpeg",
+        timestamp_planner: Callable[..., tuple[int, ...]] = (
+            plan_video_fingerprint_timestamps
+        ),
     ) -> None:
+        if not isinstance(algorithm, FingerprintAlgorithm):
+            raise FingerprintError(
+                "Fingerprint artifact services require an explicit algorithm."
+            )
+        normalized_source_kind = str(source_kind or "").strip().casefold()
+        if not normalized_source_kind:
+            raise FingerprintError(
+                "Fingerprint artifact services require a source kind."
+            )
         self.database = database
         self.extractor_factory = extractor_factory
+        self.algorithm = algorithm
+        self.analyzer_key = algorithm.key
+        self.analyzer_version = DEEP_FINGERPRINT_ARTIFACT_VERSION
+        self.source_kind = normalized_source_kind
+        self.timestamp_planner = timestamp_planner
 
     @staticmethod
     def _file_snapshot(
@@ -263,8 +283,8 @@ class DeepFingerprintArtifactService:
             )
         return scan
 
-    @staticmethod
     def _artifact_fingerprint(
+        self,
         row: Mapping[str, Any],
         *,
         snapshot: Mapping[str, Any],
@@ -275,12 +295,12 @@ class DeepFingerprintArtifactService:
             int(row.get("file_id") or 0) != int(snapshot["id"])
             or str(row.get("artifact_type") or "") != "content_fingerprint"
             or str(row.get("analyzer_key") or "")
-            != DEEP_FINGERPRINT_ARTIFACT_KEY
+            != self.analyzer_key
             or str(row.get("analyzer_version") or "")
-            != DEEP_FINGERPRINT_ARTIFACT_VERSION
+            != self.analyzer_version
             or str(row.get("status") or "") != "complete"
             or str(row.get("profile") or "") != "deep"
-            or str(row.get("source_kind") or "") != "local_ffmpeg"
+            or str(row.get("source_kind") or "") != self.source_kind
             or str(row.get("source_ref") or "")
             != f"file:{int(snapshot['id'])}"
             or (
@@ -306,8 +326,8 @@ class DeepFingerprintArtifactService:
             != str(snapshot["current_sha256"])
             or fingerprint.runtime_ms != int(snapshot["runtime_ms"])
             or fingerprint.algorithm.identity_payload()
-            != VIDEO_DHASH64_V1.identity_payload()
-            or fingerprint.source_kind != "local_ffmpeg"
+            != self.algorithm.identity_payload()
+            or fingerprint.source_kind != self.source_kind
             or (
                 source_signature is not None
                 and fingerprint.source_signature != source_signature
@@ -335,7 +355,7 @@ class DeepFingerprintArtifactService:
             if sample_count != len(fingerprint.samples):
                 return None
             try:
-                planned_timestamps = plan_video_fingerprint_timestamps(
+                planned_timestamps = self.timestamp_planner(
                     int(snapshot["runtime_ms"]),
                     sample_count=sample_count,
                 )
@@ -363,8 +383,8 @@ class DeepFingerprintArtifactService:
                    ORDER BY id DESC LIMIT 8""",
                 (
                     int(snapshot["id"]),
-                    DEEP_FINGERPRINT_ARTIFACT_KEY,
-                    DEEP_FINGERPRINT_ARTIFACT_VERSION,
+                    self.analyzer_key,
+                    self.analyzer_version,
                 ),
             ).fetchall()
             for raw in rows:
@@ -434,13 +454,14 @@ class DeepFingerprintArtifactService:
                      payload_json
                    ) VALUES (
                      ?,'content_fingerprint',?,?,?,'complete','deep',
-                     'local_ffmpeg',?,?,?,?,?
+                     ?,?,?,?,?,?
                    )""",
                 (
                     int(current["id"]),
-                    DEEP_FINGERPRINT_ARTIFACT_KEY,
-                    DEEP_FINGERPRINT_ARTIFACT_VERSION,
+                    self.analyzer_key,
+                    self.analyzer_version,
                     cache_key,
+                    self.source_kind,
                     f"file:{int(current['id'])}",
                     fingerprint.source_signature,
                     int(current["size_bytes"] or 0),
@@ -456,8 +477,8 @@ class DeepFingerprintArtifactService:
                    ORDER BY id DESC LIMIT 1""",
                 (
                     int(current["id"]),
-                    DEEP_FINGERPRINT_ARTIFACT_KEY,
-                    DEEP_FINGERPRINT_ARTIFACT_VERSION,
+                    self.analyzer_key,
+                    self.analyzer_version,
                     cache_key,
                 ),
             ).fetchone()
@@ -476,13 +497,14 @@ class DeepFingerprintArtifactService:
                 repair = conn.execute(
                     """UPDATE media_identity_artifacts
                        SET status='complete',profile='deep',
-                           source_kind='local_ffmpeg',source_ref=?,
+                           source_kind=?,source_ref=?,
                            source_signature=?,file_size_bytes=?,
                            file_modified_at=?,payload_json=?,error='',
                            updated_at=CURRENT_TIMESTAMP,
                            last_used_at=CURRENT_TIMESTAMP
                        WHERE id=? AND cache_key=?""",
                     (
+                        self.source_kind,
                         f"file:{int(current['id'])}",
                         fingerprint.source_signature,
                         int(current["size_bytes"] or 0),
@@ -620,6 +642,9 @@ class DeepFingerprintArtifactService:
             or fingerprint.file_sha256
             != str(snapshot["current_sha256"])
             or fingerprint.runtime_ms != int(snapshot["runtime_ms"])
+            or fingerprint.algorithm.identity_payload()
+            != self.algorithm.identity_payload()
+            or fingerprint.source_kind != self.source_kind
             or fingerprint.source_signature != extractor.source_signature
             or tuple(
                 sample.timestamp_ms for sample in fingerprint.samples
