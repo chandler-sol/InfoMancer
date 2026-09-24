@@ -160,6 +160,21 @@ def _transcript_output_is_sealed(
         return False
     return expected == _transcript_output_sha256(text_value, payload)
 
+def _transcript_output_is_acceptable(
+    text_value: object,
+    payload: Mapping[str, Any],
+    *,
+    require_seal: bool,
+) -> bool:
+    raw_seal = str(
+        payload.get("transcript_output_sha256") or ""
+    ).strip()
+    if require_seal or raw_seal:
+        return _transcript_output_is_sealed(text_value, payload)
+    # Pre-J2 Normal artifacts have no output seal. Normal retains compatibility
+    # with those exact audio-bound rows, while Deep requires a seal.
+    return True
+
 
 def _same_modified_at(first: Any, second: Any) -> bool:
     if first is None or second is None:
@@ -509,12 +524,10 @@ class NormalSpeechService:
                 continue
             if not isinstance(payload, Mapping):
                 continue
-            if (
-                self.require_transcript_output_seal
-                and not _transcript_output_is_sealed(
-                    row["text_value"],
-                    payload,
-                )
+            if not _transcript_output_is_acceptable(
+                row["text_value"],
+                payload,
+                require_seal=self.require_transcript_output_seal,
             ):
                 continue
             audio_identity = _audio_identity_from_payload(payload)
@@ -785,13 +798,11 @@ class NormalSpeechService:
                 and persisted_audio is not None
                 and persisted_transcript is not None
                 and (
-                    not self.require_transcript_output_seal
-                    or (
-                        persisted_payload is not None
-                        and _transcript_output_is_sealed(
-                            persisted["text_value"],
-                            persisted_payload,
-                        )
+                    persisted_payload is not None
+                    and _transcript_output_is_acceptable(
+                        persisted["text_value"],
+                        persisted_payload,
+                        require_seal=self.require_transcript_output_seal,
                     )
                 )
             ):
