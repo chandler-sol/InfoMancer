@@ -453,6 +453,64 @@ class SpeechAudioExtractionTests(unittest.TestCase):
         finally:
             extractor.close()
 
+    @unittest.skipIf(os.name == "nt", "POSIX descriptor binding test")
+    def test_parent_directory_redirection_cannot_change_leased_ffmpeg_input(
+        self,
+    ) -> None:
+        payload = wav_bytes(duration_ms=1000)
+        original = self.media_path.read_bytes()
+        held_root = self.root.with_name(self.root.name + "-held")
+        replacement_root = self.root.with_name(self.root.name + "-replacement")
+        replacement_root.mkdir()
+        (replacement_root / self.media_path.name).write_bytes(
+            b"replacement-parent-media-content"
+        )
+        extractor = self.extractor()
+
+        def redirect_parent(command, **kwargs):
+            Path(command[-1]).write_bytes(payload)
+            descriptor = kwargs["pass_fds"][0]
+            os.replace(self.root, held_root)
+            os.replace(replacement_root, self.root)
+            try:
+                self.assertEqual(
+                    os.pread(descriptor, len(original), 0),
+                    original,
+                )
+                self.assertEqual(
+                    command[command.index("-i") + 1],
+                    "fd:",
+                )
+            finally:
+                os.replace(self.root, replacement_root)
+                os.replace(held_root, self.root)
+            return subprocess.CompletedProcess(
+                args=command,
+                returncode=0,
+                stdout=None,
+                stderr=b"",
+            )
+
+        artifact = None
+        try:
+            with patch(
+                "app.media_identity.speech_audio.subprocess.run",
+                side_effect=redirect_parent,
+            ):
+                artifact = extractor.extract(SpeechWindow(0, 1000))
+            self.assertEqual(
+                artifact.identity.sha256,
+                hashlib.sha256(payload).hexdigest(),
+            )
+        finally:
+            if artifact is not None:
+                artifact.cleanup()
+            extractor.close()
+            if replacement_root.exists():
+                for item in replacement_root.iterdir():
+                    item.unlink()
+                replacement_root.rmdir()
+
     def test_output_must_be_valid_canonical_wav(self) -> None:
         invalid_payloads = [
             b"not-a-wave",
