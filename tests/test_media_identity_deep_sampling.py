@@ -474,6 +474,41 @@ class DeepSamplingServiceTests(unittest.TestCase):
         self.assertEqual(self.engine.successful_calls, 6)
         self.assertEqual(before, self._scan_snapshot())
 
+    def test_tampered_partial_checkpoint_is_not_reused(self) -> None:
+        self.engine.interrupt_after = 3
+        with self.assertRaises(KeyboardInterrupt):
+            self._service().run(self.scan.scan_id)
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT id FROM media_identity_artifacts
+                   WHERE file_id=1 AND artifact_type='visual_text'
+                     AND profile='deep'
+                   ORDER BY id LIMIT 1"""
+            ).fetchone()
+            self.assertIsNotNone(row)
+            conn.execute(
+                """UPDATE media_identity_artifacts
+                   SET text_value=text_value || '-tampered'
+                   WHERE id=?""",
+                (int(row["id"]),),
+            )
+
+        self.engine.interrupt_after = None
+        with self.assertRaisesRegex(
+            DeepSamplingScanError,
+            "failed provenance validation",
+        ):
+            self._service().run(self.scan.scan_id)
+
+        with self.database.connect() as conn:
+            manifest_count = conn.execute(
+                """SELECT COUNT(*) FROM media_identity_artifacts
+                   WHERE file_id=1
+                     AND artifact_type='deep_sampling_manifest'"""
+            ).fetchone()[0]
+        self.assertEqual(manifest_count, 0)
+
     def test_source_signature_change_creates_a_new_exact_plan(self) -> None:
         first = self._service().run(self.scan.scan_id)
         self.assertTrue(first.coverage_complete)
