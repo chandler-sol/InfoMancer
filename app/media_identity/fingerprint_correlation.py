@@ -366,6 +366,171 @@ class DeepFingerprintCorrelationService:
         )
         return payload == expected_payload
 
+    def validate_manifest_artifact(
+        self,
+        conn: sqlite3.Connection,
+        artifact_id: int,
+        *,
+        scan_id: int,
+        result_revision: int,
+        plan_signature: str,
+    ) -> bool:
+        """Revalidate one sealed J3 matrix inside the caller's transaction."""
+
+        row = conn.execute(
+            """SELECT * FROM media_identity_artifacts WHERE id=?""",
+            (int(artifact_id),),
+        ).fetchone()
+        if row is None:
+            return False
+        persisted = dict(row)
+
+        try:
+            current_scan, current_revision = self._scan_context(
+                conn,
+                int(scan_id),
+            )
+        except DeepFingerprintCorrelationError:
+            return False
+        if current_revision != int(result_revision):
+            return False
+
+        current_plan = self._plan(
+            conn,
+            int(current_scan["file_id"]),
+        )
+        if (
+            current_plan.plan_signature != str(plan_signature or "")
+            or str(persisted.get("source_signature") or "")
+            != current_plan.plan_signature
+        ):
+            return False
+
+        try:
+            payload = json.loads(
+                str(persisted.get("payload_json") or "{}")
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+        if not isinstance(payload, Mapping):
+            return False
+        identity = payload.get("identity")
+        raw_comparisons = payload.get("comparisons")
+        if (
+            not isinstance(identity, Mapping)
+            or not isinstance(raw_comparisons, list)
+            or payload.get("coverage_complete") is not True
+        ):
+            return False
+
+        raw_children = identity.get("fingerprints")
+        if not isinstance(raw_children, list):
+            return False
+
+        children: dict[int, tuple[int, ContentFingerprint]] = {}
+        for raw_child in raw_children:
+            if not isinstance(raw_child, Mapping):
+                return False
+            try:
+                child_id = int(raw_child["artifact_id"])
+                file_id = int(raw_child["file_id"])
+            except (KeyError, TypeError, ValueError):
+                return False
+            if (
+                child_id < 1
+                or file_id < 1
+                or file_id in children
+            ):
+                return False
+            child_row = conn.execute(
+                """SELECT * FROM media_identity_artifacts WHERE id=?""",
+                (child_id,),
+            ).fetchone()
+            if child_row is None:
+                return False
+            child = dict(child_row)
+            try:
+                child_payload = json.loads(
+                    str(child.get("payload_json") or "{}")
+                )
+                fingerprint = fingerprint_from_payload(
+                    child_payload
+                )
+            except (
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+                FingerprintError,
+            ):
+                return False
+            if (
+                fingerprint.file_id != file_id
+                or str(raw_child.get("cache_key") or "")
+                != fingerprint.cache_key()
+                or str(raw_child.get("output_sha256") or "")
+                != fingerprint.output_seal()
+                or str(raw_child.get("file_sha256") or "")
+                != fingerprint.file_sha256
+                or str(raw_child.get("source_signature") or "")
+                != fingerprint.source_signature
+                or not self._child_is_current(
+                    conn,
+                    artifact_id=child_id,
+                    expected=fingerprint,
+                )
+            ):
+                return False
+            children[file_id] = (child_id, fingerprint)
+
+        expected_identity = self._manifest_identity(
+            scan=current_scan,
+            revision=current_revision,
+            plan=current_plan,
+            children=children,
+        )
+        if dict(identity) != expected_identity:
+            return False
+
+        if len(raw_comparisons) != len(
+            current_plan.comparison_pairs
+        ):
+            return False
+        comparisons: list[FingerprintComparison] = []
+        try:
+            for pair, raw in zip(
+                current_plan.comparison_pairs,
+                raw_comparisons,
+            ):
+                comparison = fingerprint_comparison_from_payload(
+                    raw
+                )
+                if (
+                    (
+                        comparison.left_file_id,
+                        comparison.right_file_id,
+                    )
+                    != tuple(pair)
+                    or comparison.algorithm_key
+                    != self.algorithm.key
+                    or comparison.algorithm_version
+                    != self.algorithm.version
+                    or abs(comparison.alignment_shift)
+                    > self.match_policy.max_alignment_shift
+                    or comparison.compared_samples
+                    < self.match_policy.min_compared_samples
+                ):
+                    return False
+                comparisons.append(comparison)
+        except FingerprintError:
+            return False
+
+        return self._validate_manifest(
+            persisted,
+            scan=current_scan,
+            identity=expected_identity,
+            comparisons=tuple(comparisons),
+        )
+
     def _load_manifest(
         self,
         *,
