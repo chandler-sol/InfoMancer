@@ -39,6 +39,7 @@ from app.media_identity.fingerprint_local import (
 from app.media_identity.fingerprint_service import (
     DeepFingerprintArtifactService,
 )
+from app.media_identity.media_generation import media_generation_identity
 
 
 def _pcm(values: list[int]) -> bytes:
@@ -120,6 +121,7 @@ class AudioFingerprintPrimitiveTests(unittest.TestCase):
 class FakeAudioExtractor:
     values_by_file: dict[int, tuple[str, ...]] = {}
     calls: dict[int, int] = {}
+    mutate = None
 
     def __init__(self, media, runtime_ms, *, stream) -> None:
         self.media = media
@@ -154,7 +156,16 @@ class FakeAudioExtractor:
             raise LocalFingerprintError(
                 "fixture audio media generation changed"
             )
+        if hashlib.sha256(
+            Path(self.media.path).read_bytes()
+        ).hexdigest() != str(self.media.sha256):
+            raise LocalFingerprintError(
+                "fixture audio SHA-256 changed"
+            )
         file_id = int(self.media.file_id)
+        mutate = self.__class__.mutate
+        if mutate is not None:
+            mutate(file_id)
         self.__class__.calls[file_id] = (
             self.__class__.calls.get(file_id, 0) + 1
         )
@@ -175,6 +186,9 @@ class FakeAudioExtractor:
             source_signature=self.source_signature,
             parameters={
                 "extractor_version": 1,
+                "media_generation": media_generation_identity(
+                    self.media.path
+                ),
                 "sample_count": len(self.timestamps),
                 "window_ms": 4_000,
                 "sample_rate_hz": 8_000,
@@ -242,6 +256,9 @@ class FakeVideoExtractor:
             source_signature=self.source_signature,
             parameters={
                 "extractor_version": 1,
+                "media_generation": media_generation_identity(
+                    self.media.path
+                ),
                 "sample_count": len(self.timestamps),
                 "filter": "fixture",
             },
@@ -258,6 +275,7 @@ class AudioFingerprintServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         FakeAudioExtractor.values_by_file = {}
         FakeAudioExtractor.calls = {}
+        FakeAudioExtractor.mutate = None
         FakeVideoExtractor.values_by_file = {}
         FakeVideoExtractor.calls = {}
 
@@ -390,6 +408,41 @@ class AudioFingerprintServiceTests(unittest.TestCase):
             second.fingerprint.algorithm,
             AUDIO_ENVELOPE_DHASH64_V1,
         )
+
+    def test_audio_stream_change_mid_extract_blocks_publication(self) -> None:
+        def mutate(file_id: int) -> None:
+            if file_id != 1:
+                return
+            FakeAudioExtractor.mutate = None
+            with self.database.connect() as conn:
+                conn.execute(
+                    """UPDATE media_streams
+                       SET default_flag=0,commentary=1
+                       WHERE file_id=1 AND stream_index=1"""
+                )
+                conn.execute(
+                    """UPDATE media_streams
+                       SET default_flag=1,commentary=0
+                       WHERE file_id=1 AND stream_index=2"""
+                )
+
+        FakeAudioExtractor.mutate = mutate
+
+        with self.assertRaisesRegex(
+            Exception,
+            "inputs changed before publication",
+        ):
+            self.audio.ensure_file(1)
+
+        with self.database.connect() as conn:
+            count = conn.execute(
+                """SELECT COUNT(*) FROM media_identity_artifacts
+                   WHERE file_id=1
+                     AND artifact_type='content_fingerprint'
+                     AND analyzer_key=?""",
+                (AUDIO_ENVELOPE_DHASH64_V1.key,),
+            ).fetchone()[0]
+        self.assertEqual(count, 0)
 
     def test_audio_tamper_is_regenerated_and_repaired(self) -> None:
         first = self.audio.ensure_scan(self.scan1.scan_id)
