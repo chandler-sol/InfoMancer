@@ -146,11 +146,12 @@ def ocr_artifact_output_seal(
             separators=(",", ":"),
             allow_nan=False,
         )
-    except (TypeError, ValueError) as exc:
+        encoded = serialized.encode("utf-8")
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
         raise NormalIdentityError(
             "OCR artifact output cannot be sealed deterministically."
         ) from exc
-    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def ocr_artifact_output_is_sealed(
