@@ -143,11 +143,21 @@ class DeepFingerprintBundleService:
         scan_id: int,
         expected_revision: int,
     ) -> None:
-        _scan, revision, _language = self._scan_state(scan_id)
-        if revision != int(expected_revision):
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM media_identity_scans WHERE id=?",
+                (int(scan_id),),
+            ).fetchone()
+        if row is None:
+            raise DeepFingerprintBundleError(
+                "Episode Identity scan disappeared between fingerprint modalities."
+            )
+        raw_revision = result_revision(dict(row))
+        if raw_revision != int(expected_revision):
             raise DeepFingerprintBundleError(
                 "Episode Identity publication changed between fingerprint modalities."
             )
+        self._scan_state(scan_id)
 
     def run(self, scan_id: int) -> DeepFingerprintBundleRun:
         scan, revision, preferred_language = self._scan_state(
