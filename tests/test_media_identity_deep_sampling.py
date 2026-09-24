@@ -37,6 +37,8 @@ from app.media_identity.normal import (
     PreviewOcrObservation,
     NormalResourceLimits,
     OcrTextResult,
+    ocr_artifact_output_is_sealed,
+    ocr_artifact_output_seal,
     select_staged_preview_frames,
 )
 
@@ -58,6 +60,19 @@ def _frames(
         )
         for index in range(count)
     )
+
+
+class OcrSealRegressionTests(unittest.TestCase):
+    def test_unpaired_surrogate_fails_seal_verification_safely(self) -> None:
+        with self.assertRaises(NormalIdentityError):
+            ocr_artifact_output_seal("\ud800", {})
+
+        self.assertFalse(
+            ocr_artifact_output_is_sealed(
+                "\ud800",
+                {"artifact_output_sha256": "0" * 64},
+            )
+        )
 
 
 class DeepSamplingPlanTests(unittest.TestCase):
