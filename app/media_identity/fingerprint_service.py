@@ -579,7 +579,10 @@ class DeepFingerprintArtifactService:
             if "current exact file SHA-256" not in str(exc):
                 raise
             try:
-                MediaHashService(self.database).hash_file(int(file_id))
+                MediaHashService(
+                    self.database,
+                    recover_interrupted=False,
+                ).hash_file(int(file_id))
             except (OSError, ValueError) as hash_exc:
                 return DeepFingerprintRun(
                     file_id=int(file_id),
