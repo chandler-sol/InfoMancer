@@ -426,13 +426,17 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertFalse(stale["actionable"])
 
     def test_normal_version_drift_makes_completed_scan_stale(self):
+        source = FakePreviewSource()
         service = NormalIdentityService(
             self.database,
-            ExternalSourceRegistry([FakePreviewSource()]),
+            ExternalSourceRegistry([source]),
             FakeOcr(),
         )
         service.run_scan(self.fast_scan.scan_id)
-        decisions = MediaIdentityDecisionService(self.database)
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
         detail = decisions.scan_detail(self.fast_scan.scan_id)
         self.assertTrue(detail["snapshot_current"])
 
@@ -680,7 +684,10 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         )
         normal.run_scan(self.fast_scan.scan_id)
 
-        decisions = MediaIdentityDecisionService(self.database)
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
         old_resolution = decisions.resolve_scan(self.fast_scan.scan_id)
         self.assertEqual(old_resolution.state.value, "strong_match_other")
         old_detail = decisions.scan_detail(self.fast_scan.scan_id)
@@ -721,7 +728,10 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             ExternalSourceRegistry([source]),
             FakeOcr(),
         )
-        decisions = MediaIdentityDecisionService(self.database)
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
 
         normal.run_scan(self.fast_scan.scan_id)
         first_resolution = decisions.resolve_scan(self.fast_scan.scan_id)
@@ -798,13 +808,17 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
 
     def test_external_source_config_change_stales_normal_result(self):
         self._seed_jellyfin_config()
+        source = FakePreviewSource()
         service = NormalIdentityService(
             self.database,
-            ExternalSourceRegistry([FakePreviewSource()]),
+            ExternalSourceRegistry([source]),
             FakeOcr(),
         )
         service.run_scan(self.fast_scan.scan_id)
-        decisions = MediaIdentityDecisionService(self.database)
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
         decisions.resolve_scan(self.fast_scan.scan_id)
         self.assertTrue(
             decisions.scan_detail(self.fast_scan.scan_id)["snapshot_current"]
@@ -855,13 +869,17 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertEqual(scan["stage"], "fast_complete")
 
     def test_normal_speech_orchestration_version_drift_makes_scan_stale(self):
+        source = FakePreviewSource()
         service = NormalIdentityService(
             self.database,
-            ExternalSourceRegistry([FakePreviewSource()]),
+            ExternalSourceRegistry([source]),
             FakeOcr(),
         )
         service.run_scan(self.fast_scan.scan_id)
-        decisions = MediaIdentityDecisionService(self.database)
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
         self.assertTrue(
             decisions.scan_detail(self.fast_scan.scan_id)["snapshot_current"]
         )
@@ -2768,13 +2786,17 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertEqual(speech_engine.calls, 0)
 
     def test_partial_visual_rerun_cannot_replace_complete_normal_result(self):
+        source = FakePreviewSource()
         first = NormalIdentityService(
             self.database,
-            ExternalSourceRegistry([FakePreviewSource()]),
+            ExternalSourceRegistry([source]),
             FakeOcr(),
         ).run_scan(self.fast_scan.scan_id)
         self.assertEqual(first.completed_profile.value, "normal")
-        decisions = MediaIdentityDecisionService(self.database)
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
         decisions.resolve_scan(self.fast_scan.scan_id)
 
         with self.database.connect() as conn:
@@ -3006,15 +3028,19 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertEqual(int(transcript_count), 8)
 
     def test_deleted_normal_ocr_artifact_stales_sealed_result(self):
+        source = FakePreviewSource()
         service = NormalIdentityService(
             self.database,
-            ExternalSourceRegistry([FakePreviewSource()]),
+            ExternalSourceRegistry([source]),
             FakeOcr(),
         )
         result = service.run_scan(self.fast_scan.scan_id)
         self.assertEqual(result.observation_count, 1)
 
-        decisions = MediaIdentityDecisionService(self.database)
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
         decisions.resolve_scan(self.fast_scan.scan_id)
         before = decisions.scan_detail(self.fast_scan.scan_id)
         self.assertTrue(before["snapshot_current"])
