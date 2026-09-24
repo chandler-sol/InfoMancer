@@ -397,6 +397,23 @@ class SpeechAudioExtractionTests(unittest.TestCase):
                 artifact.cleanup()
                 self.assertFalse(parent.exists())
 
+    @unittest.skipUnless(os.name == "nt", "Windows lease semantics test")
+    def test_windows_lease_blocks_parent_rename_until_cleanup(self) -> None:
+        extractor = self.extractor()
+        moved = self.root.with_name(self.root.name + "-moved")
+        try:
+            extractor.acquire_content_lease()
+            with self.assertRaises(OSError):
+                os.replace(self.root, moved)
+        finally:
+            extractor.close()
+
+        os.replace(self.root, moved)
+        try:
+            self.assertTrue((moved / "episode.mkv").is_file())
+        finally:
+            os.replace(moved, self.root)
+
     @unittest.skipIf(os.name == "nt", "POSIX descriptor binding test")
     def test_path_redirection_cannot_change_leased_ffmpeg_input(self) -> None:
         payload = wav_bytes(duration_ms=1000)
