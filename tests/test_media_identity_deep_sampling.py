@@ -18,14 +18,19 @@ from app.media_identity.deep_sampling_service import (
 )
 from app.media_identity.external import (
     ExternalCapability,
+    ExternalSourceRegistry,
     ExternalMediaRef,
     ExternalSourceStatus,
     PreviewFrameRef,
 )
 from app.media_identity.fast import FastIdentityService
 from app.media_identity.local_frames import LOCAL_FRAME_SOURCE_KEY
+from app.media_identity.normal_service import NormalIdentityService
 from app.media_identity.normal import (
     NormalIdentityError,
+    NormalPreviewOcrRun,
+    NormalSamplingStage,
+    PreviewOcrObservation,
     NormalResourceLimits,
     OcrTextResult,
     select_staged_preview_frames,
@@ -378,6 +383,68 @@ class DeepSamplingServiceTests(unittest.TestCase):
             second.manifest_artifact_id,
             result.manifest_artifact_id,
         )
+
+    def test_normal_can_reuse_deep_created_exact_ocr_artifact(self) -> None:
+        result = self._service().run(self.scan.scan_id)
+        self.assertTrue(result.coverage_complete)
+        assert result.manifest_artifact_id is not None
+
+        with self.database.connect() as conn:
+            manifest = conn.execute(
+                "SELECT payload_json FROM media_identity_artifacts WHERE id=?",
+                (result.manifest_artifact_id,),
+            ).fetchone()
+            manifest_payload = json.loads(manifest["payload_json"])
+            child_id = int(manifest_payload["observations"][0]["artifact_id"])
+            row = dict(conn.execute(
+                """SELECT * FROM media_identity_artifacts WHERE id=?""",
+                (child_id,),
+            ).fetchone())
+            scan = dict(conn.execute(
+                "SELECT * FROM media_identity_scans WHERE id=?",
+                (self.scan.scan_id,),
+            ).fetchone())
+
+        payload = json.loads(row["payload_json"])
+        details = payload["details"]
+        observation = PreviewOcrObservation(
+            source_key=str(row["source_kind"]),
+            item_id=str(payload["item_id"]),
+            timestamp_ms=int(row["start_ms"]),
+            stage=NormalSamplingStage.FINAL,
+            ordinal=1,
+            cache_key=str(row["cache_key"]),
+            source_signature=str(row["source_signature"]),
+            asset_ref=str(row["source_ref"]),
+            text=str(row["text_value"]),
+            confidence=payload["confidence"],
+            image_bytes=int(payload["image_bytes"]),
+            reused=True,
+            details=details,
+        )
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([]),
+            self.engine,
+        )
+        run = NormalPreviewOcrRun(
+            source_key=LOCAL_FRAME_SOURCE_KEY,
+            observations=(observation,),
+            planned_frame_count=1,
+            completed_frame_count=1,
+            coverage_complete=True,
+        )
+        with self.database.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            persisted, artifact_ids = normal._persist_artifacts(
+                conn,
+                scan,
+                run,
+            )
+
+        self.assertEqual(artifact_ids, [child_id])
+        self.assertEqual(len(persisted.observations), 1)
+        self.assertTrue(persisted.observations[0].reused)
 
     def test_interrupted_run_resumes_exact_completed_work(self) -> None:
         before = self._scan_snapshot()
