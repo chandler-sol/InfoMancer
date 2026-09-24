@@ -9,6 +9,13 @@ from unittest.mock import patch
 
 from app.db import Database
 from app.mie import MediaIntelligenceEngine
+from app.media_identity.deep import (
+    DeepCandidatePolicy,
+    DeepCorrelationPolicy,
+    build_deep_plan_metadata,
+    generate_deep_episode_candidates,
+    plan_deep_correlation,
+)
 from app.media_identity.external import (
     ExternalCapability,
     ExternalMediaRef,
@@ -401,6 +408,52 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
                 ) + 1,
             )
 
+    def _promote_normal_fixture_to_deep(self) -> None:
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            claimed = json.loads(row["claimed_identity_json"])
+            candidate_plan = generate_deep_episode_candidates(
+                conn,
+                title_id=1,
+                season=1,
+                episode_start=1,
+                episode_end=1,
+                language=str(claimed.get("scan_language") or "eng"),
+                policy=DeepCandidatePolicy(
+                    adjacent_season_radius=1,
+                    include_specials=True,
+                    max_candidates=16,
+                    max_specials=4,
+                ),
+            )
+            correlation_plan = plan_deep_correlation(
+                conn,
+                file_id=1,
+                policy=DeepCorrelationPolicy(
+                    season_radius=0,
+                    max_files=2,
+                    max_pairwise_comparisons=1,
+                ),
+            )
+            claimed["deep_identity"] = build_deep_plan_metadata(
+                candidate_plan,
+                correlation_plan,
+            )
+            conn.execute(
+                """UPDATE media_identity_scans
+                   SET completed_profile='deep',claimed_identity_json=?
+                   WHERE id=?""",
+                (
+                    json.dumps(claimed, sort_keys=True),
+                    self.fast_scan.scan_id,
+                ),
+            )
+        self._reseal_scan_fixture()
+
     def test_decision_version_drift_makes_fast_scan_stale(self):
         decisions = MediaIdentityDecisionService(self.database)
         detail = decisions.scan_detail(self.fast_scan.scan_id)
@@ -456,6 +509,83 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
                 "UPDATE media_identity_scans SET claimed_identity_json=? WHERE id=?",
                 (json.dumps(claimed, sort_keys=True), self.fast_scan.scan_id),
             )
+
+        stale = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
+    def test_deep_profile_inherits_normal_freshness(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        normal.run_scan(self.fast_scan.scan_id)
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        self._promote_normal_fixture_to_deep()
+
+        current = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertEqual(current["completed_profile"], "deep")
+        self.assertTrue(current["snapshot_current"])
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT claimed_identity_json FROM media_identity_scans WHERE id=?",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            claimed = json.loads(row["claimed_identity_json"])
+            claimed["normal_ocr"]["algorithm_version"] += 1
+            conn.execute(
+                "UPDATE media_identity_scans SET claimed_identity_json=? WHERE id=?",
+                (
+                    json.dumps(claimed, sort_keys=True),
+                    self.fast_scan.scan_id,
+                ),
+            )
+        self._reseal_scan_fixture()
+
+        stale = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
+    def test_deep_profile_requires_exact_current_deep_plan(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        normal.run_scan(self.fast_scan.scan_id)
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        self._promote_normal_fixture_to_deep()
+
+        current = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertTrue(current["snapshot_current"])
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT claimed_identity_json FROM media_identity_scans WHERE id=?",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            claimed = json.loads(row["claimed_identity_json"])
+            claimed["deep_identity"]["candidate_plan_signature"] = "0" * 64
+            conn.execute(
+                "UPDATE media_identity_scans SET claimed_identity_json=? WHERE id=?",
+                (
+                    json.dumps(claimed, sort_keys=True),
+                    self.fast_scan.scan_id,
+                ),
+            )
+        self._reseal_scan_fixture()
 
         stale = decisions.scan_detail(self.fast_scan.scan_id)
         self.assertFalse(stale["snapshot_current"])
