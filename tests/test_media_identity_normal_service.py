@@ -28,6 +28,7 @@ from app.media_identity.normal import (
     ocr_preview_cache_key,
 )
 from app.media_identity.local_frames import LOCAL_FRAME_SOURCE_KEY
+from app.media_identity.media_generation import media_content_sha256
 from app.media_identity.normal_service import (
     NORMAL_OCR_ARTIFACT_KEY,
     NORMAL_OCR_ARTIFACT_VERSION,
@@ -659,9 +660,14 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertEqual(source.read_calls, result.observation_count)
 
         source.read_calls = 0
-        status = decisions.confirmation_status(1)
+        with patch(
+            "app.media_identity.service.media_content_sha256",
+            wraps=media_content_sha256,
+        ) as media_hash:
+            status = decisions.confirmation_status(1)
         self.assertTrue(status["current"])
         self.assertEqual(source.read_calls, result.observation_count)
+        self.assertEqual(media_hash.call_count, 1)
 
         source.read_calls = 0
         findings = decisions.mie_findings()
