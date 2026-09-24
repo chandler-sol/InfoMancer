@@ -448,6 +448,66 @@ class FingerprintComparison:
     median_similarity: float
     minimum_similarity: float
 
+    def __post_init__(self) -> None:
+        for label, value in (
+            ("left file ID", self.left_file_id),
+            ("right file ID", self.right_file_id),
+            ("compared sample count", self.compared_samples),
+            ("alignment shift", self.alignment_shift),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise FingerprintError(
+                    f"Fingerprint comparison {label} must be an integer."
+                )
+        if (
+            self.left_file_id < 1
+            or self.right_file_id < 1
+            or self.left_file_id == self.right_file_id
+        ):
+            raise FingerprintError(
+                "Fingerprint comparisons require two distinct positive file IDs."
+            )
+        if (
+            self.compared_samples < 1
+            or self.compared_samples > MAX_FINGERPRINT_SAMPLES
+        ):
+            raise FingerprintError(
+                "Fingerprint comparison sample count is outside the supported bound."
+            )
+        if abs(self.alignment_shift) > MAX_FINGERPRINT_ALIGNMENT_SHIFT:
+            raise FingerprintError(
+                "Fingerprint comparison alignment exceeds the supported bound."
+            )
+        algorithm_key = str(self.algorithm_key or "").strip().casefold()
+        algorithm_version = str(self.algorithm_version or "").strip()
+        if not algorithm_key or not algorithm_version:
+            raise FingerprintError(
+                "Fingerprint comparisons require algorithm identity."
+            )
+        object.__setattr__(self, "algorithm_key", algorithm_key)
+        object.__setattr__(self, "algorithm_version", algorithm_version)
+        for label, value in (
+            ("coverage", self.coverage),
+            ("mean similarity", self.mean_similarity),
+            ("median similarity", self.median_similarity),
+            ("minimum similarity", self.minimum_similarity),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or not 0.0 <= float(value) <= 1.0
+            ):
+                raise FingerprintError(
+                    f"Fingerprint comparison {label} must be between 0 and 1."
+                )
+            object.__setattr__(self, {
+                "coverage": "coverage",
+                "mean similarity": "mean_similarity",
+                "median similarity": "median_similarity",
+                "minimum similarity": "minimum_similarity",
+            }[label], float(value))
+
     @property
     def sort_key(self) -> tuple[float, float, float, int]:
         return (
@@ -456,6 +516,32 @@ class FingerprintComparison:
             self.coverage,
             self.compared_samples,
         )
+
+
+def fingerprint_comparison_from_payload(
+    value: object,
+) -> FingerprintComparison:
+    if not isinstance(value, Mapping):
+        raise FingerprintError(
+            "Persisted fingerprint comparison is not a mapping."
+        )
+    try:
+        return FingerprintComparison(
+            left_file_id=int(value["left_file_id"]),
+            right_file_id=int(value["right_file_id"]),
+            algorithm_key=str(value["algorithm_key"]),
+            algorithm_version=str(value["algorithm_version"]),
+            compared_samples=int(value["compared_samples"]),
+            alignment_shift=int(value["alignment_shift"]),
+            coverage=float(value["coverage"]),
+            mean_similarity=float(value["mean_similarity"]),
+            median_similarity=float(value["median_similarity"]),
+            minimum_similarity=float(value["minimum_similarity"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise FingerprintError(
+            "Persisted fingerprint comparison is malformed."
+        ) from exc
 
 
 def _hamming_similarity(left: str, right: str, bits: int) -> float:
