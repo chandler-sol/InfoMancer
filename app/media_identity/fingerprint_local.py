@@ -341,6 +341,7 @@ class LocalVideoFingerprintExtractor:
             source_signature=self.source_signature,
             parameters={
                 "extractor_version": VIDEO_FINGERPRINT_EXTRACTOR_VERSION,
+                "media_generation": self.media_generation,
                 "sample_count": len(self.timestamps),
                 "filter": "scale=9:8:flags=area,format=gray",
             },
