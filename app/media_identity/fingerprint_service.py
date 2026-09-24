@@ -19,8 +19,10 @@ from .fingerprint import (
     fingerprint_from_payload,
 )
 from .fingerprint_local import (
+    DEFAULT_VIDEO_FINGERPRINT_SAMPLES,
     LocalFingerprintError,
     LocalVideoFingerprintExtractor,
+    plan_video_fingerprint_timestamps,
 )
 from .models import MediaIdentityFile
 from .service import MediaIdentityDecisionService
@@ -267,7 +269,7 @@ class DeepFingerprintArtifactService:
         row: Mapping[str, Any],
         *,
         snapshot: Mapping[str, Any],
-        source_signature: str,
+        source_signature: str | None,
         expected_timestamps: Sequence[int],
     ) -> ContentFingerprint | None:
         if (
@@ -282,7 +284,10 @@ class DeepFingerprintArtifactService:
             or str(row.get("source_kind") or "") != "local_ffmpeg"
             or str(row.get("source_ref") or "")
             != f"file:{int(snapshot['id'])}"
-            or str(row.get("source_signature") or "") != source_signature
+            or (
+                source_signature is not None
+                and str(row.get("source_signature") or "") != source_signature
+            )
             or int(row.get("file_size_bytes") or 0)
             != int(snapshot["size_bytes"] or 0)
             or not _same_modified_at(
@@ -304,7 +309,12 @@ class DeepFingerprintArtifactService:
             or fingerprint.algorithm.identity_payload()
             != VIDEO_DHASH64_V1.identity_payload()
             or fingerprint.source_kind != "local_ffmpeg"
-            or fingerprint.source_signature != source_signature
+            or (
+                source_signature is not None
+                and fingerprint.source_signature != source_signature
+            )
+            or str(row.get("source_signature") or "")
+            != fingerprint.source_signature
             or tuple(
                 sample.timestamp_ms for sample in fingerprint.samples
             )
@@ -319,7 +329,7 @@ class DeepFingerprintArtifactService:
         self,
         snapshot: Mapping[str, Any],
         *,
-        source_signature: str,
+        source_signature: str | None,
         expected_timestamps: Sequence[int],
     ) -> tuple[int, ContentFingerprint] | None:
         with self.database.connect() as conn:
@@ -515,6 +525,32 @@ class DeepFingerprintArtifactService:
                     expected_revision = result_revision(scan)
             media = self._media(snapshot)
 
+        expected_timestamps = plan_video_fingerprint_timestamps(
+            int(snapshot["runtime_ms"]),
+            sample_count=DEFAULT_VIDEO_FINGERPRINT_SAMPLES,
+        )
+        cached_any = self._load_current(
+            snapshot,
+            source_signature=None,
+            expected_timestamps=expected_timestamps,
+        )
+        if cached_any is not None:
+            artifact_id, fingerprint = cached_any
+            if scan_id is not None:
+                with self.database.connect() as conn:
+                    self._require_scan_binding(
+                        conn,
+                        scan_id=int(scan_id),
+                        file_snapshot=snapshot,
+                        expected_revision=expected_revision,
+                    )
+            return DeepFingerprintRun(
+                file_id=int(file_id),
+                artifact_id=artifact_id,
+                fingerprint=fingerprint,
+                reused=True,
+            )
+
         try:
             extractor = self.extractor_factory(
                 media,
@@ -611,22 +647,17 @@ class DeepFingerprintArtifactService:
     ) -> ContentFingerprint | None:
         with self.database.connect() as conn:
             snapshot = self._file_snapshot(conn, int(file_id))
-            media = self._media(snapshot)
-        try:
-            extractor = self.extractor_factory(
-                media,
-                int(snapshot["runtime_ms"]),
-            )
-        except Exception:
-            return None
-        if not extractor.available():
-            return None
+        expected_timestamps = plan_video_fingerprint_timestamps(
+            int(snapshot["runtime_ms"]),
+            sample_count=DEFAULT_VIDEO_FINGERPRINT_SAMPLES,
+        )
         existing = self._load_current(
             snapshot,
-            source_signature=extractor.source_signature,
-            expected_timestamps=extractor.timestamps,
+            source_signature=None,
+            expected_timestamps=expected_timestamps,
         )
         return None if existing is None else existing[1]
+
 
     def compare_current_files(
         self,
