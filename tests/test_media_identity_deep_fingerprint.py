@@ -794,15 +794,16 @@ class DeepFingerprintArtifactServiceTests(unittest.TestCase):
 
 
 
-class DeepFingerprintCorrelationServiceTests(
-    DeepFingerprintArtifactServiceTests
-):
+class DeepFingerprintCorrelationServiceTests(unittest.TestCase):
     def setUp(self) -> None:
-        super().setUp()
+        DeepFingerprintArtifactServiceTests.setUp(self)
         self.correlation = DeepFingerprintCorrelationService(
             self.database,
             artifact_service=self.service,
         )
+
+    def tearDown(self) -> None:
+        DeepFingerprintArtifactServiceTests.tearDown(self)
 
     def test_complete_cohort_persists_all_pairs_without_scan_mutation(self) -> None:
         values = (
