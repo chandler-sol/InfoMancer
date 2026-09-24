@@ -391,6 +391,7 @@ class LocalAudioFingerprintExtractor:
             source_signature=self.source_signature,
             parameters={
                 "extractor_version": AUDIO_FINGERPRINT_EXTRACTOR_VERSION,
+                "media_generation": self.media_generation,
                 "sample_count": len(self.timestamps),
                 "window_ms": AUDIO_FINGERPRINT_WINDOW_MS,
                 "sample_rate_hz": AUDIO_FINGERPRINT_SAMPLE_RATE_HZ,
