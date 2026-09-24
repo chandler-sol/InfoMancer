@@ -24,6 +24,7 @@ from .service import (
     MediaIdentityDecisionError,
     MediaIdentityDecisionService,
 )
+from .versions import DEEP_CORRELATION_INTERPRETATION_VERSION
 
 
 SEQUENCE_SCAN_HISTORY_LIMIT = 8
@@ -360,6 +361,25 @@ class DeepSequenceCorrelationService:
             raise DeepSequenceCorrelationError(
                 "J4.2 interpretation belongs to a different target scan."
             )
+        if (
+            interpretation.interpretation_version
+            != DEEP_CORRELATION_INTERPRETATION_VERSION
+        ):
+            raise DeepSequenceCorrelationError(
+                "J4.2 interpretation semantics are stale."
+            )
+        if (
+            len(str(interpretation.policy_signature or "")) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in str(
+                    interpretation.policy_signature or ""
+                ).casefold()
+            )
+        ):
+            raise DeepSequenceCorrelationError(
+                "J4.2 interpretation policy signature is invalid."
+            )
 
         with self.database.connect() as conn:
             try:
@@ -398,6 +418,8 @@ class DeepSequenceCorrelationService:
             if (
                 plan.plan_signature
                 != interpretation.correlation_plan_signature
+                or len(plan.comparison_pairs)
+                != interpretation.planned_pair_count
             ):
                 raise DeepSequenceCorrelationError(
                     "J4.2 correlation cohort changed after fingerprint interpretation."
