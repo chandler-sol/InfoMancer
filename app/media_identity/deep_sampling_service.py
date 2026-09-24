@@ -351,6 +351,25 @@ class DeepSamplingService:
         ):
             return None
 
+        artifact_profile = str(row.get("profile") or "")
+        if artifact_profile == IdentityProfile.DEEP.value:
+            output_sha256 = str(
+                payload.get("artifact_output_sha256") or ""
+            ).strip().casefold()
+            digest_payload = dict(payload)
+            digest_payload.pop("artifact_output_sha256", None)
+            expected_output_sha256 = hashlib.sha256(
+                _canonical_json({
+                    "text_value": str(row.get("text_value") or ""),
+                    "payload": digest_payload,
+                }).encode("utf-8")
+            ).hexdigest()
+            if (
+                not _valid_sha256(output_sha256)
+                or output_sha256 != expected_output_sha256
+            ):
+                return None
+
         confidence = payload.get("confidence")
         try:
             normalized_confidence = (
@@ -455,6 +474,12 @@ class DeepSamplingService:
                 "preview_sha256": str(preview_sha256),
             },
         }
+        payload["artifact_output_sha256"] = hashlib.sha256(
+            _canonical_json({
+                "text_value": str(result.text or ""),
+                "payload": payload,
+            }).encode("utf-8")
+        ).hexdigest()
         with self.database.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             self._require_current_baseline(
