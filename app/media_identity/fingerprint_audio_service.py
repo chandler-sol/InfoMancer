@@ -6,6 +6,7 @@ from ..db import Database
 from .deep import DeepCorrelationPolicy
 from .fingerprint import (
     AUDIO_ENVELOPE_DHASH64_V1,
+    FingerprintError,
     FingerprintMatchPolicy,
 )
 from .fingerprint_audio import (
