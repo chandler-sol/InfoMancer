@@ -398,6 +398,8 @@ def fingerprint_from_payload(value: object) -> ContentFingerprint:
             parameters=identity["parameters"],
             comparison_parameters=identity["comparison_parameters"],
         )
+    except FingerprintError:
+        raise
     except (KeyError, TypeError, ValueError) as exc:
         raise FingerprintError(
             "Persisted fingerprint payload is malformed."
@@ -564,6 +566,8 @@ def fingerprint_comparison_from_payload(
             median_similarity=value["median_similarity"],
             minimum_similarity=value["minimum_similarity"],
         )
+    except FingerprintError:
+        raise
     except (KeyError, TypeError, ValueError) as exc:
         raise FingerprintError(
             "Persisted fingerprint comparison is malformed."
