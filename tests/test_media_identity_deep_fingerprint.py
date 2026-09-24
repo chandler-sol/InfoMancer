@@ -677,6 +677,35 @@ class DeepFingerprintArtifactServiceTests(unittest.TestCase):
         FakeVideoFingerprintExtractor.mutate = None
         self.temporary.cleanup()
 
+    def test_deep_peer_hashing_does_not_recover_unrelated_running_hashes(self) -> None:
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT size_bytes,modified_at FROM files WHERE id=2"
+            ).fetchone()
+            conn.execute(
+                """INSERT INTO media_file_hashes(
+                     file_id,size_bytes,modified_at,status,error,updated_at
+                   ) VALUES (?,?,?,'running','background worker',CURRENT_TIMESTAMP)""",
+                (2, int(row["size_bytes"]), row["modified_at"]),
+            )
+
+        result = self.service.ensure_file(3)
+
+        self.assertIsNotNone(result.artifact_id)
+        with self.database.connect() as conn:
+            running = conn.execute(
+                """SELECT status,error FROM media_file_hashes
+                   WHERE file_id=2"""
+            ).fetchone()
+            peer = conn.execute(
+                """SELECT status,sha256 FROM media_file_hashes
+                   WHERE file_id=3"""
+            ).fetchone()
+        self.assertEqual(running["status"], "running")
+        self.assertEqual(running["error"], "background worker")
+        self.assertEqual(peer["status"], "complete")
+        self.assertEqual(len(peer["sha256"]), 64)
+
     def test_fast_scan_hash_is_enough_without_background_hash_row(self) -> None:
         with self.database.connect() as conn:
             count = conn.execute(
@@ -976,6 +1005,25 @@ class DeepFingerprintCorrelationServiceTests(unittest.TestCase):
         self.assertEqual(second.reused_fingerprint_count, 3)
         self.assertEqual(second.generated_fingerprint_count, 0)
         self.assertEqual(second.comparisons, first.comparisons)
+
+    def test_invalid_peer_runtime_becomes_missing_coverage_not_exception(self) -> None:
+        with self.database.connect() as conn:
+            conn.execute(
+                "UPDATE files SET runtime_seconds=NULL WHERE id=3"
+            )
+
+        result = self.correlation.run(self.scan1.scan_id)
+
+        self.assertFalse(result.coverage_complete)
+        self.assertEqual(result.missing_file_ids, (3,))
+        self.assertEqual(result.completed_pair_count, 0)
+        self.assertIsNone(result.manifest_artifact_id)
+        self.assertTrue(
+            any(
+                "positive cataloged runtime" in failure
+                for failure in result.failures
+            )
+        )
 
     def test_one_failed_peer_keeps_matrix_non_authoritative(self) -> None:
         FakeVideoFingerprintExtractor.fail_files = {3}
