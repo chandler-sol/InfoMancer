@@ -124,6 +124,53 @@ def _canonical_json(value: Any) -> str:
     )
 
 
+OCR_ARTIFACT_OUTPUT_SEAL_FIELD = "artifact_output_sha256"
+
+
+def ocr_artifact_output_seal(
+    text_value: object,
+    payload: Mapping[str, Any],
+) -> str:
+    """Return the canonical integrity seal for a persisted OCR artifact."""
+
+    body = dict(payload)
+    body.pop(OCR_ARTIFACT_OUTPUT_SEAL_FIELD, None)
+    try:
+        serialized = json.dumps(
+            {
+                "text_value": str(text_value or ""),
+                "payload": body,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise NormalIdentityError(
+            "OCR artifact output cannot be sealed deterministically."
+        ) from exc
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def ocr_artifact_output_is_sealed(
+    text_value: object,
+    payload: Mapping[str, Any],
+) -> bool:
+    expected = str(
+        payload.get(OCR_ARTIFACT_OUTPUT_SEAL_FIELD) or ""
+    ).strip().casefold()
+    if (
+        len(expected) != 64
+        or any(character not in "0123456789abcdef" for character in expected)
+    ):
+        return False
+    try:
+        return expected == ocr_artifact_output_seal(text_value, payload)
+    except NormalIdentityError:
+        return False
+
+
 def _frame_identity(frame: PreviewFrameRef) -> tuple[str, str, int, str, str]:
     return (
         str(frame.source_key or "").strip().casefold(),
