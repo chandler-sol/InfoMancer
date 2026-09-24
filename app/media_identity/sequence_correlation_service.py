@@ -94,16 +94,19 @@ class DeepSequenceCorrelationRun:
             raise DeepSequenceCorrelationError(
                 "Sequence run hypothesis count is inconsistent."
             )
-        hypothesis_ids = tuple(item.file_id for item in self.hypotheses)
-        if (
-            len(set(hypothesis_ids)) != len(hypothesis_ids)
-            or any(
-                not isinstance(item, SequenceHypothesis)
-                for item in self.hypotheses
-            )
+        if any(
+            not isinstance(item, SequenceHypothesis)
+            for item in self.hypotheses
         ):
             raise DeepSequenceCorrelationError(
                 "Sequence run hypotheses are malformed."
+            )
+        hypothesis_ids = tuple(
+            item.file_id for item in self.hypotheses
+        )
+        if len(set(hypothesis_ids)) != len(hypothesis_ids):
+            raise DeepSequenceCorrelationError(
+                "Sequence run hypotheses contain duplicate file IDs."
             )
         missing = set(self.missing_scan_file_ids)
         invalid = set(self.invalid_scan_file_ids)
