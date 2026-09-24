@@ -82,6 +82,33 @@ class FingerprintContractTests(unittest.TestCase):
         self.assertEqual(restored.cache_key(), original.cache_key())
         self.assertEqual(len(payload["fingerprint_output_sha256"]), 64)
 
+    def test_wrong_contract_version_is_rejected_even_with_valid_shape(self) -> None:
+        original = _fingerprint(
+            1,
+            ["0" * 16] * 6,
+            sha_char="a",
+        )
+        payload = original.persisted_payload()
+        payload["identity"]["contract_version"] = 999
+        payload["fingerprint_output_sha256"] = hashlib.sha256(
+            json.dumps(
+                {
+                    "identity": payload["identity"],
+                    "samples": payload["samples"],
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+
+        with self.assertRaisesRegex(
+            FingerprintError,
+            "contract version",
+        ):
+            fingerprint_from_payload(payload)
+
     def test_tampered_sample_fails_output_seal(self) -> None:
         original = _fingerprint(
             1,
@@ -186,6 +213,25 @@ class FingerprintContractTests(unittest.TestCase):
                 policy=policy,
             )
         )
+
+    def test_sampling_parameter_mismatch_is_incomparable(self) -> None:
+        left = _fingerprint(
+            1,
+            ["0" * 16] * 6,
+            sha_char="a",
+        )
+        right = ContentFingerprint(
+            file_id=2,
+            file_sha256="b" * 64,
+            runtime_ms=left.runtime_ms,
+            algorithm=left.algorithm,
+            samples=left.samples,
+            source_kind="local_ffmpeg",
+            source_signature="source-2",
+            parameters={"scale": "different"},
+        )
+
+        self.assertIsNone(compare_content_fingerprints(left, right))
 
     def test_algorithm_mismatch_is_incomparable(self) -> None:
         alternate = FingerprintAlgorithm(
@@ -517,6 +563,25 @@ class DeepFingerprintArtifactServiceTests(unittest.TestCase):
             FakeVideoFingerprintExtractor.extract_calls[1],
             1,
         )
+
+    def test_sealed_artifact_reuse_does_not_require_extractor_availability(self) -> None:
+        first = self.service.ensure_scan(self.scan1.scan_id)
+        self.assertIsNotNone(first.artifact_id)
+
+        def unavailable_factory(*_args, **_kwargs):
+            raise AssertionError(
+                "extractor factory should not be consulted for sealed cache reuse"
+            )
+
+        cache_only = DeepFingerprintArtifactService(
+            self.database,
+            extractor_factory=unavailable_factory,
+        )
+        second = cache_only.ensure_scan(self.scan1.scan_id)
+
+        self.assertTrue(second.reused)
+        self.assertEqual(second.artifact_id, first.artifact_id)
+        self.assertIsNotNone(second.fingerprint)
 
     def test_second_run_reuses_sealed_artifact_without_extraction(self) -> None:
         first = self.service.ensure_scan(self.scan1.scan_id)
