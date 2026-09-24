@@ -178,37 +178,69 @@ class MediaContentLease:
         self.generation: dict[str, Any] | None = None
         self._descriptor: int | None = None
         self._windows_handle: int | None = None
+        self._windows_directory_handles: list[int] = []
         self._io_lock = threading.Lock()
+
+    @staticmethod
+    def _open_windows_lease_handle(
+        path: Path,
+        *,
+        desired_access: int,
+        share_mode: int,
+        flags: int,
+    ) -> int:
+        from ctypes import wintypes
+
+        create_file = ctypes.windll.kernel32.CreateFileW
+        create_file.argtypes = (
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        )
+        create_file.restype = wintypes.HANDLE
+        handle = create_file(
+            _windows_lease_path(path),
+            desired_access,
+            share_mode,
+            None,
+            3,  # OPEN_EXISTING
+            flags,
+            None,
+        )
+        invalid = ctypes.c_void_p(-1).value
+        raw_handle = int(getattr(handle, "value", handle) or 0)
+        if not raw_handle or raw_handle == invalid:
+            raise OSError(ctypes.get_last_error(), "CreateFileW failed")
+        return raw_handle
 
     def _acquire_platform_handle(self, resolved: Path) -> None:
         if os.name == "nt":
-            from ctypes import wintypes
+            self._windows_handle = self._open_windows_lease_handle(
+                resolved,
+                desired_access=0x80000000,  # GENERIC_READ
+                share_mode=0x00000001,  # FILE_SHARE_READ only
+                flags=0x00000080,  # FILE_ATTRIBUTE_NORMAL
+            )
 
-            create_file = ctypes.windll.kernel32.CreateFileW
-            create_file.argtypes = (
-                wintypes.LPCWSTR,
-                wintypes.DWORD,
-                wintypes.DWORD,
-                wintypes.LPVOID,
-                wintypes.DWORD,
-                wintypes.DWORD,
-                wintypes.HANDLE,
-            )
-            create_file.restype = wintypes.HANDLE
-            handle = create_file(
-                _windows_lease_path(resolved),
-                0x80000000,  # GENERIC_READ
-                0x00000001,  # FILE_SHARE_READ only: deny write/delete
-                None,
-                3,  # OPEN_EXISTING
-                0x00000080,  # FILE_ATTRIBUTE_NORMAL
-                None,
-            )
-            invalid = ctypes.c_void_p(-1).value
-            raw_handle = int(getattr(handle, "value", handle) or 0)
-            if not raw_handle or raw_handle == invalid:
-                raise OSError(ctypes.get_last_error(), "CreateFileW failed")
-            self._windows_handle = raw_handle
+            # FFmpeg cannot consume a raw Windows HANDLE the way POSIX builds
+            # can consume an inherited file descriptor. Keep every replaceable
+            # parent directory in the canonical resolved hierarchy open without
+            # FILE_SHARE_DELETE. This prevents a parent-directory rename/swap
+            # from redirecting the canonical path while FFmpeg opens it.
+            for parent in resolved.parents:
+                if parent.parent == parent:
+                    break
+                handle = self._open_windows_lease_handle(
+                    parent,
+                    desired_access=0x00000080,  # FILE_READ_ATTRIBUTES
+                    share_mode=0x00000003,  # FILE_SHARE_READ | FILE_SHARE_WRITE
+                    flags=0x02000000,  # FILE_FLAG_BACKUP_SEMANTICS
+                )
+                self._windows_directory_handles.append(handle)
             return
 
         flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
@@ -439,11 +471,23 @@ class MediaContentLease:
             except OSError:
                 pass
         handle, self._windows_handle = self._windows_handle, None
-        if handle is not None and os.name == "nt":
-            try:
-                ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(handle))
-            except Exception:
-                pass
+        directory_handles, self._windows_directory_handles = (
+            self._windows_directory_handles,
+            [],
+        )
+        if os.name == "nt":
+            for directory_handle in reversed(directory_handles):
+                try:
+                    ctypes.windll.kernel32.CloseHandle(
+                        ctypes.c_void_p(directory_handle)
+                    )
+                except Exception:
+                    pass
+            if handle is not None:
+                try:
+                    ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(handle))
+                except Exception:
+                    pass
         self.generation = None
 
     def __enter__(self) -> "MediaContentLease":
