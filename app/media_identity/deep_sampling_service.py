@@ -80,7 +80,6 @@ def _canonical_json(value: Any) -> str:
             sort_keys=True,
             separators=(",", ":"),
             allow_nan=False,
-            default=str,
         )
     except (TypeError, ValueError) as exc:
         raise DeepSamplingScanError(
@@ -334,8 +333,14 @@ class DeepSamplingService:
                 row.get("file_modified_at"),
                 scan.get("file_modified_at"),
             )
-            or int(row.get("start_ms") or -1) != int(sample.frame.timestamp_ms)
-            or int(row.get("end_ms") or -1) != int(sample.frame.timestamp_ms)
+            or (
+                row.get("start_ms") is None
+                or int(row["start_ms"]) != int(sample.frame.timestamp_ms)
+            )
+            or (
+                row.get("end_ms") is None
+                or int(row["end_ms"]) != int(sample.frame.timestamp_ms)
+            )
             or str(row.get("cache_key") or "") != expected_cache_key
             or str(payload.get("item_id") or "") != str(sample.frame.item_id)
             or str(payload.get("engine_key") or "").strip().casefold()
@@ -903,6 +908,25 @@ class DeepSamplingService:
                 deep_identity=deep_identity,
                 engine_identity=engine_identity,
             )
+            if not visual_plan.samples:
+                return DeepSamplingRun(
+                    scan_id=int(scan_id),
+                    plan_signature=visual_plan.plan_signature,
+                    candidate_plan_signature=candidate_plan.plan_signature,
+                    correlation_plan_signature=correlation_plan.plan_signature,
+                    planned_frame_count=0,
+                    completed_frame_count=0,
+                    reused_artifact_count=0,
+                    manifest_artifact_id=None,
+                    coverage_complete=False,
+                    failures=("deep-visual-no-frames",),
+                    budget_exhausted=False,
+                    frame_attempt_count=0,
+                    source_bytes=0,
+                    image_bytes=0,
+                    text_chars=0,
+                )
+
             existing = self._load_complete_manifest(
                 scan,
                 visual_plan=visual_plan,
@@ -945,6 +969,16 @@ class DeepSamplingService:
                     cache_parameters,
                 )
                 if cached is not None:
+                    try:
+                        budget.reserve_text_chars(len(cached.text))
+                    except VisualBudgetExceeded as exc:
+                        failures.append(
+                            _bounded_failure(
+                                f"deep-visual:{sample.ordinal}:cached-text-budget",
+                                exc,
+                            )
+                        )
+                        break
                     observations.append(cached)
                     continue
 
