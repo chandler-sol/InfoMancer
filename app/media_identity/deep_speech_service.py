@@ -468,7 +468,7 @@ class DeepSpeechSamplingService:
         *,
         identity: Mapping[str, Any],
         plan: DeepSpeechPlan,
-    ) -> tuple[int, tuple[int, ...]] | None:
+    ) -> tuple[int, tuple[int, ...], int] | None:
         cache_key = self._manifest_cache_key(identity)
         with self.database.connect() as conn:
             row = conn.execute(
@@ -515,6 +515,7 @@ class DeepSpeechSamplingService:
                 )
 
             artifact_ids: list[int] = []
+            text_transcript_count = 0
             for sample, item in zip(plan.samples, raw_items):
                 if not isinstance(item, Mapping):
                     raise DeepSpeechSamplingError(
@@ -541,13 +542,19 @@ class DeepSpeechSamplingService:
                         "integrity validation."
                     )
                 artifact_ids.append(artifact_id)
+                if str(child["text_value"] or "").strip():
+                    text_transcript_count += 1
 
             conn.execute(
                 """UPDATE media_identity_artifacts
                    SET last_used_at=CURRENT_TIMESTAMP WHERE id=?""",
                 (int(manifest["id"]),),
             )
-            return int(manifest["id"]), tuple(artifact_ids)
+            return (
+                int(manifest["id"]),
+                tuple(artifact_ids),
+                text_transcript_count,
+            )
 
     def _persist_manifest(
         self,
@@ -821,7 +828,7 @@ class DeepSpeechSamplingService:
             plan=plan,
         )
         if existing is not None:
-            manifest_id, artifact_ids = existing
+            manifest_id, artifact_ids, text_transcript_count = existing
             return DeepSpeechSamplingRun(
                 scan_id=int(scan_id),
                 plan_signature=plan.plan_signature,
@@ -833,7 +840,7 @@ class DeepSpeechSamplingService:
                 ),
                 planned_window_count=len(plan.samples),
                 transcript_count=len(artifact_ids),
-                text_transcript_count=len(artifact_ids),
+                text_transcript_count=text_transcript_count,
                 reused_artifact_count=len(artifact_ids),
                 manifest_artifact_id=manifest_id,
                 coverage_complete=True,
