@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from app.db import Database
@@ -385,6 +386,64 @@ class DeepSamplingServiceTests(unittest.TestCase):
         self.assertEqual(
             second.manifest_artifact_id,
             result.manifest_artifact_id,
+        )
+
+    def test_post_read_cache_hit_still_charges_text_budget(self) -> None:
+        service = self._service()
+        first = service.run(self.scan.scan_id)
+        self.assertTrue(first.coverage_complete)
+
+        with self.database.connect() as conn:
+            texts = [
+                str(row["text_value"] or "")
+                for row in conn.execute(
+                    """SELECT text_value FROM media_identity_artifacts
+                       WHERE file_id=1 AND artifact_type='visual_text'
+                         AND profile='deep'
+                       ORDER BY start_ms,id"""
+                ).fetchall()
+            ]
+            conn.execute(
+                """DELETE FROM media_identity_artifacts
+                   WHERE file_id=1
+                     AND artifact_type='deep_sampling_manifest'"""
+            )
+        expected_text_chars = sum(len(value) for value in texts)
+        self.assertGreater(expected_text_chars, 0)
+
+        original_lookup = service._cached_observation
+        delayed_work_key = {"value": None}
+        lookup_counts: dict[str, int] = {}
+
+        def delayed_lookup(scan, sample, cache_parameters):
+            key = sample.work_key
+            lookup_counts[key] = lookup_counts.get(key, 0) + 1
+            if delayed_work_key["value"] is None:
+                delayed_work_key["value"] = key
+            if (
+                key == delayed_work_key["value"]
+                and lookup_counts[key] == 1
+            ):
+                return None
+            return original_lookup(scan, sample, cache_parameters)
+
+        with patch.object(
+            service,
+            "_cached_observation",
+            side_effect=delayed_lookup,
+        ):
+            second = service.run(self.scan.scan_id)
+
+        self.assertTrue(second.coverage_complete)
+        self.assertEqual(second.reused_artifact_count, 6)
+        self.assertEqual(second.text_chars, expected_text_chars)
+        self.assertEqual(
+            self.factory.instances[-1].read_calls,
+            1,
+        )
+        self.assertEqual(
+            lookup_counts[delayed_work_key["value"]],
+            2,
         )
 
     def test_normal_can_reuse_deep_created_exact_ocr_artifact(self) -> None:
