@@ -57,7 +57,16 @@ def _fingerprint(
         ),
         source_kind="local_ffmpeg",
         source_signature=f"source-{file_id}",
-        parameters={"scale": "9x8-gray"},
+        parameters={
+            "extractor_version": 1,
+            "sample_count": len(values),
+            "source_note": f"file-{file_id}",
+        },
+        comparison_parameters={
+            "sample_count": len(values),
+            "lattice": "fixture",
+            "scale": "9x8-gray",
+        },
     )
 
 
@@ -181,7 +190,7 @@ class FingerprintContractTests(unittest.TestCase):
         left = _fingerprint(1, core, sha_char="a")
         right = _fingerprint(
             2,
-            ["fedcba9876543210", *core],
+            ["fedcba9876543210", *core[:-1]],
             sha_char="b",
         )
 
@@ -189,7 +198,7 @@ class FingerprintContractTests(unittest.TestCase):
 
         self.assertIsNotNone(comparison)
         self.assertEqual(comparison.alignment_shift, 1)
-        self.assertEqual(comparison.compared_samples, 8)
+        self.assertEqual(comparison.compared_samples, 7)
         self.assertEqual(comparison.mean_similarity, 1.0)
         self.assertLess(comparison.coverage, 1.0)
 
@@ -228,7 +237,66 @@ class FingerprintContractTests(unittest.TestCase):
             samples=left.samples,
             source_kind="local_ffmpeg",
             source_signature="source-2",
-            parameters={"scale": "different"},
+            parameters={"source_note": "different provenance"},
+            comparison_parameters={"scale": "different"},
+        )
+
+        self.assertIsNone(compare_content_fingerprints(left, right))
+
+    def test_provenance_parameter_difference_remains_comparable(self) -> None:
+        left = _fingerprint(
+            1,
+            ["0" * 16] * 6,
+            sha_char="a",
+        )
+        right = ContentFingerprint(
+            file_id=2,
+            file_sha256="b" * 64,
+            runtime_ms=left.runtime_ms,
+            algorithm=left.algorithm,
+            samples=left.samples,
+            source_kind="local_ffmpeg",
+            source_signature="different-ffmpeg-generation",
+            parameters={
+                **dict(left.parameters),
+                "source_note": "different provenance",
+            },
+            comparison_parameters=dict(left.comparison_parameters),
+        )
+
+        comparison = compare_content_fingerprints(left, right)
+
+        self.assertIsNotNone(comparison)
+        self.assertEqual(comparison.mean_similarity, 1.0)
+
+    def test_low_information_pairs_do_not_satisfy_match_minimum(self) -> None:
+        left = _fingerprint(
+            1,
+            ["0" * 16] * 6,
+            sha_char="a",
+        )
+        right = _fingerprint(
+            2,
+            ["0" * 16] * 6,
+            sha_char="b",
+        )
+        left = ContentFingerprint(
+            file_id=left.file_id,
+            file_sha256=left.file_sha256,
+            runtime_ms=left.runtime_ms,
+            algorithm=left.algorithm,
+            samples=tuple(
+                FingerprintSample(
+                    timestamp_ms=item.timestamp_ms,
+                    value=item.value,
+                    informative=index < 5,
+                )
+                for index, item in enumerate(left.samples)
+            ),
+            source_kind=left.source_kind,
+            source_signature=left.source_signature,
+            parameters=left.parameters,
+            comparison_parameters=left.comparison_parameters,
         )
 
         self.assertIsNone(compare_content_fingerprints(left, right))
@@ -454,6 +522,12 @@ class FakeVideoFingerprintExtractor:
                 "extractor_version": 1,
                 "sample_count": len(self.timestamps),
                 "filter": "fixture",
+            },
+            comparison_parameters={
+                "sample_count": len(self.timestamps),
+                "lattice": "interior-10-90",
+                "filter": "fixture",
+                "hash": "horizontal-dhash64",
             },
         )
 
