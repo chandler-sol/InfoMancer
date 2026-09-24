@@ -38,6 +38,7 @@ from app.media_identity.fingerprint_local import (
 )
 from app.media_identity.fingerprint_service import (
     DeepFingerprintArtifactService,
+    DeepFingerprintError,
 )
 from app.media_identity.media_generation import media_generation_identity
 
@@ -429,7 +430,7 @@ class AudioFingerprintServiceTests(unittest.TestCase):
         FakeAudioExtractor.mutate = mutate
 
         with self.assertRaisesRegex(
-            Exception,
+            DeepFingerprintError,
             "inputs changed before publication",
         ):
             self.audio.ensure_file(1)
