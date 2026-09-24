@@ -104,7 +104,13 @@ class DeepAudioFingerprintArtifactService(DeepFingerprintArtifactService):
             or not isinstance(raw_stream, Mapping)
         ):
             return False
-        return dict(raw_stream) == dict(stream.cache_identity())
+        return (
+            super()._fingerprint_matches_snapshot(
+                fingerprint,
+                snapshot,
+            )
+            and dict(raw_stream) == dict(stream.cache_identity())
+        )
 
 
 class DeepAudioFingerprintCorrelationService(
