@@ -361,7 +361,7 @@ class NormalSpeechService:
         self,
         records: Iterable[tuple[SpeechWindow, SpeechAudioIdentity]],
     ) -> tuple[tuple[SpeechWindow, SpeechAudioIdentity], ...]:
-        return self.validate_audio_budget(records)
+        return validate_normal_speech_audio_budget(records)
 
 
     def _engine_snapshot(self) -> _SpeechEngineSnapshot:
