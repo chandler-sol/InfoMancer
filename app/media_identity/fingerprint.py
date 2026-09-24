@@ -304,6 +304,16 @@ def fingerprint_from_payload(value: object) -> ContentFingerprint:
     samples = value.get("samples")
     if not isinstance(identity, Mapping) or not isinstance(samples, Sequence):
         raise FingerprintError("Persisted fingerprint payload is incomplete.")
+    try:
+        contract_version = int(identity.get("contract_version") or 0)
+    except (TypeError, ValueError) as exc:
+        raise FingerprintError(
+            "Persisted fingerprint contract version is malformed."
+        ) from exc
+    if contract_version != DEEP_FINGERPRINT_CONTRACT_VERSION:
+        raise FingerprintError(
+            "Persisted fingerprint contract version is not current."
+        )
     algorithm_raw = identity.get("algorithm")
     if not isinstance(algorithm_raw, Mapping):
         raise FingerprintError("Persisted fingerprint algorithm is missing.")
