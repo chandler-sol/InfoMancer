@@ -314,12 +314,13 @@ class PairInterpretationTests(unittest.TestCase):
             left_file_id=1,
             right_file_id=2,
             video=_comparison(
-                algorithm_key="video",
+                algorithm_key=VIDEO_DHASH64_V1.key,
                 mean=0.95,
                 median=0.95,
             ),
             audio=_comparison(
-                algorithm_key="audio",
+                algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                algorithm_version=AUDIO_ENVELOPE_DHASH64_V1.version,
                 mean=0.95,
                 median=0.95,
             ),
@@ -337,12 +338,13 @@ class PairInterpretationTests(unittest.TestCase):
             left_file_id=1,
             right_file_id=2,
             video=_comparison(
-                algorithm_key="video",
+                algorithm_key=VIDEO_DHASH64_V1.key,
                 mean=0.95,
                 median=0.95,
             ),
             audio=_comparison(
-                algorithm_key="audio",
+                algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                algorithm_version=AUDIO_ENVELOPE_DHASH64_V1.version,
                 mean=0.83,
                 median=0.85,
             ),
@@ -360,12 +362,13 @@ class PairInterpretationTests(unittest.TestCase):
             left_file_id=1,
             right_file_id=2,
             video=_comparison(
-                algorithm_key="video",
+                algorithm_key=VIDEO_DHASH64_V1.key,
                 mean=0.50,
                 median=0.50,
             ),
             audio=_comparison(
-                algorithm_key="audio",
+                algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                algorithm_version=AUDIO_ENVELOPE_DHASH64_V1.version,
                 mean=0.50,
                 median=0.50,
             ),
@@ -382,12 +385,13 @@ class PairInterpretationTests(unittest.TestCase):
             left_file_id=1,
             right_file_id=2,
             video=_comparison(
-                algorithm_key="video",
+                algorithm_key=VIDEO_DHASH64_V1.key,
                 mean=0.95,
                 median=0.95,
             ),
             audio=_comparison(
-                algorithm_key="audio",
+                algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                algorithm_version=AUDIO_ENVELOPE_DHASH64_V1.version,
                 mean=0.50,
                 median=0.50,
             ),
@@ -405,12 +409,13 @@ class PairInterpretationTests(unittest.TestCase):
             left_file_id=1,
             right_file_id=2,
             video=_comparison(
-                algorithm_key="video",
+                algorithm_key=VIDEO_DHASH64_V1.key,
                 mean=0.95,
                 median=0.95,
             ),
             audio=_comparison(
-                algorithm_key="audio",
+                algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                algorithm_version=AUDIO_ENVELOPE_DHASH64_V1.version,
                 mean=0.75,
                 median=0.75,
             ),
@@ -428,7 +433,7 @@ class PairInterpretationTests(unittest.TestCase):
             left_file_id=1,
             right_file_id=2,
             video=_comparison(
-                algorithm_key="video",
+                algorithm_key=VIDEO_DHASH64_V1.key,
                 mean=0.95,
                 median=0.95,
             ),
@@ -445,12 +450,13 @@ class PairInterpretationTests(unittest.TestCase):
             left_file_id=1,
             right_file_id=2,
             video=_comparison(
-                algorithm_key="video",
+                algorithm_key=VIDEO_DHASH64_V1.key,
                 mean=0.95,
                 median=0.95,
             ),
             audio=_comparison(
-                algorithm_key="audio",
+                algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                algorithm_version=AUDIO_ENVELOPE_DHASH64_V1.version,
                 mean=0.95,
                 median=0.95,
                 coverage=0.50,
@@ -467,13 +473,14 @@ class PairInterpretationTests(unittest.TestCase):
             left_file_id=1,
             right_file_id=2,
             video=_comparison(
-                algorithm_key="video",
+                algorithm_key=VIDEO_DHASH64_V1.key,
                 mean=1.0,
                 median=1.0,
                 coverage=0.25,
             ),
             audio=_comparison(
-                algorithm_key="audio",
+                algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                algorithm_version=AUDIO_ENVELOPE_DHASH64_V1.version,
                 mean=1.0,
                 median=1.0,
                 coverage=0.50,
@@ -492,7 +499,7 @@ class PairInterpretationTests(unittest.TestCase):
             video=_comparison(
                 left=2,
                 right=1,
-                algorithm_key="video",
+                algorithm_key=VIDEO_DHASH64_V1.key,
             ),
             audio=None,
         )
@@ -553,12 +560,12 @@ class MatrixInterpretationTests(unittest.TestCase):
                 _comparison(
                     left=2,
                     right=1,
-                    algorithm_key="video",
+                    algorithm_key=VIDEO_DHASH64_V1.key,
                 ),
                 _comparison(
                     left=2,
                     right=3,
-                    algorithm_key="video",
+                    algorithm_key=VIDEO_DHASH64_V1.key,
                     mean=0.50,
                     median=0.50,
                 ),
@@ -567,7 +574,7 @@ class MatrixInterpretationTests(unittest.TestCase):
                 _comparison(
                     left=1,
                     right=2,
-                    algorithm_key="audio",
+                    algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
                 ),
             ],
         )
