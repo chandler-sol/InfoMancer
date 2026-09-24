@@ -1803,8 +1803,7 @@ class MediaIdentityDecisionService:
                 )
                 file_sha256 = str(latest.get("file_sha256") or "").strip().casefold()
                 if (
-                    str(latest.get("completed_profile") or "") != IdentityProfile.NORMAL.value
-                    and metadata_signature
+                    metadata_signature
                     and len(file_sha256) == 64
                     and all(
                         character in "0123456789abcdef"
@@ -1814,7 +1813,7 @@ class MediaIdentityDecisionService:
                     preserved_rows = conn.execute(
                         """SELECT id
                            FROM media_identity_scans
-                           WHERE file_id=? AND id<?
+                           WHERE file_id=? AND id<=?
                              AND status='complete' AND result_state IS NOT NULL
                              AND completed_profile='normal'
                              AND metadata_signature=?
