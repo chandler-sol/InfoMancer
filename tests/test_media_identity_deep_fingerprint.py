@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -31,6 +32,7 @@ from app.media_identity.fingerprint_service import (
     DeepFingerprintArtifactService,
     DeepFingerprintError,
 )
+from app.media_identity.media_generation import media_generation_identity
 from app.media_identity.fingerprint_correlation import (
     DeepFingerprintCorrelationError,
     DeepFingerprintCorrelationService,
@@ -493,6 +495,12 @@ class FakeVideoFingerprintExtractor:
             raise LocalFingerprintError(
                 "fixture media no longer matches catalog snapshot"
             )
+        if hashlib.sha256(
+            Path(self.media.path).read_bytes()
+        ).hexdigest() != str(self.media.sha256):
+            raise LocalFingerprintError(
+                "fixture media SHA-256 changed"
+            )
         file_id = int(self.media.file_id)
         if file_id in self.__class__.fail_files:
             raise LocalFingerprintError(
@@ -521,6 +529,9 @@ class FakeVideoFingerprintExtractor:
             source_signature=self.source_signature,
             parameters={
                 "extractor_version": 1,
+                "media_generation": media_generation_identity(
+                    self.media.path
+                ),
                 "sample_count": len(self.timestamps),
                 "filter": "fixture",
             },
@@ -754,6 +765,29 @@ class DeepFingerprintArtifactServiceTests(unittest.TestCase):
 
         self.assertIsNone(result.artifact_id)
         self.assertIsNone(result.fingerprint)
+        self.assertIn("fingerprint-extraction", result.failure)
+
+    def test_same_size_mtime_replacement_does_not_reuse_cached_fingerprint(self) -> None:
+        first = self.service.ensure_scan(self.scan1.scan_id)
+        self.assertIsNotNone(first.artifact_id)
+
+        path = self.paths[1]
+        original = path.stat()
+        original_bytes = path.read_bytes()
+        replacement = path.with_suffix(".replacement")
+        replacement.write_bytes(
+            bytes((value ^ 0x01) for value in original_bytes)
+        )
+        os.replace(replacement, path)
+        os.utime(
+            path,
+            ns=(original.st_atime_ns, original.st_mtime_ns),
+        )
+
+        result = self.service.ensure_scan(self.scan1.scan_id)
+
+        self.assertFalse(result.reused)
+        self.assertIsNone(result.artifact_id)
         self.assertIn("fingerprint-extraction", result.failure)
 
     def test_compare_current_files_uses_only_available_trusted_artifacts(self) -> None:
