@@ -15,6 +15,13 @@ from app.managed_ffmpeg import (
     ManagedFfmpegError,
     ManagedFfmpegStatus,
 )
+from app.managed_speech import (
+    ManagedSpeechComponentError,
+    ManagedSpeechRuntimeStatus,
+    ManagedWhisperCppRuntime,
+    ManagedWhisperModel,
+)
+from app.media_identity.speech import SpeechBinaryIdentity
 from app.media_identity.external_config import ExternalSourceConfigService
 from app.provider_secrets import ProviderSecretStore
 from app.request_security import LOCAL_CSRF_COOKIE
@@ -41,6 +48,8 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
             main.external_source_config,
             main.provider_secrets,
             main.ffmpeg_components,
+            main.speech_runtime_component,
+            main.speech_model_components,
         )
         main.db = database
         main.settings = settings
@@ -50,6 +59,11 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
             "external-route-security-test-secret",
         )
         main.ffmpeg_components = ManagedFfmpegComponent(data)
+        main.speech_runtime_component = ManagedWhisperCppRuntime(data)
+        main.speech_model_components = {
+            "base-q5_1": ManagedWhisperModel(data, "base-q5_1"),
+            "base.en-q5_1": ManagedWhisperModel(data, "base.en-q5_1"),
+        }
 
         main.external_source_config.save_source(
             "plex",
@@ -77,6 +91,8 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
             main.external_source_config,
             main.provider_secrets,
             main.ffmpeg_components,
+            main.speech_runtime_component,
+            main.speech_model_components,
         ) = self.original
         self.temporary.cleanup()
 
@@ -132,6 +148,110 @@ class ExternalSourceRouteSecurityTests(unittest.TestCase):
         self.assertIn("/settings/integrations", response.headers["location"])
         self.assertIn("removed", response.headers["location"])
         remove.assert_called_once_with()
+
+    def test_integrations_page_exposes_separate_local_speech_components(self):
+        runtime_status = ManagedSpeechRuntimeStatus(
+            state="unavailable",
+            available=False,
+            version="1.9.4",
+            path="",
+            detail="whisper.cpp is not available.",
+            can_install=True,
+            can_remove=False,
+            identity=None,
+        )
+        with patch.object(
+            main.speech_runtime_component,
+            "status",
+            return_value=runtime_status,
+        ):
+            response = self.client.get("/settings/integrations")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Local speech analysis", response.text)
+        self.assertIn("Install whisper.cpp for InfoMancer", response.text)
+        self.assertIn(
+            "/settings/integrations/speech/runtime/install",
+            response.text,
+        )
+        self.assertIn(
+            "/settings/integrations/speech/models/base-q5_1/install",
+            response.text,
+        )
+        self.assertIn(
+            "/settings/integrations/speech/models/base.en-q5_1/install",
+            response.text,
+        )
+        self.assertIn("CPU only", response.text)
+
+    def test_managed_speech_runtime_install_route_uses_verified_manager(self):
+        installed = Path(self.temporary.name) / "whisper-cli"
+        identity = SpeechBinaryIdentity(
+            key="whisper.cpp",
+            version="1.9.4",
+            sha256="d" * 64,
+            size_bytes=123,
+            source="fixture",
+            license_id="MIT",
+        )
+        with patch.object(
+            main.speech_runtime_component,
+            "install",
+            return_value=(installed, identity),
+        ) as install:
+            response = self.client.post(
+                "/settings/integrations/speech/runtime/install"
+            )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("/settings/integrations", response.headers["location"])
+        self.assertIn("downloaded", response.headers["location"])
+        install.assert_called_once_with()
+
+    def test_managed_speech_runtime_failure_returns_without_500(self):
+        with patch.object(
+            main.speech_runtime_component,
+            "install",
+            side_effect=ManagedSpeechComponentError(
+                "fixture speech integrity failure"
+            ),
+        ):
+            response = self.client.post(
+                "/settings/integrations/speech/runtime/install"
+            )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn(
+            "fixture+speech+integrity+failure",
+            response.headers["location"],
+        )
+
+    def test_managed_speech_model_routes_are_allowlisted(self):
+        model = main.speech_model_components["base-q5_1"]
+        installed = Path(self.temporary.name) / "ggml-base-q5_1.bin"
+        with patch.object(
+            model,
+            "install",
+            return_value=(installed, model.identity),
+        ) as install:
+            response = self.client.post(
+                "/settings/integrations/speech/models/base-q5_1/install"
+            )
+        self.assertEqual(response.status_code, 303)
+        install.assert_called_once_with()
+
+        with patch.object(model, "remove") as remove:
+            response = self.client.post(
+                "/settings/integrations/speech/models/base-q5_1/remove"
+            )
+        self.assertEqual(response.status_code, 303)
+        remove.assert_called_once_with()
+
+        response = self.client.post(
+            "/settings/integrations/speech/models/not-a-model/install"
+        )
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("Unknown+managed+Whisper+model", response.headers["location"])
 
     def test_integrations_page_reports_plex_adapter_ready_for_normal(self):
         local_root = Path(self.temporary.name) / "media"

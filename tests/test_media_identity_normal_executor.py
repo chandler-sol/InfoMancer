@@ -451,7 +451,7 @@ class NormalPreviewOcrExecutorTests(unittest.TestCase):
         self.assertEqual(len(result.observations), 2)
         self.assertTrue(any(":ocr:" in item for item in result.failures))
 
-    def test_text_budget_truncates_final_observation_and_stops(self):
+    def test_text_budget_discards_incomplete_final_observation_and_stops(self):
         source_frames = frames("jellyfin", 3)
         source = PreviewSource(
             "jellyfin",
@@ -477,8 +477,9 @@ class NormalPreviewOcrExecutorTests(unittest.TestCase):
         self.assertTrue(result.budget_exhausted)
         self.assertEqual(
             "".join(item.text for item in result.observations),
-            "abcdefghij",
+            "abcdef",
         )
+        self.assertEqual(result.completed_frame_count, 1)
 
     def test_strong_initial_stage_can_stop_before_expansion(self):
         source_frames = frames("jellyfin", 40)

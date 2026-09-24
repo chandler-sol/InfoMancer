@@ -22,6 +22,11 @@ from app.media_identity.external import (
     ExternalPreviewUnavailable,
     ExternalSourceFailure,
 )
+from app.media_identity.visual_budget import (
+    VisualAttemptBudget,
+    VisualBudgetExceeded,
+    visual_budget_scope,
+)
 from app.media_identity.models import (
     AnalyzerContext,
     IdentityProfile,
@@ -34,6 +39,7 @@ from app.media_identity.sources.plex import (
     PlexBifSource,
     PlexPreviewUnavailable,
     PlexSourceFailure,
+    bif_source_signature,
     enumerate_bif_preview_frames,
     enumerate_plex_http_preview_frames,
     fetch_plex_bif_image,
@@ -45,6 +51,7 @@ from app.media_identity.sources.plex import (
     parse_bif_index,
     plex_bif_path_for_bundle,
     read_bif_index,
+    read_verified_bif_preview,
     resolve_local_bif_path,
     resolve_plex_media_ref,
 )
@@ -224,6 +231,75 @@ class PlexBifFoundationTests(unittest.TestCase):
         self.assertEqual(parsed.image_count, 2)
         self.assertEqual(parsed.file_size, len(bif))
         self.assertTrue(parsed.index_digest)
+
+    def test_local_bif_reads_share_source_budget_and_attempt_cache(self):
+        bif = build_bif()
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "index-sd.bif"
+            path.write_bytes(bif)
+            index_bytes = len(index_prefix(bif))
+            budget = VisualAttemptBudget(
+                max_frame_attempts=4,
+                max_source_bytes=index_bytes + len(FRAME_ZERO) + 1,
+                max_image_bytes=1,
+                max_text_chars=1,
+            )
+            with visual_budget_scope(budget):
+                parsed = read_bif_index(path)
+                self.assertEqual(budget.source_bytes, index_bytes)
+
+                repeated = read_bif_index(path)
+                self.assertEqual(
+                    repeated.index_digest,
+                    parsed.index_digest,
+                )
+                self.assertEqual(budget.source_bytes, index_bytes)
+
+                frame = parsed.frames[0]
+                signature = bif_source_signature(path, parsed)
+                payload = read_verified_bif_preview(
+                    path,
+                    expected_signature=signature,
+                    timestamp_ms=frame.timestamp_ms,
+                    offset=frame.offset,
+                    length=frame.length,
+                )
+                self.assertEqual(payload, FRAME_ZERO)
+                self.assertEqual(
+                    budget.source_bytes,
+                    index_bytes + len(FRAME_ZERO),
+                )
+
+                repeated_payload = read_verified_bif_preview(
+                    path,
+                    expected_signature=signature,
+                    timestamp_ms=frame.timestamp_ms,
+                    offset=frame.offset,
+                    length=frame.length,
+                )
+                self.assertEqual(repeated_payload, FRAME_ZERO)
+                self.assertEqual(
+                    budget.source_bytes,
+                    index_bytes + len(FRAME_ZERO),
+                )
+
+    def test_local_bif_index_fails_before_read_when_source_budget_is_tiny(self):
+        bif = build_bif()
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "index-sd.bif"
+            path.write_bytes(bif)
+            budget = VisualAttemptBudget(
+                max_frame_attempts=1,
+                max_source_bytes=1,
+                max_image_bytes=1,
+                max_text_chars=1,
+            )
+            with visual_budget_scope(budget):
+                with self.assertRaises(VisualBudgetExceeded):
+                    read_bif_index(path)
+
+            self.assertTrue(budget.exhausted)
+            self.assertEqual(budget.source_bytes, 0)
 
     def test_preview_enumeration_keeps_ranges_lazy(self):
         bif = build_bif()
@@ -817,6 +893,38 @@ class PlexBifFoundationTests(unittest.TestCase):
         )
         self.assertNotIn("secret", opener.request.full_url)
 
+    def test_bif_download_cannot_exceed_shared_visual_source_budget(self):
+        bif = build_bif()
+        response = DummyResponse(
+            bif,
+            content_type="application/octet-stream",
+        )
+        response.headers["Content-Length"] = str(len(bif))
+        opener = DummyOpener(response)
+        budget = VisualAttemptBudget(
+            max_frame_attempts=12,
+            max_source_bytes=max(1, len(bif) - 1),
+            max_image_bytes=48 * 1024 * 1024,
+            max_text_chars=64_000,
+        )
+
+        with (
+            patch(
+                "app.media_identity.sources.plex.urllib.request.build_opener",
+                return_value=opener,
+            ),
+            visual_budget_scope(budget),
+        ):
+            with self.assertRaises(VisualBudgetExceeded):
+                fetch_plex_bif_index(
+                    "https://plex.local:32400",
+                    "secret",
+                    "501",
+                )
+
+        self.assertEqual(budget.source_bytes, 0)
+        self.assertTrue(budget.exhausted)
+
     def test_fetch_plex_bif_image_rejects_non_jpeg(self):
         opener = DummyOpener(
             DummyResponse(b"not-a-jpeg", content_type="image/jpeg")
@@ -904,6 +1012,42 @@ class PlexBifFoundationTests(unittest.TestCase):
                             "501",
                             0,
                         )
+
+    def test_ambiguous_path_mapping_is_normalized_as_plex_source_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            local_root = Path(temporary) / "tv"
+            local_path = local_root / "Show" / "Episode.mkv"
+            mapper = ExternalPathMapper([
+                PathMapping("plex", "/srv/tv-a", str(local_root), priority=1),
+                PathMapping("plex", "/srv/tv-b", str(local_root), priority=1),
+            ])
+            source = PlexBifSource(
+                "https://plex.local:32400",
+                "secret",
+                mapper,
+            )
+            context = AnalyzerContext(
+                media=MediaIdentityFile(
+                    file_id=1,
+                    title_id=1,
+                    path=str(local_path),
+                    size_bytes=1,
+                    modified_at=1.0,
+                ),
+                claimed_identity=IdentityReference(
+                    identity_kind="episode",
+                    season=1,
+                    episode=1,
+                    display_name="Episode",
+                ),
+                profile=IdentityProfile.NORMAL,
+            )
+            with self.assertRaisesRegex(
+                PlexSourceFailure,
+                "path mapping.*unambiguously",
+            ) as caught:
+                source.resolve_media(context)
+            self.assertIsInstance(caught.exception, ExternalSourceFailure)
 
     def test_configured_plex_source_resolves_and_reads_exact_part_preview(self):
         bif = build_bif()

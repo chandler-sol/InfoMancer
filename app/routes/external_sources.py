@@ -5,6 +5,7 @@ import uuid
 
 from ..access import require_librarian
 from ..managed_ffmpeg import ManagedFfmpegError
+from ..managed_speech import ManagedSpeechComponentError
 from ..media_identity.external_config import (
     ExternalSourceConfigError,
     external_token_is_bound,
@@ -18,6 +19,8 @@ def build_router(ctx: RouteContext):
     router = APIRouter()
     external_source_config = ctx.live("external_source_config")
     ffmpeg_components = ctx.live("ffmpeg_components")
+    speech_runtime_component = ctx.live("speech_runtime_component")
+    speech_model_components = ctx.live("speech_model_components")
     provider_secrets = ctx.live("provider_secrets")
     record_event = ctx.live("record_event")
     redirect = ctx.live("redirect")
@@ -80,6 +83,128 @@ def build_router(ctx: RouteContext):
         return redirect(
             "/settings/integrations",
             "InfoMancer's managed FFmpeg copy was removed.",
+        )
+
+    @librarian_post("/settings/integrations/speech/runtime/install")
+    def install_managed_speech_runtime(request: Request):
+        try:
+            installed, identity = speech_runtime_component.install()
+        except ManagedSpeechComponentError as exc:
+            record_event(
+                "settings",
+                "Managed whisper.cpp installation failed.",
+                level="error",
+                detail=str(exc),
+                user_id=request.state.user.id,
+            )
+            return redirect("/settings/integrations", str(exc))
+
+        record_event(
+            "settings",
+            "Managed whisper.cpp installed.",
+            context={
+                "path": str(installed),
+                "version": identity.version,
+                "sha256": identity.sha256,
+            },
+            user_id=request.state.user.id,
+        )
+        return redirect(
+            "/settings/integrations",
+            "whisper.cpp was downloaded, verified, and installed for InfoMancer.",
+        )
+
+    @librarian_post("/settings/integrations/speech/runtime/remove")
+    def remove_managed_speech_runtime(request: Request):
+        try:
+            speech_runtime_component.remove()
+        except ManagedSpeechComponentError as exc:
+            record_event(
+                "settings",
+                "Managed whisper.cpp removal failed.",
+                level="error",
+                detail=str(exc),
+                user_id=request.state.user.id,
+            )
+            return redirect("/settings/integrations", str(exc))
+
+        record_event(
+            "settings",
+            "Managed whisper.cpp removed.",
+            user_id=request.state.user.id,
+        )
+        return redirect(
+            "/settings/integrations",
+            "InfoMancer's managed whisper.cpp runtime was removed.",
+        )
+
+    def managed_speech_model(model_key: str):
+        key = str(model_key or "").strip()
+        component = speech_model_components.get(key)
+        if component is None:
+            raise ManagedSpeechComponentError(
+                "Unknown managed Whisper model."
+            )
+        return key, component
+
+    @librarian_post(
+        "/settings/integrations/speech/models/{model_key}/install"
+    )
+    def install_managed_speech_model(request: Request, model_key: str):
+        try:
+            key, component = managed_speech_model(model_key)
+            installed, identity = component.install()
+        except ManagedSpeechComponentError as exc:
+            record_event(
+                "settings",
+                "Managed Whisper model installation failed.",
+                level="error",
+                detail=str(exc),
+                user_id=request.state.user.id,
+            )
+            return redirect("/settings/integrations", str(exc))
+
+        record_event(
+            "settings",
+            "Managed Whisper model installed.",
+            context={
+                "model_key": key,
+                "path": str(installed),
+                "sha256": identity.sha256,
+            },
+            user_id=request.state.user.id,
+        )
+        return redirect(
+            "/settings/integrations",
+            f"Whisper model {key} was downloaded, verified, and installed.",
+        )
+
+    @librarian_post(
+        "/settings/integrations/speech/models/{model_key}/remove"
+    )
+    def remove_managed_speech_model(request: Request, model_key: str):
+        try:
+            key, component = managed_speech_model(model_key)
+            component.remove()
+        except ManagedSpeechComponentError as exc:
+            record_event(
+                "settings",
+                "Managed Whisper model removal failed.",
+                level="error",
+                detail=str(exc),
+                user_id=request.state.user.id,
+            )
+            return redirect("/settings/integrations", str(exc))
+
+        record_event(
+            "settings",
+            "Managed Whisper model removed.",
+            context={"model_key": key},
+            user_id=request.state.user.id,
+        )
+        return redirect(
+            "/settings/integrations",
+            f"InfoMancer's managed Whisper model {key} was removed.",
         )
 
     @librarian_post("/settings/integrations/{source_key}")
@@ -389,6 +514,10 @@ def build_router(ctx: RouteContext):
     return router, {
         "install_managed_ffmpeg": install_managed_ffmpeg,
         "remove_managed_ffmpeg": remove_managed_ffmpeg,
+        "install_managed_speech_runtime": install_managed_speech_runtime,
+        "remove_managed_speech_runtime": remove_managed_speech_runtime,
+        "install_managed_speech_model": install_managed_speech_model,
+        "remove_managed_speech_model": remove_managed_speech_model,
         "save_external_source": save_external_source,
         "test_source_connection": test_source_connection,
         "add_source_mapping": add_source_mapping,

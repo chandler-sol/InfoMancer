@@ -31,8 +31,11 @@ class MediaIntelligenceHistoryEngine(MediaIntelligenceEngine):
     the base analysis plus lifecycle/history finalization in one database transaction.
     """
 
-    def __init__(self, database):
-        super().__init__(database)
+    def __init__(self, database, *, external_registry_factory=None):
+        super().__init__(
+            database,
+            external_registry_factory=external_registry_factory,
+        )
         self._history_lock = threading.Lock()
 
     def analyze(self) -> int:
@@ -46,7 +49,8 @@ class MediaIntelligenceHistoryEngine(MediaIntelligenceEngine):
                 }
 
                 transactional_engine = MediaIntelligenceEngine(
-                    _TransactionalDatabase(self.database, conn)
+                    _TransactionalDatabase(self.database, conn),
+                    external_registry_factory=self.external_registry_factory,
                 )
                 candidate_count = transactional_engine.analyze()
 

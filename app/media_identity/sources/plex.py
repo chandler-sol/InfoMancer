@@ -19,6 +19,7 @@ from PIL import Image, UnidentifiedImageError
 
 from ...path_mapping import ExternalPathMapper, PathMappingError, parse_absolute_path
 from ..external import (
+    ExternalAnalysisError,
     ExternalCapability,
     ExternalMediaRef,
     ExternalPreviewUnavailable,
@@ -27,6 +28,13 @@ from ..external import (
     PreviewFrameRef,
 )
 from ..models import AnalyzerContext
+from ..visual_budget import (
+    VisualBudgetExceeded,
+    account_source_bytes,
+    current_visual_budget,
+    deny_visual_budget,
+    source_read_plan,
+)
 
 
 _BIF_MAGIC = b"\x89BIF\r\n\x1a\n"
@@ -46,7 +54,7 @@ _PLEX_PAGE_SIZE = 256
 _PLEX_MEDIA_HASH = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
-class PlexBifError(ValueError):
+class PlexBifError(ExternalAnalysisError):
     """Raised when a Plex source operation is malformed, unsafe, or unavailable."""
 
 
@@ -214,35 +222,114 @@ def parse_bif_index(
     )
 
 
+def _bif_stat_mtime_ns(value: os.stat_result) -> int:
+    return int(
+        getattr(
+            value,
+            "st_mtime_ns",
+            int(float(value.st_mtime) * 1_000_000_000),
+        )
+    )
+
+
+def _bif_stat_ctime_ns(value: os.stat_result) -> int:
+    return int(
+        getattr(
+            value,
+            "st_ctime_ns",
+            int(float(value.st_ctime) * 1_000_000_000),
+        )
+    )
+
+
+def _bif_index_budget_cache_key(
+    path: Path,
+    stat_result: os.stat_result,
+) -> str:
+    identity = {
+        "path": str(path.absolute()),
+        "size": int(stat_result.st_size),
+        "mtime_ns": _bif_stat_mtime_ns(stat_result),
+        "ctime_ns": _bif_stat_ctime_ns(stat_result),
+        "device_id": int(getattr(stat_result, "st_dev", 0) or 0),
+        "inode_id": int(getattr(stat_result, "st_ino", 0) or 0),
+    }
+    canonical = json.dumps(
+        identity,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return "plex-bif-index:" + hashlib.sha256(
+        canonical.encode("utf-8")
+    ).hexdigest()
+
+
+def _read_budgeted_bif_index_payload(
+    handle,
+    path: Path,
+    stat_result: os.stat_result,
+) -> bytes:
+    """Read a BIF header/index once per visual attempt and charge actual reads."""
+    budget = current_visual_budget()
+    cache_key = _bif_index_budget_cache_key(path, stat_result)
+    if budget is not None:
+        cached = budget.cached_source_asset(cache_key)
+        if cached is not None:
+            return bytes(cached)
+
+    account_source_bytes(_BIF_HEADER_SIZE)
+    header = handle.read(_BIF_HEADER_SIZE)
+    _, image_count, _ = _header_fields(header)
+    index_size = (image_count + 1) * _BIF_INDEX_ENTRY_SIZE
+    account_source_bytes(index_size)
+    index_bytes = handle.read(index_size)
+    if len(index_bytes) != index_size:
+        raise PlexBifError("Plex BIF index is truncated.")
+
+    payload = header + index_bytes
+    if budget is not None:
+        budget.cache_source_asset(cache_key, payload)
+    return payload
+
+
 def read_bif_index(path: str | Path) -> PlexBifIndex:
     """Read only the bounded BIF header/index from disk, never the JPEG section."""
     bif_path = Path(path)
     try:
-        stat = bif_path.stat()
-    except OSError as exc:
-        raise PlexBifError(f"Plex BIF could not be inspected: {exc}") from exc
-    if not bif_path.is_file():
-        raise PlexBifError("Plex BIF path is not a regular file.")
-    if stat.st_size < _BIF_HEADER_SIZE + _BIF_INDEX_ENTRY_SIZE:
-        raise PlexBifError("Plex BIF file is too small to contain an index.")
-    if stat.st_size > 0xFFFFFFFF:
-        raise PlexBifError("Plex BIF file exceeds the version 0 offset range.")
-
-    try:
         with bif_path.open("rb") as handle:
-            header = handle.read(_BIF_HEADER_SIZE)
-            _, image_count, _ = _header_fields(header)
-            index_size = (image_count + 1) * _BIF_INDEX_ENTRY_SIZE
-            index_bytes = handle.read(index_size)
+            stat = os.fstat(handle.fileno())
+            if not stat_module.S_ISREG(stat.st_mode):
+                raise PlexBifError("Plex BIF path is not a regular file.")
+            if stat.st_size < _BIF_HEADER_SIZE + _BIF_INDEX_ENTRY_SIZE:
+                raise PlexBifError(
+                    "Plex BIF file is too small to contain an index."
+                )
+            if stat.st_size > 0xFFFFFFFF:
+                raise PlexBifError(
+                    "Plex BIF file exceeds the version 0 offset range."
+                )
+            index_payload = _read_budgeted_bif_index_payload(
+                handle,
+                bif_path,
+                stat,
+            )
+            after = os.fstat(handle.fileno())
+    except PlexBifError:
+        raise
     except OSError as exc:
         raise PlexBifError(f"Plex BIF index could not be read: {exc}") from exc
 
-    if len(index_bytes) != index_size:
-        raise PlexBifError("Plex BIF index is truncated.")
+    if (
+        int(stat.st_size) != int(after.st_size)
+        or _bif_stat_mtime_ns(stat) != _bif_stat_mtime_ns(after)
+        or _bif_stat_ctime_ns(stat) != _bif_stat_ctime_ns(after)
+    ):
+        raise PlexBifError("Plex BIF changed while its index was being read.")
     return parse_bif_index(
-        header + index_bytes,
+        index_payload,
         file_size=stat.st_size,
-        source_mtime_ns=getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000)),
+        source_mtime_ns=_bif_stat_mtime_ns(stat),
     )
 
 
@@ -523,26 +610,16 @@ def read_verified_bif_preview(
                     "Plex BIF file exceeds the supported version 0 offset range."
                 )
 
-            header = handle.read(_BIF_HEADER_SIZE)
             try:
-                _, image_count, _ = _header_fields(header)
-            except PlexBifError as exc:
-                raise PlexPreviewUnavailable(
-                    f"Plex local BIF header is unusable: {exc}"
-                ) from exc
-            index_size = (image_count + 1) * _BIF_INDEX_ENTRY_SIZE
-            index_bytes = handle.read(index_size)
-            if len(index_bytes) != index_size:
-                raise PlexPreviewUnavailable("Plex local BIF index is truncated.")
-            try:
+                index_payload = _read_budgeted_bif_index_payload(
+                    handle,
+                    bif_path,
+                    before,
+                )
                 current_index = parse_bif_index(
-                    header + index_bytes,
+                    index_payload,
                     file_size=before.st_size,
-                    source_mtime_ns=getattr(
-                        before,
-                        "st_mtime_ns",
-                        int(before.st_mtime * 1_000_000_000),
-                    ),
+                    source_mtime_ns=_bif_stat_mtime_ns(before),
                 )
             except PlexBifError as exc:
                 raise PlexPreviewUnavailable(
@@ -570,8 +647,30 @@ def read_verified_bif_preview(
                     "Plex local BIF frame range changed after preview enumeration."
                 )
 
-            handle.seek(start)
-            payload = handle.read(count)
+            budget = current_visual_budget()
+            frame_cache_key = (
+                _bif_index_budget_cache_key(
+                    bif_path,
+                    before,
+                )
+                + f":frame:{start}:{count}"
+            )
+            cached_payload = (
+                budget.cached_source_asset(frame_cache_key)
+                if budget is not None
+                else None
+            )
+            if cached_payload is not None:
+                payload = bytes(cached_payload)
+            else:
+                account_source_bytes(count)
+                handle.seek(start)
+                payload = handle.read(count)
+                if len(payload) == count and budget is not None:
+                    budget.cache_source_asset(
+                        frame_cache_key,
+                        payload,
+                    )
             after = os.fstat(handle.fileno())
     except PlexPreviewUnavailable:
         raise
@@ -783,7 +882,8 @@ def _read_plex_bytes(
         urllib.request.ProxyHandler({}),
         _NoRedirect(),
     )
-    limit = max(1, int(max_bytes))
+    configured_limit = max(1, int(max_bytes))
+    limit, budget_limited = source_read_plan(configured_limit)
     try:
         with opener.open(
             request,
@@ -797,7 +897,28 @@ def _read_plex_bytes(
             content_type = str(
                 response.headers.get("Content-Type", "")
             ).split(";", 1)[0].strip().casefold()
-            payload = response.read(limit + 1)
+            raw_length = response.headers.get("Content-Length")
+            if raw_length not in {None, ""}:
+                try:
+                    content_length = int(raw_length)
+                except (TypeError, ValueError) as exc:
+                    raise PlexSourceFailure(
+                        "Plex response had an invalid Content-Length."
+                    ) from exc
+                if content_length < 0:
+                    raise PlexSourceFailure(
+                        "Plex response had an invalid Content-Length."
+                    )
+                if content_length > limit:
+                    if budget_limited:
+                        deny_visual_budget(
+                            "Normal visual source-byte budget cannot admit this Plex response."
+                        )
+                    raise _PlexResponseTooLarge(
+                        "Plex response exceeded the safe size limit."
+                    )
+            payload = response.read(limit if budget_limited else limit + 1)
+            account_source_bytes(len(payload))
     except urllib.error.HTTPError as exc:
         if exc.code in {401, 403}:
             detail = "Plex rejected the access token."
@@ -1424,10 +1545,15 @@ class PlexBifSource:
     def resolve_media(self, context: AnalyzerContext) -> ExternalMediaRef | None:
         if not self.status().available:
             return None
-        translation = self.mapper.reverse_translate(
-            self.source_key,
-            context.media.path,
-        )
+        try:
+            translation = self.mapper.reverse_translate(
+                self.source_key,
+                context.media.path,
+            )
+        except PathMappingError as exc:
+            raise PlexSourceFailure(
+                f"Plex path mapping could not resolve this media unambiguously: {exc}"
+            ) from exc
         if translation is None:
             return None
         candidates = fetch_plex_path_candidates(

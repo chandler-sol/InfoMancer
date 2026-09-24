@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -123,6 +124,52 @@ def external_token_is_bound(
         and bool(source.credential_generation)
         and secrets.get(generation_key, "") == source.credential_generation
     )
+
+
+def external_source_config_signature(
+    conn: sqlite3.Connection,
+    source_key: str,
+) -> str | None:
+    """Return a non-secret identity for one configured external analysis source."""
+    key = str(source_key or "").strip().casefold()
+    if key not in SUPPORTED_EXTERNAL_SOURCES:
+        return None
+    row = conn.execute(
+        """SELECT source_key,enabled,server_url,metadata_root,config_json,
+                  credential_generation,config_revision
+           FROM external_analysis_sources WHERE source_key=?""",
+        (key,),
+    ).fetchone()
+    if row is None:
+        return None
+    mappings = [
+        dict(item)
+        for item in conn.execute(
+            """SELECT external_root,local_root,priority,enabled
+               FROM external_path_mappings
+               WHERE source_key=?
+               ORDER BY priority,external_root,local_root,id""",
+            (key,),
+        ).fetchall()
+    ]
+    payload = {
+        "version": 1,
+        "source_key": key,
+        "enabled": bool(row["enabled"]),
+        "server_url": str(row["server_url"] or ""),
+        "metadata_root": str(row["metadata_root"] or ""),
+        "config_json": str(row["config_json"] or "{}"),
+        "credential_generation": str(row["credential_generation"] or ""),
+        "config_revision": int(row["config_revision"] or 0),
+        "mappings": mappings,
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class ExternalSourceConfigService:

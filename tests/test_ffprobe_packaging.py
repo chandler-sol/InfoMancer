@@ -121,6 +121,24 @@ class FFprobePackagingTests(unittest.TestCase):
         self.assertIn("rapidocr==3.9.2", requirements)
         self.assertIn("onnxruntime==1.30.0", requirements)
 
+    def test_server_release_preserves_optional_speech_notice_contract(self):
+        release = (ROOT / "scripts" / "build_release.py").read_text(
+            encoding="utf-8"
+        )
+        notice = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('"THIRD_PARTY_NOTICES.md"', release)
+        self.assertIn("whisper.cpp 1.9.4", notice)
+        self.assertIn("base-q5_1", notice)
+        self.assertIn("base.en-q5_1", notice)
+        self.assertIn(
+            "f281eb45af861ab5e5297d23694b7d46e090c02c",
+            notice,
+        )
+        self.assertIn("License: MIT", notice)
+
     def test_native_packaging_runs_packaged_ffprobe_self_check(self):
         stage = (ROOT / "scripts" / "stage_ffprobe.py").read_text(encoding="utf-8")
         self.assertIn("FFPROBE_LICENSE.txt", stage)

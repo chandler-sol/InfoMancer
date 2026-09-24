@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -7,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.db import Database
+from app.mie import MediaIntelligenceEngine
 from app.media_identity.external import (
     ExternalCapability,
     ExternalMediaRef,
@@ -15,14 +17,96 @@ from app.media_identity.external import (
     PreviewFrameRef,
 )
 from app.media_identity.fast import FastIdentityService
-from app.media_identity.normal import NormalResourceLimits, OcrTextResult
+from app.media_identity.decision_snapshot import (
+    result_revision,
+    seal_decision_snapshot,
+)
+from app.media_identity.normal import (
+    NormalIdentityError,
+    NormalResourceLimits,
+    OcrTextResult,
+    ocr_preview_cache_key,
+)
 from app.media_identity.local_frames import LOCAL_FRAME_SOURCE_KEY
-from app.media_identity.normal_service import NormalIdentityService
+from app.media_identity.media_generation import media_content_sha256
+from app.media_identity.normal_service import (
+    NORMAL_OCR_ARTIFACT_KEY,
+    NORMAL_OCR_ARTIFACT_VERSION,
+    NORMAL_OCR_EVIDENCE_KEY,
+    NORMAL_SPEECH_EVIDENCE_KEY,
+    NormalIdentityScanError,
+    NormalIdentityService,
+)
 from app.media_identity.service import MediaIdentityDecisionService
+from app.media_identity.speech import (
+    SpeechAudioIdentity,
+    SpeechBinaryIdentity,
+    SpeechModelIdentity,
+    SpeechTranscript,
+    SpeechWindow,
+)
+from app.media_identity.speech_audio import SpeechAudioStream
+from app.media_identity.speech_service import (
+    NormalSpeechObservation,
+    NormalSpeechRun,
+)
 from app.media_identity.versions import (
     EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION,
     NORMAL_EVIDENCE_ALGORITHM_VERSION,
 )
+from app.media_identity.visual_budget import (
+    account_source_bytes,
+    current_visual_budget,
+)
+
+
+def _reviewed_action_kwargs(
+    decisions: MediaIdentityDecisionService,
+    scan_id: int,
+) -> dict[str, object]:
+    detail = decisions.scan_detail(
+        int(scan_id),
+        verify_actionable_content=False,
+        include_confirmation=False,
+    )
+    candidate_key = str(detail.get("best_candidate_key") or "")
+    if not candidate_key:
+        candidates = list(detail.get("candidates") or [])
+        candidate_key = (
+            str(candidates[0].get("candidate_key") or "")
+            if candidates
+            else "unavailable"
+        )
+    return {
+        "expected_result_revision": int(
+            detail.get("result_revision") or 0
+        ),
+        "expected_decision_snapshot_sha256": str(
+            detail.get("decision_snapshot_sha256") or ""
+        ),
+        "expected_candidate_key": candidate_key,
+    }
+
+
+def _confirm_best(
+    decisions: MediaIdentityDecisionService,
+    scan_id: int,
+):
+    return decisions.confirm_best(
+        int(scan_id),
+        None,
+        **_reviewed_action_kwargs(decisions, scan_id),
+    )
+
+
+def _rename_preview(
+    decisions: MediaIdentityDecisionService,
+    scan_id: int,
+):
+    return decisions.rename_preview(
+        int(scan_id),
+        **_reviewed_action_kwargs(decisions, scan_id),
+    )
 
 
 class FakeOcr:
@@ -45,6 +129,102 @@ class FakeOcr:
             confidence=1.0,
             details={"fixture": True},
         )
+
+
+class FakeNormalSpeechPrepared:
+    def __init__(self, identity):
+        self.identity = identity
+        self.cleanup_calls = 0
+
+    def validated_path(self, expected_identity=None):
+        if expected_identity is not None and expected_identity != self.identity:
+            raise RuntimeError("speech identity mismatch")
+        return "/tmp/fake-normal-speech.wav"
+
+    def cleanup(self):
+        self.cleanup_calls += 1
+
+
+class FakeNormalSpeechExtractor:
+    instances = []
+
+    def __init__(self, media, streams, *, preferred_language=""):
+        self.media = media
+        self.streams = tuple(streams)
+        self.preferred_language = preferred_language
+        self.stream = SpeechAudioStream(
+            index=0,
+            language="eng",
+            channels=2,
+            sample_rate_hz=48_000,
+            default=True,
+        )
+        self.extract_calls = 0
+        self.prepared = []
+        type(self).instances.append(self)
+
+    def source_signature(self, window):
+        return hashlib.sha256(
+            f"normal:{self.media.file_id}:{window.start_ms}:{window.end_ms}".encode()
+        ).hexdigest()
+
+    def extract(self, window):
+        self.extract_calls += 1
+        payload = f"normal-audio:{window.start_ms}:{window.end_ms}".encode()
+        identity = SpeechAudioIdentity(
+            sha256=hashlib.sha256(payload).hexdigest(),
+            size_bytes=len(payload),
+            format_key="wav-pcm-s16le",
+            sample_rate_hz=16_000,
+            channels=1,
+            source_signature=self.source_signature(window),
+        )
+        prepared = FakeNormalSpeechPrepared(identity)
+        self.prepared.append(prepared)
+        return prepared
+
+
+class FakeNormalSpeechEngine:
+    key = "fake-normal-speech"
+    version = "1"
+
+    def __init__(self, *, available=True):
+        self.is_available = available
+        self.calls = 0
+
+    def available(self):
+        return self.is_available
+
+    def binary_identity(self):
+        return SpeechBinaryIdentity(
+            key=self.key,
+            version=self.version,
+            sha256="d" * 64,
+            size_bytes=2048,
+            source="fixture",
+            details={"runtime_tree_sha256": "e" * 64},
+        )
+
+    def cache_identity(self):
+        return {"fixture": "normal-speech-v1", "cpu_only": True}
+
+    def transcribe(self, _audio_path, request):
+        self.calls += 1
+        return SpeechTranscript(
+            text=f"dialogue {request.window.start_ms}-{request.window.end_ms}",
+            language="en",
+        )
+
+
+def fake_normal_speech_model():
+    return SpeechModelIdentity(
+        key="base-q5_1",
+        version="fixture",
+        sha256="f" * 64,
+        size_bytes=4096,
+        source="fixture",
+        details={"multilingual": True},
+    )
 
 
 class FakePreviewSource:
@@ -206,6 +386,21 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
+    def _reseal_scan_fixture(self) -> None:
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            seal_decision_snapshot(
+                conn,
+                self.fast_scan.scan_id,
+                revision=result_revision(
+                    {"claimed_identity_json": row["claimed_identity_json"]}
+                ) + 1,
+            )
+
     def test_decision_version_drift_makes_fast_scan_stale(self):
         decisions = MediaIdentityDecisionService(self.database)
         detail = decisions.scan_detail(self.fast_scan.scan_id)
@@ -232,13 +427,17 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertFalse(stale["actionable"])
 
     def test_normal_version_drift_makes_completed_scan_stale(self):
+        source = FakePreviewSource()
         service = NormalIdentityService(
             self.database,
-            ExternalSourceRegistry([FakePreviewSource()]),
+            ExternalSourceRegistry([source]),
             FakeOcr(),
         )
         service.run_scan(self.fast_scan.scan_id)
-        decisions = MediaIdentityDecisionService(self.database)
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
         detail = decisions.scan_detail(self.fast_scan.scan_id)
         self.assertTrue(detail["snapshot_current"])
 
@@ -256,6 +455,645 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             conn.execute(
                 "UPDATE media_identity_scans SET claimed_identity_json=? WHERE id=?",
                 (json.dumps(claimed, sort_keys=True), self.fast_scan.scan_id),
+            )
+
+        stale = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
+    def _seed_jellyfin_config(self, *, revision=1, server_url="https://jf-one.local"):
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO external_analysis_sources(
+                     source_key,enabled,server_url,metadata_root,config_json,
+                     credential_generation,config_revision,updated_at
+                   ) VALUES ('jellyfin',1,?,'','{}','generation-a',?,CURRENT_TIMESTAMP)
+                   ON CONFLICT(source_key) DO UPDATE SET
+                     enabled=1,server_url=excluded.server_url,
+                     config_json='{}',credential_generation='generation-a',
+                     config_revision=excluded.config_revision,
+                     updated_at=CURRENT_TIMESTAMP""",
+                (server_url, int(revision)),
+            )
+
+    def test_actionable_external_ocr_revalidates_current_preview_bytes(self):
+        class MutablePreview(FakePreviewSource):
+            def __init__(self):
+                super().__init__()
+                self.payload = b"bronze harbor lantern meadow quartz thunder"
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return self.payload
+
+        self._seed_jellyfin_config()
+        source = MutablePreview()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        service.run_scan(self.fast_scan.scan_id)
+
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        resolution = decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertEqual(resolution.state.value, "strong_match_other")
+        before = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertTrue(before["snapshot_current"])
+        self.assertTrue(before["actionable"])
+
+        source.payload = b"amber falcon orchard glacier velvet compass"
+        after = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(after["snapshot_current"])
+        self.assertFalse(after["actionable"])
+        self.assertEqual(
+            _rename_preview(decisions, self.fast_scan.scan_id)["status"],
+            "stale",
+        )
+        with self.assertRaisesRegex(ValueError, "changed after this identity scan"):
+            _confirm_best(decisions, self.fast_scan.scan_id)
+
+    def test_external_backed_result_fails_closed_without_registry_factory(self):
+        self._seed_jellyfin_config()
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        normal.run_scan(self.fast_scan.scan_id)
+
+        configured = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        resolution = configured.resolve_scan(self.fast_scan.scan_id)
+        self.assertEqual(resolution.state.value, "strong_match_other")
+        self.assertTrue(
+            configured.scan_detail(self.fast_scan.scan_id)["snapshot_current"]
+        )
+
+        unconfigured = MediaIdentityDecisionService(self.database)
+        detail = unconfigured.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+        self.assertEqual(unconfigured.mie_findings(), [])
+
+    def test_mie_uses_external_preview_freshness_boundary(self):
+        class MutablePreview(FakePreviewSource):
+            def __init__(self):
+                super().__init__()
+                self.payload = b"bronze harbor lantern meadow quartz thunder"
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return self.payload
+
+        self._seed_jellyfin_config()
+        source = MutablePreview()
+        registry_factory = lambda: ExternalSourceRegistry([source])
+        normal = NormalIdentityService(
+            self.database,
+            registry_factory(),
+            FakeOcr(),
+        )
+        normal.run_scan(self.fast_scan.scan_id)
+
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=registry_factory,
+        )
+        resolution = decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertEqual(resolution.state.value, "strong_match_other")
+
+        mie = MediaIntelligenceEngine(
+            self.database,
+            external_registry_factory=registry_factory,
+        )
+        before = mie.identity_decisions.mie_findings()
+        self.assertEqual(len(before), 1)
+        self.assertEqual(
+            before[0]["evidence"]["scan_id"],
+            self.fast_scan.scan_id,
+        )
+
+        source.payload = b"amber falcon orchard glacier velvet compass"
+        self.assertEqual(mie.identity_decisions.mie_findings(), [])
+
+    def test_action_time_external_freshness_uses_shared_source_budget(self):
+        class BudgetProbeSource(FakePreviewSource):
+            def __init__(self):
+                super().__init__()
+                self.payload = b"bronze harbor lantern meadow quartz thunder"
+                self.observed_budgets = []
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                budget = current_visual_budget()
+                self.observed_budgets.append(budget)
+                account_source_bytes(len(self.payload))
+                return self.payload
+
+        source = BudgetProbeSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        normal.run_scan(self.fast_scan.scan_id)
+
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        resolution = decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertEqual(resolution.state.value, "strong_match_other")
+
+        source.read_calls = 0
+        source.observed_budgets.clear()
+        with patch(
+            "app.media_identity.service._ACTION_EXTERNAL_PREVIEW_MAX_SOURCE_BYTES",
+            len(source.payload) - 1,
+        ):
+            detail = decisions.scan_detail(self.fast_scan.scan_id)
+
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+        self.assertEqual(source.read_calls, 1)
+        self.assertEqual(len(source.observed_budgets), 1)
+        self.assertIsNotNone(source.observed_budgets[0])
+        self.assertTrue(source.observed_budgets[0].exhausted)
+
+    def test_human_actions_revalidate_external_previews_once(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        result = normal.run_scan(self.fast_scan.scan_id)
+
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        resolution = decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertEqual(resolution.state.value, "strong_match_other")
+        self.assertGreater(result.observation_count, 0)
+
+        source.read_calls = 0
+        preview = _rename_preview(decisions, self.fast_scan.scan_id)
+        self.assertEqual(preview["status"], "ready")
+        self.assertEqual(source.read_calls, result.observation_count)
+
+        source.read_calls = 0
+        confirmation = _confirm_best(decisions, self.fast_scan.scan_id)
+        self.assertTrue(confirmation["current"])
+        self.assertEqual(source.read_calls, result.observation_count)
+
+        source.read_calls = 0
+        confirmed_detail = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertTrue(confirmed_detail["confirmation"]["current"])
+        self.assertEqual(source.read_calls, result.observation_count)
+
+        source.read_calls = 0
+        with patch(
+            "app.media_identity.service.media_content_sha256",
+            wraps=media_content_sha256,
+        ) as media_hash:
+            status = decisions.confirmation_status(1)
+        self.assertTrue(status["current"])
+        self.assertEqual(source.read_calls, result.observation_count)
+        self.assertEqual(media_hash.call_count, 1)
+
+        source.read_calls = 0
+        findings = decisions.mie_findings()
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(source.read_calls, result.observation_count)
+
+        # An existing alternate confirmation must not make rename preview
+        # re-read the same external evidence during preparation and final action.
+        source.read_calls = 0
+        with patch(
+            "app.media_identity.service.media_content_sha256",
+            wraps=media_content_sha256,
+        ) as media_hash:
+            confirmed_preview = _rename_preview(
+                decisions,
+                self.fast_scan.scan_id,
+            )
+        self.assertEqual(confirmed_preview["status"], "ready")
+        self.assertEqual(source.read_calls, result.observation_count)
+        self.assertEqual(media_hash.call_count, 1)
+
+    def test_validated_confirmation_snapshot_requires_every_identity_field(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        result = normal.run_scan(self.fast_scan.scan_id)
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        confirmation = _confirm_best(decisions, self.fast_scan.scan_id)
+        self.assertTrue(confirmation["current"])
+
+        with self.database.connect() as conn:
+            scan = dict(conn.execute(
+                """SELECT id,file_id,claimed_identity_json,metadata_signature,
+                          file_size_bytes,file_modified_at,file_sha256
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone())
+        claimed = json.loads(scan["claimed_identity_json"])
+        validated = {
+            "current": True,
+            "content_verified": True,
+            "scan_id": int(scan["id"]),
+            "file_id": int(scan["file_id"]),
+            "result_revision": result_revision(claimed),
+            "decision_snapshot_sha256": str(
+                claimed["decision_snapshot"]["sha256"]
+            ),
+            "metadata_signature": str(scan["metadata_signature"] or ""),
+            "file_size_bytes": int(scan["file_size_bytes"] or 0),
+            "file_modified_at": scan["file_modified_at"],
+            "file_sha256": str(scan["file_sha256"] or ""),
+        }
+        altered = {
+            "current": False,
+            "content_verified": False,
+            "scan_id": int(validated["scan_id"]) + 1,
+            "file_id": int(validated["file_id"]) + 1,
+            "result_revision": int(validated["result_revision"]) + 1,
+            "decision_snapshot_sha256": "0" * 64,
+            "metadata_signature": str(validated["metadata_signature"]) + "-changed",
+            "file_size_bytes": int(validated["file_size_bytes"]) + 1,
+            "file_modified_at": 0,
+            "file_sha256": "0" * 64,
+        }
+
+        source.read_calls = 0
+        with patch(
+            "app.media_identity.service.media_content_sha256",
+            wraps=media_content_sha256,
+        ) as media_hash:
+            status = decisions.confirmation_status(
+                1,
+                validated_source=validated,
+            )
+        self.assertTrue(status["current"])
+        self.assertEqual(media_hash.call_count, 0)
+        self.assertEqual(source.read_calls, 0)
+
+        for field in validated:
+            for mode in ("missing", "altered"):
+                with self.subTest(field=field, mode=mode):
+                    probe = dict(validated)
+                    if mode == "missing":
+                        probe.pop(field)
+                    else:
+                        probe[field] = altered[field]
+                    source.read_calls = 0
+                    with patch(
+                        "app.media_identity.service.media_content_sha256",
+                        wraps=media_content_sha256,
+                    ) as media_hash:
+                        status = decisions.confirmation_status(
+                            1,
+                            validated_source=probe,
+                        )
+                    self.assertTrue(status["current"])
+                    self.assertEqual(media_hash.call_count, 1)
+                    self.assertEqual(
+                        source.read_calls,
+                        result.observation_count,
+                    )
+
+    def test_new_fast_scan_does_not_hide_current_normal_mie_result(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        normal.run_scan(self.fast_scan.scan_id)
+
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        old_resolution = decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertEqual(old_resolution.state.value, "strong_match_other")
+        old_detail = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertEqual(old_detail["completed_profile"], "normal")
+        self.assertTrue(old_detail["snapshot_current"])
+        self.assertTrue(old_detail["actionable"])
+
+        newer_fast = self.fast.scan_file(1)
+        self.assertGreater(newer_fast.scan_id, self.fast_scan.scan_id)
+        newer_resolution = decisions.resolve_scan(newer_fast.scan_id)
+        newer_detail = decisions.scan_detail(newer_fast.scan_id)
+        self.assertEqual(newer_detail["completed_profile"], "fast")
+        self.assertTrue(newer_detail["snapshot_current"])
+        self.assertFalse(newer_detail["actionable"])
+        self.assertNotEqual(
+            newer_resolution.state.value,
+            "strong_match_other",
+        )
+
+        latest = decisions.latest_scan_for_file(1)
+        self.assertEqual(latest["id"], newer_fast.scan_id)
+
+        findings = decisions.mie_findings()
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(
+            findings[0]["evidence"]["scan_id"],
+            self.fast_scan.scan_id,
+        )
+        self.assertEqual(
+            findings[0]["evidence"]["result_state"],
+            "strong_match_other",
+        )
+
+    def test_stale_newer_normal_does_not_hide_older_current_normal(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+
+        normal.run_scan(self.fast_scan.scan_id)
+        first_resolution = decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertEqual(
+            first_resolution.state.value,
+            "strong_match_other",
+        )
+        first_normal_id = self.fast_scan.scan_id
+        self.assertTrue(
+            decisions.scan_detail(first_normal_id)["snapshot_current"]
+        )
+
+        second_fast = self.fast.scan_file(1)
+        normal.run_scan(second_fast.scan_id)
+        second_resolution = decisions.resolve_scan(second_fast.scan_id)
+        self.assertEqual(
+            second_resolution.state.value,
+            "strong_match_other",
+        )
+        second_normal_id = second_fast.scan_id
+        self.assertGreater(second_normal_id, first_normal_id)
+
+        # Corrupt only the newer Normal's sealed evidence. The older Normal
+        # still describes the same current media/input identity and remains
+        # independently valid.
+        with self.database.connect() as conn:
+            evidence_id = conn.execute(
+                """SELECT id FROM media_identity_evidence
+                   WHERE scan_id=?
+                   ORDER BY id DESC LIMIT 1""",
+                (second_normal_id,),
+            ).fetchone()["id"]
+            conn.execute(
+                """UPDATE media_identity_evidence
+                   SET strength=CASE
+                         WHEN strength < 0.99 THEN strength + 0.01
+                         ELSE strength - 0.01
+                       END
+                   WHERE id=?""",
+                (evidence_id,),
+            )
+        self.assertFalse(
+            decisions.scan_detail(second_normal_id)["snapshot_current"]
+        )
+        self.assertTrue(
+            decisions.scan_detail(first_normal_id)["snapshot_current"]
+        )
+
+        # Even while the stale Normal is itself the latest completed scan,
+        # Library Health must walk backward to the newest still-current Normal.
+        latest_normal_findings = [
+            finding
+            for finding in decisions.mie_findings()
+            if finding["rule_key"] == "episode-identity-review"
+        ]
+        self.assertEqual(len(latest_normal_findings), 1)
+        self.assertEqual(
+            latest_normal_findings[0]["evidence"]["scan_id"],
+            first_normal_id,
+        )
+
+        third_fast = self.fast.scan_file(1)
+        third_resolution = decisions.resolve_scan(third_fast.scan_id)
+        third_detail = decisions.scan_detail(third_fast.scan_id)
+        self.assertEqual(third_detail["completed_profile"], "fast")
+        self.assertTrue(third_detail["snapshot_current"])
+        self.assertNotEqual(
+            third_resolution.state.value,
+            "strong_match_other",
+        )
+        self.assertEqual(
+            decisions.latest_scan_for_file(1)["id"],
+            third_fast.scan_id,
+        )
+
+        findings = decisions.mie_findings()
+        identity_findings = [
+            finding
+            for finding in findings
+            if finding["rule_key"] == "episode-identity-review"
+        ]
+        self.assertEqual(len(identity_findings), 1)
+        self.assertEqual(
+            identity_findings[0]["evidence"]["scan_id"],
+            first_normal_id,
+        )
+
+    def test_normal_history_limit_fails_closed_before_older_current_result(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+
+        normal.run_scan(self.fast_scan.scan_id)
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        oldest_current_normal_id = self.fast_scan.scan_id
+        self.assertTrue(
+            decisions.scan_detail(oldest_current_normal_id)["snapshot_current"]
+        )
+
+        stale_normal_ids = []
+        for _ in range(8):
+            newer_fast = self.fast.scan_file(1)
+            normal.run_scan(newer_fast.scan_id)
+            decisions.resolve_scan(newer_fast.scan_id)
+            stale_normal_ids.append(newer_fast.scan_id)
+            with self.database.connect() as conn:
+                evidence_id = conn.execute(
+                    """SELECT id FROM media_identity_evidence
+                       WHERE scan_id=? ORDER BY id DESC LIMIT 1""",
+                    (newer_fast.scan_id,),
+                ).fetchone()["id"]
+                conn.execute(
+                    """UPDATE media_identity_evidence
+                       SET strength=CASE
+                         WHEN strength < 0.99 THEN strength + 0.01
+                         ELSE strength - 0.01
+                       END
+                       WHERE id=?""",
+                    (evidence_id,),
+                )
+            self.assertFalse(
+                decisions.scan_detail(newer_fast.scan_id)["snapshot_current"]
+            )
+
+        self.assertTrue(
+            decisions.scan_detail(oldest_current_normal_id)["snapshot_current"]
+        )
+
+        latest_fast = self.fast.scan_file(1)
+        decisions.resolve_scan(latest_fast.scan_id)
+        self.assertEqual(
+            decisions.latest_scan_for_file(1)["id"],
+            latest_fast.scan_id,
+        )
+
+        findings = decisions.mie_findings()
+        uncertain = [
+            finding
+            for finding in findings
+            if finding["rule_key"] == "episode-identity-history-uncertain"
+        ]
+        self.assertEqual(len(uncertain), 1)
+        self.assertEqual(
+            uncertain[0]["evidence"]["latest_scan_id"],
+            latest_fast.scan_id,
+        )
+        self.assertEqual(
+            uncertain[0]["evidence"]["normal_history_checked"],
+            len(stale_normal_ids),
+        )
+        self.assertEqual(
+            uncertain[0]["evidence"]["normal_history_validation_limit"],
+            len(stale_normal_ids),
+        )
+        self.assertTrue(uncertain[0]["evidence"]["history_truncated"])
+        self.assertFalse(any(
+            finding["rule_key"] == "episode-identity-review"
+            and finding.get("evidence", {}).get("scan_id")
+            == oldest_current_normal_id
+            for finding in findings
+        ))
+
+    def test_external_source_config_change_stales_normal_result(self):
+        self._seed_jellyfin_config()
+        source = FakePreviewSource()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        service.run_scan(self.fast_scan.scan_id)
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertTrue(
+            decisions.scan_detail(self.fast_scan.scan_id)["snapshot_current"]
+        )
+
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE external_analysis_sources
+                   SET server_url='https://jf-two.local',
+                       config_revision=config_revision+1
+                   WHERE source_key='jellyfin'"""
+            )
+
+        stale = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
+    def test_external_source_config_change_during_ocr_blocks_publication(self):
+        self._seed_jellyfin_config()
+
+        def mutate_config():
+            with self.database.connect() as conn:
+                conn.execute(
+                    """UPDATE external_analysis_sources
+                       SET server_url='https://jf-two.local',
+                           config_revision=config_revision+1
+                       WHERE source_key='jellyfin'"""
+                )
+
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([FakePreviewSource(mutate=mutate_config)]),
+            FakeOcr(),
+        )
+        with self.assertRaisesRegex(
+            NormalIdentityScanError,
+            "configuration changed during Normal OCR",
+        ):
+            service.run_scan(self.fast_scan.scan_id)
+
+        with self.database.connect() as conn:
+            scan = conn.execute(
+                """SELECT completed_profile,stage
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+        self.assertEqual(scan["completed_profile"], "fast")
+        self.assertEqual(scan["stage"], "fast_complete")
+
+    def test_normal_speech_orchestration_version_drift_makes_scan_stale(self):
+        source = FakePreviewSource()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        service.run_scan(self.fast_scan.scan_id)
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        self.assertTrue(
+            decisions.scan_detail(self.fast_scan.scan_id)["snapshot_current"]
+        )
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT claimed_identity_json FROM media_identity_scans WHERE id=?",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            claimed = json.loads(row["claimed_identity_json"])
+            claimed["normal_speech"]["algorithm_version"] += 1
+            conn.execute(
+                "UPDATE media_identity_scans SET claimed_identity_json=? WHERE id=?",
+                (
+                    json.dumps(claimed, sort_keys=True),
+                    self.fast_scan.scan_id,
+                ),
             )
 
         stale = decisions.scan_detail(self.fast_scan.scan_id)
@@ -315,6 +1153,113 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
                 for row in evidence
             )
         )
+
+    def test_ocr_insert_race_scores_persisted_winner_not_losing_output(self):
+        source = FakePreviewSource()
+        engine = FakeOcr()
+        frame = source.preview_frames(None)[0]
+        with self.database.connect() as conn:
+            scan = conn.execute(
+                """SELECT file_size_bytes,file_modified_at,file_sha256
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            cache_key = ocr_preview_cache_key(
+                frame,
+                engine,
+                parameters={
+                    "file_id": 1,
+                    "size_bytes": int(scan["file_size_bytes"]),
+                    "modified_at": scan["file_modified_at"],
+                    "sha256": str(scan["file_sha256"] or ""),
+                },
+                preview_sha256=hashlib.sha256(
+                    b"bronze harbor lantern meadow quartz thunder"
+                ).hexdigest(),
+            )
+            winner_text = "amber falcon orchard glacier velvet compass"
+            conn.execute(
+                """INSERT INTO media_identity_artifacts(
+                     file_id,artifact_type,analyzer_key,analyzer_version,
+                     cache_key,status,profile,source_kind,source_ref,
+                     source_signature,file_size_bytes,file_modified_at,
+                     start_ms,end_ms,text_value,payload_json
+                   ) VALUES (
+                     1,'visual_text',?,?,?,'complete','normal',?,?,?,
+                     ?,?,?,?,?,?
+                   )""",
+                (
+                    NORMAL_OCR_ARTIFACT_KEY,
+                    NORMAL_OCR_ARTIFACT_VERSION,
+                    cache_key,
+                    frame.source_key,
+                    frame.asset_ref,
+                    frame.source_signature,
+                    int(scan["file_size_bytes"]),
+                    scan["file_modified_at"],
+                    frame.timestamp_ms,
+                    frame.timestamp_ms,
+                    winner_text,
+                    json.dumps({
+                        "confidence": 1.0,
+                        "stage": 1,
+                        "ordinal": 1,
+                        "image_bytes": 64,
+                        "reused": False,
+                        "item_id": frame.item_id,
+                        "engine_key": engine.key,
+                        "engine_version": engine.version,
+                        "details": {"winner": True},
+                    }, sort_keys=True),
+                ),
+            )
+
+        class ForcedMissService(NormalIdentityService):
+            def _cached_ocr(self, scan, frame, cache_key):
+                return None
+
+        result = ForcedMissService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            engine,
+        ).run_scan(self.fast_scan.scan_id)
+        self.assertEqual(result.observation_count, 1)
+        self.assertEqual(result.reused_artifact_count, 1)
+        self.assertEqual(engine.calls, 1)
+
+        with self.database.connect() as conn:
+            artifact = conn.execute(
+                """SELECT id,text_value FROM media_identity_artifacts
+                   WHERE file_id=1 AND artifact_type='visual_text'
+                     AND analyzer_key=? AND analyzer_version=? AND cache_key=?""",
+                (
+                    NORMAL_OCR_ARTIFACT_KEY,
+                    NORMAL_OCR_ARTIFACT_VERSION,
+                    cache_key,
+                ),
+            ).fetchone()
+            evidence = conn.execute(
+                """SELECT candidate_key,relation,strength,details_json
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key=?
+                   ORDER BY candidate_key""",
+                (self.fast_scan.scan_id, NORMAL_OCR_EVIDENCE_KEY),
+            ).fetchall()
+
+        self.assertEqual(artifact["text_value"], winner_text)
+        supported = [row for row in evidence if row["relation"] == "supports"]
+        self.assertTrue(
+            any(row["candidate_key"].endswith('"1001"]') for row in supported)
+        )
+        self.assertFalse(
+            any(row["candidate_key"].endswith('"1002"]') for row in supported)
+        )
+        excerpts = [
+            json.loads(row["details_json"]).get("text_excerpt", "")
+            for row in evidence
+        ]
+        self.assertTrue(any("amber falcon" in excerpt for excerpt in excerpts))
+        self.assertFalse(any("bronze harbor" in excerpt for excerpt in excerpts))
 
     def test_strong_visual_separation_stops_normal_after_initial_five_frames(self):
         class ManyFrameSource(FakePreviewSource):
@@ -463,7 +1408,7 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertEqual(result.highest_observed_stage.name, "FINAL")
         self.assertEqual(engine.calls, 12)
 
-    def test_second_normal_run_reuses_derived_ocr_without_rereading_preview(self):
+    def test_second_normal_run_revalidates_preview_bytes_before_reusing_ocr(self):
         source = FakePreviewSource()
         engine = FakeOcr()
         service = NormalIdentityService(
@@ -479,7 +1424,8 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         second = service.run_scan(self.fast_scan.scan_id)
 
         self.assertEqual(second.reused_artifact_count, 1)
-        self.assertEqual(source.read_calls, 1)
+        self.assertEqual(second.visual_frame_attempt_count, 1)
+        self.assertEqual(source.read_calls, 2)
         self.assertEqual(engine.calls, 1)
         with self.database.connect() as conn:
             artifact_count = conn.execute(
@@ -488,6 +1434,43 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
                    WHERE file_id=1 AND artifact_type='visual_text'"""
             ).fetchone()["count"]
         self.assertEqual(int(artifact_count), 1)
+
+    def test_changed_preview_bytes_with_same_reference_do_not_reuse_old_ocr(self):
+        class MutablePreview(FakePreviewSource):
+            def __init__(self):
+                super().__init__()
+                self.payload = b"bronze harbor lantern meadow quartz thunder"
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return self.payload
+
+        source = MutablePreview()
+        engine = FakeOcr()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            engine,
+        )
+        first = service.run_scan(self.fast_scan.scan_id)
+        self.assertEqual(first.reused_artifact_count, 0)
+        self.assertEqual(engine.calls, 1)
+
+        source.payload = b"amber falcon orchard glacier velvet compass"
+        second = service.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(second.reused_artifact_count, 0)
+        self.assertEqual(source.read_calls, 2)
+        self.assertEqual(engine.calls, 2)
+        with self.database.connect() as conn:
+            artifacts = conn.execute(
+                """SELECT cache_key,text_value FROM media_identity_artifacts
+                   WHERE file_id=1 AND artifact_type='visual_text'
+                   ORDER BY id"""
+            ).fetchall()
+        self.assertEqual(len(artifacts), 2)
+        self.assertNotEqual(artifacts[0]["cache_key"], artifacts[1]["cache_key"])
+        self.assertIn("amber falcon", artifacts[1]["text_value"])
 
     def test_failed_rerun_preserves_existing_completed_normal_evidence(self):
         source = FakePreviewSource()
@@ -665,6 +1648,70 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             any("jellyfin:ocr:no-visual-text" in item for item in result.failures)
         )
 
+    def test_truncated_ocr_is_not_persisted_as_complete_cache(self):
+        class LongOcr(FakeOcr):
+            def recognize(self, image: bytes) -> OcrTextResult:
+                self.calls += 1
+                return OcrTextResult(
+                    text="bronze harbor lantern meadow quartz thunder",
+                    confidence=1.0,
+                    details={"fixture": True},
+                )
+
+        source = FakePreviewSource()
+        engine = LongOcr()
+        limited = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            engine,
+            limits=NormalResourceLimits(
+                initial_preview_frames=1,
+                expanded_preview_frames=1,
+                max_preview_frames=1,
+                max_ocr_text_chars=8,
+            ),
+        )
+        with patch(
+            "app.media_identity.normal_service.LocalFfmpegFrameSource"
+        ) as local_factory:
+            first = limited.run_scan(self.fast_scan.scan_id)
+
+        self.assertTrue(first.budget_exhausted)
+        self.assertEqual(first.observation_count, 0)
+        self.assertEqual(engine.calls, 1)
+        local_factory.assert_not_called()
+        with self.database.connect() as conn:
+            count = conn.execute(
+                """SELECT COUNT(*) AS count
+                   FROM media_identity_artifacts
+                   WHERE file_id=1
+                     AND artifact_type='visual_text'
+                     AND analyzer_key=?""",
+                (NORMAL_OCR_ARTIFACT_KEY,),
+            ).fetchone()["count"]
+        self.assertEqual(int(count), 0)
+
+        retry = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            engine,
+            limits=NormalResourceLimits(
+                initial_preview_frames=1,
+                expanded_preview_frames=1,
+                max_preview_frames=1,
+                max_ocr_text_chars=256,
+            ),
+        )
+        with patch(
+            "app.media_identity.normal_service.LocalFfmpegFrameSource"
+        ) as local_factory:
+            second = retry.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(second.observation_count, 1)
+        self.assertEqual(second.reused_artifact_count, 0)
+        self.assertEqual(engine.calls, 2)
+        local_factory.assert_not_called()
+
     def test_weak_jellyfin_ocr_can_yield_to_stronger_plex_before_ffmpeg(self):
         class WeakJellyfin(FakePreviewSource):
             source_key = "jellyfin"
@@ -703,6 +1750,52 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             )
         )
         local_factory.assert_not_called()
+
+    def test_global_frame_budget_prevents_extra_local_fallback_read(self):
+        class WeakExternal(FakePreviewSource):
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"unrelated sponsor graphic weather logo"
+
+        class StrongLocal(FakePreviewSource):
+            source_key = LOCAL_FRAME_SOURCE_KEY
+
+            def resolve_media(self, _context):
+                return ExternalMediaRef(
+                    source_key=self.source_key,
+                    item_id="file:1",
+                    path=str(self_path),
+                    source_signature="local-budget-v1",
+                )
+
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"bronze harbor lantern meadow quartz thunder"
+
+        self_path = self.media_path
+        external = WeakExternal()
+        local = StrongLocal()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([external]),
+            FakeOcr(),
+            limits=NormalResourceLimits(
+                initial_preview_frames=1,
+                expanded_preview_frames=1,
+                max_preview_frames=1,
+            ),
+        )
+
+        with patch(
+            "app.media_identity.normal_service.LocalFfmpegFrameSource",
+            return_value=local,
+        ):
+            result = service.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(external.read_calls, 1)
+        self.assertEqual(local.read_calls, 0)
+        self.assertEqual(result.visual_frame_attempt_count, 1)
+        self.assertTrue(result.budget_exhausted)
 
     def test_weak_external_ocr_falls_back_to_stronger_local_frames(self):
         class WeakExternal(FakePreviewSource):
@@ -910,6 +2003,1319 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         self.assertEqual(result.completed_profile.value, "fast")
         self.assertIn("ocr-engine-unavailable", result.failures)
         local_factory.assert_not_called()
+
+    def test_failed_normal_fallback_does_not_leave_speech_evidence_on_fast_scan(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=FakeNormalSpeechEngine(available=False),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(result.completed_profile.value, "fast")
+        self.assertTrue(result.speech_escalated)
+        self.assertEqual(result.speech_transcript_count, 0)
+        with self.database.connect() as conn:
+            speech_evidence_count = conn.execute(
+                """SELECT COUNT(*) AS count
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key=?""",
+                (self.fast_scan.scan_id, NORMAL_SPEECH_EVIDENCE_KEY),
+            ).fetchone()["count"]
+        self.assertEqual(int(speech_evidence_count), 0)
+
+        detail = MediaIdentityDecisionService(self.database).scan_detail(
+            self.fast_scan.scan_id
+        )
+        self.assertTrue(detail["snapshot_current"])
+
+    def test_weak_normal_evidence_escalates_to_neutral_speech_evidence(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        FakeNormalSpeechExtractor.instances.clear()
+        speech_engine = FakeNormalSpeechEngine()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=speech_engine,
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        )
+
+        result = service.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(result.completed_profile.value, "normal")
+        self.assertTrue(result.speech_escalated)
+        self.assertEqual(result.speech_transcript_count, 8)
+        self.assertEqual(result.speech_reused_artifact_count, 0)
+        self.assertEqual(speech_engine.calls, 8)
+        self.assertEqual(FakeNormalSpeechExtractor.instances[-1].extract_calls, 8)
+        self.assertTrue(
+            all(
+                item.cleanup_calls == 1
+                for item in FakeNormalSpeechExtractor.instances[-1].prepared
+            )
+        )
+
+        with self.database.connect() as conn:
+            scan = conn.execute(
+                """SELECT completed_profile,stage,claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            transcript_count = conn.execute(
+                """SELECT COUNT(*) AS count
+                   FROM media_identity_artifacts
+                   WHERE file_id=1 AND artifact_type='speech_transcript'"""
+            ).fetchone()["count"]
+            speech_evidence = conn.execute(
+                """SELECT relation,strength,correlation_group
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND evidence_category='speech'
+                   ORDER BY candidate_key""",
+                (self.fast_scan.scan_id,),
+            ).fetchall()
+
+        claimed = json.loads(scan["claimed_identity_json"])
+        self.assertEqual(scan["completed_profile"], "normal")
+        self.assertEqual(scan["stage"], "normal_speech_complete")
+        self.assertEqual(int(transcript_count), 8)
+        self.assertEqual(len(speech_evidence), 2)
+        self.assertTrue(
+            all(row["relation"] == "neutral" for row in speech_evidence)
+        )
+        self.assertTrue(
+            all(float(row["strength"]) == 0.0 for row in speech_evidence)
+        )
+        self.assertTrue(
+            all(
+                row["correlation_group"] == "subtitle-dialogue:1"
+                for row in speech_evidence
+            )
+        )
+        self.assertTrue(claimed["normal_speech"]["escalated"])
+        self.assertEqual(claimed["normal_speech"]["transcript_count"], 8)
+
+    def test_targeted_speech_persists_candidate_evidence_in_dialogue_group(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        class EpisodeTwoSpeech(FakeNormalSpeechEngine):
+            def transcribe(self, _audio_path, request):
+                self.calls += 1
+                return SpeechTranscript(
+                    text="bronze harbor lantern meadow quartz thunder",
+                    language="en",
+                )
+
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=EpisodeTwoSpeech(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertTrue(result.speech_escalated)
+        self.assertEqual(result.speech_transcript_count, 8)
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """SELECT candidate_key,evidence_category,relation,strength,
+                          correlation_group,details_json,cache_key
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key=?
+                   ORDER BY candidate_key""",
+                (self.fast_scan.scan_id, NORMAL_SPEECH_EVIDENCE_KEY),
+            ).fetchall()
+
+        self.assertEqual(len(rows), 2)
+        supported = next(
+            row for row in rows
+            if row["candidate_key"].endswith('"1002"]')
+        )
+        self.assertEqual(supported["evidence_category"], "speech")
+        self.assertEqual(supported["relation"], "supports")
+        self.assertGreater(float(supported["strength"]), 0.9)
+        self.assertEqual(supported["correlation_group"], "subtitle-dialogue:1")
+        self.assertTrue(supported["cache_key"])
+        details = json.loads(supported["details_json"])
+        self.assertEqual(details["transcript_count"], 8)
+        self.assertEqual(details["correlated_with"], ["subtitle-synopsis"])
+        self.assertEqual(len(details["windows"]), 8)
+
+        review = MediaIdentityDecisionService(self.database).scan_detail(
+            self.fast_scan.scan_id
+        )
+        speech_analysis = review["speech_analysis"]
+        self.assertIsNotNone(speech_analysis)
+        self.assertTrue(speech_analysis["escalated"])
+        self.assertEqual(speech_analysis["text_transcript_count"], 8)
+        self.assertEqual(len(speech_analysis["windows"]), 8)
+        self.assertGreater(speech_analysis["strongest_similarity"], 0.9)
+        self.assertIn("bronze harbor", speech_analysis["transcript_excerpt"])
+        self.assertEqual(
+            speech_analysis["correlation_group"],
+            "subtitle-dialogue:1",
+        )
+
+    def test_spanish_only_audio_is_translated_before_english_synopsis_scoring(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        class SpanishExtractor(FakeNormalSpeechExtractor):
+            instances = []
+
+            def __init__(self, media, streams, *, preferred_language=""):
+                super().__init__(
+                    media,
+                    streams,
+                    preferred_language=preferred_language,
+                )
+                self.stream = SpeechAudioStream(
+                    index=0,
+                    language="spa",
+                    channels=2,
+                    sample_rate_hz=48_000,
+                    default=True,
+                )
+
+        class TranslatedEpisodeTwoSpeech(FakeNormalSpeechEngine):
+            def __init__(self):
+                super().__init__()
+                self.requests = []
+
+            def transcribe(self, _audio_path, request):
+                self.calls += 1
+                self.requests.append(request)
+                return SpeechTranscript(
+                    text="bronze harbor lantern meadow quartz thunder",
+                    language="en",
+                )
+
+        speech_engine = TranslatedEpisodeTwoSpeech()
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=speech_engine,
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=SpanishExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertTrue(result.speech_escalated)
+        self.assertEqual(result.speech_transcript_count, 8)
+        self.assertEqual(len(speech_engine.requests), 8)
+        self.assertTrue(
+            all(request.language == "spa" for request in speech_engine.requests)
+        )
+        self.assertTrue(
+            all(request.translate for request in speech_engine.requests)
+        )
+        self.assertEqual(
+            SpanishExtractor.instances[-1].preferred_language,
+            "eng",
+        )
+
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """SELECT candidate_key,relation,strength,details_json
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key=?
+                   ORDER BY candidate_key""",
+                (self.fast_scan.scan_id, NORMAL_SPEECH_EVIDENCE_KEY),
+            ).fetchall()
+        supported = next(
+            row for row in rows
+            if row["candidate_key"].endswith('"1002"]')
+        )
+        self.assertEqual(supported["relation"], "supports")
+        self.assertGreater(float(supported["strength"]), 0.9)
+        details = json.loads(supported["details_json"])
+        self.assertEqual(details["synopsis_language"], "eng")
+        self.assertEqual(details["transcript_languages"], ["eng"])
+        review = MediaIdentityDecisionService(self.database).scan_detail(
+            self.fast_scan.scan_id
+        )
+        self.assertTrue(review["snapshot_current"])
+
+    def test_speech_corpus_excludes_transcript_in_wrong_synopsis_language(self):
+        audio = SpeechAudioIdentity(
+            sha256="b" * 64,
+            size_bytes=1024,
+            format_key="wav-pcm-s16le",
+            sample_rate_hz=16_000,
+            channels=1,
+            source_signature="fixture-spanish",
+        )
+        run = NormalSpeechRun(
+            observations=(
+                NormalSpeechObservation(
+                    window=SpeechWindow(0, 1000),
+                    cache_key="spanish",
+                    source_signature="fixture-spanish",
+                    transcript=SpeechTranscript(
+                        text="puerto bronce linterna pradera",
+                        language="es",
+                    ),
+                    audio_identity=audio,
+                    artifact_id=1,
+                ),
+            )
+        )
+        corpus, usable, excluded = NormalIdentityService._speech_text_corpus(
+            run,
+            "eng",
+        )
+        self.assertFalse(corpus.tokens)
+        self.assertEqual(usable, [])
+        self.assertEqual(len(excluded), 1)
+
+    def test_padded_speech_text_remains_current_with_exact_cache_hash(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        class PaddedSpeech(FakeNormalSpeechEngine):
+            def transcribe(self, _audio_path, request):
+                self.calls += 1
+                return SpeechTranscript(
+                    text="  bronze harbor lantern meadow quartz thunder  \n",
+                    language="en",
+                )
+
+        NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=PaddedSpeech(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        detail = MediaIdentityDecisionService(self.database).scan_detail(
+            self.fast_scan.scan_id
+        )
+        self.assertTrue(detail["snapshot_current"])
+        self.assertIn(
+            "bronze harbor lantern meadow quartz thunder",
+            detail["speech_analysis"]["transcript_excerpt"],
+        )
+
+    def test_tokenless_nonblank_speech_stays_current_neutral_evidence(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        class StopwordSpeech(FakeNormalSpeechEngine):
+            def transcribe(self, _audio_path, request):
+                self.calls += 1
+                return SpeechTranscript(
+                    text="this that with there",
+                    language="en",
+                )
+
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=StopwordSpeech(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(result.speech_text_transcript_count, 8)
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """SELECT relation,strength,cache_key,details_json
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key=?""",
+                (self.fast_scan.scan_id, NORMAL_SPEECH_EVIDENCE_KEY),
+            ).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["relation"], "neutral")
+        self.assertEqual(float(rows[0]["strength"]), 0.0)
+        self.assertTrue(rows[0]["cache_key"])
+        details = json.loads(rows[0]["details_json"])
+        self.assertEqual(len(details["artifact_ids"]), 8)
+        self.assertEqual(len(details["windows"]), 8)
+        self.assertIn("this that with there", details["transcript_excerpt"])
+
+        detail = MediaIdentityDecisionService(self.database).scan_detail(
+            self.fast_scan.scan_id
+        )
+        self.assertTrue(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+
+    def test_speech_corpus_does_not_create_cross_window_bigrams(self):
+        audio = SpeechAudioIdentity(
+            sha256="a" * 64,
+            size_bytes=1024,
+            format_key="wav-pcm-s16le",
+            sample_rate_hz=16_000,
+            channels=1,
+            source_signature="fixture",
+        )
+        run = NormalSpeechRun(
+            observations=(
+                NormalSpeechObservation(
+                    window=SpeechWindow(0, 1000),
+                    cache_key="one",
+                    source_signature="fixture-one",
+                    transcript=SpeechTranscript(text="alpha cedar", language="en"),
+                    audio_identity=audio,
+                    artifact_id=1,
+                ),
+                NormalSpeechObservation(
+                    window=SpeechWindow(2000, 3000),
+                    cache_key="two",
+                    source_signature="fixture-two",
+                    transcript=SpeechTranscript(text="bravo delta", language="en"),
+                    audio_identity=audio,
+                    artifact_id=2,
+                ),
+            )
+        )
+        corpus, usable, excluded = NormalIdentityService._speech_text_corpus(
+            run,
+            "eng",
+        )
+        self.assertEqual(len(usable), 2)
+        self.assertEqual(excluded, [])
+        self.assertIn(("alpha", "cedar"), corpus.bigrams)
+        self.assertIn(("bravo", "delta"), corpus.bigrams)
+        self.assertNotIn(("cedar", "bravo"), corpus.bigrams)
+
+    def test_reassigned_speech_candidate_makes_completed_normal_scan_stale(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        class EpisodeTwoSpeech(FakeNormalSpeechEngine):
+            def transcribe(self, _audio_path, request):
+                self.calls += 1
+                return SpeechTranscript(
+                    text="bronze harbor lantern meadow quartz thunder",
+                    language="en",
+                )
+
+        NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=EpisodeTwoSpeech(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        decisions = MediaIdentityDecisionService(self.database)
+        self.assertTrue(
+            decisions.scan_detail(self.fast_scan.scan_id)["snapshot_current"]
+        )
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """SELECT id,candidate_key,relation
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key=?
+                   ORDER BY id""",
+                (self.fast_scan.scan_id, NORMAL_SPEECH_EVIDENCE_KEY),
+            ).fetchall()
+            supported = next(row for row in rows if row["relation"] == "supports")
+            other = next(
+                row for row in rows
+                if row["candidate_key"] != supported["candidate_key"]
+            )
+            conn.execute(
+                """UPDATE media_identity_evidence
+                   SET candidate_key=?
+                   WHERE id=?""",
+                (other["candidate_key"], supported["id"]),
+            )
+
+        stale = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
+    def test_tampered_speech_strength_makes_completed_normal_scan_stale(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        class EpisodeTwoSpeech(FakeNormalSpeechEngine):
+            def transcribe(self, _audio_path, request):
+                self.calls += 1
+                return SpeechTranscript(
+                    text="bronze harbor lantern meadow quartz thunder",
+                    language="en",
+                )
+
+        NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=EpisodeTwoSpeech(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        decisions = MediaIdentityDecisionService(self.database)
+        self.assertTrue(
+            decisions.scan_detail(self.fast_scan.scan_id)["snapshot_current"]
+        )
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE media_identity_evidence
+                   SET strength=0.123456
+                   WHERE scan_id=? AND analyzer_key=? AND relation='supports'""",
+                (
+                    self.fast_scan.scan_id,
+                    NORMAL_SPEECH_EVIDENCE_KEY,
+                ),
+            )
+
+        stale = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
+    def test_missing_speech_evidence_makes_completed_normal_scan_stale(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=FakeNormalSpeechEngine(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+        self.assertEqual(result.speech_transcript_count, 8)
+
+        decisions = MediaIdentityDecisionService(self.database)
+        self.assertTrue(
+            decisions.scan_detail(self.fast_scan.scan_id)["snapshot_current"]
+        )
+        with self.database.connect() as conn:
+            conn.execute(
+                """DELETE FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key='speech-synopsis'""",
+                (self.fast_scan.scan_id,),
+            )
+
+        stale = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
+    def test_wrong_speech_correlation_group_makes_scan_stale(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=FakeNormalSpeechEngine(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+        self.assertEqual(result.speech_transcript_count, 8)
+
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE media_identity_evidence
+                   SET correlation_group='speech-independent:1'
+                   WHERE scan_id=? AND analyzer_key='speech-synopsis'""",
+                (self.fast_scan.scan_id,),
+            )
+
+        stale = MediaIdentityDecisionService(self.database).scan_detail(
+            self.fast_scan.scan_id
+        )
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
+    def test_pre_i5_normal_metadata_without_speech_evidence_version_is_stale(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=FakeNormalSpeechEngine(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            claimed = json.loads(row["claimed_identity_json"])
+            claimed["normal_speech"].pop("evidence_algorithm_version", None)
+            conn.execute(
+                """UPDATE media_identity_scans
+                   SET claimed_identity_json=?
+                   WHERE id=?""",
+                (
+                    json.dumps(claimed, sort_keys=True),
+                    self.fast_scan.scan_id,
+                ),
+            )
+
+        stale = MediaIdentityDecisionService(self.database).scan_detail(
+            self.fast_scan.scan_id
+        )
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
+    def test_missing_speech_artifact_makes_completed_normal_scan_stale(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=FakeNormalSpeechEngine(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+        self.assertEqual(result.speech_transcript_count, 8)
+
+        decisions = MediaIdentityDecisionService(self.database)
+        before = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertTrue(before["snapshot_current"])
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            claimed = json.loads(row["claimed_identity_json"])
+            artifact_id = claimed["normal_speech"]["artifact_ids"][0]
+            conn.execute(
+                "DELETE FROM media_identity_artifacts WHERE id=?",
+                (artifact_id,),
+            )
+
+        after = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(after["snapshot_current"])
+        self.assertFalse(after["actionable"])
+
+    def test_error_speech_artifact_makes_completed_normal_scan_stale(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=FakeNormalSpeechEngine(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+        self.assertEqual(result.speech_transcript_count, 8)
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            claimed = json.loads(row["claimed_identity_json"])
+            artifact_id = claimed["normal_speech"]["artifact_ids"][0]
+            conn.execute(
+                """UPDATE media_identity_artifacts
+                   SET status='error',error='fixture'
+                   WHERE id=?""",
+                (artifact_id,),
+            )
+
+        detail = MediaIdentityDecisionService(self.database).scan_detail(
+            self.fast_scan.scan_id
+        )
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+
+    def test_malformed_speech_artifact_payload_makes_scan_stale(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=FakeNormalSpeechEngine(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+        self.assertEqual(result.speech_transcript_count, 8)
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            claimed = json.loads(row["claimed_identity_json"])
+            artifact_id = claimed["normal_speech"]["artifact_ids"][0]
+            conn.execute(
+                """UPDATE media_identity_artifacts
+                   SET payload_json='{}'
+                   WHERE id=?""",
+                (artifact_id,),
+            )
+
+        detail = MediaIdentityDecisionService(self.database).scan_detail(
+            self.fast_scan.scan_id
+        )
+        self.assertFalse(detail["snapshot_current"])
+        self.assertFalse(detail["actionable"])
+
+    def test_speech_only_rerun_preserves_prior_normal_ocr_evidence(self):
+        class WeakPreview(FakePreviewSource):
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"unrelated"
+
+        FakeNormalSpeechExtractor.instances.clear()
+        first_service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([WeakPreview()]),
+            FakeOcr(),
+            limits=NormalResourceLimits(
+                initial_preview_frames=1,
+                expanded_preview_frames=1,
+                max_preview_frames=1,
+                max_preview_bytes_per_frame=9,
+                max_preview_bytes_total=9,
+            ),
+            speech_engine=FakeNormalSpeechEngine(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        )
+        first = first_service.run_scan(self.fast_scan.scan_id)
+        self.assertEqual(first.completed_profile.value, "normal")
+        self.assertGreater(first.observation_count, 0)
+        self.assertEqual(first.speech_transcript_count, 8)
+
+        with self.database.connect() as conn:
+            before_scan = conn.execute(
+                """SELECT claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            before_evidence = [
+                tuple(row)
+                for row in conn.execute(
+                    """SELECT candidate_key,relation,strength,source_kind,
+                              source_ref,value_text,details_json,cache_key
+                       FROM media_identity_evidence
+                       WHERE scan_id=? AND analyzer_key=?
+                       ORDER BY id""",
+                    (self.fast_scan.scan_id, NORMAL_OCR_EVIDENCE_KEY),
+                ).fetchall()
+            ]
+
+        before_claimed = json.loads(before_scan["claimed_identity_json"])
+        self.assertTrue(before_evidence)
+        self.assertIn("normal_ocr", before_claimed)
+
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        second = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=FakeNormalSpeechEngine(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(second.completed_profile.value, "normal")
+        self.assertEqual(second.observation_count, 0)
+        self.assertEqual(second.speech_transcript_count, 8)
+        self.assertEqual(second.speech_reused_artifact_count, 8)
+
+        with self.database.connect() as conn:
+            after_scan = conn.execute(
+                """SELECT claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            after_evidence = [
+                tuple(row)
+                for row in conn.execute(
+                    """SELECT candidate_key,relation,strength,source_kind,
+                              source_ref,value_text,details_json,cache_key
+                       FROM media_identity_evidence
+                       WHERE scan_id=? AND analyzer_key=?
+                       ORDER BY id""",
+                    (self.fast_scan.scan_id, NORMAL_OCR_EVIDENCE_KEY),
+                ).fetchall()
+            ]
+
+        after_claimed = json.loads(after_scan["claimed_identity_json"])
+        self.assertEqual(after_evidence, before_evidence)
+        self.assertEqual(
+            after_claimed["normal_ocr"],
+            before_claimed["normal_ocr"],
+        )
+
+    def test_second_normal_speech_run_reuses_persisted_fragments(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        FakeNormalSpeechExtractor.instances.clear()
+        first_engine = FakeNormalSpeechEngine()
+        first_service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=first_engine,
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        )
+        first = first_service.run_scan(self.fast_scan.scan_id)
+        self.assertEqual(first.speech_transcript_count, 8)
+        self.assertEqual(first_engine.calls, 8)
+
+        second_engine = FakeNormalSpeechEngine()
+        second_service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=second_engine,
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        )
+        second = second_service.run_scan(self.fast_scan.scan_id)
+
+        self.assertEqual(second.completed_profile.value, "normal")
+        self.assertEqual(second.speech_transcript_count, 8)
+        self.assertEqual(second.speech_reused_artifact_count, 8)
+        self.assertEqual(second_engine.calls, 0)
+        self.assertEqual(FakeNormalSpeechExtractor.instances[-1].extract_calls, 8)
+        self.assertTrue(
+            all(
+                item.cleanup_calls == 1
+                for item in FakeNormalSpeechExtractor.instances[-1].prepared
+            )
+        )
+
+    def test_strong_existing_subtitle_signal_skips_speech_escalation(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        with self.database.connect() as conn:
+            candidate = conn.execute(
+                """SELECT candidate_key FROM media_identity_candidates
+                   WHERE scan_id=? ORDER BY rank,candidate_key LIMIT 1""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            conn.execute(
+                """INSERT INTO media_identity_evidence(
+                     scan_id,candidate_key,analyzer_key,analyzer_version,
+                     evidence_category,correlation_group,relation,strength,
+                     source_kind,source_ref,value_text,details_json,cache_key,profile
+                   ) VALUES (
+                     ?,?,'subtitle-synopsis','1','subtitle_text',
+                     'subtitle-dialogue:1','supports',0.75,
+                     'sidecar_subtitle','fixture.srt','fixture','{}','','fast'
+                   )""",
+                (self.fast_scan.scan_id, candidate["candidate_key"]),
+            )
+
+        self._reseal_scan_fixture()
+
+        speech_engine = FakeNormalSpeechEngine()
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=speech_engine,
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertFalse(result.speech_escalated)
+        self.assertEqual(result.speech_transcript_count, 0)
+        self.assertEqual(speech_engine.calls, 0)
+
+    def test_close_neutral_subtitle_runner_up_still_escalates_to_speech(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        with self.database.connect() as conn:
+            candidates = conn.execute(
+                """SELECT candidate_key FROM media_identity_candidates
+                   WHERE scan_id=? ORDER BY rank,candidate_key LIMIT 2""",
+                (self.fast_scan.scan_id,),
+            ).fetchall()
+            self.assertEqual(len(candidates), 2)
+            rows = [
+                (
+                    self.fast_scan.scan_id,
+                    candidates[0]["candidate_key"],
+                    "supports",
+                    0.35,
+                    json.dumps({"similarity": 0.35}),
+                ),
+                (
+                    self.fast_scan.scan_id,
+                    candidates[1]["candidate_key"],
+                    "neutral",
+                    0.0,
+                    json.dumps({"similarity": 0.29}),
+                ),
+            ]
+            conn.executemany(
+                """INSERT INTO media_identity_evidence(
+                     scan_id,candidate_key,analyzer_key,analyzer_version,
+                     evidence_category,correlation_group,relation,strength,
+                     source_kind,source_ref,value_text,details_json,cache_key,profile
+                   ) VALUES (
+                     ?,?,'subtitle-synopsis','1','subtitle_text',
+                     'subtitle-dialogue:1',?,?, 'sidecar_subtitle',
+                     'fixture.srt','fixture',?,'','fast'
+                   )""",
+                rows,
+            )
+
+        self._reseal_scan_fixture()
+
+        FakeNormalSpeechExtractor.instances.clear()
+        speech_engine = FakeNormalSpeechEngine()
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=speech_engine,
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertTrue(result.speech_escalated)
+        self.assertEqual(result.speech_transcript_count, 8)
+        self.assertEqual(speech_engine.calls, 8)
+
+    def test_raw_subtitle_similarity_can_skip_speech_when_separation_is_clear(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        with self.database.connect() as conn:
+            candidates = conn.execute(
+                """SELECT candidate_key FROM media_identity_candidates
+                   WHERE scan_id=? ORDER BY rank,candidate_key LIMIT 2""",
+                (self.fast_scan.scan_id,),
+            ).fetchall()
+            self.assertEqual(len(candidates), 2)
+            rows = [
+                (
+                    self.fast_scan.scan_id,
+                    candidates[0]["candidate_key"],
+                    "supports",
+                    0.55,
+                    json.dumps({"similarity": 0.55}),
+                ),
+                (
+                    self.fast_scan.scan_id,
+                    candidates[1]["candidate_key"],
+                    "neutral",
+                    0.0,
+                    json.dumps({"similarity": 0.20}),
+                ),
+            ]
+            conn.executemany(
+                """INSERT INTO media_identity_evidence(
+                     scan_id,candidate_key,analyzer_key,analyzer_version,
+                     evidence_category,correlation_group,relation,strength,
+                     source_kind,source_ref,value_text,details_json,cache_key,profile
+                   ) VALUES (
+                     ?,?,'subtitle-synopsis','1','subtitle_text',
+                     'subtitle-dialogue:1',?,?, 'sidecar_subtitle',
+                     'fixture.srt','fixture',?,'','fast'
+                   )""",
+                rows,
+            )
+
+        self._reseal_scan_fixture()
+
+        speech_engine = FakeNormalSpeechEngine()
+        result = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=speech_engine,
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertFalse(result.speech_escalated)
+        self.assertEqual(result.speech_transcript_count, 0)
+        self.assertEqual(speech_engine.calls, 0)
+
+    def test_partial_visual_rerun_cannot_replace_complete_normal_result(self):
+        source = FakePreviewSource()
+        first = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        ).run_scan(self.fast_scan.scan_id)
+        self.assertEqual(first.completed_profile.value, "normal")
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        decisions.resolve_scan(self.fast_scan.scan_id)
+
+        with self.database.connect() as conn:
+            before_scan = conn.execute(
+                """SELECT claimed_identity_json,result_state,best_candidate_key
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            before_evidence = [
+                tuple(row)
+                for row in conn.execute(
+                    """SELECT candidate_key,relation,strength,details_json,cache_key
+                       FROM media_identity_evidence
+                       WHERE scan_id=? AND analyzer_key=?
+                       ORDER BY id""",
+                    (self.fast_scan.scan_id, NORMAL_OCR_EVIDENCE_KEY),
+                ).fetchall()
+            ]
+
+        class FiveFrameSource(FakePreviewSource):
+            def preview_frames(self, _media):
+                return tuple(
+                    PreviewFrameRef(
+                        source_key=self.source_key,
+                        item_id="episode-1",
+                        timestamp_ms=(index + 1) * 10_000,
+                        asset_ref=f"partial:{index}",
+                        source_signature="preview-partial-v1",
+                        width=320,
+                        height=180,
+                    )
+                    for index in range(5)
+                )
+
+        class OneThenFailOcr(FakeOcr):
+            def recognize(self, image: bytes) -> OcrTextResult:
+                self.calls += 1
+                if self.calls > 1:
+                    raise NormalIdentityError("fixture transient OCR failure")
+                return OcrTextResult(
+                    text=image.decode("utf-8"),
+                    confidence=1.0,
+                    details={"fixture": True},
+                )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "only completed part of its visual coverage",
+        ):
+            NormalIdentityService(
+                self.database,
+                ExternalSourceRegistry([FiveFrameSource()]),
+                OneThenFailOcr(),
+            ).run_scan(self.fast_scan.scan_id)
+
+        with self.database.connect() as conn:
+            after_scan = conn.execute(
+                """SELECT claimed_identity_json,result_state,best_candidate_key
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            after_evidence = [
+                tuple(row)
+                for row in conn.execute(
+                    """SELECT candidate_key,relation,strength,details_json,cache_key
+                       FROM media_identity_evidence
+                       WHERE scan_id=? AND analyzer_key=?
+                       ORDER BY id""",
+                    (self.fast_scan.scan_id, NORMAL_OCR_EVIDENCE_KEY),
+                ).fetchall()
+            ]
+
+        self.assertEqual(dict(after_scan), dict(before_scan))
+        self.assertEqual(after_evidence, before_evidence)
+        self.assertTrue(
+            decisions.scan_detail(self.fast_scan.scan_id)["snapshot_current"]
+        )
+
+    def test_partial_speech_rerun_cannot_replace_complete_eight_window_result(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        class EpisodeTwoSpeech(FakeNormalSpeechEngine):
+            def transcribe(self, _audio_path, request):
+                self.calls += 1
+                return SpeechTranscript(
+                    text="bronze harbor lantern meadow quartz thunder",
+                    language="en",
+                )
+
+        first = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=EpisodeTwoSpeech(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        ).run_scan(self.fast_scan.scan_id)
+        self.assertEqual(first.speech_transcript_count, 8)
+
+        decisions = MediaIdentityDecisionService(self.database)
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        with self.database.connect() as conn:
+            before_scan = conn.execute(
+                """SELECT claimed_identity_json,result_state,best_candidate_key
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            before_evidence = [
+                tuple(row)
+                for row in conn.execute(
+                    """SELECT candidate_key,relation,strength,details_json,cache_key
+                       FROM media_identity_evidence
+                       WHERE scan_id=? AND analyzer_key=?
+                       ORDER BY id""",
+                    (self.fast_scan.scan_id, NORMAL_SPEECH_EVIDENCE_KEY),
+                ).fetchall()
+            ]
+
+        class OneThenFailExtractor(FakeNormalSpeechExtractor):
+            def extract(self, window):
+                if self.extract_calls >= 1:
+                    self.extract_calls += 1
+                    raise RuntimeError("fixture transient speech extraction failure")
+                return super().extract(window)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "only completed part of the speech coverage",
+        ):
+            NormalIdentityService(
+                self.database,
+                ExternalSourceRegistry(()),
+                UnavailableOcr(),
+                speech_engine=EpisodeTwoSpeech(),
+                speech_model=fake_normal_speech_model(),
+                speech_extractor_factory=OneThenFailExtractor,
+            ).run_scan(self.fast_scan.scan_id)
+
+        with self.database.connect() as conn:
+            after_scan = conn.execute(
+                """SELECT claimed_identity_json,result_state,best_candidate_key
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            after_evidence = [
+                tuple(row)
+                for row in conn.execute(
+                    """SELECT candidate_key,relation,strength,details_json,cache_key
+                       FROM media_identity_evidence
+                       WHERE scan_id=? AND analyzer_key=?
+                       ORDER BY id""",
+                    (self.fast_scan.scan_id, NORMAL_SPEECH_EVIDENCE_KEY),
+                ).fetchall()
+            ]
+
+        self.assertEqual(dict(after_scan), dict(before_scan))
+        self.assertEqual(after_evidence, before_evidence)
+        detail = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertTrue(detail["snapshot_current"])
+        self.assertTrue(detail["actionable"])
+
+    def test_weak_rerun_cannot_discard_existing_speech_backed_normal_state(self):
+        class UnavailableOcr(FakeOcr):
+            def available(self):
+                return False
+
+        first_engine = FakeNormalSpeechEngine()
+        first_service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry(()),
+            UnavailableOcr(),
+            speech_engine=first_engine,
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        )
+        first = first_service.run_scan(self.fast_scan.scan_id)
+        self.assertEqual(first.speech_transcript_count, 8)
+
+        class WeakPreview(FakePreviewSource):
+            def read_preview(self, _frame):
+                self.read_calls += 1
+                return b"unrelated"
+
+        class UnavailableSpeech(FakeNormalSpeechEngine):
+            def __init__(self):
+                super().__init__(available=False)
+
+        weak = WeakPreview()
+        second_service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([weak]),
+            FakeOcr(),
+            limits=NormalResourceLimits(
+                initial_preview_frames=1,
+                expanded_preview_frames=1,
+                max_preview_frames=1,
+                max_preview_bytes_per_frame=9,
+                max_preview_bytes_total=9,
+            ),
+            speech_engine=UnavailableSpeech(),
+            speech_model=fake_normal_speech_model(),
+            speech_extractor_factory=FakeNormalSpeechExtractor,
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "existing completed Normal evidence was retained",
+        ):
+            second_service.run_scan(self.fast_scan.scan_id)
+
+        with self.database.connect() as conn:
+            scan = conn.execute(
+                """SELECT completed_profile,stage,claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            transcript_count = conn.execute(
+                """SELECT COUNT(*) AS count
+                   FROM media_identity_artifacts
+                   WHERE file_id=1 AND artifact_type='speech_transcript'"""
+            ).fetchone()["count"]
+
+        claimed = json.loads(scan["claimed_identity_json"])
+        self.assertEqual(scan["completed_profile"], "normal")
+        self.assertEqual(scan["stage"], "normal_speech_complete")
+        self.assertEqual(claimed["normal_speech"]["transcript_count"], 8)
+        self.assertEqual(int(transcript_count), 8)
+
+    def test_deleted_normal_ocr_artifact_stales_sealed_result(self):
+        source = FakePreviewSource()
+        service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        result = service.run_scan(self.fast_scan.scan_id)
+        self.assertEqual(result.observation_count, 1)
+
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        before = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertTrue(before["snapshot_current"])
+
+        with self.database.connect() as conn:
+            evidence = conn.execute(
+                """SELECT details_json FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key=?
+                   ORDER BY id LIMIT 1""",
+                (self.fast_scan.scan_id, NORMAL_OCR_EVIDENCE_KEY),
+            ).fetchone()
+            artifact_ids = json.loads(evidence["details_json"])["artifact_ids"]
+            self.assertTrue(artifact_ids)
+            conn.execute(
+                "DELETE FROM media_identity_artifacts WHERE id=?",
+                (int(artifact_ids[0]),),
+            )
+
+        after = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(after["snapshot_current"])
+        self.assertFalse(after["actionable"])
+        self.assertEqual(
+            _rename_preview(decisions, self.fast_scan.scan_id)["status"],
+            "stale",
+        )
+
+    def test_superseded_failed_normal_attempt_returns_persisted_winner(self):
+        winner_source = FakePreviewSource()
+        winner_service = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([winner_source]),
+            FakeOcr(),
+        )
+        winner_result = None
+
+        class TriggerWinnerThenFail(FakeOcr):
+            def recognize(inner_self, image):
+                nonlocal winner_result
+                inner_self.calls += 1
+                if winner_result is None:
+                    winner_result = winner_service.run_scan(
+                        self.fast_scan.scan_id
+                    )
+                raise NormalIdentityError("fixture loser OCR failure")
+
+        loser = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([FakePreviewSource()]),
+            TriggerWinnerThenFail(),
+        ).run_scan(self.fast_scan.scan_id)
+
+        self.assertIsNotNone(winner_result)
+        self.assertEqual(winner_result.completed_profile.value, "normal")
+        self.assertEqual(loser.completed_profile.value, "normal")
+        self.assertEqual(loser.observation_count, winner_result.observation_count)
+        self.assertEqual(loser.text_observation_count, winner_result.text_observation_count)
+
+        with self.database.connect() as conn:
+            scan = conn.execute(
+                """SELECT completed_profile,claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            evidence_count = conn.execute(
+                """SELECT COUNT(*) AS count
+                   FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key=? AND profile='normal'""",
+                (self.fast_scan.scan_id, NORMAL_OCR_EVIDENCE_KEY),
+            ).fetchone()["count"]
+
+        claimed = json.loads(scan["claimed_identity_json"])
+        self.assertEqual(scan["completed_profile"], "normal")
+        self.assertEqual(claimed["result_revision"], 2)
+        self.assertGreater(int(evidence_count), 0)
+        self.assertEqual(
+            claimed["decision_snapshot"]["revision"],
+            claimed["result_revision"],
+        )
 
     def test_file_change_during_ocr_prevents_artifact_or_evidence_commit(self):
         def mutate_file():

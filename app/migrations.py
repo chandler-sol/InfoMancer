@@ -5,7 +5,11 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Callable
 
-from .media_identity.migration import apply_media_identity_foundation
+from .media_identity.migration import (
+    apply_media_identity_confirmation_provenance,
+    apply_media_identity_foundation,
+    repair_legacy_media_identity_confirmation_provenance,
+)
 from .media_identity.provider_migration import apply_provider_episode_cache
 from .media_identity.external_migration import (
     apply_external_source_credential_generation,
@@ -411,6 +415,16 @@ MIGRATIONS = (
         22,
         "0.9 external credential generation binding",
         apply_external_source_credential_generation,
+    ),
+    additive_migration(
+        23,
+        "0.9 media identity confirmation provenance",
+        apply_media_identity_confirmation_provenance,
+    ),
+    behavioral_migration(
+        24,
+        "0.9 repair inferred media identity confirmation provenance",
+        repair_legacy_media_identity_confirmation_provenance,
     ),
 )
 

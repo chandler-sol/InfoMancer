@@ -14,6 +14,7 @@ from PIL import Image, UnidentifiedImageError
 
 from ...path_mapping import ExternalPathMapper, PathMappingError, parse_absolute_path
 from ..external import (
+    ExternalAnalysisError,
     ExternalCapability,
     ExternalMediaRef,
     ExternalPreviewUnavailable,
@@ -22,6 +23,13 @@ from ..external import (
     PreviewFrameRef,
 )
 from ..models import AnalyzerContext
+from ..visual_budget import (
+    VisualBudgetExceeded,
+    account_source_bytes,
+    current_visual_budget,
+    deny_visual_budget,
+    source_read_plan,
+)
 
 
 _MAX_THUMBNAILS = 50_000
@@ -36,7 +44,7 @@ _MAX_EPISODE_CANDIDATES = 4096
 _JELLYFIN_PAGE_SIZE = 256
 
 
-class JellyfinAdapterError(ValueError):
+class JellyfinAdapterError(ExternalAnalysisError):
     """Base Jellyfin adapter error retained for adapter-specific callers."""
 
 
@@ -426,14 +434,21 @@ def fetch_trickplay_tile(
     credential = str(token or "").strip()
     if not credential:
         raise JellyfinAdapterError("A Jellyfin access token is required for Trickplay.")
-    limit = int(max_bytes)
-    if limit <= 0 or limit > _MAX_TILE_JPEG_BYTES:
+    configured_limit = int(max_bytes)
+    if configured_limit <= 0 or configured_limit > _MAX_TILE_JPEG_BYTES:
         raise JellyfinAdapterError("Jellyfin Trickplay response limit is invalid.")
     secure_base = _credential_transport_url(
         server_url,
         allow_insecure_http=allow_insecure_http,
     )
     url = trickplay_tile_url(secure_base, frame)
+    visual_budget = current_visual_budget()
+    cache_key = f"jellyfin-trickplay-tile:{url}"
+    if visual_budget is not None:
+        cached_tile = visual_budget.cached_source_asset(cache_key)
+        if cached_tile is not None:
+            return cached_tile
+    limit, budget_limited = source_read_plan(configured_limit)
     request = urllib.request.Request(
         url,
         headers={
@@ -472,11 +487,20 @@ def fetch_trickplay_tile(
                     raise JellyfinSourceFailure(
                         "Jellyfin Trickplay response had an invalid Content-Length."
                     ) from exc
-                if content_length < 0 or content_length > limit:
+                if content_length < 0:
+                    raise JellyfinSourceFailure(
+                        "Jellyfin Trickplay response had an invalid Content-Length."
+                    )
+                if content_length > limit:
+                    if budget_limited:
+                        deny_visual_budget(
+                            "Normal visual source-byte budget cannot admit this Jellyfin Trickplay tile."
+                        )
                     raise JellyfinPreviewUnavailable(
                         "Jellyfin Trickplay tile exceeded the safe response-size limit."
                     )
-            payload = response.read(limit + 1)
+            payload = response.read(limit if budget_limited else limit + 1)
+            account_source_bytes(len(payload))
     except urllib.error.HTTPError as exc:
         if exc.code in {301, 302, 303, 307, 308}:
             detail = "Jellyfin redirected the Trickplay request; save the final local server URL instead."
@@ -501,6 +525,8 @@ def fetch_trickplay_tile(
         )
     if not payload.startswith(b"\xff\xd8"):
         raise JellyfinPreviewUnavailable("Jellyfin Trickplay response was not a JPEG image.")
+    if visual_budget is not None:
+        visual_budget.cache_source_asset(cache_key, payload)
     return payload
 
 
@@ -717,9 +743,10 @@ def _read_jellyfin_json(
     credential = str(token or "").strip()
     if not credential:
         raise JellyfinAdapterError("A Jellyfin access token is required.")
-    limit = int(max_bytes)
-    if limit <= 0 or limit > _MAX_JSON_BYTES:
+    configured_limit = int(max_bytes)
+    if configured_limit <= 0 or configured_limit > _MAX_JSON_BYTES:
         raise JellyfinAdapterError("Jellyfin JSON response limit is invalid.")
+    limit, budget_limited = source_read_plan(configured_limit)
 
     base = _credential_transport_url(
         server_url,
@@ -761,11 +788,20 @@ def _read_jellyfin_json(
                     raise JellyfinSourceFailure(
                         "Jellyfin metadata response had an invalid Content-Length."
                     ) from exc
-                if content_length < 0 or content_length > limit:
+                if content_length < 0:
+                    raise JellyfinSourceFailure(
+                        "Jellyfin metadata response had an invalid Content-Length."
+                    )
+                if content_length > limit:
+                    if budget_limited:
+                        deny_visual_budget(
+                            "Normal visual source-byte budget cannot admit this Jellyfin metadata response."
+                        )
                     raise JellyfinSourceFailure(
                         "Jellyfin metadata response exceeded the safe response-size limit."
                     )
-            payload = response.read(limit + 1)
+            payload = response.read(limit if budget_limited else limit + 1)
+            account_source_bytes(len(payload))
     except urllib.error.HTTPError as exc:
         if exc.code in {301, 302, 303, 307, 308}:
             detail = (
@@ -1030,10 +1066,15 @@ class JellyfinTrickplaySource:
     def resolve_media(self, context: AnalyzerContext) -> ExternalMediaRef | None:
         if not self.status().available:
             return None
-        translation = self.mapper.reverse_translate(
-            self.source_key,
-            context.media.path,
-        )
+        try:
+            translation = self.mapper.reverse_translate(
+                self.source_key,
+                context.media.path,
+            )
+        except PathMappingError as exc:
+            raise JellyfinSourceFailure(
+                f"Jellyfin path mapping could not resolve this media unambiguously: {exc}"
+            ) from exc
         if translation is None:
             return None
         season = context.claimed_identity.season

@@ -35,6 +35,25 @@ class SettingsUiContractTests(unittest.TestCase):
         self.assertIn("Install FFmpeg for InfoMancer", template)
         self.assertIn("/settings/integrations/ffmpeg/install", template)
         self.assertIn("/settings/integrations/ffmpeg/remove", template)
+        self.assertIn("Local speech analysis", template)
+        self.assertIn("Install whisper.cpp for InfoMancer", template)
+        self.assertIn("pinned to whisper.cpp 1.9.4 CPU release artifacts", template)
+        self.assertNotIn(
+            "pinned to whisper.cpp {{ speech_runtime_component.version",
+            template,
+        )
+        self.assertIn("/settings/integrations/speech/runtime/install", template)
+        self.assertIn("/settings/integrations/speech/runtime/remove", template)
+        self.assertIn(
+            "/settings/integrations/speech/models/{{ model.key }}/install",
+            template,
+        )
+        self.assertIn(
+            "/settings/integrations/speech/models/{{ model.key }}/remove",
+            template,
+        )
+        self.assertIn("base-q5_1", template)
+        self.assertIn("base.en-q5_1", template)
         self.assertIn("Plex and Jellyfin are optional, read-only Episode Identity accelerators.", template)
         self.assertIn("Test path mapping", template)
         self.assertIn("BIF adapter", template)

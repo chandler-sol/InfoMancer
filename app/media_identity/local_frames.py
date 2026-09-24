@@ -21,11 +21,16 @@ from .external import (
     ExternalSourceStatus,
     PreviewFrameRef,
 )
+from .media_generation import (
+    MediaContentLease,
+    MediaContentLeaseError,
+    media_generation_identity,
+)
 from .models import AnalyzerContext
 
 
 LOCAL_FRAME_SOURCE_KEY = "local-ffmpeg"
-LOCAL_FRAME_SOURCE_VERSION = "1"
+LOCAL_FRAME_SOURCE_VERSION = "3"
 _LOCAL_FRAME_COUNT = 40
 _MAX_GENERATED_JPEG_BYTES = 8 * 1024 * 1024
 _MAX_WIDTH = 1280
@@ -63,6 +68,7 @@ def _media_signature(
     device_id: int | None,
     inode_id: int | None,
     ffmpeg_identity: Mapping[str, Any] | None,
+    generation_identity: Mapping[str, Any] | None,
 ) -> str:
     payload = {
         "version": LOCAL_FRAME_SOURCE_VERSION,
@@ -75,6 +81,7 @@ def _media_signature(
         "device_id": device_id,
         "inode_id": inode_id,
         "ffmpeg_identity": dict(ffmpeg_identity or {}),
+        "media_generation": dict(generation_identity or {}),
     }
     return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
 
@@ -212,6 +219,8 @@ class LocalFfmpegFrameSource:
             else requested_executable
         )
         self.timeout_seconds = max(1, min(int(timeout_seconds), 60))
+        self._media_generation = media_generation_identity(context.media.path)
+        self._media_lease: MediaContentLease | None = None
         path_identity = _stat_identity(Path(context.media.path))
         if path_identity is None:
             self._device_id = None
@@ -225,24 +234,75 @@ class LocalFfmpegFrameSource:
                 device_id=self._device_id,
                 inode_id=self._inode_id,
                 ffmpeg_identity=self._ffmpeg_identity,
+                generation_identity=self._media_generation,
             )
             if runtime > 0
             else ""
         )
 
+    def acquire_content_lease(self) -> None:
+        if self._media_lease is not None:
+            try:
+                self._media_lease.require_current()
+            except MediaContentLeaseError as exc:
+                raise LocalFrameSourceFailure(str(exc)) from exc
+            return
+        try:
+            lease = MediaContentLease(
+                self.context.media.path,
+                self.context.media.sha256 or "",
+                expected_generation=self._media_generation,
+            ).acquire()
+        except (MediaContentLeaseError, OSError) as exc:
+            raise LocalFrameSourceFailure(
+                "The local media file no longer matches the exact verified content snapshot."
+            ) from exc
+        self._media_lease = lease
+
+    def close(self) -> None:
+        lease, self._media_lease = self._media_lease, None
+        if lease is not None:
+            lease.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    def _require_content_lease(self) -> None:
+        if self._media_lease is None:
+            self.acquire_content_lease()
+        try:
+            self._media_lease.require_current()
+        except (AttributeError, MediaContentLeaseError) as exc:
+            raise LocalFrameSourceFailure(
+                "The local media file changed while generated-frame analysis was active."
+            ) from exc
+
     def status(self) -> ExternalSourceStatus:
         path = Path(self.context.media.path)
+        if not self.context.media.sha256:
+            return ExternalSourceStatus(
+                source_key=self.source_key,
+                available=False,
+                detail="An exact media SHA-256 snapshot is required for generated frames.",
+            )
         if self.runtime_seconds <= 0:
             return ExternalSourceStatus(
                 source_key=self.source_key,
                 available=False,
                 detail="A positive cataloged runtime is required for generated frames.",
             )
-        if not _stat_matches(
-            path,
-            self.context,
-            device_id=self._device_id,
-            inode_id=self._inode_id,
+        if (
+            self._media_generation is None
+            or media_generation_identity(path) != self._media_generation
+            or not _stat_matches(
+                path,
+                self.context,
+                device_id=self._device_id,
+                inode_id=self._inode_id,
+            )
         ):
             return ExternalSourceStatus(
                 source_key=self.source_key,
@@ -270,6 +330,7 @@ class LocalFfmpegFrameSource:
             return None
         if not self.status().available:
             return None
+        self.acquire_content_lease()
         return ExternalMediaRef(
             source_key=self.source_key,
             item_id=f"file:{int(context.media.file_id)}",
@@ -340,57 +401,77 @@ class LocalFfmpegFrameSource:
             raise LocalFrameSourceFailure(
                 "FFmpeg changed after the generated-frame source was prepared."
             )
+        self._require_content_lease()
         path = Path(self.context.media.path)
-        if not _stat_matches(
-            path,
-            self.context,
-            device_id=self._device_id,
-            inode_id=self._inode_id,
+        if (
+            self._media_generation is None
+            or media_generation_identity(path) != self._media_generation
+            or not _stat_matches(
+                path,
+                self.context,
+                device_id=self._device_id,
+                inode_id=self._inode_id,
+            )
         ):
             raise LocalFrameSourceFailure(
                 "The local media file changed before FFmpeg frame extraction."
             )
 
         timestamp_seconds = max(0.0, float(frame.timestamp_ms) / 1000.0)
-        command = [
-            self.executable,
-            "-nostdin",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-ss",
-            f"{timestamp_seconds:.3f}",
-            "-i",
-            str(path),
-            "-map",
-            "0:v:0",
-            "-frames:v",
-            "1",
-            "-vf",
-            (
-                "scale=w='min(1280,iw)':h='min(720,ih)':"
-                "force_original_aspect_ratio=decrease:force_divisible_by=2"
-            ),
-            "-q:v",
-            "4",
-            "-fs",
-            str(_MAX_GENERATED_JPEG_BYTES),
-            "-f",
-            "image2pipe",
-            "-vcodec",
-            "mjpeg",
-            "pipe:1",
-        ]
         try:
-            result = subprocess.run(
-                command,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=self.timeout_seconds,
-                check=False,
-                **_quiet_subprocess_options(),
-            )
+            if self._media_lease is None:
+                raise MediaContentLeaseError(
+                    "The local media content lease is unavailable."
+                )
+            with self._media_lease.ffmpeg_input() as (
+                ffmpeg_input_args,
+                lease_subprocess_options,
+            ):
+                command = [
+                    self.executable,
+                    "-nostdin",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-ss",
+                    f"{timestamp_seconds:.3f}",
+                    *ffmpeg_input_args,
+                    "-map",
+                    "0:v:0",
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    (
+                        "scale=w='min(1280,iw)':h='min(720,ih)':"
+                        "force_original_aspect_ratio=decrease:force_divisible_by=2"
+                    ),
+                    "-q:v",
+                    "4",
+                    "-fs",
+                    str(_MAX_GENERATED_JPEG_BYTES),
+                    "-f",
+                    "image2pipe",
+                    "-vcodec",
+                    "mjpeg",
+                    "pipe:1",
+                ]
+                subprocess_options = {
+                    **_quiet_subprocess_options(),
+                    **lease_subprocess_options,
+                }
+                result = subprocess.run(
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    timeout=self.timeout_seconds,
+                    check=False,
+                    **subprocess_options,
+                )
+        except MediaContentLeaseError as exc:
+            raise LocalFrameSourceFailure(
+                "The leased local media input changed before or during FFmpeg frame extraction."
+            ) from exc
         except FileNotFoundError as exc:
             raise LocalFrameSourceFailure(
                 "FFmpeg is unavailable for generated Normal preview frames."
@@ -404,11 +485,16 @@ class LocalFfmpegFrameSource:
                 "InfoMancer could not start FFmpeg for generated preview frames."
             ) from exc
 
-        if not _stat_matches(
-            path,
-            self.context,
-            device_id=self._device_id,
-            inode_id=self._inode_id,
+        self._require_content_lease()
+        if (
+            self._media_generation is None
+            or media_generation_identity(path) != self._media_generation
+            or not _stat_matches(
+                path,
+                self.context,
+                device_id=self._device_id,
+                inode_id=self._inode_id,
+            )
         ):
             raise LocalFrameSourceFailure(
                 "The local media file changed during FFmpeg frame extraction."

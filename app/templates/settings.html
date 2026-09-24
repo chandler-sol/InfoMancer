@@ -91,6 +91,64 @@
   </section>
 
   <section class="panel settings-card full-width">
+    <p class="eyebrow">EPISODE IDENTITY COMPONENTS</p>
+    <h2>Local speech analysis</h2>
+    <p class="muted">Normal verification can use short, targeted local speech windows when cheaper subtitle and visual evidence is not enough. InfoMancer uses CPU-only whisper.cpp for 0.9, keeps the runtime and models separate, and never sends speech audio to a cloud transcription service.</p>
+    <div class="settings-metrics">
+      <div><strong>{{ speech_runtime_component.state|replace('_',' ')|title }}</strong><span>Runtime source</span></div>
+      <div><strong>{{ speech_runtime_component.version or 'Unavailable' }}</strong><span>whisper.cpp</span></div>
+      <div><strong>{{ 'Ready' if speech_runtime_component.available else 'Unavailable' }}</strong><span>Local speech runtime</span></div>
+      <div><strong>CPU only</strong><span>0.9 backend</span></div>
+    </div>
+    <p class="muted">{{ speech_runtime_component.detail }}</p>
+    {% if speech_runtime_component.path %}<p class="muted"><small>Executable: <code>{{ speech_runtime_component.path }}</code></small></p>{% endif %}
+    <div class="actions">
+      {% if speech_runtime_component.can_install %}
+      <form method="post" action="/settings/integrations/speech/runtime/install">
+        <button class="button primary">Install whisper.cpp for InfoMancer</button>
+      </form>
+      {% endif %}
+      {% if speech_runtime_component.can_remove %}
+      <form method="post" action="/settings/integrations/speech/runtime/remove" onsubmit="return confirm('Remove InfoMancer\'s managed whisper.cpp runtime? Local speech analysis will use another available runtime or remain unavailable.');">
+        <button class="button danger">Remove managed whisper.cpp</button>
+      </form>
+      {% endif %}
+    </div>
+    <p class="muted"><small>Managed installs are pinned to whisper.cpp 1.9.4 CPU release artifacts when upstream publishes a compatible CLI build. System or explicitly configured <code>whisper-cli</code> runtimes remain supported and are hashed before use.</small></p>
+
+    <div class="settings-table-wrap">
+      <table>
+        <thead><tr><th>Speech model</th><th>Scope</th><th>Size</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+          {% for model in speech_model_components %}
+          <tr>
+            <td>
+              <strong>{% if model.key == 'base-q5_1' %}Base multilingual{% elif model.key == 'base.en-q5_1' %}Base English{% else %}Whisper model{% endif %}</strong><br>
+              <small><code>{{ model.key }}</code></small>
+            </td>
+            <td>{% if model.key == 'base-q5_1' %}Multilingual{% elif model.key == 'base.en-q5_1' %}English only{% else %}Configured{% endif %}</td>
+            <td>{{ format_bytes(model.identity.size_bytes) }}</td>
+            <td>{{ 'Ready' if model.available else 'Not installed' }}</td>
+            <td>
+              {% if model.can_install %}
+              <form class="inline-form" method="post" action="/settings/integrations/speech/models/{{ model.key }}/install">
+                <button class="button compact">Install model</button>
+              </form>
+              {% elif model.can_remove %}
+              <form class="inline-form" method="post" action="/settings/integrations/speech/models/{{ model.key }}/remove" onsubmit="return confirm('Remove this managed Whisper model?');">
+                <button class="button danger compact">Remove model</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted"><small>The multilingual <code>base-q5_1</code> model is the default 0.9 model. The English-only model is optional and managed independently. Each model is pinned by exact size and SHA-256 so I4 can reuse transcripts only when the model identity still matches.</small></p>
+  </section>
+
+  <section class="panel settings-card full-width">
     <p class="eyebrow">MEDIA SERVERS</p>
     <h2>Episode Identity integrations</h2>
     <p class="muted">Plex and Jellyfin are optional, read-only Episode Identity accelerators. When configured and mapped, their existing preview frames are available to Normal verification before InfoMancer falls back to local frame generation.</p>

@@ -51,7 +51,7 @@
       <strong>{{ (identity.completed_profile or identity.requested_profile)|title }}</strong>
       <h3>Completed tier</h3>
       {% if identity.completed_profile == 'normal' %}
-      <p>Normal includes the Fast evidence plus bounded visual text from media-server previews or local FFmpeg-generated fallback frames.</p>
+      <p>Normal includes the Fast evidence plus bounded visual text and, when cheaper evidence is insufficient, targeted local speech analysis.</p>
       {% else %}
       <p>Fast uses local catalog, provider metadata, stream facts, and available subtitle text.</p>
       {% endif %}
@@ -87,6 +87,73 @@
 </section>
 {% endif %}
 
+{% if identity.speech_analysis %}
+<section class="panel">
+  <header>
+    <div>
+      <p class="eyebrow">TARGETED SPEECH ANALYSIS</p>
+      <h2>Local dialogue evidence</h2>
+      <p>Speech is sampled only when cheaper subtitle and visual evidence do not separate the candidates safely. Speech and subtitle matches share one dialogue correlation group, so the resolver counts them as one supporting signal rather than two.</p>
+    </div>
+  </header>
+  <div class="mie-score-grid">
+    <article>
+      <strong>{{ 'Yes' if identity.speech_analysis.escalated else 'No' }}</strong>
+      <h3>Speech escalation</h3>
+      <p>{% if identity.speech_analysis.escalated %}Normal requested targeted local transcription.{% else %}Cheaper evidence was sufficient, so speech was not needed.{% endif %}</p>
+    </article>
+    <article>
+      <strong>{{ identity.speech_analysis.text_transcript_count }} / {{ identity.speech_analysis.planned_windows }}</strong>
+      <h3>Usable windows</h3>
+      <p>{{ identity.speech_analysis.transcript_count }} transcript artifact(s) were validated, including blank windows.</p>
+    </article>
+    <article>
+      <strong>{{ identity.speech_analysis.reused_artifact_count }}</strong>
+      <h3>Cached transcripts</h3>
+      <p>Reusable transcript artifacts still require regeneration and exact hashing of the bounded audio window before reuse.</p>
+    </article>
+    <article>
+      <strong>{% if identity.speech_analysis.evidence_count %}{{ '%.3f'|format(identity.speech_analysis.strongest_similarity) }}{% else %}None{% endif %}</strong>
+      <h3>Strongest synopsis similarity</h3>
+      <p>This is diagnostic lexical overlap, not a confidence percentage.</p>
+    </article>
+  </div>
+
+  {% if identity.speech_analysis.windows %}
+  <details>
+    <summary class="button">Sampled speech windows</summary>
+    <ul>
+      {% for window in identity.speech_analysis.windows %}
+      <li>{{ '%.1f'|format(window.start_ms / 1000) }}s to {{ '%.1f'|format(window.end_ms / 1000) }}s</li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
+  {% if identity.speech_analysis.transcript_excerpt %}
+  <details>
+    <summary class="button">Transcript sample</summary>
+    <pre>{{ identity.speech_analysis.transcript_excerpt }}</pre>
+  </details>
+  {% endif %}
+
+  {% if identity.speech_analysis.failures %}
+  <details>
+    <summary class="button">Speech diagnostics</summary>
+    <ul>
+      {% for failure in identity.speech_analysis.failures %}
+      <li><code>{{ failure }}</code></li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
+  {% if identity.speech_analysis.budget_exhausted %}
+  <p class="legal-note">Speech analysis stopped at its configured resource ceiling. Persisted completed windows remain reusable.</p>
+  {% endif %}
+</section>
+{% endif %}
+
 {% if current_user.is_librarian %}
 <section class="panel">
   <header><div><p class="eyebrow">HUMAN DECISION</p><h2>Confirm or inspect</h2><p>Confirmation records your decision for this exact file snapshot. It does not rename or rewrite the catalog claim.</p></div></header>
@@ -97,17 +164,28 @@
     {% if identity.claimed_candidate_keys|length == 1 %}
     <form method="post" action="/episode-identity/scans/{{ identity.id }}/confirm-current">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="result_revision" value="{{ identity.result_revision }}">
+      <input type="hidden" name="decision_snapshot_sha256" value="{{ identity.decision_snapshot_sha256 }}">
+      <input type="hidden" name="candidate_key" value="{{ identity.claimed_candidate_keys[0] }}">
       <button class="button">Mark current filename correct</button>
     </form>
     {% endif %}
     {% if identity.result_state in ['possible_mismatch', 'likely_mismatch', 'strong_match_other'] and identity.best_candidate and identity.best_candidate.candidate_key not in identity.claimed_candidate_keys %}
     <form method="post" action="/episode-identity/scans/{{ identity.id }}/confirm-best">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="result_revision" value="{{ identity.result_revision }}">
+      <input type="hidden" name="decision_snapshot_sha256" value="{{ identity.decision_snapshot_sha256 }}">
+      <input type="hidden" name="candidate_key" value="{{ identity.best_candidate.candidate_key }}">
       <button class="button primary">Confirm suggested content</button>
     </form>
     {% endif %}
-    {% if identity.actionable %}
-    <a class="button" href="/episode-identity/scans/{{ identity.id }}/rename-preview">Preview rename suggestion</a>
+    {% if identity.actionable and identity.best_candidate %}
+    <form method="get" action="/episode-identity/scans/{{ identity.id }}/rename-preview">
+      <input type="hidden" name="result_revision" value="{{ identity.result_revision }}">
+      <input type="hidden" name="decision_snapshot_sha256" value="{{ identity.decision_snapshot_sha256 }}">
+      <input type="hidden" name="candidate_key" value="{{ identity.best_candidate.candidate_key }}">
+      <button class="button">Preview rename suggestion</button>
+    </form>
     {% endif %}
   </div>
   <p class="legal-note">A rename preview is advisory only. Episode Identity never applies a filesystem change automatically.</p>

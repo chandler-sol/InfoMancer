@@ -15,6 +15,30 @@ from .models import (
     MediaIdentityFile,
 )
 
+from .speech import (
+    SpeechAudioIdentity,
+    SpeechBinaryIdentity,
+    SpeechEngine,
+    SpeechIdentityError,
+    SpeechModelIdentity,
+    SpeechRequest,
+    SpeechTranscript,
+    SpeechWindow,
+    speech_transcript_cache_key,
+)
+
+from .speech_audio import (
+    ExtractedSpeechAudio,
+    LocalFfmpegSpeechAudioExtractor,
+    SpeechAudioError,
+    SpeechAudioStaleError,
+    SpeechAudioStream,
+    SpeechAudioUnavailable,
+    select_speech_audio_stream,
+    validate_normal_speech_audio_budget,
+    validate_normal_speech_window_plan,
+)
+
 __all__ = [
     "AnalyzerContext",
     "AnalyzerResult",
@@ -28,4 +52,22 @@ __all__ = [
     "IdentityReference",
     "IdentityResultState",
     "MediaIdentityFile",
+    "ExtractedSpeechAudio",
+    "LocalFfmpegSpeechAudioExtractor",
+    "SpeechAudioError",
+    "SpeechAudioIdentity",
+    "SpeechAudioStaleError",
+    "SpeechAudioStream",
+    "SpeechAudioUnavailable",
+    "SpeechBinaryIdentity",
+    "SpeechEngine",
+    "SpeechIdentityError",
+    "SpeechModelIdentity",
+    "SpeechRequest",
+    "SpeechTranscript",
+    "SpeechWindow",
+    "select_speech_audio_stream",
+    "speech_transcript_cache_key",
+    "validate_normal_speech_audio_budget",
+    "validate_normal_speech_window_plan",
 ]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 
 
@@ -173,4 +174,114 @@ def apply_media_identity_foundation(conn: sqlite3.Connection) -> None:
     conn.execute(
         """CREATE INDEX IF NOT EXISTS idx_media_identity_confirmations_provider
            ON media_identity_confirmations(identity_kind,provider,provider_item_id)"""
+    )
+
+
+def apply_media_identity_confirmation_provenance(
+    conn: sqlite3.Connection,
+) -> None:
+    """Persist immutable confirmation-time scan provenance outside the scan FK."""
+    confirmation_table = conn.execute(
+        """SELECT 1 FROM sqlite_master
+           WHERE type='table' AND name='media_identity_confirmations'"""
+    ).fetchone()
+    if confirmation_table is None:
+        # Repair databases whose historical migration ledger claims the
+        # foundation ran even though its tables are absent. The foundation is
+        # idempotent and uses CREATE IF NOT EXISTS throughout.
+        apply_media_identity_foundation(conn)
+
+    existing = {
+        str(row["name"])
+        for row in conn.execute(
+            "PRAGMA table_info(media_identity_confirmations)"
+        )
+    }
+    additions = {
+        "source_scan_snapshot_id": "INTEGER NOT NULL DEFAULT 0 CHECK(source_scan_snapshot_id>=0)",
+        "source_result_revision": "INTEGER NOT NULL DEFAULT 0 CHECK(source_result_revision>=0)",
+        "source_decision_snapshot_sha256": "TEXT NOT NULL DEFAULT ''",
+        "source_metadata_signature": "TEXT NOT NULL DEFAULT ''",
+    }
+    added_columns: set[str] = set()
+    for name, definition in additions.items():
+        if name not in existing:
+            conn.execute(
+                f"ALTER TABLE media_identity_confirmations ADD COLUMN {name} {definition}"
+            )
+            added_columns.add(name)
+
+    if not added_columns:
+        return
+
+    # A legacy confirmation can identify which scan it referenced, but a later
+    # migration cannot prove which mutable result revision, sealed decision, or
+    # metadata signature the human actually reviewed at confirmation time.
+    # Preserve the source scan as audit identity only. The zero/blank provenance
+    # intentionally makes confirmation_status() treat these rows as stale until
+    # the user reviews and confirms a current sealed result.
+    conn.execute(
+        """UPDATE media_identity_confirmations
+           SET source_scan_snapshot_id=CASE
+                 WHEN source_scan_id IS NOT NULL AND source_scan_snapshot_id=0
+                 THEN source_scan_id
+                 ELSE source_scan_snapshot_id
+               END,
+               source_result_revision=0,
+               source_decision_snapshot_sha256='',
+               source_metadata_signature=''
+           WHERE source_scan_id IS NOT NULL"""
+    )
+
+
+def repair_legacy_media_identity_confirmation_provenance(
+    conn: sqlite3.Connection,
+) -> None:
+    """Invalidate authority that the original migration 23 could have invented."""
+    table = conn.execute(
+        """SELECT 1 FROM sqlite_master
+           WHERE type='table' AND name='media_identity_confirmations'"""
+    ).fetchone()
+    if table is None:
+        return
+    columns = {
+        str(row["name"])
+        for row in conn.execute(
+            "PRAGMA table_info(media_identity_confirmations)"
+        )
+    }
+    required = {
+        "source_scan_id",
+        "confirmed_at",
+        "source_scan_snapshot_id",
+        "source_result_revision",
+        "source_decision_snapshot_sha256",
+        "source_metadata_signature",
+    }
+    if not required.issubset(columns):
+        return
+
+    migration_23 = conn.execute(
+        """SELECT applied_at FROM schema_migrations
+           WHERE version=23"""
+    ).fetchone()
+    if migration_23 is None:
+        return
+    applied_at = str(migration_23["applied_at"] or "")
+    if not applied_at:
+        return
+
+    # Rows confirmed before, or in the same SQLite timestamp second as, the
+    # original migration could only have acquired these fields through that
+    # migration's inference. Preserve source_scan_snapshot_id for audit, but
+    # remove the unprovable authority. Confirmations created later retain the
+    # provenance captured at the actual user action.
+    conn.execute(
+        """UPDATE media_identity_confirmations
+           SET source_result_revision=0,
+               source_decision_snapshot_sha256='',
+               source_metadata_signature=''
+           WHERE source_scan_id IS NOT NULL
+             AND confirmed_at<=?""",
+        (applied_at,),
     )

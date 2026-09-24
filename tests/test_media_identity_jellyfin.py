@@ -16,6 +16,10 @@ from app.media_identity.external import (
     ExternalPreviewUnavailable,
     ExternalSourceFailure,
 )
+from app.media_identity.visual_budget import (
+    VisualAttemptBudget,
+    visual_budget_scope,
+)
 from app.media_identity.models import (
     AnalyzerContext,
     IdentityProfile,
@@ -461,6 +465,42 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
                 )
         self.assertIsInstance(caught.exception, ExternalSourceFailure)
 
+    def test_ambiguous_path_mapping_is_normalized_as_jellyfin_source_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            local_root = Path(temporary) / "tv"
+            local_path = local_root / "Show" / "Episode.mkv"
+            mapper = ExternalPathMapper([
+                PathMapping("jellyfin", "/srv/tv-a", str(local_root), priority=1),
+                PathMapping("jellyfin", "/srv/tv-b", str(local_root), priority=1),
+            ])
+            source = JellyfinTrickplaySource(
+                "https://jellyfin.local:8096",
+                "jf-secret",
+                mapper,
+            )
+            context = AnalyzerContext(
+                media=MediaIdentityFile(
+                    file_id=1,
+                    title_id=1,
+                    path=str(local_path),
+                    size_bytes=1,
+                    modified_at=1.0,
+                ),
+                claimed_identity=IdentityReference(
+                    identity_kind="episode",
+                    season=1,
+                    episode=1,
+                    display_name="Episode",
+                ),
+                profile=IdentityProfile.NORMAL,
+            )
+            with self.assertRaisesRegex(
+                JellyfinSourceFailure,
+                "path mapping.*unambiguously",
+            ) as caught:
+                source.resolve_media(context)
+            self.assertIsInstance(caught.exception, ExternalSourceFailure)
+
     def test_configured_source_resolves_exact_mapped_episode_and_enumerates_trickplay(self):
         item_id = "11111111111111111111111111111111"
         media_source_id = "22222222222222222222222222222222"
@@ -797,6 +837,58 @@ class JellyfinTrickplayFoundationTests(unittest.TestCase):
         self.assertEqual(len(proxy_handlers), 1)
         self.assertEqual(proxy_handlers[0].proxies, {})
         self.assertLessEqual(opener.timeout, 15.0)
+
+    def test_same_trickplay_tile_is_downloaded_once_per_visual_attempt(self):
+        item_id = "11111111111111111111111111111111"
+        media_source_id = "22222222222222222222222222222222"
+        variant = type(select_trickplay_variant(
+            parse_trickplay_variants(self._item()), media_source_id="media-a"
+        ))(
+            media_source_id=media_source_id,
+            width=8,
+            height=6,
+            tile_width=2,
+            tile_height=2,
+            thumbnail_count=4,
+            interval_ms=1000,
+            bandwidth=1000,
+        )
+        frames = enumerate_preview_frames(
+            item_id=item_id,
+            item_etag="etag-network",
+            variant=variant,
+        )
+        tile = self._tile_jpeg()
+        opener = DummyOpener(DummyResponse(tile))
+        budget = VisualAttemptBudget(
+            max_frame_attempts=12,
+            max_source_bytes=1024 * 1024,
+            max_image_bytes=48 * 1024 * 1024,
+            max_text_chars=64_000,
+        )
+
+        with (
+            patch(
+                "app.media_identity.sources.jellyfin.urllib.request.build_opener",
+                return_value=opener,
+            ) as builder,
+            visual_budget_scope(budget),
+        ):
+            first = fetch_trickplay_tile(
+                "https://jellyfin.local:8096",
+                "top-secret",
+                frames[0],
+            )
+            second = fetch_trickplay_tile(
+                "https://jellyfin.local:8096",
+                "top-secret",
+                frames[3],
+            )
+
+        self.assertEqual(first, tile)
+        self.assertEqual(second, tile)
+        self.assertEqual(builder.call_count, 1)
+        self.assertEqual(budget.source_bytes, len(tile))
 
     def test_read_preview_crops_only_requested_cell(self):
         frame = self._network_frame()

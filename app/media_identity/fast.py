@@ -10,6 +10,8 @@ from typing import Any, Iterable
 
 from ..db import Database
 from .candidates import CandidateSet, generate_episode_candidates
+from .decision_snapshot import seal_decision_snapshot
+from .media_generation import media_content_sha256, media_generation_identity
 from .models import (
     EvidenceCategory,
     EvidenceRelation,
@@ -34,7 +36,7 @@ TEXT_SUPPORT_THRESHOLD = 0.30
 SPECIAL_EXPANSION_THRESHOLD = 0.20
 SIDECAR_ANALYZER_KEY = "sidecar-subtitle"
 SIDECAR_ANALYZER_VERSION = "1"
-SCAN_INPUT_SIGNATURE_VERSION = 2
+SCAN_INPUT_SIGNATURE_VERSION = 3
 
 
 class FastIdentityScanError(RuntimeError):
@@ -192,8 +194,10 @@ def scan_input_signatures(
         "audio_channels", "bitrate", "container", "dynamic_range",
         "media_info_at", "media_info_error",
     )
+    generation = media_generation_identity(str(file_row.get("path") or ""))
     signatures = {
         "catalog": _catalog_snapshot_signature(file_row, streams),
+        "media_generation": _signature(generation or {}),
         "title_provider_identity": _signature({
             "title_id": file_row.get("title_id"),
             "title_kind": file_row.get("title_kind"),
@@ -867,12 +871,16 @@ class FastIdentityService:
         with self.database.connect() as conn:
             file_row = self._file_row(conn, int(file_id))
             streams = self._stream_rows(conn, int(file_id))
-            file_sha256 = self._current_sha256(conn, file_row)
             catalog_snapshot_signature = _catalog_snapshot_signature(
                 file_row, streams
             )
 
         self._verify_media_snapshot(file_row)
+        media_generation = media_generation_identity(file_row["path"])
+        if media_generation is None:
+            raise FastIdentityScanError(
+                "The media file could not be generation-bound for Episode Identity."
+            )
         sidecars = self._prepare_sidecars(file_row)
         candidate_set, expanded_specials, corpora = self._candidate_set(
             file_row, sidecars, language
@@ -896,6 +904,15 @@ class FastIdentityService:
 
         self._verify_media_snapshot(file_row)
         self._verify_sidecars(file_row, sidecars)
+        file_sha256 = media_content_sha256(
+            file_row["path"],
+            expected_generation=media_generation,
+        )
+        if not file_sha256:
+            raise FastIdentityStaleError(
+                "The media file changed while Episode Identity verified its exact "
+                "content. Retry the scan."
+            )
 
         with self.database.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -935,6 +952,11 @@ class FastIdentityService:
             # before waiting for another catalog writer.
             self._verify_media_snapshot(file_row)
             self._verify_sidecars(file_row, sidecars)
+            if not media_generation_identity(file_row["path"]) == media_generation:
+                raise FastIdentityStaleError(
+                    "The media file generation changed before Fast persistence. "
+                    "Retry the scan."
+                )
 
             current_signatures = scan_input_signatures(
                 current,
@@ -992,6 +1014,7 @@ class FastIdentityService:
                    WHERE id=?""",
                 (scan_id,),
             )
+            seal_decision_snapshot(conn, scan_id, revision=1)
 
         return FastScanResult(
             scan_id=scan_id,

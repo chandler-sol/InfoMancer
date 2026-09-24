@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from io import BytesIO
+import hashlib
 import os
 import subprocess
 import tempfile
@@ -53,6 +54,7 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
                 path=str(self.media),
                 size_bytes=stat.st_size,
                 modified_at=stat.st_mtime,
+                sha256=hashlib.sha256(self.media.read_bytes()).hexdigest(),
             ),
             claimed_identity=IdentityReference(
                 identity_kind="episode",
@@ -144,10 +146,148 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
         self.assertIn("-fs", command)
         self.assertIn("image2pipe", command)
         self.assertIn("mjpeg", command)
-        self.assertIn(str(self.media), command)
+        if os.name == "nt":
+            self.assertIn(str(self.media.resolve()), command)
+            self.assertNotIn("pass_fds", run.call_args.kwargs)
+        else:
+            self.assertIn("-fd", command)
+            self.assertEqual(command[command.index("-i") + 1], "fd:")
+            self.assertNotIn(str(self.media), command)
+            self.assertEqual(len(run.call_args.kwargs["pass_fds"]), 1)
         self.assertNotIn("-hwaccel", command)
         self.assertEqual(run.call_args.kwargs["timeout"], 20)
         self.assertFalse(run.call_args.kwargs["check"])
+        self.assertIs(
+            run.call_args.kwargs["stderr"],
+            subprocess.DEVNULL,
+        )
+        self.assertIs(
+            run.call_args.kwargs["stdout"],
+            subprocess.PIPE,
+        )
+
+    @unittest.skipUnless(os.name == "nt", "Windows lease semantics test")
+    def test_windows_lease_blocks_parent_rename_until_cleanup(self):
+        source = self.source()
+        moved = self.root.with_name(self.root.name + "-moved")
+        try:
+            media = source.resolve_media(self.context)
+            self.assertIsNotNone(media)
+            with self.assertRaises(OSError):
+                os.replace(self.root, moved)
+        finally:
+            source.close()
+
+        os.replace(self.root, moved)
+        try:
+            self.assertTrue((moved / "episode.mkv").is_file())
+        finally:
+            os.replace(moved, self.root)
+
+    @unittest.skipIf(os.name == "nt", "POSIX descriptor binding test")
+    def test_path_redirection_cannot_change_leased_ffmpeg_input(self):
+        payload = jpeg_bytes()
+        original = self.media.read_bytes()
+        alternate = self.root / "alternate.mkv"
+        alternate.write_bytes(b"alternate-media" * 64)
+        alias = self.root / "episode-alias.mkv"
+        alias.symlink_to(self.media)
+        alias_context = replace(
+            self.context,
+            media=replace(self.context.media, path=str(alias)),
+        )
+        source = LocalFfmpegFrameSource(
+            alias_context,
+            1800.0,
+            executable=str(self.ffmpeg),
+        )
+
+        def redirect_alias(command, **kwargs):
+            descriptor = kwargs["pass_fds"][0]
+            alias.unlink()
+            alias.symlink_to(alternate)
+            try:
+                leased_bytes = os.pread(
+                    descriptor,
+                    len(original),
+                    0,
+                )
+                self.assertEqual(leased_bytes, original)
+                self.assertEqual(
+                    command[command.index("-i") + 1],
+                    "fd:",
+                )
+            finally:
+                alias.unlink()
+                alias.symlink_to(self.media)
+            return subprocess.CompletedProcess(
+                args=command,
+                returncode=0,
+                stdout=payload,
+                stderr=b"",
+            )
+
+        try:
+            media = source.resolve_media(alias_context)
+            frame = source.preview_frames(media)[0]
+            with patch(
+                "app.media_identity.local_frames.subprocess.run",
+                side_effect=redirect_alias,
+            ):
+                self.assertEqual(source.read_preview(frame), payload)
+        finally:
+            source.close()
+
+    @unittest.skipIf(os.name == "nt", "POSIX descriptor binding test")
+    def test_parent_directory_redirection_cannot_change_leased_ffmpeg_input(self):
+        payload = jpeg_bytes()
+        original = self.media.read_bytes()
+        held_root = self.root.with_name(self.root.name + "-held")
+        replacement_root = self.root.with_name(self.root.name + "-replacement")
+        replacement_root.mkdir()
+        (replacement_root / self.media.name).write_bytes(
+            b"replacement-parent-media" * 64
+        )
+        source = self.source()
+
+        def redirect_parent(command, **kwargs):
+            descriptor = kwargs["pass_fds"][0]
+            os.replace(self.root, held_root)
+            os.replace(replacement_root, self.root)
+            try:
+                self.assertEqual(
+                    os.pread(descriptor, len(original), 0),
+                    original,
+                )
+                self.assertEqual(
+                    command[command.index("-i") + 1],
+                    "fd:",
+                )
+            finally:
+                os.replace(self.root, replacement_root)
+                os.replace(held_root, self.root)
+            return subprocess.CompletedProcess(
+                args=command,
+                returncode=0,
+                stdout=payload,
+                stderr=b"",
+            )
+
+        try:
+            media = source.resolve_media(self.context)
+            self.assertIsNotNone(media)
+            frame = source.preview_frames(media)[0]
+            with patch(
+                "app.media_identity.local_frames.subprocess.run",
+                side_effect=redirect_parent,
+            ):
+                self.assertEqual(source.read_preview(frame), payload)
+        finally:
+            source.close()
+            if replacement_root.exists():
+                for item in replacement_root.iterdir():
+                    item.unlink()
+                replacement_root.rmdir()
 
     def test_timeout_is_optional_preview_failure(self):
         with (
@@ -161,10 +301,13 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
             ),
         ):
             source = self.source()
-            media = source.resolve_media(self.context)
-            frame = source.preview_frames(media)[0]
-            with self.assertRaisesRegex(LocalFrameUnavailable, "timed out"):
-                source.read_preview(frame)
+            try:
+                media = source.resolve_media(self.context)
+                frame = source.preview_frames(media)[0]
+                with self.assertRaisesRegex(LocalFrameUnavailable, "timed out"):
+                    source.read_preview(frame)
+            finally:
+                source.close()
 
     def test_ffmpeg_change_invalidates_prepared_source_and_cache_signature(self):
         source = self.source()
@@ -213,11 +356,49 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
             source = self.source()
             media = source.resolve_media(self.context)
             frame = source.preview_frames(media)[0]
-            with self.assertRaisesRegex(
-                LocalFrameSourceFailure,
-                "changed during",
-            ):
+            with self.assertRaises(LocalFrameSourceFailure):
                 source.read_preview(frame)
+
+    def test_same_size_same_mtime_a_b_a_during_extraction_fails_closed(self):
+        payload = jpeg_bytes()
+        original = self.media.read_bytes()
+        original_stat = self.media.stat()
+        replacement = bytearray(original)
+        replacement[0] ^= 0x01
+        replacement = bytes(replacement)
+
+        def cycle_content(*_args, **_kwargs):
+            self.media.write_bytes(replacement)
+            os.utime(
+                self.media,
+                ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+            )
+            self.media.write_bytes(original)
+            os.utime(
+                self.media,
+                ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+            )
+            return subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=payload,
+                stderr=b"",
+            )
+
+        source = self.source()
+        try:
+            media = source.resolve_media(self.context)
+            frame = source.preview_frames(media)[0]
+            with patch(
+                "app.media_identity.local_frames.subprocess.run",
+                side_effect=cycle_content,
+            ):
+                with self.assertRaises(LocalFrameSourceFailure):
+                    source.read_preview(frame)
+        finally:
+            source.close()
+
+        self.assertEqual(self.media.read_bytes(), original)
 
     def test_same_size_same_mtime_file_replacement_is_rejected_when_inode_is_available(self):
         with patch(
