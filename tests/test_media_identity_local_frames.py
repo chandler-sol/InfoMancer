@@ -238,6 +238,57 @@ class LocalFfmpegFrameSourceTests(unittest.TestCase):
         finally:
             source.close()
 
+    @unittest.skipIf(os.name == "nt", "POSIX descriptor binding test")
+    def test_parent_directory_redirection_cannot_change_leased_ffmpeg_input(self):
+        payload = jpeg_bytes()
+        original = self.media.read_bytes()
+        held_root = self.root.with_name(self.root.name + "-held")
+        replacement_root = self.root.with_name(self.root.name + "-replacement")
+        replacement_root.mkdir()
+        (replacement_root / self.media.name).write_bytes(
+            b"replacement-parent-media" * 64
+        )
+        source = self.source()
+
+        def redirect_parent(command, **kwargs):
+            descriptor = kwargs["pass_fds"][0]
+            os.replace(self.root, held_root)
+            os.replace(replacement_root, self.root)
+            try:
+                self.assertEqual(
+                    os.pread(descriptor, len(original), 0),
+                    original,
+                )
+                self.assertEqual(
+                    command[command.index("-i") + 1],
+                    "fd:",
+                )
+            finally:
+                os.replace(self.root, replacement_root)
+                os.replace(held_root, self.root)
+            return subprocess.CompletedProcess(
+                args=command,
+                returncode=0,
+                stdout=payload,
+                stderr=b"",
+            )
+
+        try:
+            media = source.resolve_media(self.context)
+            self.assertIsNotNone(media)
+            frame = source.preview_frames(media)[0]
+            with patch(
+                "app.media_identity.local_frames.subprocess.run",
+                side_effect=redirect_parent,
+            ):
+                self.assertEqual(source.read_preview(frame), payload)
+        finally:
+            source.close()
+            if replacement_root.exists():
+                for item in replacement_root.iterdir():
+                    item.unlink()
+                replacement_root.rmdir()
+
     def test_timeout_is_optional_preview_failure(self):
         with (
             patch(
