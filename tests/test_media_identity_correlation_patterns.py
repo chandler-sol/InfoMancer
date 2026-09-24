@@ -10,6 +10,7 @@ from app.media_identity.correlation_interpretation import (
 from app.media_identity.correlation_patterns import (
     CorrelationPatternError,
     DuplicatePatternStrength,
+    IdentityCycleObservation,
     SwapPatternObservation,
     SwapPatternStatus,
     detect_correlation_patterns,
@@ -359,6 +360,18 @@ class CyclePatternTests(unittest.TestCase):
             set(cycle.target_file_ids),
             set(cycle.file_ids),
         )
+
+    def test_two_disjoint_two_cycles_cannot_masquerade_as_one_cycle(self) -> None:
+        with self.assertRaisesRegex(
+            CorrelationPatternError,
+            "one complete directed cycle",
+        ):
+            IdentityCycleObservation(
+                file_ids=(1, 2, 3, 4),
+                target_file_ids=(2, 1, 4, 3),
+                claimed_coordinates=((1, 1), (1, 2), (1, 3), (1, 4)),
+                hypothesis_coordinates=((1, 2), (1, 1), (1, 4), (1, 3)),
+            )
 
     def test_four_file_rotation_is_cycle_not_multiple_swaps(self) -> None:
         analysis = detect_correlation_patterns(
