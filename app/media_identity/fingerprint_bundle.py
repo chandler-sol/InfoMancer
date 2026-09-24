@@ -15,6 +15,7 @@ from .fingerprint_correlation import (
     DeepFingerprintCorrelationRun,
     DeepFingerprintCorrelationService,
 )
+from .service import MediaIdentityDecisionService
 
 
 class DeepFingerprintBundleError(RuntimeError):
@@ -84,13 +85,38 @@ class DeepFingerprintBundleService:
                 "SELECT * FROM media_identity_scans WHERE id=?",
                 (int(scan_id),),
             ).fetchone()
+            evidence = (
+                []
+                if row is None
+                else [
+                    dict(item)
+                    for item in conn.execute(
+                        """SELECT * FROM media_identity_evidence
+                           WHERE scan_id=? ORDER BY id""",
+                        (int(scan_id),),
+                    ).fetchall()
+                ]
+            )
+            current = (
+                False
+                if row is None
+                else MediaIdentityDecisionService._scan_snapshot_is_current(
+                    conn,
+                    dict(row),
+                    evidence,
+                )[0]
+            )
         if row is None:
             raise DeepFingerprintBundleError(
                 "Episode Identity scan was not found for fingerprint preparation."
             )
         scan = dict(row)
         revision = result_revision(scan)
-        if scan["status"] != "complete" or revision <= 0:
+        if (
+            not current
+            or scan["status"] != "complete"
+            or revision <= 0
+        ):
             raise DeepFingerprintBundleError(
                 "Fingerprint preparation requires a complete sealed scan."
             )
