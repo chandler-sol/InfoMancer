@@ -200,7 +200,7 @@ class DeepSpeechPlanTests(unittest.TestCase):
 
         self.assertEqual(deep.windows, normal)
         self.assertEqual(
-            sum(item.duration_ms for item in deep.samples),
+            sum(item.window.duration_ms for item in deep.samples),
             95_000,
         )
         self.assertTrue(
