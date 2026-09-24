@@ -25,7 +25,10 @@ from app.media_identity.external import (
 )
 from app.media_identity.fast import FastIdentityService
 from app.media_identity.local_frames import LOCAL_FRAME_SOURCE_KEY
-from app.media_identity.normal_service import NormalIdentityService
+from app.media_identity.normal_service import (
+    NormalIdentityScanError,
+    NormalIdentityService,
+)
 from app.media_identity.normal import (
     NormalIdentityError,
     NormalPreviewOcrRun,
@@ -523,7 +526,7 @@ class DeepSamplingServiceTests(unittest.TestCase):
         with self.database.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             with self.assertRaisesRegex(
-                NormalIdentityError,
+                NormalIdentityScanError,
                 "output integrity seal",
             ):
                 normal._persist_artifacts(
