@@ -31,6 +31,7 @@ from app.media_identity.speech import (
 from app.media_identity.speech_audio import SpeechAudioStream
 from app.media_identity.speech_service import (
     NormalSpeechService,
+    NormalSpeechStaleError,
     plan_normal_speech_windows,
 )
 
@@ -559,7 +560,7 @@ class DeepSpeechServiceTests(unittest.TestCase):
 
         self.engine.mutate = mutate
         with self.assertRaisesRegex(
-            NormalSpeechService.__mro__[0].__name__ and Exception,
+            NormalSpeechStaleError,
             "publication changed",
         ):
             self._sampling_service().run(self.scan.scan_id)
