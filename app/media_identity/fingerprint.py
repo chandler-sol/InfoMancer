@@ -160,6 +160,7 @@ def _canonical_json(value: Any) -> str:
 class FingerprintSample:
     timestamp_ms: int
     value: str
+    informative: bool = True
 
     def __post_init__(self) -> None:
         if (
@@ -175,6 +176,10 @@ class FingerprintSample:
             raise FingerprintError(
                 "Fingerprint samples must be hexadecimal values."
             )
+        if not isinstance(self.informative, bool):
+            raise FingerprintError(
+                "Fingerprint sample informativeness must be boolean."
+            )
         object.__setattr__(self, "value", value)
 
 
@@ -188,6 +193,7 @@ class ContentFingerprint:
     source_kind: str = "local"
     source_signature: str = ""
     parameters: Mapping[str, Any] = field(default_factory=dict)
+    comparison_parameters: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if (
@@ -257,6 +263,11 @@ class ContentFingerprint:
             "parameters",
             _freeze_json(self.parameters),
         )
+        object.__setattr__(
+            self,
+            "comparison_parameters",
+            _freeze_json(self.comparison_parameters),
+        )
 
     def cache_identity(self) -> dict[str, Any]:
         return {
@@ -268,6 +279,9 @@ class ContentFingerprint:
             "source_kind": self.source_kind,
             "source_signature": self.source_signature,
             "parameters": _json_ready(self.parameters),
+            "comparison_parameters": _json_ready(
+                self.comparison_parameters
+            ),
         }
 
     def cache_key(self) -> str:
@@ -282,6 +296,7 @@ class ContentFingerprint:
                 {
                     "timestamp_ms": sample.timestamp_ms,
                     "value": sample.value,
+                    "informative": sample.informative,
                 }
                 for sample in self.samples
             ],
@@ -343,6 +358,7 @@ def fingerprint_from_payload(value: object) -> ContentFingerprint:
                 FingerprintSample(
                     timestamp_ms=int(item["timestamp_ms"]),
                     value=str(item["value"]),
+                    informative=item["informative"],
                 )
                 for item in samples
                 if isinstance(item, Mapping)
@@ -352,6 +368,14 @@ def fingerprint_from_payload(value: object) -> ContentFingerprint:
             parameters=(
                 identity.get("parameters")
                 if isinstance(identity.get("parameters"), Mapping)
+                else {}
+            ),
+            comparison_parameters=(
+                identity.get("comparison_parameters")
+                if isinstance(
+                    identity.get("comparison_parameters"),
+                    Mapping,
+                )
                 else {}
             ),
         )
@@ -448,7 +472,8 @@ def compare_content_fingerprints(
     policy = policy or FingerprintMatchPolicy()
     if (
         left.algorithm.identity_payload() != right.algorithm.identity_payload()
-        or _json_ready(left.parameters) != _json_ready(right.parameters)
+        or _json_ready(left.comparison_parameters)
+        != _json_ready(right.comparison_parameters)
         or len(left.samples) > policy.max_samples_per_fingerprint
         or len(right.samples) > policy.max_samples_per_fingerprint
     ):
@@ -475,15 +500,21 @@ def compare_content_fingerprints(
                 bits,
             )
             for index in range(available)
+            if (
+                left.samples[left_start + index].informative
+                and right.samples[right_start + index].informative
+            )
         ]
+        if len(values) < policy.min_compared_samples:
+            continue
         comparison = FingerprintComparison(
             left_file_id=left.file_id,
             right_file_id=right.file_id,
             algorithm_key=left.algorithm.key,
             algorithm_version=left.algorithm.version,
-            compared_samples=available,
+            compared_samples=len(values),
             alignment_shift=shift,
-            coverage=float(available) / float(
+            coverage=float(len(values)) / float(
                 max(len(left.samples), len(right.samples))
             ),
             mean_similarity=statistics.fmean(values),
