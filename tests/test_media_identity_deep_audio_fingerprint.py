@@ -101,8 +101,9 @@ class FakeAudioExtractor:
     values_by_file: dict[int, tuple[str, ...]] = {}
     calls: dict[int, int] = {}
 
-    def __init__(self, media, runtime_ms) -> None:
+    def __init__(self, media, runtime_ms, *, stream) -> None:
         self.media = media
+        self.stream = stream
         self.runtime_ms = int(runtime_ms)
         self.timestamps = plan_audio_fingerprint_timestamps(
             self.runtime_ms,
@@ -116,7 +117,8 @@ class FakeAudioExtractor:
         self.source_signature = hashlib.sha256(
             (
                 f"audio:{media.file_id}:{media.sha256}:"
-                f"{self.runtime_ms}:{self._generation}"
+                f"{self.runtime_ms}:{self._generation}:"
+                f"{dict(stream.cache_identity())}"
             ).encode()
         ).hexdigest()
 
@@ -157,7 +159,7 @@ class FakeAudioExtractor:
                 "window_ms": 4_000,
                 "sample_rate_hz": 8_000,
                 "channels": 1,
-                "stream_selector": "0:a:0",
+                "stream": dict(self.stream.cache_identity()),
                 "feature_bins": 33,
             },
         )
@@ -274,6 +276,35 @@ class AudioFingerprintServiceTests(unittest.TestCase):
                         file_id,
                     ),
                 )
+                conn.executemany(
+                    """INSERT INTO media_streams(
+                         file_id,stream_index,stream_type,codec,language,title,
+                         channels,channel_layout,sample_rate,default_flag,
+                         forced_flag,hearing_impaired,visual_impaired,commentary,
+                         disposition_json
+                       ) VALUES (
+                         ?,?,'audio','aac',?,?,2,'stereo',48000,?,
+                         0,0,0,?,'{}'
+                       )""",
+                    [
+                        (
+                            file_id,
+                            1,
+                            "eng",
+                            "Main English",
+                            1,
+                            0,
+                        ),
+                        (
+                            file_id,
+                            2,
+                            "eng",
+                            "Commentary",
+                            0,
+                            1,
+                        ),
+                    ],
+                )
                 conn.execute(
                     """INSERT INTO expected_episodes(
                          id,title_id,tvdb_episode_id,season,episode,name
@@ -302,6 +333,15 @@ class AudioFingerprintServiceTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def test_audio_fingerprint_uses_primary_non_commentary_stream(self) -> None:
+        result = self.audio.ensure_scan(self.scan1.scan_id)
+
+        self.assertIsNotNone(result.fingerprint)
+        stream = result.fingerprint.parameters["stream"]
+        self.assertEqual(stream["index"], 1)
+        self.assertEqual(stream["language"], "eng")
+        self.assertFalse(stream["commentary"])
 
     def test_audio_artifact_reuses_sealed_cache(self) -> None:
         first = self.audio.ensure_scan(self.scan1.scan_id)
