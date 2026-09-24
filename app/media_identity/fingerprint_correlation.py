@@ -19,6 +19,7 @@ from .fingerprint import (
     FingerprintError,
     FingerprintMatchPolicy,
     compare_content_fingerprints,
+    fingerprint_comparison_from_payload,
     fingerprint_from_payload,
 )
 from .fingerprint_service import (
@@ -102,6 +103,28 @@ def _comparison_payload(item: FingerprintComparison) -> dict[str, Any]:
         "median_similarity": item.median_similarity,
         "minimum_similarity": item.minimum_similarity,
     }
+
+FINGERPRINT_MANIFEST_OUTPUT_SEAL_FIELD = "manifest_output_sha256"
+
+
+def _manifest_payload(
+    identity: Mapping[str, Any],
+    comparisons: tuple[FingerprintComparison, ...],
+) -> dict[str, Any]:
+    body = {
+        "identity": dict(identity),
+        "coverage_complete": True,
+        "comparisons": [
+            _comparison_payload(item)
+            for item in comparisons
+        ],
+    }
+    body[FINGERPRINT_MANIFEST_OUTPUT_SEAL_FIELD] = hashlib.sha256(
+        _canonical_json(body).encode("utf-8")
+    ).hexdigest()
+    return body
+
+
 
 
 class DeepFingerprintCorrelationService:
@@ -333,15 +356,124 @@ class DeepFingerprintCorrelationService:
             payload = json.loads(str(row.get("payload_json") or "{}"))
         except (TypeError, ValueError, json.JSONDecodeError):
             return False
-        expected_payload = {
-            "identity": dict(identity),
-            "coverage_complete": True,
-            "comparisons": [
-                _comparison_payload(item)
-                for item in comparisons
-            ],
-        }
+        expected_payload = _manifest_payload(
+            identity,
+            comparisons,
+        )
         return payload == expected_payload
+
+    def _load_manifest(
+        self,
+        *,
+        baseline_scan: Mapping[str, Any],
+        revision: int,
+        plan: DeepCorrelationPlan,
+        children: Mapping[int, tuple[int, ContentFingerprint]],
+    ) -> tuple[int, tuple[FingerprintComparison, ...]] | None:
+        identity = self._manifest_identity(
+            scan=baseline_scan,
+            revision=revision,
+            plan=plan,
+            children=children,
+        )
+        cache_key = self._cache_key(identity)
+        with self.database.connect() as conn:
+            conn.execute("BEGIN")
+            current_scan, current_revision = self._scan_context(
+                conn,
+                int(baseline_scan["id"]),
+            )
+            if (
+                current_revision != int(revision)
+                or str(current_scan["metadata_signature"] or "")
+                != str(baseline_scan["metadata_signature"] or "")
+                or str(current_scan["file_sha256"] or "")
+                != str(baseline_scan["file_sha256"] or "")
+            ):
+                raise DeepFingerprintCorrelationError(
+                    "Episode Identity publication changed before cached "
+                    "fingerprint correlation reuse."
+                )
+            current_plan = self._plan(
+                conn,
+                int(current_scan["file_id"]),
+            )
+            if current_plan.plan_signature != plan.plan_signature:
+                raise DeepFingerprintCorrelationError(
+                    "Deep correlation cohort changed before cached matrix reuse."
+                )
+            for artifact_id, fingerprint in children.values():
+                if not self._child_is_current(
+                    conn,
+                    artifact_id=artifact_id,
+                    expected=fingerprint,
+                ):
+                    return None
+
+            row = conn.execute(
+                """SELECT * FROM media_identity_artifacts
+                   WHERE file_id=? AND artifact_type='deep_fingerprint_manifest'
+                     AND analyzer_key=? AND analyzer_version=? AND cache_key=?
+                   ORDER BY id DESC LIMIT 1""",
+                (
+                    int(current_scan["file_id"]),
+                    self.manifest_key,
+                    self.manifest_version,
+                    cache_key,
+                ),
+            ).fetchone()
+            if row is None:
+                return None
+            persisted = dict(row)
+            try:
+                payload = json.loads(
+                    str(persisted.get("payload_json") or "{}")
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return None
+            raw_comparisons = (
+                payload.get("comparisons")
+                if isinstance(payload, Mapping)
+                else None
+            )
+            if (
+                not isinstance(raw_comparisons, list)
+                or len(raw_comparisons) != len(plan.comparison_pairs)
+            ):
+                return None
+
+            comparisons: list[FingerprintComparison] = []
+            try:
+                for pair, raw in zip(
+                    plan.comparison_pairs,
+                    raw_comparisons,
+                ):
+                    comparison = fingerprint_comparison_from_payload(raw)
+                    if (
+                        (comparison.left_file_id, comparison.right_file_id)
+                        != tuple(pair)
+                        or comparison.algorithm_key != self.algorithm.key
+                        or comparison.algorithm_version
+                        != self.algorithm.version
+                        or abs(comparison.alignment_shift)
+                        > self.match_policy.max_alignment_shift
+                        or comparison.compared_samples
+                        < self.match_policy.min_compared_samples
+                    ):
+                        return None
+                    comparisons.append(comparison)
+            except FingerprintError:
+                return None
+
+            result = tuple(comparisons)
+            if not self._validate_manifest(
+                persisted,
+                scan=current_scan,
+                identity=identity,
+                comparisons=result,
+            ):
+                return None
+            return int(persisted["id"]), result
 
     def _persist_manifest(
         self,
@@ -358,14 +490,10 @@ class DeepFingerprintCorrelationService:
             plan=plan,
             children=children,
         )
-        payload = {
-            "identity": identity,
-            "coverage_complete": True,
-            "comparisons": [
-                _comparison_payload(item)
-                for item in comparisons
-            ],
-        }
+        payload = _manifest_payload(
+            identity,
+            comparisons,
+        )
         cache_key = self._cache_key(identity)
 
         with self.database.connect() as conn:
@@ -542,6 +670,32 @@ class DeepFingerprintCorrelationService:
                 "Deep correlation cohort changed while fingerprints were prepared."
             )
         plan = current_plan
+
+        if not missing:
+            cached_manifest = self._load_manifest(
+                baseline_scan=current_scan,
+                revision=current_revision,
+                plan=plan,
+                children=children,
+            )
+            if cached_manifest is not None:
+                manifest_id, cached_comparisons = cached_manifest
+                return DeepFingerprintCorrelationRun(
+                    scan_id=int(scan_id),
+                    algorithm_key=self.algorithm.key,
+                    correlation_plan_signature=plan.plan_signature,
+                    planned_file_count=len(plan.files),
+                    completed_file_count=len(children),
+                    planned_pair_count=len(plan.comparison_pairs),
+                    completed_pair_count=len(cached_comparisons),
+                    reused_fingerprint_count=reused,
+                    generated_fingerprint_count=generated,
+                    manifest_artifact_id=manifest_id,
+                    coverage_complete=True,
+                    missing_file_ids=(),
+                    comparisons=cached_comparisons,
+                    failures=(),
+                )
 
         comparisons: list[FingerprintComparison] = []
         if not missing:
