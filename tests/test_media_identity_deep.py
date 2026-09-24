@@ -162,6 +162,144 @@ class DeepIdentityPlanningTests(unittest.TestCase):
             [(2, 1), (2, 2), (0, 1), (1, 1)],
         )
 
+    def test_deep_candidate_plan_binds_provider_cache_signature(self) -> None:
+        with self.database.connect() as conn:
+            conn.execute("UPDATE titles SET tvdb_id=4242 WHERE id=1")
+            conn.execute(
+                """INSERT INTO provider_episode_series_cache(
+                     provider,provider_series_id,language,source_signature,
+                     episode_count,mapping_count,order_namespaces_json
+                   ) VALUES (
+                     'tvdb','4242','eng','provider-v1',5,5,
+                     '[{"namespace":"default"}]'
+                   )"""
+            )
+            conn.executemany(
+                """INSERT INTO provider_episode_identities(
+                     provider,provider_series_id,provider_episode_id,language,
+                     name,overview,aired,metadata_json
+                   ) VALUES ('tvdb','4242',?,'eng',?,?,?,'{}')""",
+                [
+                    ("1001", "S2 One", "alpha", "2026-01-01"),
+                    ("1002", "S2 Two", "bravo", "2026-01-08"),
+                    ("9001", "Special", "special", "2025-12-25"),
+                    ("1101", "S1 One", "charlie", "2025-01-01"),
+                    ("1301", "S3 One", "delta", "2027-01-01"),
+                ],
+            )
+            conn.executemany(
+                """INSERT INTO provider_episode_mappings(
+                     provider,provider_series_id,provider_episode_id,language,
+                     order_namespace,order_name,season,episode,absolute_number,
+                     coordinate_key,details_json
+                   ) VALUES (
+                     'tvdb','4242',?,'eng','default','Default',?,?,?,?,'{}'
+                   )""",
+                [
+                    ("1001", 2, 1, 1, "[2,1,1]"),
+                    ("1002", 2, 2, 2, "[2,2,2]"),
+                    ("9001", 0, 1, 0, "[0,1,0]"),
+                    ("1101", 1, 1, 1, "[1,1,1]"),
+                    ("1301", 3, 1, 1, "[3,1,1]"),
+                ],
+            )
+            first = generate_deep_episode_candidates(
+                conn,
+                title_id=1,
+                season=2,
+                episode_start=1,
+                policy=DeepCandidatePolicy(
+                    adjacent_season_radius=1,
+                    include_specials=True,
+                    max_candidates=10,
+                    max_specials=1,
+                ),
+            )
+            conn.execute(
+                """UPDATE provider_episode_series_cache
+                   SET source_signature='provider-v2'
+                   WHERE provider='tvdb'
+                     AND provider_series_id='4242'
+                     AND language='eng'"""
+            )
+            second = generate_deep_episode_candidates(
+                conn,
+                title_id=1,
+                season=2,
+                episode_start=1,
+                policy=first.policy,
+            )
+
+        self.assertTrue(first.used_provider_cache)
+        self.assertEqual(first.provider_series_id, "4242")
+        self.assertEqual(first.provider_signature, "provider-v1")
+        self.assertEqual(second.provider_signature, "provider-v2")
+        self.assertNotEqual(first.plan_signature, second.plan_signature)
+        self.assertEqual(
+            [(item.identity.season, item.identity.episode) for item in first.candidates],
+            [(2, 1), (2, 2), (0, 1), (1, 1), (3, 1)],
+        )
+
+    def test_existing_schema_supports_deep_fingerprint_and_correlation_states(self) -> None:
+        with self.database.connect() as conn:
+            cursor = conn.execute(
+                """INSERT INTO media_identity_scans(
+                     file_id,requested_profile,completed_profile,status,stage,
+                     claimed_identity_json,file_size_bytes,result_state
+                   ) VALUES (
+                     1,'deep','deep','complete','deep_complete','{}',101,
+                     'duplicate_content_identity'
+                   )"""
+            )
+            scan_id = int(cursor.lastrowid)
+            conn.execute(
+                """INSERT INTO media_identity_evidence(
+                     scan_id,analyzer_key,analyzer_version,evidence_category,
+                     correlation_group,relation,strength,source_kind,source_ref,
+                     details_json,profile
+                   ) VALUES (
+                     ?,'deep-fingerprint','1','fingerprint',
+                     'fingerprint:file:1','neutral',0,'local','file:1',
+                     '{}','deep'
+                   )""",
+                (scan_id,),
+            )
+            conn.execute(
+                """INSERT INTO media_identity_artifacts(
+                     file_id,artifact_type,analyzer_key,analyzer_version,
+                     cache_key,status,profile,file_size_bytes,payload_json
+                   ) VALUES (
+                     1,'fingerprint','deep-fingerprint','1',
+                     'fixture-fingerprint','complete','deep',101,'{}'
+                   )"""
+            )
+            conn.execute(
+                """UPDATE media_identity_scans
+                   SET result_state='possible_swapped_episodes'
+                   WHERE id=?""",
+                (scan_id,),
+            )
+            row = conn.execute(
+                """SELECT requested_profile,completed_profile,result_state
+                   FROM media_identity_scans WHERE id=?""",
+                (scan_id,),
+            ).fetchone()
+            evidence_profile = conn.execute(
+                """SELECT profile FROM media_identity_evidence
+                   WHERE scan_id=?""",
+                (scan_id,),
+            ).fetchone()["profile"]
+            artifact_profile = conn.execute(
+                """SELECT profile FROM media_identity_artifacts
+                   WHERE file_id=1 AND cache_key='fixture-fingerprint'"""
+            ).fetchone()["profile"]
+
+        self.assertEqual(row["requested_profile"], "deep")
+        self.assertEqual(row["completed_profile"], "deep")
+        self.assertEqual(row["result_state"], "possible_swapped_episodes")
+        self.assertEqual(evidence_profile, "deep")
+        self.assertEqual(artifact_profile, "deep")
+
     def test_deep_special_claim_does_not_treat_regular_seasons_as_adjacent(self) -> None:
         with self.database.connect() as conn:
             plan = generate_deep_episode_candidates(
