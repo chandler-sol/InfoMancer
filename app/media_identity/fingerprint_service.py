@@ -376,6 +376,7 @@ class DeepFingerprintArtifactService:
         ):
             return None
         if expected_timestamps is None:
+            try:
                 sample_count = int(
                     fingerprint.parameters.get("sample_count")
                 )
