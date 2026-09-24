@@ -639,21 +639,43 @@ def deep_plan_metadata_is_current(
         candidate_plan,
         correlation_plan,
     )
+    raw_pairs = metadata.get("comparison_pairs")
+    raw_file_ids = metadata.get("correlation_file_ids")
+    raw_candidate_keys = metadata.get("candidate_keys")
+    if (
+        not isinstance(raw_pairs, list)
+        or not isinstance(raw_file_ids, list)
+        or not isinstance(raw_candidate_keys, list)
+    ):
+        return False
+
+    persisted_pairs: list[list[int]] = []
     try:
-        persisted_pairs = [
-            [int(pair[0]), int(pair[1])]
-            for pair in metadata.get("comparison_pairs", [])
-            if isinstance(pair, (list, tuple)) and len(pair) == 2
-        ]
-        persisted_file_ids = [
-            int(value)
-            for value in metadata.get("correlation_file_ids", [])
-        ]
-        persisted_candidate_keys = [
-            str(value)
-            for value in metadata.get("candidate_keys", [])
-        ]
-    except (TypeError, ValueError):
+        for pair in raw_pairs:
+            if not isinstance(pair, list) or len(pair) != 2:
+                return False
+            left = _strict_int(pair[0], name="Deep comparison left file id")
+            right = _strict_int(pair[1], name="Deep comparison right file id")
+            if left <= 0 or right <= 0 or left == right:
+                return False
+            persisted_pairs.append([left, right])
+
+        persisted_file_ids = []
+        for value in raw_file_ids:
+            file_value = _strict_int(
+                value,
+                name="Deep correlation metadata file id",
+            )
+            if file_value <= 0:
+                return False
+            persisted_file_ids.append(file_value)
+
+        persisted_candidate_keys = []
+        for value in raw_candidate_keys:
+            if not isinstance(value, str) or not value:
+                return False
+            persisted_candidate_keys.append(value)
+    except (DeepIdentityError, TypeError, ValueError):
         return False
 
     return (
