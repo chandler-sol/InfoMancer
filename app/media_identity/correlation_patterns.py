@@ -75,6 +75,7 @@ class SwapPatternObservation:
     right_hypothesis: tuple[int, int]
     status: SwapPatternStatus
     fingerprint_agreement: MultimodalAgreement | None
+    fingerprint_similarity_support: bool
 
     def __post_init__(self) -> None:
         if (
@@ -114,11 +115,46 @@ class SwapPatternObservation:
             raise CorrelationPatternError(
                 "Swap fingerprint agreement is invalid."
             )
+        if not isinstance(
+            self.fingerprint_similarity_support,
+            bool,
+        ):
+            raise CorrelationPatternError(
+                "Swap fingerprint similarity-support flag is invalid."
+            )
+        if self.status is SwapPatternStatus.CORROBORATED_DISTINCT:
+            if (
+                self.fingerprint_agreement
+                is not MultimodalAgreement.BOTH_LOW
+                or self.fingerprint_similarity_support
+            ):
+                raise CorrelationPatternError(
+                    "Corroborated swaps require multimodal difference support."
+                )
+        elif self.status is SwapPatternStatus.CONFLICTED_MODALITIES:
+            if (
+                self.fingerprint_agreement
+                is not MultimodalAgreement.CONTRADICTORY
+            ):
+                raise CorrelationPatternError(
+                    "Modality-conflicted swaps require contradictory fingerprints."
+                )
+        elif self.status is SwapPatternStatus.CONFLICTED_SIMILARITY:
+            if not self.fingerprint_similarity_support:
+                raise CorrelationPatternError(
+                    "Similarity-conflicted swaps require similarity support."
+                )
+        elif self.status is SwapPatternStatus.HYPOTHESIS_ONLY:
+            if self.fingerprint_similarity_support:
+                raise CorrelationPatternError(
+                    "Hypothesis-only swaps cannot carry fingerprint similarity support."
+                )
 
 
 @dataclass(frozen=True)
 class IdentityCycleObservation:
     file_ids: tuple[int, ...]
+    target_file_ids: tuple[int, ...]
     claimed_coordinates: tuple[tuple[int, int], ...]
     hypothesis_coordinates: tuple[tuple[int, int], ...]
 
@@ -135,11 +171,25 @@ class IdentityCycleObservation:
                 "Identity cycle file IDs must be unique and normalized."
             )
         if (
-            len(self.claimed_coordinates) != len(self.file_ids)
+            len(self.target_file_ids) != len(self.file_ids)
+            or len(self.claimed_coordinates) != len(self.file_ids)
             or len(self.hypothesis_coordinates) != len(self.file_ids)
         ):
             raise CorrelationPatternError(
                 "Identity cycle coordinate counts are inconsistent."
+            )
+        if (
+            set(self.target_file_ids) != set(self.file_ids)
+            or any(
+                source == target
+                for source, target in zip(
+                    self.file_ids,
+                    self.target_file_ids,
+                )
+            )
+        ):
+            raise CorrelationPatternError(
+                "Identity cycle targets do not form a closed file cycle."
             )
 
 
@@ -297,17 +347,24 @@ def _find_cycles(
                         _coordinate(hypotheses_by_file[file_id])
                         for file_id in normalized
                     )
-                    targets = tuple(
+                    hypothesis_coordinates = tuple(
                         _hypothesis_coordinate(
                             hypotheses_by_file[file_id]
                         )
                         for file_id in normalized
                     )
+                    target_file_ids = tuple(
+                        edges[file_id]
+                        for file_id in normalized
+                    )
                     cycles.append(
                         IdentityCycleObservation(
                             file_ids=normalized,
+                            target_file_ids=target_file_ids,
                             claimed_coordinates=claimed,
-                            hypothesis_coordinates=targets,
+                            hypothesis_coordinates=(
+                                hypothesis_coordinates
+                            ),
                         )
                     )
                 break
@@ -334,17 +391,38 @@ def _find_cycles(
 
 def _swap_status(
     pair: PairInterpretation | None,
-) -> tuple[SwapPatternStatus, MultimodalAgreement | None]:
+) -> tuple[
+    SwapPatternStatus,
+    MultimodalAgreement | None,
+    bool,
+]:
     if pair is None:
-        return SwapPatternStatus.HYPOTHESIS_ONLY, None
+        return SwapPatternStatus.HYPOTHESIS_ONLY, None, False
     agreement = pair.agreement
+    similarity_support = pair.has_any_similarity_support
     if agreement is MultimodalAgreement.BOTH_LOW:
-        return SwapPatternStatus.CORROBORATED_DISTINCT, agreement
+        return (
+            SwapPatternStatus.CORROBORATED_DISTINCT,
+            agreement,
+            False,
+        )
     if agreement is MultimodalAgreement.CONTRADICTORY:
-        return SwapPatternStatus.CONFLICTED_MODALITIES, agreement
-    if pair.has_any_similarity_support:
-        return SwapPatternStatus.CONFLICTED_SIMILARITY, agreement
-    return SwapPatternStatus.HYPOTHESIS_ONLY, agreement
+        return (
+            SwapPatternStatus.CONFLICTED_MODALITIES,
+            agreement,
+            similarity_support,
+        )
+    if similarity_support:
+        return (
+            SwapPatternStatus.CONFLICTED_SIMILARITY,
+            agreement,
+            True,
+        )
+    return (
+        SwapPatternStatus.HYPOTHESIS_ONLY,
+        agreement,
+        False,
+    )
 
 
 def detect_correlation_patterns(
@@ -424,7 +502,9 @@ def detect_correlation_patterns(
         left_item = hypotheses_by_file[left]
         right_item = hypotheses_by_file[right]
         pair = pair_by_key.get((left, right))
-        status, agreement = _swap_status(pair)
+        status, agreement, similarity_support = _swap_status(
+            pair
+        )
         swaps.append(
             SwapPatternObservation(
                 left_file_id=left,
@@ -435,6 +515,9 @@ def detect_correlation_patterns(
                 right_hypothesis=_hypothesis_coordinate(right_item),
                 status=status,
                 fingerprint_agreement=agreement,
+                fingerprint_similarity_support=(
+                    similarity_support
+                ),
             )
         )
 
