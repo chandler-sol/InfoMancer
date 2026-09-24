@@ -446,6 +446,92 @@ class DeepSamplingServiceTests(unittest.TestCase):
         self.assertEqual(len(persisted.observations), 1)
         self.assertTrue(persisted.observations[0].reused)
 
+    def test_normal_rejects_tampered_deep_created_ocr_artifact(self) -> None:
+        result = self._service().run(self.scan.scan_id)
+        self.assertTrue(result.coverage_complete)
+        assert result.manifest_artifact_id is not None
+
+        with self.database.connect() as conn:
+            manifest = conn.execute(
+                "SELECT payload_json FROM media_identity_artifacts WHERE id=?",
+                (result.manifest_artifact_id,),
+            ).fetchone()
+            manifest_payload = json.loads(manifest["payload_json"])
+            child_id = int(manifest_payload["observations"][0]["artifact_id"])
+            row = dict(conn.execute(
+                "SELECT * FROM media_identity_artifacts WHERE id=?",
+                (child_id,),
+            ).fetchone())
+            scan = dict(conn.execute(
+                "SELECT * FROM media_identity_scans WHERE id=?",
+                (self.scan.scan_id,),
+            ).fetchone())
+
+        payload = json.loads(row["payload_json"])
+        frame = PreviewFrameRef(
+            source_key=str(row["source_kind"]),
+            item_id=str(payload["item_id"]),
+            timestamp_ms=int(row["start_ms"]),
+            asset_ref=str(row["source_ref"]),
+            source_signature=str(row["source_signature"]),
+            width=1280,
+            height=720,
+        )
+        observation = PreviewOcrObservation(
+            source_key=frame.source_key,
+            item_id=frame.item_id,
+            timestamp_ms=frame.timestamp_ms,
+            stage=NormalSamplingStage.FINAL,
+            ordinal=1,
+            cache_key=str(row["cache_key"]),
+            source_signature=frame.source_signature,
+            asset_ref=frame.asset_ref,
+            text=str(row["text_value"]),
+            confidence=payload["confidence"],
+            image_bytes=int(payload["image_bytes"]),
+            reused=True,
+            details=payload["details"],
+        )
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([]),
+            self.engine,
+        )
+
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE media_identity_artifacts
+                   SET text_value=text_value || '-tampered'
+                   WHERE id=?""",
+                (child_id,),
+            )
+
+        self.assertIsNone(
+            normal._cached_ocr(
+                scan,
+                frame,
+                str(row["cache_key"]),
+            )
+        )
+        run = NormalPreviewOcrRun(
+            source_key=LOCAL_FRAME_SOURCE_KEY,
+            observations=(observation,),
+            planned_frame_count=1,
+            completed_frame_count=1,
+            coverage_complete=True,
+        )
+        with self.database.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            with self.assertRaisesRegex(
+                NormalIdentityError,
+                "output integrity seal",
+            ):
+                normal._persist_artifacts(
+                    conn,
+                    scan,
+                    run,
+                )
+
     def test_interrupted_run_resumes_exact_completed_work(self) -> None:
         before = self._scan_snapshot()
         self.engine.interrupt_after = 3
