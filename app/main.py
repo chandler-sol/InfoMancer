@@ -56,7 +56,6 @@ from .media_info import MediaInspectionError, inspect_media
 from .mie import CATEGORIES as MIE_CATEGORIES
 from .mie import SEVERITIES as MIE_SEVERITIES
 from .mie import MediaIntelligenceEngine
-from .mie_history import MediaIntelligenceHistoryEngine
 from .maintenance import (
     MaintenanceError, create_database_backup, install_database_backup,
     list_database_backups, read_update_status, resolve_backup,
@@ -133,15 +132,10 @@ def _mie_external_registry():
     except ProviderSecretError:
         integration_secrets = {}
     return build_configured_source_registry(
-        external_source_config,
+        ExternalSourceConfigService(db),
         integration_secrets,
     )
 
-
-mie = MediaIntelligenceHistoryEngine(
-    db,
-    external_registry_factory=_mie_external_registry,
-)
 APP_VERSION = "0.8.1-beta.2"
 @asynccontextmanager
 async def _infomancer_lifespan(_app: FastAPI):
