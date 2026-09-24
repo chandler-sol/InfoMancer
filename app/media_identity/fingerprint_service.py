@@ -122,6 +122,23 @@ class DeepFingerprintArtifactService:
         self.source_kind = normalized_source_kind
         self.timestamp_planner = timestamp_planner
 
+    def _build_extractor(
+        self,
+        media: MediaIdentityFile,
+        snapshot: Mapping[str, Any],
+    ):
+        return self.extractor_factory(
+            media,
+            int(snapshot["runtime_ms"]),
+        )
+
+    def _fingerprint_matches_snapshot(
+        self,
+        fingerprint: ContentFingerprint,
+        snapshot: Mapping[str, Any],
+    ) -> bool:
+        return True
+
     @staticmethod
     def _file_snapshot(
         conn: sqlite3.Connection,
@@ -345,8 +362,12 @@ class DeepFingerprintArtifactService:
             != fingerprint.cache_key()
         ):
             return None
+        if not self._fingerprint_matches_snapshot(
+            fingerprint,
+            snapshot,
+        ):
+            return None
         if expected_timestamps is None:
-            try:
                 sample_count = int(
                     fingerprint.parameters.get("sample_count")
                 )
@@ -592,9 +613,9 @@ class DeepFingerprintArtifactService:
             )
 
         try:
-            extractor = self.extractor_factory(
+            extractor = self._build_extractor(
                 media,
-                int(snapshot["runtime_ms"]),
+                snapshot,
             )
         except (FingerprintError, LocalFingerprintError, OSError) as exc:
             return DeepFingerprintRun(
@@ -645,6 +666,10 @@ class DeepFingerprintArtifactService:
             or fingerprint.algorithm.identity_payload()
             != self.algorithm.identity_payload()
             or fingerprint.source_kind != self.source_kind
+            or not self._fingerprint_matches_snapshot(
+                fingerprint,
+                snapshot,
+            )
             or fingerprint.source_signature != extractor.source_signature
             or tuple(
                 sample.timestamp_ms for sample in fingerprint.samples
