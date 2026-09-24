@@ -13,6 +13,8 @@ from app.media_identity.deep import (
     DeepCandidatePolicy,
     DeepCorrelationPolicy,
     DeepIdentityError,
+    build_deep_plan_metadata,
+    deep_plan_metadata_is_current,
     generate_deep_episode_candidates,
     plan_deep_correlation,
 )
@@ -382,6 +384,76 @@ class DeepIdentityPlanningTests(unittest.TestCase):
 
         self.assertEqual([item.file_id for item in plan.peers], [2, 3])
         self.assertEqual(plan.comparison_pairs, ((1, 2), (1, 3)))
+
+    def test_persisted_deep_plan_metadata_revalidates_exact_plans(self) -> None:
+        candidate_policy = DeepCandidatePolicy(
+            adjacent_season_radius=1,
+            include_specials=True,
+            max_candidates=10,
+            max_specials=1,
+        )
+        correlation_policy = DeepCorrelationPolicy(
+            season_radius=0,
+            max_files=2,
+            max_pairwise_comparisons=1,
+        )
+        with self.database.connect() as conn:
+            candidates = generate_deep_episode_candidates(
+                conn,
+                title_id=1,
+                season=2,
+                episode_start=1,
+                policy=candidate_policy,
+            )
+            correlation = plan_deep_correlation(
+                conn,
+                file_id=1,
+                policy=correlation_policy,
+            )
+            metadata = build_deep_plan_metadata(candidates, correlation)
+            self.assertTrue(
+                deep_plan_metadata_is_current(
+                    conn,
+                    file_id=1,
+                    title_id=1,
+                    season=2,
+                    episode_start=1,
+                    episode_end=1,
+                    language="eng",
+                    metadata=metadata,
+                )
+            )
+
+            changed = dict(metadata)
+            changed["candidate_plan_signature"] = "0" * 64
+            self.assertFalse(
+                deep_plan_metadata_is_current(
+                    conn,
+                    file_id=1,
+                    title_id=1,
+                    season=2,
+                    episode_start=1,
+                    episode_end=1,
+                    language="eng",
+                    metadata=changed,
+                )
+            )
+
+            conn.execute(
+                "UPDATE files SET modified_at=modified_at+1 WHERE id=2"
+            )
+            self.assertFalse(
+                deep_plan_metadata_is_current(
+                    conn,
+                    file_id=1,
+                    title_id=1,
+                    season=2,
+                    episode_start=1,
+                    episode_end=1,
+                    language="eng",
+                    metadata=metadata,
+                )
+            )
 
     def test_correlation_signature_binds_file_snapshot(self) -> None:
         policy = DeepCorrelationPolicy(
