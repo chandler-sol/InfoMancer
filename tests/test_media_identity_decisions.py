@@ -878,7 +878,7 @@ class DecisionServiceTests(unittest.TestCase):
                 (self.scan_id,),
             )
         with self.assertRaisesRegex(
-            ValueError, "not strong enough to confirm an alternate episode"
+            ValueError, "sealed Episode Identity decision no longer matches"
         ):
             self._confirm_best(self.scan_id)
 
@@ -1169,7 +1169,9 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertFalse(detail["snapshot_current"])
         self.assertFalse(detail["actionable"])
         self.assertEqual(self._rename_preview(self.scan_id)["status"], "stale")
-        with self.assertRaisesRegex(ValueError, "changed after this identity scan"):
+        with self.assertRaisesRegex(
+            ValueError, "sealed Episode Identity decision no longer matches"
+        ):
             self._confirm_best(self.scan_id)
 
     def test_persisted_evidence_tamper_cannot_leave_stored_mismatch_actionable(self) -> None:
