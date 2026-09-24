@@ -30,8 +30,8 @@ def _comparison(
     left: int = 1,
     right: int = 2,
     *,
-    algorithm_key: str = "fixture",
-    algorithm_version: str = "1",
+    algorithm_key: str = VIDEO_DHASH64_V1.key,
+    algorithm_version: str = VIDEO_DHASH64_V1.version,
     compared_samples: int = 8,
     coverage: float = 1.0,
     mean: float = 0.95,
@@ -218,6 +218,19 @@ class ModalityInterpretationTests(unittest.TestCase):
                 modality="video",
             )
         )
+
+    def test_modality_rejects_wrong_fingerprint_algorithm(self) -> None:
+        with self.assertRaisesRegex(
+            CorrelationInterpretationError,
+            "wrong fingerprint algorithm",
+        ):
+            interpret_modality(
+                _comparison(
+                    algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                    algorithm_version=AUDIO_ENVELOPE_DHASH64_V1.version,
+                ),
+                modality="video",
+            )
 
     def test_unknown_modality_fails_closed(self) -> None:
         with self.assertRaisesRegex(
@@ -424,6 +437,10 @@ class PairInterpretationTests(unittest.TestCase):
             MultimodalAgreement.SINGLE_MODALITY,
         )
         self.assertEqual(
+            (result.left_file_id, result.right_file_id),
+            (1, 2),
+        )
+        self.assertEqual(
             frozenset(
                 (
                     result.video.left_file_id,
@@ -431,6 +448,24 @@ class PairInterpretationTests(unittest.TestCase):
                 )
             ),
             frozenset((1, 2)),
+        )
+
+    def test_reversed_requested_pair_normalizes_output_identity(self) -> None:
+        result = interpret_pair(
+            left_file_id=2,
+            right_file_id=1,
+            video=_comparison(
+                left=1,
+                right=2,
+                algorithm_key=VIDEO_DHASH64_V1.key,
+                algorithm_version=VIDEO_DHASH64_V1.version,
+            ),
+            audio=None,
+        )
+
+        self.assertEqual(
+            (result.left_file_id, result.right_file_id),
+            (1, 2),
         )
 
     def test_boolean_pair_id_fails_closed(self) -> None:
