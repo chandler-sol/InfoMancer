@@ -929,6 +929,7 @@ class MediaIntelligenceEngine:
         return [dict(row) for row in rows]
 
     def delete_feedback(self, feedback_id: int) -> bool:
+        reconcile_identity = False
         with self.database.connect() as conn:
             feedback = conn.execute(
                 "SELECT finding_fingerprint FROM mie_feedback WHERE id=? AND active=1",
@@ -936,16 +937,44 @@ class MediaIntelligenceEngine:
             ).fetchone()
             if not feedback:
                 return False
-            cursor = conn.execute(
-                "UPDATE mie_feedback SET active=0 WHERE id=? AND active=1", (feedback_id,)
-            )
-            conn.execute(
-                """UPDATE mie_findings
-                   SET status='active',dismissed_at=NULL,dismissed_by=NULL
+            finding = conn.execute(
+                """SELECT id,rule_key
+                   FROM mie_findings
                    WHERE fingerprint=?""",
                 (feedback["finding_fingerprint"],),
+            ).fetchone()
+            cursor = conn.execute(
+                "UPDATE mie_feedback SET active=0 WHERE id=? AND active=1",
+                (feedback_id,),
             )
-        return bool(cursor.rowcount)
+            reconcile_identity = bool(
+                finding
+                and str(finding["rule_key"] or "")
+                == "episode-identity-review"
+            )
+            if reconcile_identity:
+                # Removing feedback does not prove that this historical sealed
+                # decision is still the current effective Episode Identity
+                # result. Keep it historical until MIE independently emits the
+                # same fingerprint again.
+                conn.execute(
+                    """UPDATE mie_findings
+                       SET status='resolved',dismissed_at=NULL,dismissed_by=NULL,
+                           resolved_at=CURRENT_TIMESTAMP
+                       WHERE id=?""",
+                    (int(finding["id"]),),
+                )
+            else:
+                conn.execute(
+                    """UPDATE mie_findings
+                       SET status='active',dismissed_at=NULL,dismissed_by=NULL
+                       WHERE fingerprint=?""",
+                    (feedback["finding_fingerprint"],),
+                )
+        deleted = bool(cursor.rowcount)
+        if deleted and reconcile_identity:
+            self.analyze()
+        return deleted
 
     @staticmethod
     def _normalize_quality_profile(
