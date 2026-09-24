@@ -1981,7 +1981,7 @@ class MediaIdentityDecisionService:
                     "fingerprint": (
                         "episode-identity-history:"
                         f"file:{int(latest_detail['file_id'])}:"
-                        f"latest:{latest_scan_id}:profile:normal"
+                        f"latest:{latest_scan_id}"
                     ),
                     "rule_key": "episode-identity-history-uncertain",
                     "category": "identity",
