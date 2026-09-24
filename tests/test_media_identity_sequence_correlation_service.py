@@ -335,6 +335,43 @@ class DeepSequenceCorrelationServiceTests(unittest.TestCase):
                     self.interpretation,
                 )
 
+    def test_sequence_run_rejects_overlapping_missing_and_invalid_files(self) -> None:
+        from app.media_identity.sequence_correlation import (
+            SequenceOffsetAnalysis,
+            SequenceOffsetPolicy,
+        )
+        from app.media_identity.sequence_correlation_service import (
+            DeepSequenceCorrelationRun,
+        )
+
+        target = _hypothesis(1, 1, 2)
+        analysis = SequenceOffsetAnalysis(
+            policy=SequenceOffsetPolicy(),
+            hypothesis_count=1,
+            usable_count=1,
+            excluded_file_ids=(),
+            observations=(),
+            conflicted_seasons=(),
+        )
+        with self.assertRaisesRegex(
+            DeepSequenceCorrelationError,
+            "overlap",
+        ):
+            DeepSequenceCorrelationRun(
+                scan_id=1,
+                target_file_id=1,
+                result_revision=1,
+                correlation_plan_signature="a" * 64,
+                sequence_policy_signature="b" * 64,
+                sequence_policy_identity={},
+                planned_file_count=3,
+                hypothesis_count=1,
+                missing_scan_file_ids=(2,),
+                invalid_scan_file_ids=(2,),
+                hypotheses=(target,),
+                analysis=analysis,
+            )
+
     def test_target_revision_drift_is_rejected(self) -> None:
         stale = DeepCorrelationInterpretationRun(
             scan_id=self.interpretation.scan_id,
