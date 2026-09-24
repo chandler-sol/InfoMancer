@@ -463,7 +463,7 @@ def _pair_key(
         or left_file_id == right_file_id
     ):
         raise CorrelationInterpretationError(
-            "Correlation pairs require two distinct positive integer file IDs."
+            "Correlation pairs require two distinct positive file IDs."
         )
     return (
         min(left_file_id, right_file_id),
