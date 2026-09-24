@@ -179,13 +179,15 @@ class PairInterpretation:
             raise CorrelationInterpretationError(
                 "Pair interpretation requires two distinct positive file IDs."
             )
+        expected_pair = frozenset(
+            (self.left_file_id, self.right_file_id)
+        )
         for item in (self.video, self.audio):
             if item is None:
                 continue
-            if (
-                item.left_file_id != self.left_file_id
-                or item.right_file_id != self.right_file_id
-            ):
+            if frozenset(
+                (item.left_file_id, item.right_file_id)
+            ) != expected_pair:
                 raise CorrelationInterpretationError(
                     "Modality interpretation belongs to a different file pair."
                 )
@@ -336,8 +338,8 @@ def interpret_pair(
         policy=policy,
     )
     pair = PairInterpretation(
-        left_file_id=int(left_file_id),
-        right_file_id=int(right_file_id),
+        left_file_id=left_file_id,
+        right_file_id=right_file_id,
         video=video_interpretation,
         audio=audio_interpretation,
         agreement=_agreement(
@@ -352,9 +354,21 @@ def _pair_key(
     left_file_id: int,
     right_file_id: int,
 ) -> tuple[int, int]:
+    if (
+        isinstance(left_file_id, bool)
+        or isinstance(right_file_id, bool)
+        or not isinstance(left_file_id, int)
+        or not isinstance(right_file_id, int)
+        or left_file_id < 1
+        or right_file_id < 1
+        or left_file_id == right_file_id
+    ):
+        raise CorrelationInterpretationError(
+            "Correlation pairs require two distinct positive integer file IDs."
+        )
     return (
-        min(int(left_file_id), int(right_file_id)),
-        max(int(left_file_id), int(right_file_id)),
+        min(left_file_id, right_file_id),
+        max(left_file_id, right_file_id),
     )
 
 
