@@ -1255,7 +1255,11 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertFalse(detail["actionable"])
         self.assertEqual(self._rename_preview(self.scan_id)["status"], "stale")
         with self.assertRaisesRegex(
-            ValueError, "sealed Episode Identity decision no longer matches"
+            ValueError,
+            (
+                "changed after this identity scan"
+                "|sealed Episode Identity decision no longer matches"
+            ),
         ):
             self._confirm_best(self.scan_id)
 
