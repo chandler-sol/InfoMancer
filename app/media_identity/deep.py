@@ -200,20 +200,36 @@ def generate_deep_episode_candidates(
     """
 
     policy = policy or DeepCandidatePolicy()
-    episode_end = (
-        episode_start
-        if episode_end is None
-        else max(int(episode_start), int(episode_end))
+    title_id = _strict_int(title_id, name="Deep title id")
+    season = _strict_int(season, name="Deep claimed season")
+    episode_start = _strict_int(
+        episode_start,
+        name="Deep claimed episode",
     )
+    if title_id <= 0 or season < 0 or episode_start < 0:
+        raise DeepIdentityError(
+            "Deep candidate coordinates must be non-negative and identify a title."
+        )
+    if episode_end is None:
+        episode_end = episode_start
+    else:
+        episode_end = _strict_int(
+            episode_end,
+            name="Deep claimed episode end",
+        )
+        if episode_end < episode_start:
+            raise DeepIdentityError(
+                "Deep claimed episode range cannot run backward."
+            )
     language = str(language or "eng").strip().casefold() or "eng"
 
     sources: list[CandidateSet] = []
     base = generate_episode_candidates(
         conn,
-        title_id=int(title_id),
-        season=int(season),
-        episode_start=int(episode_start),
-        episode_end=int(episode_end),
+        title_id=title_id,
+        season=season,
+        episode_start=episode_start,
+        episode_end=episode_end,
         include_specials=False,
         language=language,
     )
@@ -231,13 +247,13 @@ def generate_deep_episode_candidates(
 
     if (
         len(candidates) < policy.max_candidates
-        and int(season) != 0
+        and season != 0
         and policy.include_specials
         and policy.max_specials > 0
     ):
         specials = generate_episode_candidates(
             conn,
-            title_id=int(title_id),
+            title_id=title_id,
             season=0,
             episode_start=0,
             episode_end=0,
@@ -257,12 +273,12 @@ def generate_deep_episode_candidates(
             ),
         )
 
-    for adjacent_season in policy.adjacent_seasons(int(season)):
+    for adjacent_season in policy.adjacent_seasons(season):
         if len(candidates) >= policy.max_candidates:
             break
         adjacent = generate_episode_candidates(
             conn,
-            title_id=int(title_id),
+            title_id=title_id,
             season=adjacent_season,
             episode_start=0,
             episode_end=0,
@@ -295,11 +311,11 @@ def generate_deep_episode_candidates(
     payload = {
         "version": DEEP_ORCHESTRATION_VERSION,
         "kind": "episode-candidates",
-        "title_id": int(title_id),
+        "title_id": title_id,
         "claimed": {
-            "season": int(season),
-            "episode_start": int(episode_start),
-            "episode_end": int(episode_end),
+            "season": season,
+            "episode_start": episode_start,
+            "episode_end": episode_end,
         },
         "language": language,
         "policy": {
@@ -426,14 +442,21 @@ def plan_deep_correlation(
     """Select a bounded, snapshot-bound cross-file comparison cohort."""
 
     policy = policy or DeepCorrelationPolicy()
+    file_id = _strict_int(file_id, name="Deep correlation file id")
+    if file_id <= 0:
+        raise DeepIdentityError("Deep correlation file id must be positive.")
     target_row = conn.execute(
-        """SELECT id,title_id,season,episode_start,episode_end,
-                  size_bytes,modified_at
-           FROM files WHERE id=?""",
-        (int(file_id),),
+        """SELECT f.id,f.title_id,f.season,f.episode_start,f.episode_end,
+                  f.size_bytes,f.modified_at,t.kind title_kind
+           FROM files f
+           JOIN titles t ON t.id=f.title_id
+           WHERE f.id=?""",
+        (file_id,),
     ).fetchone()
     if target_row is None:
         raise DeepIdentityError("Deep correlation target file does not exist.")
+    if str(target_row["title_kind"] or "") != "tv":
+        raise DeepIdentityError("Deep episode correlation requires a TV title.")
     if target_row["season"] is None or target_row["episode_start"] is None:
         raise DeepIdentityError(
             "Deep correlation requires an episode-season coordinate."
