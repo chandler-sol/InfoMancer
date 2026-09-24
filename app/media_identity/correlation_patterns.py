@@ -512,11 +512,17 @@ def detect_correlation_patterns(
                 )
             )
 
+    prepared_hypotheses = tuple(hypotheses)
     credible = _credible_hypotheses(
-        hypotheses,
+        prepared_hypotheses,
         policy=credibility_policy,
     )
-    owners, ambiguous = _claim_owners(credible)
+    claimable = tuple(
+        item
+        for item in prepared_hypotheses
+        if item.single_episode and item.claimed_season > 0
+    )
+    owners, ambiguous = _claim_owners(claimable)
     hypotheses_by_file = {
         item.file_id: item
         for item in credible
