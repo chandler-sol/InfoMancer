@@ -113,6 +113,39 @@ def _json_object(value: Any) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
+def _deep_ocr_artifact_output_is_valid(
+    profile: object,
+    text_value: object,
+    payload: Mapping[str, Any],
+) -> bool:
+    """Verify the self-seal on OCR artifacts produced by Deep.
+
+    Normal artifacts predate this seal and remain compatible. Deep artifacts are
+    accepted cross-profile only when their persisted output still matches the
+    digest written by the Deep checkpoint producer.
+    """
+
+    if str(profile or "") != IdentityProfile.DEEP.value:
+        return True
+    expected = str(
+        payload.get("artifact_output_sha256") or ""
+    ).strip().casefold()
+    if (
+        len(expected) != 64
+        or any(character not in "0123456789abcdef" for character in expected)
+    ):
+        return False
+    digest_payload = dict(payload)
+    digest_payload.pop("artifact_output_sha256", None)
+    actual = hashlib.sha256(
+        _canonical_json({
+            "text_value": str(text_value or ""),
+            "payload": digest_payload,
+        }).encode("utf-8")
+    ).hexdigest()
+    return actual == expected
+
+
 def _same_modified_at(first: Any, second: Any) -> bool:
     if first is None or second is None:
         return first is None and second is None
@@ -295,7 +328,7 @@ class NormalIdentityService:
         with self.database.connect() as conn:
             row = conn.execute(
                 """SELECT text_value,payload_json,source_signature,
-                          file_size_bytes,file_modified_at
+                          file_size_bytes,file_modified_at,profile
                    FROM media_identity_artifacts
                    WHERE file_id=? AND artifact_type='visual_text'
                      AND analyzer_key=? AND analyzer_version=?
@@ -321,6 +354,12 @@ class NormalIdentityService:
             return None
 
         payload = _json_object(row["payload_json"])
+        if not _deep_ocr_artifact_output_is_valid(
+            row["profile"],
+            row["text_value"],
+            payload,
+        ):
+            return None
         confidence = payload.get("confidence")
         try:
             normalized_confidence = (
@@ -421,6 +460,14 @@ class NormalIdentityService:
                 )
 
             persisted_payload = _json_object(row["payload_json"])
+            if not _deep_ocr_artifact_output_is_valid(
+                row["profile"],
+                row["text_value"],
+                persisted_payload,
+            ):
+                raise NormalIdentityScanError(
+                    "The persisted Deep OCR winner failed its output integrity seal."
+                )
             details = persisted_payload.get("details")
             confidence = persisted_payload.get("confidence")
             try:
