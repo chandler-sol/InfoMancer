@@ -374,6 +374,9 @@ class DeepFingerprintCorrelationService:
         scan_id: int,
         result_revision: int,
         plan_signature: str,
+        expected_comparisons: tuple[
+            FingerprintComparison, ...
+        ] | None = None,
     ) -> bool:
         """Revalidate one sealed J3 matrix inside the caller's transaction."""
 
@@ -524,11 +527,17 @@ class DeepFingerprintCorrelationService:
         except FingerprintError:
             return False
 
+        comparison_tuple = tuple(comparisons)
+        if (
+            expected_comparisons is not None
+            and comparison_tuple != expected_comparisons
+        ):
+            return False
         return self._validate_manifest(
             persisted,
             scan=current_scan,
             identity=expected_identity,
-            comparisons=tuple(comparisons),
+            comparisons=comparison_tuple,
         )
 
     def _load_manifest(
