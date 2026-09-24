@@ -5,7 +5,7 @@ import hashlib
 from itertools import combinations, islice
 import json
 import sqlite3
-from typing import Any
+from typing import Any, Mapping
 
 from .candidates import CandidateSet, generate_episode_candidates
 from .models import IdentityCandidate
@@ -376,6 +376,29 @@ class DeepCorrelationPolicy:
             )
 
 
+    def identity_payload(self) -> dict[str, Any]:
+        return {
+            "season_radius": self.season_radius,
+            "max_files": self.max_files,
+            "max_pairwise_comparisons": self.max_pairwise_comparisons,
+        }
+
+    @classmethod
+    def from_payload(cls, value: object) -> "DeepCorrelationPolicy":
+        if not isinstance(value, Mapping):
+            raise DeepIdentityError("Deep correlation policy metadata is missing.")
+        try:
+            return cls(
+                season_radius=value["season_radius"],
+                max_files=value["max_files"],
+                max_pairwise_comparisons=value["max_pairwise_comparisons"],
+            )
+        except KeyError as exc:
+            raise DeepIdentityError(
+                "Deep correlation policy metadata is incomplete."
+            ) from exc
+
+
 @dataclass(frozen=True)
 class DeepFileSnapshot:
     file_id: int
@@ -519,4 +542,102 @@ def plan_deep_correlation(
         comparison_pairs=pairs,
         policy=policy,
         plan_signature=_digest(payload),
+    )
+
+
+def build_deep_plan_metadata(
+    candidate_plan: DeepCandidatePlan,
+    correlation_plan: DeepCorrelationPlan,
+) -> dict[str, Any]:
+    """Return the exact persisted provenance required for a current Deep result."""
+
+    return {
+        "algorithm_version": DEEP_ORCHESTRATION_VERSION,
+        "candidate_policy": candidate_plan.policy.identity_payload(),
+        "candidate_plan_signature": candidate_plan.plan_signature,
+        "candidate_keys": [
+            candidate.key for candidate in candidate_plan.candidates
+        ],
+        "correlation_policy": correlation_plan.policy.identity_payload(),
+        "correlation_plan_signature": correlation_plan.plan_signature,
+        "correlation_file_ids": [
+            item.file_id for item in correlation_plan.files
+        ],
+        "comparison_pairs": [
+            [left, right]
+            for left, right in correlation_plan.comparison_pairs
+        ],
+    }
+
+
+def deep_plan_metadata_is_current(
+    conn: sqlite3.Connection,
+    *,
+    file_id: int,
+    title_id: int,
+    season: int,
+    episode_start: int,
+    episode_end: int | None,
+    language: str,
+    metadata: object,
+) -> bool:
+    """Rebuild persisted Deep plans and fail closed on any semantic drift."""
+
+    if not isinstance(metadata, Mapping):
+        return False
+    try:
+        if int(metadata.get("algorithm_version") or 0) != DEEP_ORCHESTRATION_VERSION:
+            return False
+        candidate_policy = DeepCandidatePolicy.from_payload(
+            metadata.get("candidate_policy")
+        )
+        correlation_policy = DeepCorrelationPolicy.from_payload(
+            metadata.get("correlation_policy")
+        )
+        candidate_plan = generate_deep_episode_candidates(
+            conn,
+            title_id=title_id,
+            season=season,
+            episode_start=episode_start,
+            episode_end=episode_end,
+            language=language,
+            policy=candidate_policy,
+        )
+        correlation_plan = plan_deep_correlation(
+            conn,
+            file_id=file_id,
+            policy=correlation_policy,
+        )
+    except (DeepIdentityError, TypeError, ValueError, sqlite3.Error):
+        return False
+
+    expected = build_deep_plan_metadata(
+        candidate_plan,
+        correlation_plan,
+    )
+    try:
+        persisted_pairs = [
+            [int(pair[0]), int(pair[1])]
+            for pair in metadata.get("comparison_pairs", [])
+            if isinstance(pair, (list, tuple)) and len(pair) == 2
+        ]
+        persisted_file_ids = [
+            int(value)
+            for value in metadata.get("correlation_file_ids", [])
+        ]
+        persisted_candidate_keys = [
+            str(value)
+            for value in metadata.get("candidate_keys", [])
+        ]
+    except (TypeError, ValueError):
+        return False
+
+    return (
+        str(metadata.get("candidate_plan_signature") or "")
+        == expected["candidate_plan_signature"]
+        and persisted_candidate_keys == expected["candidate_keys"]
+        and str(metadata.get("correlation_plan_signature") or "")
+        == expected["correlation_plan_signature"]
+        and persisted_file_ids == expected["correlation_file_ids"]
+        and persisted_pairs == expected["comparison_pairs"]
     )
