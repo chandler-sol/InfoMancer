@@ -127,6 +127,8 @@ class DeepSequenceCorrelationService:
     def _candidate_default_coordinate(
         conn: sqlite3.Connection,
         candidate: Mapping[str, Any],
+        *,
+        title_id: int,
     ) -> tuple[int, int] | None:
         expected_id = candidate.get("expected_episode_id")
         if (
@@ -136,8 +138,9 @@ class DeepSequenceCorrelationService:
         ):
             row = conn.execute(
                 """SELECT season,episode
-                   FROM expected_episodes WHERE id=?""",
-                (expected_id,),
+                   FROM expected_episodes
+                   WHERE id=? AND title_id=?""",
+                (expected_id, int(title_id)),
             ).fetchone()
             if row is not None:
                 season = _strict_coordinate(row["season"])
@@ -226,12 +229,18 @@ class DeepSequenceCorrelationService:
         ):
             return None
 
-        current, _ = MediaIdentityDecisionService._scan_snapshot_is_current(
-            conn,
-            scan,
-            evidence,
+        current, file_row = (
+            MediaIdentityDecisionService._scan_snapshot_is_current(
+                conn,
+                scan,
+                evidence,
+            )
         )
-        if not current:
+        if not current or not isinstance(file_row, Mapping):
+            return None
+        try:
+            title_id = int(file_row["title_id"])
+        except (KeyError, TypeError, ValueError):
             return None
 
         revision = result_revision(scan)
@@ -283,6 +292,7 @@ class DeepSequenceCorrelationService:
             DeepSequenceCorrelationService._candidate_default_coordinate(
                 conn,
                 candidate,
+                title_id=title_id,
             )
         )
         if default_coordinate is None:
