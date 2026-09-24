@@ -856,6 +856,44 @@ class DecisionServiceTests(unittest.TestCase):
         self.assertGreater(int(evidence["result_revision"]), 0)
         self.assertEqual(len(evidence["decision_snapshot_sha256"]), 64)
 
+    def test_restore_reconciles_obsolete_episode_identity_fingerprint(self) -> None:
+        self.service.resolve_scan(self.scan_id)
+        mie = MediaIntelligenceHistoryEngine(self.database)
+        mie.analyze()
+        first = next(
+            item
+            for item in mie.findings()
+            if item["rule_key"] == "episode-identity-review"
+        )
+        self.assertTrue(
+            mie.dismiss(
+                int(first["id"]),
+                None,
+                reason="expected",
+                scope="finding",
+            )
+        )
+
+        # Publish a new sealed revision without reconciling MIE first. Restore
+        # must not blindly reactivate the dismissed revision-2 fingerprint.
+        self._advance_scan_revision()
+        self.assertTrue(mie.restore(int(first["id"])))
+
+        active = [
+            item
+            for item in mie.findings()
+            if item["rule_key"] == "episode-identity-review"
+        ]
+        self.assertEqual(len(active), 1)
+        self.assertNotEqual(active[0]["fingerprint"], first["fingerprint"])
+        with self.database.connect() as conn:
+            historical = conn.execute(
+                "SELECT status FROM mie_findings WHERE id=?",
+                (int(first["id"]),),
+            ).fetchone()
+        self.assertIsNotNone(historical)
+        self.assertEqual(historical["status"], "resolved")
+
     def test_mark_correct_suppresses_advisory_finding_only_for_current_snapshot(self) -> None:
         self.service.resolve_scan(self.scan_id)
         self.assertEqual(len(self.service.mie_findings()), 1)
