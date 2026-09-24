@@ -135,27 +135,60 @@ class DeepFingerprintArtifactService:
             raise DeepFingerprintError(
                 "Deep fingerprinting requires a positive cataloged runtime."
             )
+
+        trusted_sha256 = ""
+        hash_source = ""
         if (
-            str(snapshot.get("hash_status") or "") != "complete"
-            or not _valid_sha256(snapshot.get("current_sha256"))
-            or int(snapshot.get("hash_size_bytes") or -1)
-            != int(snapshot.get("size_bytes") or 0)
-            or not _same_modified_at(
+            str(snapshot.get("hash_status") or "") == "complete"
+            and _valid_sha256(snapshot.get("current_sha256"))
+            and int(snapshot.get("hash_size_bytes") or -1)
+            == int(snapshot.get("size_bytes") or 0)
+            and _same_modified_at(
                 snapshot.get("hash_modified_at"),
                 snapshot.get("modified_at"),
             )
         ):
+            trusted_sha256 = str(
+                snapshot["current_sha256"]
+            ).strip().casefold()
+            hash_source = "media_file_hashes"
+        else:
+            scan_rows = conn.execute(
+                """SELECT id,file_sha256,file_size_bytes,file_modified_at
+                   FROM media_identity_scans
+                   WHERE file_id=? AND status='complete' AND file_sha256!=''
+                   ORDER BY id DESC LIMIT 8""",
+                (int(file_id),),
+            ).fetchall()
+            for scan_row in scan_rows:
+                if (
+                    _valid_sha256(scan_row["file_sha256"])
+                    and int(scan_row["file_size_bytes"] or 0)
+                    == int(snapshot.get("size_bytes") or 0)
+                    and _same_modified_at(
+                        scan_row["file_modified_at"],
+                        snapshot.get("modified_at"),
+                    )
+                ):
+                    trusted_sha256 = str(
+                        scan_row["file_sha256"]
+                    ).strip().casefold()
+                    hash_source = f"media_identity_scan:{int(scan_row['id'])}"
+                    break
+
+        if not trusted_sha256:
             raise DeepFingerprintError(
                 "Deep fingerprinting requires a current exact file SHA-256."
             )
+
         snapshot["runtime_ms"] = max(
             1,
             int(round(runtime_seconds * 1000.0)),
         )
-        snapshot["current_sha256"] = str(
-            snapshot["current_sha256"]
-        ).strip().casefold()
+        snapshot["current_sha256"] = trusted_sha256
+        snapshot["hash_source"] = hash_source
         return snapshot
+
 
     @staticmethod
     def _media(snapshot: Mapping[str, Any]) -> MediaIdentityFile:
