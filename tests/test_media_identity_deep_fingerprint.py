@@ -799,22 +799,29 @@ class DeepFingerprintArtifactServiceTests(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(count, 0)
 
-    def test_changed_media_bytes_cannot_reuse_old_scan_hash(self) -> None:
+    def test_changed_media_bytes_make_scan_stale_before_fingerprint_reuse(self) -> None:
         first = self.service.ensure_scan(self.scan1.scan_id)
         self.assertIsNotNone(first.artifact_id)
+        calls_before = FakeVideoFingerprintExtractor.extract_calls[1]
 
         path = self.paths[1]
         path.write_bytes(path.read_bytes() + b"changed")
 
-        result = self.service.ensure_scan(self.scan1.scan_id)
+        with self.assertRaisesRegex(
+            DeepFingerprintError,
+            "snapshot is stale for fingerprinting",
+        ):
+            self.service.ensure_scan(self.scan1.scan_id)
 
-        self.assertIsNone(result.artifact_id)
-        self.assertIsNone(result.fingerprint)
-        self.assertIn("fingerprint-extraction", result.failure)
+        self.assertEqual(
+            FakeVideoFingerprintExtractor.extract_calls[1],
+            calls_before,
+        )
 
-    def test_same_size_mtime_replacement_does_not_reuse_cached_fingerprint(self) -> None:
+    def test_same_size_mtime_replacement_makes_scan_stale_before_cache_reuse(self) -> None:
         first = self.service.ensure_scan(self.scan1.scan_id)
         self.assertIsNotNone(first.artifact_id)
+        calls_before = FakeVideoFingerprintExtractor.extract_calls[1]
 
         path = self.paths[1]
         original = path.stat()
@@ -829,11 +836,16 @@ class DeepFingerprintArtifactServiceTests(unittest.TestCase):
             ns=(original.st_atime_ns, original.st_mtime_ns),
         )
 
-        result = self.service.ensure_scan(self.scan1.scan_id)
+        with self.assertRaisesRegex(
+            DeepFingerprintError,
+            "snapshot is stale for fingerprinting",
+        ):
+            self.service.ensure_scan(self.scan1.scan_id)
 
-        self.assertFalse(result.reused)
-        self.assertIsNone(result.artifact_id)
-        self.assertIn("fingerprint-extraction", result.failure)
+        self.assertEqual(
+            FakeVideoFingerprintExtractor.extract_calls[1],
+            calls_before,
+        )
 
     def test_compare_current_files_uses_only_available_trusted_artifacts(self) -> None:
         values = (
