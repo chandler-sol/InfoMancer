@@ -14,6 +14,19 @@ from .deep import (
     plan_deep_correlation,
 )
 
+from .deep_sampling import (
+    DeepSamplingError,
+    DeepSamplingPolicy,
+    DeepVisualPlan,
+    DeepVisualSample,
+    build_deep_visual_plan,
+)
+from .deep_sampling_service import (
+    DeepSamplingRun,
+    DeepSamplingScanError,
+    DeepSamplingService,
+    DeepVisualObservation,
+)
 from .external import ExternalAnalysisSource
 from .models import (
     AnalyzerContext,
@@ -61,6 +74,15 @@ __all__ = [
     "DeepCorrelationPolicy",
     "DeepFileSnapshot",
     "DeepIdentityError",
+    "DeepSamplingError",
+    "DeepSamplingPolicy",
+    "DeepVisualPlan",
+    "DeepVisualSample",
+    "build_deep_visual_plan",
+    "DeepSamplingRun",
+    "DeepSamplingScanError",
+    "DeepSamplingService",
+    "DeepVisualObservation",
     "build_deep_plan_metadata",
     "deep_plan_metadata_is_current",
     "generate_deep_episode_candidates",
