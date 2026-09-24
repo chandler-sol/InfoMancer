@@ -631,11 +631,22 @@ class DeepFingerprintCorrelationService:
         generated = 0
 
         for item in initial_plan.files:
-            result = self.artifact_service.ensure_file(
-                item.file_id,
-                scan_id=(int(scan_id) if item.file_id == int(scan["file_id"]) else None),
-                expected_revision=(revision if item.file_id == int(scan["file_id"]) else None),
-            )
+            is_target = item.file_id == int(scan["file_id"])
+            try:
+                result = self.artifact_service.ensure_file(
+                    item.file_id,
+                    scan_id=(int(scan_id) if is_target else None),
+                    expected_revision=(revision if is_target else None),
+                )
+            except DeepFingerprintError as exc:
+                if is_target:
+                    raise
+                missing.append(item.file_id)
+                failures.append(
+                    "fingerprint-unavailable:"
+                    f"file:{item.file_id}:{type(exc).__name__}:{exc}"
+                )
+                continue
             if (
                 result.artifact_id is None
                 or result.fingerprint is None
