@@ -408,6 +408,27 @@ class AmbiguousClaimTests(unittest.TestCase):
             (2, 3),
         )
 
+    def test_weak_duplicate_claim_still_blocks_swap_ownership(self) -> None:
+        analysis = detect_correlation_patterns(
+            pairs=[],
+            hypotheses=[
+                _hypothesis(1, 1, 2),
+                _hypothesis(2, 2, 1),
+                _hypothesis(
+                    3,
+                    2,
+                    1,
+                    support=0.20,
+                ),
+            ],
+        )
+
+        self.assertEqual(analysis.swap_observations, ())
+        self.assertEqual(
+            analysis.ambiguous_claim_file_ids,
+            (2, 3),
+        )
+
     def test_duplicate_pair_interpretations_are_rejected(self) -> None:
         pair = _pair(
             1,
