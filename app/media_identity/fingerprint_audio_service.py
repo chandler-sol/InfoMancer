@@ -33,10 +33,16 @@ class DeepAudioFingerprintArtifactService(DeepFingerprintArtifactService):
         extractor_factory: Callable[..., LocalAudioFingerprintExtractor] = (
             LocalAudioFingerprintExtractor
         ),
-        preferred_language: str = "eng",
+        preferred_language: str = "",
     ) -> None:
-        self.preferred_language = normalize_speech_language(
-            preferred_language
+        if not isinstance(preferred_language, str):
+            raise FingerprintError(
+                "Preferred audio fingerprint language must be text."
+            )
+        self.preferred_language = (
+            normalize_speech_language(preferred_language)
+            if preferred_language.strip()
+            else ""
         )
         super().__init__(
             database,
@@ -113,7 +119,7 @@ class DeepAudioFingerprintCorrelationService(
         artifact_service: DeepAudioFingerprintArtifactService | None = None,
         correlation_policy: DeepCorrelationPolicy | None = None,
         match_policy: FingerprintMatchPolicy | None = None,
-        preferred_language: str = "eng",
+        preferred_language: str = "",
     ) -> None:
         super().__init__(
             database,
