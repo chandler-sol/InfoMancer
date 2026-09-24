@@ -439,6 +439,21 @@ class DeepIdentityPlanningTests(unittest.TestCase):
                 )
             )
 
+            malformed = dict(metadata)
+            malformed["comparison_pairs"] = [["malformed"]]
+            self.assertFalse(
+                deep_plan_metadata_is_current(
+                    conn,
+                    file_id=1,
+                    title_id=1,
+                    season=2,
+                    episode_start=1,
+                    episode_end=1,
+                    language="eng",
+                    metadata=malformed,
+                )
+            )
+
             conn.execute(
                 "UPDATE files SET modified_at=modified_at+1 WHERE id=2"
             )
