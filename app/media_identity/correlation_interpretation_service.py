@@ -54,7 +54,7 @@ class DeepCorrelationInterpretationRun:
         )
 
 
-def _canonical_json(value: object) -> str:
+def _canonical_json_bytes(value: object) -> bytes:
     try:
         return json.dumps(
             value,
@@ -62,11 +62,22 @@ def _canonical_json(value: object) -> str:
             sort_keys=True,
             separators=(",", ":"),
             allow_nan=False,
-        )
+        ).encode("utf-8")
     except (TypeError, ValueError, UnicodeEncodeError) as exc:
         raise CorrelationInterpretationError(
             "Correlation interpretation policy cannot be serialized safely."
         ) from exc
+
+
+def _freeze_policy_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({
+            str(key): _freeze_policy_value(item)
+            for key, item in value.items()
+        })
+    if isinstance(value, list):
+        return tuple(_freeze_policy_value(item) for item in value)
+    return value
 
 
 def _policy_identity(
@@ -74,9 +85,14 @@ def _policy_identity(
 ) -> tuple[Mapping[str, Any], str]:
     payload = policy.identity_payload()
     signature = hashlib.sha256(
-        _canonical_json(payload).encode("utf-8")
+        _canonical_json_bytes(payload)
     ).hexdigest()
-    return MappingProxyType(payload), signature
+    frozen = _freeze_policy_value(payload)
+    if not isinstance(frozen, Mapping):
+        raise CorrelationInterpretationError(
+            "Correlation interpretation policy identity is malformed."
+        )
+    return frozen, signature
 
 
 def interpret_fingerprint_bundle(
