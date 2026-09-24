@@ -368,6 +368,61 @@ class DeepSpeechServiceTests(unittest.TestCase):
             language="eng",
         )
 
+    def test_normal_rejects_tampered_newly_sealed_transcript(self):
+        file_row, media, streams = self._file_and_streams()
+        normal = NormalSpeechService(
+            self.database,
+            self.engine,
+            self.model,
+            extractor_factory=FakeExtractor,
+            language="eng",
+        )
+        first = normal.run(
+            self.scan.scan_id,
+            self._scan_row(),
+            media,
+            file_row["runtime_seconds"],
+            streams,
+        )
+        self.assertTrue(first.coverage_complete)
+        self.assertEqual(self.engine.successful_calls, 8)
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT id FROM media_identity_artifacts
+                   WHERE file_id=1 AND artifact_type='speech_transcript'
+                   ORDER BY id LIMIT 1"""
+            ).fetchone()
+            conn.execute(
+                """UPDATE media_identity_artifacts
+                   SET text_value=text_value || '-tampered'
+                   WHERE id=?""",
+                (int(row["id"]),),
+            )
+
+        second = normal.run(
+            self.scan.scan_id,
+            self._scan_row(),
+            media,
+            file_row["runtime_seconds"],
+            streams,
+        )
+        self.assertTrue(second.coverage_complete)
+        self.assertEqual(second.reused_artifact_count, 7)
+        self.assertEqual(self.engine.successful_calls, 9)
+        with self.database.connect() as conn:
+            repaired = conn.execute(
+                """SELECT text_value,payload_json
+                   FROM media_identity_artifacts WHERE id=?""",
+                (int(row["id"]),),
+            ).fetchone()
+        self.assertNotIn("-tampered", repaired["text_value"])
+        repaired_payload = json.loads(repaired["payload_json"])
+        self.assertEqual(
+            len(repaired_payload["transcript_output_sha256"]),
+            64,
+        )
+
     def test_deep_reuses_sealed_normal_windows_and_transcribes_only_extras(self):
         file_row, media, streams = self._file_and_streams()
         scan = self._scan_row()
