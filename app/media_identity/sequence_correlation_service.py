@@ -90,6 +90,10 @@ class DeepSequenceCorrelationRun:
             raise DeepSequenceCorrelationError(
                 "Sequence run policy identity is malformed."
             )
+        if not isinstance(self.analysis, SequenceOffsetAnalysis):
+            raise DeepSequenceCorrelationError(
+                "Sequence run analysis is malformed."
+            )
         expected_policy_payload = self.analysis.policy.identity_payload()
         if (
             _canonical_json_bytes(self.sequence_policy_identity)
@@ -153,10 +157,6 @@ class DeepSequenceCorrelationRun:
         if self.target_file_id not in set(hypothesis_ids):
             raise DeepSequenceCorrelationError(
                 "Sequence run is missing its target hypothesis."
-            )
-        if not isinstance(self.analysis, SequenceOffsetAnalysis):
-            raise DeepSequenceCorrelationError(
-                "Sequence run analysis is malformed."
             )
         if self.analysis.hypothesis_count != self.hypothesis_count:
             raise DeepSequenceCorrelationError(
