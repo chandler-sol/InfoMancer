@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import json
 import struct
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 from pathlib import Path
 
 from app.db import Database
@@ -17,6 +20,11 @@ from app.media_identity.fingerprint import (
     FingerprintSample,
 )
 from app.media_identity.fingerprint_audio import (
+    AUDIO_FINGERPRINT_CHANNELS,
+    AUDIO_FINGERPRINT_SAMPLE_RATE_HZ,
+    AUDIO_FINGERPRINT_SAMPLE_WIDTH_BYTES,
+    AUDIO_FINGERPRINT_WINDOW_MS,
+    LocalAudioFingerprintExtractor,
     LocalFingerprintError,
     audio_envelope_dhash64_from_pcm_s16le,
     audio_pcm_is_informative,
@@ -45,6 +53,57 @@ from app.media_identity.media_generation import media_generation_identity
 
 def _pcm(values: list[int]) -> bytes:
     return struct.pack(f"<{len(values)}h", *values)
+
+
+class AudioFingerprintExtractionContractTests(unittest.TestCase):
+    def test_ffmpeg_window_uses_sample_exact_trim(self) -> None:
+        expected_samples = (
+            AUDIO_FINGERPRINT_WINDOW_MS
+            * AUDIO_FINGERPRINT_SAMPLE_RATE_HZ
+            // 1000
+        )
+        expected_bytes = (
+            expected_samples
+            * AUDIO_FINGERPRINT_CHANNELS
+            * AUDIO_FINGERPRINT_SAMPLE_WIDTH_BYTES
+        )
+
+        extractor = object.__new__(LocalAudioFingerprintExtractor)
+        extractor.executable = "ffmpeg"
+        extractor.stream = SimpleNamespace(index=1)
+        extractor.timeout_seconds = 20
+
+        class FakeLease:
+            @contextmanager
+            def ffmpeg_input(self):
+                yield (["-i", "fixture.mkv"], {})
+
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout=b"\x00" * expected_bytes,
+        )
+        with patch(
+            "app.media_identity.fingerprint_audio.subprocess.run",
+            return_value=completed,
+        ) as run:
+            raw = extractor._extract_pcm_window(
+                FakeLease(),
+                center_ms=120_000,
+            )
+
+        self.assertEqual(len(raw), expected_bytes)
+        command = run.call_args.args[0]
+        self.assertNotIn("-t", command)
+        self.assertNotIn("-ar", command)
+        filter_value = command[command.index("-af") + 1]
+        self.assertIn(
+            f"aresample={AUDIO_FINGERPRINT_SAMPLE_RATE_HZ}:async=0",
+            filter_value,
+        )
+        self.assertIn(
+            f"atrim=start_sample=0:end_sample={expected_samples}",
+            filter_value,
+        )
 
 
 class AudioFingerprintPrimitiveTests(unittest.TestCase):
