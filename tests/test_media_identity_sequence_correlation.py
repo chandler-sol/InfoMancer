@@ -72,6 +72,15 @@ class SequenceOffsetPolicyTests(unittest.TestCase):
             payload["eligible_states"],
         )
 
+    def test_support_ratio_below_majority_is_rejected(self) -> None:
+        with self.assertRaisesRegex(
+            SequenceCorrelationError,
+            "between 0.50 and 1",
+        ):
+            SequenceOffsetPolicy(
+                minimum_support_ratio=0.49,
+            )
+
     def test_boolean_limits_fail_closed(self) -> None:
         with self.assertRaisesRegex(
             SequenceCorrelationError,
