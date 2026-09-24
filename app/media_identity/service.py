@@ -2045,6 +2045,7 @@ class MediaIdentityDecisionService:
         detail = self.scan_detail(
             int(scan_id),
             verify_actionable_content=False,
+            include_confirmation=False,
             verify_confirmation_external=False,
         )
         reviewed_revision = int(expected_result_revision)
@@ -2095,13 +2096,6 @@ class MediaIdentityDecisionService:
                 "available": False,
                 "status": "stale",
                 "reason": "The media or supporting evidence changed after verification. Run Episode Identity again before considering a rename.",
-                "scan": detail,
-            }
-        if detail.get("confirmed_claimed"):
-            return {
-                "available": False,
-                "status": "unavailable",
-                "reason": "The current filename was marked correct for this media snapshot, so no alternate rename is suggested.",
                 "scan": detail,
             }
         if not detail.get("actionable"):
@@ -2192,6 +2186,54 @@ class MediaIdentityDecisionService:
                 ),
                 "scan": stale_detail,
             }
+
+        validated_source = {
+            "current": True,
+            "content_verified": True,
+            "scan_id": int(scan["id"]),
+            "file_id": int(scan["file_id"]),
+            "result_revision": current_revision,
+            "decision_snapshot_sha256": current_digest,
+            "metadata_signature": str(scan.get("metadata_signature") or ""),
+            "file_size_bytes": int(scan.get("file_size_bytes") or 0),
+            "file_modified_at": scan.get("file_modified_at"),
+            "file_sha256": str(scan.get("file_sha256") or ""),
+        }
+        confirmation = self.confirmation_status(
+            int(scan["file_id"]),
+            validated_source=validated_source,
+        )
+        confirmed_key = None
+        if confirmation and confirmation.get("current"):
+            for candidate in detail.get("candidates") or []:
+                if self._confirmation_matches_candidate(
+                    confirmation,
+                    candidate,
+                ):
+                    confirmed_key = str(candidate["candidate_key"])
+                    break
+        confirmed_claimed = (
+            confirmed_key is not None
+            and confirmed_key in set(
+                detail.get("claimed_candidate_keys") or []
+            )
+        )
+        detail = dict(detail)
+        detail["confirmation"] = confirmation
+        detail["confirmed_claimed"] = confirmed_claimed
+        detail["snapshot_current"] = True
+        detail["actionable"] = (
+            not confirmed_claimed
+            and str(detail.get("result_state") or "") in ACTIONABLE_STATES
+        )
+        if confirmed_claimed:
+            return {
+                "available": False,
+                "status": "unavailable",
+                "reason": "The current filename was marked correct for this media snapshot, so no alternate rename is suggested.",
+                "scan": detail,
+            }
+
         source = Path(str(file_row["path"]))
         raw_extension = str(file_row.get("extension") or "").strip()
         extension = (
