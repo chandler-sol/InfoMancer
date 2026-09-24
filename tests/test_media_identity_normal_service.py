@@ -953,6 +953,51 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             "strong_match_other",
         )
 
+    def test_current_deep_result_outranks_newer_normal_result(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+
+        normal.run_scan(self.fast_scan.scan_id)
+        deep_resolution = decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertEqual(
+            deep_resolution.state.value,
+            "strong_match_other",
+        )
+        self._promote_normal_fixture_to_deep()
+        deep_id = self.fast_scan.scan_id
+        deep_detail = decisions.scan_detail(deep_id)
+        self.assertEqual(deep_detail["completed_profile"], "deep")
+        self.assertTrue(deep_detail["snapshot_current"])
+
+        newer_fast = self.fast.scan_file(1)
+        normal.run_scan(newer_fast.scan_id)
+        decisions.resolve_scan(newer_fast.scan_id)
+        newer_detail = decisions.scan_detail(newer_fast.scan_id)
+        self.assertEqual(newer_detail["completed_profile"], "normal")
+        self.assertTrue(newer_detail["snapshot_current"])
+        self.assertGreater(newer_fast.scan_id, deep_id)
+        self.assertEqual(
+            decisions.latest_scan_for_file(1)["id"],
+            newer_fast.scan_id,
+        )
+
+        findings = [
+            finding
+            for finding in decisions.mie_findings()
+            if finding["rule_key"] == "episode-identity-review"
+        ]
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["evidence"]["scan_id"], deep_id)
+        self.assertEqual(findings[0]["evidence"]["profile"], "deep")
+
     def test_stale_newer_normal_does_not_hide_older_current_normal(self):
         source = FakePreviewSource()
         normal = NormalIdentityService(
