@@ -313,6 +313,28 @@ class DeepSequenceCorrelationServiceTests(unittest.TestCase):
         self.assertEqual(result.missing_scan_file_ids, ())
         self.assertEqual(result.invalid_scan_file_ids, (3,))
 
+    def test_invalid_target_hypothesis_aborts_sequence_run(self) -> None:
+        self.service._validated_hypothesis = (
+            lambda _conn, _scan_id: None
+        )
+        self.service._best_current_hypothesis = (
+            lambda _conn, _file_id: (None, False)
+        )
+
+        with patch.object(
+            MediaIdentityDecisionService,
+            "_scan_snapshot_is_current",
+            return_value=(True, {"title_id": 1}),
+        ):
+            with self.assertRaisesRegex(
+                DeepSequenceCorrelationError,
+                "target resolver snapshot is invalid",
+            ):
+                self.service.run(
+                    self.scan.scan_id,
+                    self.interpretation,
+                )
+
     def test_target_revision_drift_is_rejected(self) -> None:
         stale = DeepCorrelationInterpretationRun(
             scan_id=self.interpretation.scan_id,
