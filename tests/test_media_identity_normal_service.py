@@ -1075,6 +1075,29 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             identity_finding["evidence"]["deep_artifact_id"],
             902,
         )
+        self.assertTrue(
+            identity_finding["fingerprint"].endswith(":deep:902")
+        )
+
+        first_fingerprint = identity_finding["fingerprint"]
+        detail["deep_correlation_analysis"]["artifact_id"] = 904
+        with patch.object(
+            decisions,
+            "scan_detail",
+            return_value=detail,
+        ):
+            refreshed = decisions.mie_findings()
+        refreshed_identity = next(
+            item for item in refreshed
+            if item["rule_key"] == "episode-identity-review"
+        )
+        self.assertTrue(
+            refreshed_identity["fingerprint"].endswith(":deep:904")
+        )
+        self.assertNotEqual(
+            refreshed_identity["fingerprint"],
+            first_fingerprint,
+        )
 
     def test_actionable_identity_does_not_hide_deep_duplicate_content(self):
         decisions = MediaIdentityDecisionService(self.database)
