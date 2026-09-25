@@ -113,6 +113,35 @@ class EpisodeIdentityReviewAdapterTests(unittest.TestCase):
             for row in item["evidence_rows"]
         ))
 
+    def test_deep_episode_identity_advisory_uses_matching_review_surface(self) -> None:
+        item = self.queue._finding_item({
+            "id": 2,
+            "rule_key": "episode-identity-deep-review",
+            "category": "identity",
+            "severity": "information",
+            "status": "active",
+            "summary": "S01E01.mkv: Episode sequence offset",
+            "explanation": "Deep found a cross-file pattern.",
+            "recommendation": "Review the season-level pattern.",
+            "title_id": 1,
+            "root_id": 1,
+            "evidence": {
+                "scan_id": 43,
+                "deep_review_state": "sequence_offset",
+                "deep_review_actionable": False,
+            },
+        })
+
+        self.assertEqual(item["bucket"], "matching")
+        self.assertEqual(item["source_label"], "Episode Identity")
+        self.assertEqual(
+            item["review_label"],
+            "Review Deep episode analysis",
+        )
+        self.assertEqual(item["identity_scan_id"], 43)
+        self.assertEqual(item["identity_state"], "sequence_offset")
+        self.assertFalse(item["evidence"]["deep_review_actionable"])
+
     def test_episode_identity_feedback_scope_is_forced_server_side(self) -> None:
         engine = MediaIntelligenceEngine(self.database)
 
@@ -174,6 +203,54 @@ class EpisodeIdentityReviewAdapterTests(unittest.TestCase):
         self.assertIsNone(finding["dismissed_at"])
         self.assertEqual(active_feedback, 0)
 
+    def test_deep_episode_identity_feedback_is_snapshot_scoped(self) -> None:
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO mie_findings(
+                     id,fingerprint,rule_key,category,severity,root_id,title_id,
+                     file_id,summary,explanation,recommendation,evidence_json,
+                     status,first_seen_at,last_seen_at
+                   ) VALUES (
+                     2,'episode-identity-deep:file:1:fixture',
+                     'episode-identity-deep-review','identity','information',
+                     1,1,1,'Deep sequence offset','Deep found a pattern.',
+                     'Review the Deep evidence.',?,'active',
+                     CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+                   )""",
+                (json.dumps({
+                    "scan_id": 43,
+                    "deep_review_state": "sequence_offset",
+                }),),
+            )
+        engine = MediaIntelligenceEngine(self.database)
+
+        self.assertTrue(
+            engine.dismiss(2, None, reason="expected", scope="title")
+        )
+        with self.database.connect() as conn:
+            feedback = conn.execute(
+                """SELECT scope FROM mie_feedback
+                   WHERE finding_fingerprint=
+                         'episode-identity-deep:file:1:fixture'
+                     AND active=1
+                   ORDER BY id DESC LIMIT 1"""
+            ).fetchone()
+        self.assertEqual(feedback["scope"], "finding")
+
+        self.assertTrue(engine.restore(2))
+        with self.database.connect() as conn:
+            finding = conn.execute(
+                "SELECT status FROM mie_findings WHERE id=2"
+            ).fetchone()
+            active_feedback = conn.execute(
+                """SELECT COUNT(*) FROM mie_feedback
+                   WHERE finding_fingerprint=
+                         'episode-identity-deep:file:1:fixture'
+                     AND active=1"""
+            ).fetchone()[0]
+        self.assertEqual(finding["status"], "resolved")
+        self.assertEqual(active_feedback, 0)
+
     def test_health_action_routes_identity_finding_to_exact_scan(self) -> None:
         self.assertEqual(
             health_finding_href({
@@ -183,6 +260,15 @@ class EpisodeIdentityReviewAdapterTests(unittest.TestCase):
                 "evidence": {"scan_id": 42},
             }),
             "/episode-identity/scans/42",
+        )
+        self.assertEqual(
+            health_finding_href({
+                "rule_key": "episode-identity-deep-review",
+                "title_id": 1,
+                "root_id": 1,
+                "evidence": {"scan_id": 43},
+            }),
+            "/episode-identity/scans/43",
         )
 
 
