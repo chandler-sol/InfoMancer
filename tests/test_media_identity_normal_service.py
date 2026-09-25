@@ -963,6 +963,59 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             "strong_match_other",
         )
 
+    def test_nonactionable_resolver_can_surface_deep_cross_file_advisory(self):
+        decisions = MediaIdentityDecisionService(self.database)
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        detail = decisions.scan_detail(self.fast_scan.scan_id)
+        detail["result_state"] = "probably_correct"
+        detail["actionable"] = False
+        detail["deep_correlation_analysis"] = {
+            "artifact_id": 901,
+            "review_state": "sequence_offset",
+            "review_label": "Episode sequence offset",
+            "review_explanation": (
+                "This file participates in an authoritative season-level "
+                "episode offset pattern (+1)."
+            ),
+            "review_actionable": False,
+            "duplicates": (),
+            "swaps": (),
+            "identity_cycles": (),
+            "target_sequence_observations": ({
+                "offset": 1,
+                "supporting_file_ids": (1, 2, 3),
+            },),
+            "coverage": {
+                "fully_multimodal": True,
+                "complete_modalities": ("video", "audio"),
+                "sequence_peer_coverage_complete": True,
+            },
+        }
+
+        with patch.object(
+            decisions,
+            "scan_detail",
+            return_value=detail,
+        ):
+            findings = decisions.mie_findings()
+
+        deep_findings = [
+            item for item in findings
+            if item["rule_key"] == "episode-identity-deep-review"
+        ]
+        self.assertEqual(len(deep_findings), 1)
+        self.assertEqual(
+            deep_findings[0]["evidence"]["resolver_result_state"],
+            "probably_correct",
+        )
+        self.assertFalse(
+            deep_findings[0]["evidence"]["deep_review_actionable"]
+        )
+        self.assertFalse(any(
+            item["rule_key"] == "episode-identity-review"
+            for item in findings
+        ))
+
     def test_current_deep_result_outranks_newer_normal_result(self):
         source = FakePreviewSource()
         normal = NormalIdentityService(
