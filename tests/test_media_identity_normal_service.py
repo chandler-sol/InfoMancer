@@ -58,6 +58,7 @@ from app.media_identity.speech_service import (
     NormalSpeechRun,
 )
 from app.media_identity.versions import (
+    DEEP_EVIDENCE_PROMOTION_VERSION,
     EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION,
     NORMAL_EVIDENCE_ALGORITHM_VERSION,
 )
@@ -443,6 +444,15 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
                 candidate_plan,
                 correlation_plan,
             )
+            claimed["deep_evidence"] = {
+                "version": DEEP_EVIDENCE_PROMOTION_VERSION,
+                "baseline_revision": result_revision(claimed),
+                "visual_manifest_artifact_id": None,
+                "speech_manifest_artifact_id": None,
+                "visual_evidence_count": 0,
+                "speech_evidence_count": 0,
+                "added_candidate_keys": [],
+            }
             conn.execute(
                 """UPDATE media_identity_scans
                    SET completed_profile='deep',claimed_identity_json=?
