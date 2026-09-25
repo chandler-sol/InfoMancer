@@ -521,7 +521,7 @@ def _related_file_ids(
         int(value)
         for value in coverage.get("invalid_scan_file_ids", ())
     )
-    related.discard(int(target_file_id))
+    related.add(int(target_file_id))
     if len(related) > _MAX_VIEW_ITEMS:
         raise DeepCorrelationViewError(
             "Deep correlation display context exceeds the supported bound."
