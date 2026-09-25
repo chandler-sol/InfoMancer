@@ -23,7 +23,7 @@ from .deep_sampling_service import (
 )
 from .deep_speech_service import (
     DeepSpeechSamplingRun,
-    DeepSpeechService,
+    DeepSpeechSamplingService,
 )
 from .models import IdentityProfile
 from .normal_service import (
@@ -80,7 +80,7 @@ class DeepVerificationService:
         *,
         normal_service: NormalIdentityService | None,
         visual_service: DeepSamplingService | None,
-        speech_service: DeepSpeechService | None,
+        speech_service: DeepSpeechSamplingService | None,
         promotion_service: DeepEvidencePromotionService | None = None,
         decision_service: MediaIdentityDecisionService | None = None,
         completion_service: DeepCompletionService | None = None,
