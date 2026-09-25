@@ -65,17 +65,128 @@ class DeepFingerprintCorrelationRun:
     comparisons: tuple[FingerprintComparison, ...]
     failures: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.scan_id, bool)
+            or not isinstance(self.scan_id, int)
+            or self.scan_id < 1
+        ):
+            raise DeepFingerprintCorrelationError(
+                "Fingerprint correlation scan ID must be positive."
+            )
+        if not isinstance(self.algorithm_key, str) or not self.algorithm_key.strip():
+            raise DeepFingerprintCorrelationError(
+                "Fingerprint correlation algorithm key is invalid."
+            )
+        signature = str(self.correlation_plan_signature or "").strip().casefold()
+        if (
+            len(signature) != 64
+            or any(character not in "0123456789abcdef" for character in signature)
+        ):
+            raise DeepFingerprintCorrelationError(
+                "Fingerprint correlation plan signature is invalid."
+            )
+        for label, value in (
+            ("planned file count", self.planned_file_count),
+            ("completed file count", self.completed_file_count),
+            ("planned pair count", self.planned_pair_count),
+            ("completed pair count", self.completed_pair_count),
+            ("reused fingerprint count", self.reused_fingerprint_count),
+            ("generated fingerprint count", self.generated_fingerprint_count),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 0
+            ):
+                raise DeepFingerprintCorrelationError(
+                    f"Fingerprint correlation {label} is invalid."
+                )
+        if self.planned_file_count < 1:
+            raise DeepFingerprintCorrelationError(
+                "Fingerprint correlation requires at least one planned file."
+            )
+        if self.completed_file_count > self.planned_file_count:
+            raise DeepFingerprintCorrelationError(
+                "Fingerprint correlation completed-file count exceeds its plan."
+            )
+        maximum_pairs = (
+            self.planned_file_count
+            * (self.planned_file_count - 1)
+            // 2
+        )
+        if (
+            self.planned_pair_count > maximum_pairs
+            or self.completed_pair_count > self.planned_pair_count
+            or self.completed_pair_count != len(self.comparisons)
+        ):
+            raise DeepFingerprintCorrelationError(
+                "Fingerprint correlation pair accounting is inconsistent."
+            )
+        if not isinstance(self.coverage_complete, bool):
+            raise DeepFingerprintCorrelationError(
+                "Fingerprint correlation coverage flag must be boolean."
+            )
+        if any(
+            not isinstance(item, FingerprintComparison)
+            or item.algorithm_key != self.algorithm_key
+            for item in self.comparisons
+        ):
+            raise DeepFingerprintCorrelationError(
+                "Fingerprint correlation comparisons are malformed."
+            )
+        missing = tuple(self.missing_file_ids)
+        if (
+            len(set(missing)) != len(missing)
+            or tuple(sorted(missing)) != missing
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 1
+                for value in missing
+            )
+        ):
+            raise DeepFingerprintCorrelationError(
+                "Fingerprint correlation missing-file IDs are invalid."
+            )
+        if any(
+            not isinstance(item, str) or not item
+            for item in self.failures
+        ):
+            raise DeepFingerprintCorrelationError(
+                "Fingerprint correlation failures are malformed."
+            )
+        if self.coverage_complete:
+            if (
+                isinstance(self.manifest_artifact_id, bool)
+                or not isinstance(self.manifest_artifact_id, int)
+                or self.manifest_artifact_id < 1
+                or self.completed_file_count != self.planned_file_count
+                or self.completed_pair_count != self.planned_pair_count
+                or self.missing_file_ids
+                or self.failures
+            ):
+                raise DeepFingerprintCorrelationError(
+                    "Complete fingerprint correlation lacks sealed full coverage."
+                )
+        elif self.manifest_artifact_id is not None:
+            raise DeepFingerprintCorrelationError(
+                "Incomplete fingerprint correlation cannot carry a completion manifest."
+            )
+
 
 def _canonical_json(value: object) -> str:
     try:
-        return json.dumps(
+        serialized = json.dumps(
             value,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
             allow_nan=False,
         )
-    except (TypeError, ValueError) as exc:
+        serialized.encode("utf-8")
+        return serialized
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
         raise DeepFingerprintCorrelationError(
             "Fingerprint correlation metadata could not be serialized safely."
         ) from exc
