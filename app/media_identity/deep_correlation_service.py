@@ -111,13 +111,15 @@ class DeepCorrelationArtifactRun:
 
 def _canonical_json(value: object) -> str:
     try:
-        return json.dumps(
+        serialized = json.dumps(
             value,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
             allow_nan=False,
         )
+        serialized.encode("utf-8")
+        return serialized
     except (TypeError, ValueError, UnicodeEncodeError) as exc:
         raise DeepCorrelationAnalysisError(
             "J4 correlation metadata could not be serialized safely."
@@ -302,6 +304,28 @@ def _output_payload(
         patterns.patterns
     )
     return {
+        "coverage": {
+            "complete_modalities": list(
+                interpretation.complete_modalities
+            ),
+            "fully_multimodal": interpretation.fully_multimodal,
+            "planned_pair_count": interpretation.planned_pair_count,
+            "interpreted_pair_count": interpretation.pair_count,
+            "planned_file_count": sequence.planned_file_count,
+            "valid_hypothesis_count": sequence.hypothesis_count,
+            "missing_scan_file_ids": list(
+                sequence.missing_scan_file_ids
+            ),
+            "invalid_scan_file_ids": list(
+                sequence.invalid_scan_file_ids
+            ),
+            "sequence_peer_coverage_complete": (
+                sequence.hypothesis_count
+                == sequence.planned_file_count
+                and not sequence.missing_scan_file_ids
+                and not sequence.invalid_scan_file_ids
+            ),
+        },
         "pair_interpretations": [
             _pair_payload(item)
             for item in interpretation.pairs
