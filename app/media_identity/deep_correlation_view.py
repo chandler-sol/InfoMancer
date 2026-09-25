@@ -335,6 +335,12 @@ def _target_patterns(
             raise DeepCorrelationViewError(
                 "Deep correlation sequence support ratio is malformed."
             )
+        supporting_file_ids = _strict_file_ids(
+            item.get("supporting_file_ids")
+        )
+        usable_file_ids = _strict_file_ids(
+            item.get("usable_file_ids")
+        )
         support_count = _strict_int(
             item.get("support_count"),
             minimum=1,
@@ -343,7 +349,14 @@ def _target_patterns(
             item.get("usable_count"),
             minimum=1,
         )
-        if support_count > usable_count:
+        if (
+            support_count > usable_count
+            or support_count != len(supporting_file_ids)
+            or usable_count != len(usable_file_ids)
+            or not set(supporting_file_ids).issubset(
+                set(usable_file_ids)
+            )
+        ):
             raise DeepCorrelationViewError(
                 "Deep correlation sequence counts are inconsistent."
             )
@@ -351,6 +364,11 @@ def _target_patterns(
             authoritative.append({
                 "season": season,
                 "offset": offset,
+                "supporting_file_ids": supporting_file_ids,
+                "usable_file_ids": usable_file_ids,
+                "target_supports": (
+                    target_file_id in set(supporting_file_ids)
+                ),
                 "support_count": support_count,
                 "usable_count": usable_count,
                 "support_ratio": float(ratio),
@@ -369,12 +387,112 @@ def _target_patterns(
     ambiguous = _strict_file_ids(
         output.get("ambiguous_claim_file_ids")
     )
+    target_claim_ambiguous = target_file_id in set(
+        ambiguous
+    )
+    target_sequence = [
+        item for item in authoritative
+        if item["target_supports"]
+    ]
+
+    review_state = "no_cross_file_pattern"
+    review_label = "No target-specific cross-file pattern"
+    review_explanation = (
+        "Deep completed its cross-file analysis without an authoritative "
+        "pattern that directly identifies this file."
+    )
+    if duplicates:
+        review_state = "duplicate_content_identity"
+        review_label = "Duplicate content identity"
+        review_explanation = (
+            "Multimodal fingerprint evidence indicates this file shares "
+            "episode content with another claimed file."
+        )
+    else:
+        corroborated_swaps = [
+            item for item in swaps
+            if item["status"] == "corroborated_distinct"
+        ]
+        hypothesis_swaps = [
+            item for item in swaps
+            if item["status"] == "hypothesis_only"
+        ]
+        similarity_conflicts = [
+            item for item in swaps
+            if item["status"] == "conflicted_similarity"
+        ]
+        modality_conflicts = [
+            item for item in swaps
+            if item["status"] == "conflicted_modalities"
+        ]
+        if corroborated_swaps:
+            review_state = "possible_swapped_episodes"
+            review_label = "Possible swapped episodes"
+            review_explanation = (
+                "Two resolver hypotheses are reciprocal and fingerprint "
+                "evidence supports the files being distinct."
+            )
+        elif cycles:
+            review_state = "identity_cycle"
+            review_label = "Multi-file identity rotation"
+            review_explanation = (
+                "Resolver hypotheses form a three-or-more-file identity cycle "
+                "that cannot be represented as one pairwise swap."
+            )
+        elif hypothesis_swaps:
+            review_state = "possible_swapped_episodes"
+            review_label = "Possible swapped episodes"
+            review_explanation = (
+                "Two resolver hypotheses are reciprocal, but fingerprint "
+                "coverage is not strong enough to corroborate the swap."
+            )
+        elif similarity_conflicts:
+            review_state = "conflicting_swap_similarity"
+            review_label = "Swap hypothesis conflicts with similarity"
+            review_explanation = (
+                "Resolver hypotheses are reciprocal, but fingerprint evidence "
+                "also supports the files sharing content."
+            )
+        elif modality_conflicts:
+            review_state = "conflicting_fingerprint_modalities"
+            review_label = "Fingerprint modalities disagree"
+            review_explanation = (
+                "Video and audio fingerprint evidence disagree about a "
+                "reciprocal identity hypothesis."
+            )
+        elif target_sequence:
+            review_state = "sequence_offset"
+            review_label = "Episode sequence offset"
+            offsets = sorted({
+                int(item["offset"])
+                for item in target_sequence
+            })
+            offset_text = ", ".join(
+                f"{value:+d}" for value in offsets
+            )
+            review_explanation = (
+                "This file participates in an authoritative season-level "
+                f"episode offset pattern ({offset_text})."
+            )
+        elif target_claim_ambiguous:
+            review_state = "ambiguous_claim"
+            review_label = "Ambiguous claimed episode ownership"
+            review_explanation = (
+                "More than one file claims this episode coordinate, so Deep "
+                "will not infer swap ownership from the claim alone."
+            )
+
     return {
         "duplicates": tuple(duplicates),
         "swaps": tuple(swaps),
         "identity_cycles": tuple(cycles),
         "sequence_observations": tuple(authoritative),
-        "target_claim_ambiguous": target_file_id in set(ambiguous),
+        "target_sequence_observations": tuple(target_sequence),
+        "target_claim_ambiguous": target_claim_ambiguous,
+        "review_state": review_state,
+        "review_label": review_label,
+        "review_explanation": review_explanation,
+        "review_actionable": False,
     }
 
 
