@@ -2264,9 +2264,9 @@ class MediaIdentityDecisionService:
             scan_id = int(detail["id"])
             state = str(detail.get("result_state") or "")
             deep_finding = self._deep_correlation_finding(detail)
-            if deep_finding is not None:
-                findings.append(deep_finding)
             if state not in ACTIONABLE_STATES:
+                if deep_finding is not None:
+                    findings.append(deep_finding)
                 continue
             file_row = detail.get("file") or {}
             best = detail.get("best_candidate")
@@ -2364,6 +2364,18 @@ class MediaIdentityDecisionService:
                     "support_categories": best_resolution.get("support_categories", []),
                     "confirmation": (
                         confirmation.get("freshness") if confirmation else "none"
+                    ),
+                    "deep_review_state": (
+                        deep_finding["evidence"]["deep_review_state"]
+                        if deep_finding is not None else "none"
+                    ),
+                    "deep_review_label": (
+                        deep_finding["evidence"]["deep_review_label"]
+                        if deep_finding is not None else "None"
+                    ),
+                    "deep_artifact_id": (
+                        deep_finding["evidence"]["deep_artifact_id"]
+                        if deep_finding is not None else None
                     ),
                 },
             })
