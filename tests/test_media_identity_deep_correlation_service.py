@@ -619,6 +619,70 @@ class DeepCorrelationAnalysisServiceTests(unittest.TestCase):
             ).hexdigest(),
         )
 
+    def test_scan_detail_exposes_only_current_sealed_j4_artifact(self) -> None:
+        run = self.analysis_service.run(
+            self.scan_id
+        )
+
+        detail = self.decision_service.scan_detail(
+            self.scan_id
+        )
+        deep = detail["deep_correlation_analysis"]
+
+        self.assertIsNotNone(deep)
+        self.assertEqual(
+            deep["artifact_id"],
+            run.artifact_id,
+        )
+        self.assertTrue(deep["target_current"])
+        self.assertTrue(deep["analysis_complete"])
+        self.assertTrue(
+            deep["coverage"]["fully_multimodal"]
+        )
+        self.assertEqual(
+            deep["coverage"]["complete_modalities"],
+            ("video", "audio"),
+        )
+        self.assertEqual(
+            deep["coverage"]["planned_file_count"],
+            run.sequence.planned_file_count,
+        )
+        self.assertEqual(
+            deep["coverage"]["valid_hypothesis_count"],
+            run.sequence.hypothesis_count,
+        )
+
+    def test_scan_detail_ignores_tampered_j4_artifact(self) -> None:
+        run = self.analysis_service.run(
+            self.scan_id
+        )
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT payload_json
+                   FROM media_identity_artifacts
+                   WHERE id=?""",
+                (run.artifact_id,),
+            ).fetchone()
+            payload = json.loads(row["payload_json"])
+            payload["output"]["coverage"]["fully_multimodal"] = False
+            conn.execute(
+                """UPDATE media_identity_artifacts
+                   SET payload_json=?
+                   WHERE id=?""",
+                (
+                    json.dumps(payload, sort_keys=True),
+                    run.artifact_id,
+                ),
+            )
+
+        detail = self.decision_service.scan_detail(
+            self.scan_id
+        )
+
+        self.assertIsNone(
+            detail["deep_correlation_analysis"]
+        )
+
     def test_tampered_j4_artifact_is_repaired_from_current_inputs(self) -> None:
         first = self.analysis_service.run(
             self.scan_id
