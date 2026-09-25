@@ -232,17 +232,39 @@ class DeepSpeechSamplingService:
         self.translation_target_language = translation_target_language
         self.parameters = dict(parameters or {})
 
-    def _service(self) -> DeepSpeechService:
+    def _service(
+        self,
+        *,
+        scan_language: str = "",
+    ) -> DeepSpeechService:
+        fallback_language = str(
+            scan_language or ""
+        ).strip().casefold()
+        language = (
+            self.language
+            if str(self.language or "").strip()
+            else fallback_language
+        )
+        synopsis_language = (
+            self.synopsis_language
+            if self.synopsis_language is not None
+            else fallback_language
+        )
+        preferred_audio_language = (
+            self.preferred_audio_language
+            if self.preferred_audio_language is not None
+            else fallback_language
+        )
         return DeepSpeechService(
             self.database,
             self.engine,
             self.model,
             policy=self.policy,
             extractor_factory=self.extractor_factory,
-            language=self.language,
+            language=language,
             translate=self.translate,
-            synopsis_language=self.synopsis_language,
-            preferred_audio_language=self.preferred_audio_language,
+            synopsis_language=synopsis_language,
+            preferred_audio_language=preferred_audio_language,
             translation_target_language=self.translation_target_language,
             parameters=self.parameters,
         )
@@ -796,7 +818,15 @@ class DeepSpeechSamplingService:
             deep_identity = self._deep_identity(conn, scan, file_row)
             media = self._media(scan, file_row)
 
-        service = self._service()
+        claimed = _json_object(
+            scan.get("claimed_identity_json")
+        )
+        scan_language = str(
+            claimed.get("scan_language") or "eng"
+        ).strip().casefold() or "eng"
+        service = self._service(
+            scan_language=scan_language,
+        )
         try:
             if not self.engine.available():
                 return DeepSpeechSamplingRun(
