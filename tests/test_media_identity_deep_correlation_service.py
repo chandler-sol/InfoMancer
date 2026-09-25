@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 import json
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -48,7 +50,18 @@ from app.media_identity.fingerprint_service import (
 from app.media_identity.media_generation import (
     media_generation_identity,
 )
-from app.media_identity.models import IdentityReference
+from app.media_identity.models import (
+    IdentityReference,
+    IdentityResultState,
+)
+from app.media_identity.sequence_correlation import (
+    SequenceHypothesis,
+    SequenceOffsetAnalysis,
+    SequenceOffsetPolicy,
+)
+from app.media_identity.sequence_correlation_service import (
+    DeepSequenceCorrelationRun,
+)
 from app.media_identity.service import MediaIdentityDecisionService
 from app.media_identity.versions import (
     EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION,
@@ -643,6 +656,104 @@ class DeepCorrelationAnalysisServiceTests(unittest.TestCase):
                 (first.artifact_id,),
             ).fetchone()["payload_json"])
         self.assertTrue(repaired["analysis_complete"])
+
+    def test_final_publication_rejects_superseded_peer_hypothesis(self) -> None:
+        policy = SequenceOffsetPolicy()
+        target = SequenceHypothesis(
+            file_id=1,
+            scan_id=self.scan_id,
+            result_revision=1,
+            claimed_season=1,
+            claimed_episode=1,
+            claimed_episode_end=1,
+            candidate_key="candidate:target",
+            hypothesis_season=1,
+            hypothesis_episode=2,
+            result_state=IdentityResultState.LIKELY_MISMATCH,
+            support_strength=0.75,
+            conflict_strength=0.10,
+            margin=0.20,
+            independent_categories=2,
+            content_support=True,
+        )
+        peer = SequenceHypothesis(
+            file_id=2,
+            scan_id=200,
+            result_revision=1,
+            claimed_season=1,
+            claimed_episode=2,
+            claimed_episode_end=2,
+            candidate_key="candidate:peer",
+            hypothesis_season=1,
+            hypothesis_episode=1,
+            result_state=IdentityResultState.LIKELY_MISMATCH,
+            support_strength=0.75,
+            conflict_strength=0.10,
+            margin=0.20,
+            independent_categories=2,
+            content_support=True,
+        )
+        newer_peer = replace(
+            peer,
+            scan_id=201,
+            candidate_key="candidate:newer-peer",
+        )
+        analysis = SequenceOffsetAnalysis(
+            policy=policy,
+            hypothesis_count=2,
+            usable_count=2,
+            excluded_file_ids=(),
+            observations=(),
+            conflicted_seasons=(),
+        )
+        policy_payload = policy.identity_payload()
+        policy_signature = hashlib.sha256(
+            json.dumps(
+                policy_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        sequence = DeepSequenceCorrelationRun(
+            scan_id=self.scan_id,
+            target_file_id=1,
+            result_revision=1,
+            correlation_plan_signature="a" * 64,
+            sequence_policy_signature=policy_signature,
+            sequence_policy_identity=policy_payload,
+            planned_file_count=2,
+            hypothesis_count=2,
+            missing_scan_file_ids=(),
+            invalid_scan_file_ids=(),
+            hypotheses=(target, peer),
+            analysis=analysis,
+        )
+        plan = SimpleNamespace(
+            files=(
+                SimpleNamespace(file_id=1),
+                SimpleNamespace(file_id=2),
+            )
+        )
+
+        with patch.object(
+            self.analysis_service.sequence_service,
+            "_validated_hypothesis",
+            return_value=target,
+        ), patch.object(
+            self.analysis_service.sequence_service,
+            "_best_current_hypothesis",
+            return_value=(newer_peer, True),
+        ):
+            valid = self.analysis_service._validate_peer_hypotheses(
+                None,
+                plan=plan,
+                sequence=sequence,
+                target_file_id=1,
+            )
+
+        self.assertFalse(valid)
 
     def test_final_publication_rejects_invalid_j3_matrix(self) -> None:
         self.analysis_service.run(self.scan_id)
