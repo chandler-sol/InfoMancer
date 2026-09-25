@@ -10,6 +10,7 @@ from ..db import Database
 from ..naming import contained_destination, plex_episode_filename
 from .candidates import generate_episode_candidates
 from .deep import deep_plan_metadata_is_current
+from .deep_correlation_view import load_current_deep_correlation_view
 from .decision_snapshot import (
     DECISION_SNAPSHOT_VERSION,
     decision_snapshot_matches,
@@ -1629,6 +1630,25 @@ class MediaIdentityDecisionService:
         claimed = self._claimed_identity(scan)
         resolution = self._resolve_snapshot(scan, candidates, evidence)
         result_revision_value, decision_digest = self._decision_token(claimed)
+        claimed_season = claimed.get("season")
+        if (
+            isinstance(claimed_season, bool)
+            or not isinstance(claimed_season, int)
+            or claimed_season < 0
+        ):
+            claimed_season = None
+        deep_correlation_analysis = None
+        if snapshot_current:
+            with self.database.connect() as conn:
+                deep_correlation_analysis = (
+                    load_current_deep_correlation_view(
+                        conn,
+                        scan=scan,
+                        result_revision=result_revision_value,
+                        decision_snapshot_sha256=decision_digest,
+                        target_season=claimed_season,
+                    )
+                )
         content_verified = bool(
             verify_actionable_content
             and str(scan.get("result_state") or "") in ACTIONABLE_STATES
@@ -1752,6 +1772,7 @@ class MediaIdentityDecisionService:
             )
         result["evidence"] = evidence
         result["speech_analysis"] = speech_analysis
+        result["deep_correlation_analysis"] = deep_correlation_analysis
         result["file"] = dict(file_row) if file_row else None
         result["best_candidate"] = best
         result["claimed_candidate_keys"] = list(resolution.claimed_candidate_keys)
