@@ -1113,13 +1113,36 @@ class DeepEvidencePromotionService:
                 conn,
                 int(scan_id),
             )
+            completed_profile = str(
+                scan.get("completed_profile") or ""
+            )
+            claimed_before = _json_object(
+                scan.get("claimed_identity_json")
+            )
+            normal_attempted_fast = (
+                completed_profile == IdentityProfile.FAST.value
+                and str(scan.get("requested_profile") or "")
+                == IdentityProfile.NORMAL.value
+                and isinstance(
+                    claimed_before.get("normal_ocr"),
+                    Mapping,
+                )
+                and isinstance(
+                    claimed_before.get("normal_speech"),
+                    Mapping,
+                )
+            )
             if (
                 scan.get("status") != "complete"
-                or str(scan.get("completed_profile") or "")
-                != IdentityProfile.NORMAL.value
+                or (
+                    completed_profile
+                    != IdentityProfile.NORMAL.value
+                    and not normal_attempted_fast
+                )
             ):
                 raise DeepEvidencePromotionError(
-                    "Deep evidence promotion requires a complete current Normal scan."
+                    "Deep evidence promotion requires a complete current "
+                    "Normal attempt."
                 )
             current, file_row = (
                 MediaIdentityDecisionService._scan_snapshot_is_current(
