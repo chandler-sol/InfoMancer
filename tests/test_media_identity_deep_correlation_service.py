@@ -566,6 +566,32 @@ class DeepCorrelationAnalysisServiceTests(unittest.TestCase):
         self.assertEqual(row["status"], "complete")
         self.assertEqual(row["profile"], "deep")
         payload = json.loads(row["payload_json"])
+        self.assertTrue(payload["analysis_complete"])
+        coverage = payload["output"]["coverage"]
+        self.assertEqual(
+            coverage["complete_modalities"],
+            ["video", "audio"],
+        )
+        self.assertTrue(coverage["fully_multimodal"])
+        self.assertEqual(
+            coverage["planned_pair_count"],
+            first.interpretation.planned_pair_count,
+        )
+        self.assertEqual(
+            coverage["interpreted_pair_count"],
+            first.interpretation.pair_count,
+        )
+        self.assertEqual(
+            coverage["planned_file_count"],
+            first.sequence.planned_file_count,
+        )
+        self.assertEqual(
+            coverage["valid_hypothesis_count"],
+            first.sequence.hypothesis_count,
+        )
+        self.assertTrue(
+            coverage["sequence_peer_coverage_complete"]
+        )
         seal = payload.pop("artifact_output_sha256")
         self.assertEqual(
             seal,
