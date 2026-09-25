@@ -620,14 +620,24 @@ class DeepCorrelationAnalysisService:
             file_id = item.file_id
             expected = by_file.get(file_id)
             if expected is not None:
-                current = (
-                    self.sequence_service._validated_hypothesis(
-                        conn,
-                        expected.scan_id,
+                if file_id == target_file_id:
+                    current = (
+                        self.sequence_service._validated_hypothesis(
+                            conn,
+                            expected.scan_id,
+                        )
                     )
-                )
-                if current != expected:
-                    return False
+                    if current != expected:
+                        return False
+                else:
+                    current, had_scan = (
+                        self.sequence_service._best_current_hypothesis(
+                            conn,
+                            file_id,
+                        )
+                    )
+                    if not had_scan or current != expected:
+                        return False
                 continue
             if file_id == target_file_id:
                 return False
