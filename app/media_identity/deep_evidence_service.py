@@ -645,7 +645,7 @@ class DeepEvidencePromotionService:
         conn: sqlite3.Connection,
         scan_id: int,
         candidate_plan,
-    ) -> int:
+    ) -> tuple[int, tuple[str, ...]]:
         existing = {
             str(row["candidate_key"])
             for row in conn.execute(
@@ -656,10 +656,12 @@ class DeepEvidencePromotionService:
             ).fetchall()
         }
         added = 0
+        added_keys: list[str] = []
         for candidate in candidate_plan.candidates:
             identity = candidate.identity
             if candidate.key not in existing:
                 added += 1
+                added_keys.append(candidate.key)
             conn.execute(
                 """INSERT INTO media_identity_candidates(
                      scan_id,candidate_key,identity_kind,provider,
@@ -698,7 +700,7 @@ class DeepEvidencePromotionService:
                     _canonical_json(dict(candidate.details)),
                 ),
             )
-        return added
+        return added, tuple(added_keys)
 
     @staticmethod
     def _candidate_rows(
@@ -1103,10 +1105,6 @@ class DeepEvidencePromotionService:
         visual: DeepSamplingRun | None = None,
         speech: DeepSpeechSamplingRun | None = None,
     ) -> DeepEvidencePromotionRun:
-        if visual is None and speech is None:
-            raise DeepEvidencePromotionError(
-                "Deep evidence promotion requires at least one J2 result."
-            )
         with self.database.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             scan, _, evidence = MediaIdentityDecisionService._scan_snapshot(
@@ -1170,12 +1168,60 @@ class DeepEvidencePromotionService:
                     deep_identity=deep_identity,
                 )
             )
-            if visual_corpus is None and speech_corpus is None:
-                raise DeepEvidencePromotionError(
-                    "No complete Deep J2 manifest is available for promotion."
+            # A Deep run may legitimately have no usable OCR/speech runtime.
+            # Candidate widening and later fingerprint/correlation work remain
+            # valid, so zero promoted text modalities is not an error.
+
+            claimed = _json_object(
+                scan.get("claimed_identity_json")
+            )
+            previous_deep = claimed.get("deep_evidence")
+            previous_added_keys: set[str] = set()
+            if isinstance(previous_deep, Mapping):
+                raw_previous_added = previous_deep.get(
+                    "added_candidate_keys"
+                )
+                if isinstance(raw_previous_added, list):
+                    for value in raw_previous_added:
+                        if isinstance(value, str) and value:
+                            previous_added_keys.add(value)
+
+            current_plan_keys = {
+                candidate.key
+                for candidate in candidate_plan.candidates
+            }
+            obsolete_added_keys = sorted(
+                previous_added_keys - current_plan_keys
+            )
+            if obsolete_added_keys:
+                placeholders = ",".join(
+                    "?" for _ in obsolete_added_keys
+                )
+                conn.execute(
+                    f"""DELETE FROM media_identity_evidence
+                        WHERE scan_id=? AND candidate_key IN ({placeholders})""",
+                    (int(scan_id), *obsolete_added_keys),
+                )
+                conn.execute(
+                    f"""DELETE FROM media_identity_candidates
+                        WHERE scan_id=? AND candidate_key IN ({placeholders})""",
+                    (int(scan_id), *obsolete_added_keys),
                 )
 
-            added_candidates = self._upsert_candidates(
+            # Every promotion replaces the complete Deep text contribution.
+            # This prevents a previously-complete modality from leaking into a
+            # later run where that modality is now incomplete or unavailable.
+            conn.execute(
+                """DELETE FROM media_identity_evidence
+                   WHERE scan_id=? AND analyzer_key IN (?,?)""",
+                (
+                    int(scan_id),
+                    DEEP_VISUAL_EVIDENCE_KEY,
+                    DEEP_SPEECH_EVIDENCE_KEY,
+                ),
+            )
+
+            added_candidates, added_candidate_keys = self._upsert_candidates(
                 conn,
                 int(scan_id),
                 candidate_plan,
@@ -1205,9 +1251,6 @@ class DeepEvidencePromotionService:
                 )
             )
 
-            claimed = _json_object(
-                scan.get("claimed_identity_json")
-            )
             claimed["deep_identity"] = dict(deep_identity)
             claimed["deep_evidence"] = {
                 "version": DEEP_EVIDENCE_PROMOTION_VERSION,
@@ -1224,6 +1267,7 @@ class DeepEvidencePromotionService:
                 ),
                 "visual_evidence_count": visual_evidence_count,
                 "speech_evidence_count": speech_evidence_count,
+                "added_candidate_keys": list(added_candidate_keys),
             }
             conn.execute(
                 """UPDATE media_identity_scans
