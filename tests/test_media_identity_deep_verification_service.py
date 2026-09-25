@@ -145,8 +145,11 @@ class _Correlation:
         self.state.calls.append("correlate")
         return SimpleNamespace(
             scan_id=1,
-            result_revision=5,
             artifact_id=900,
+            interpretation=SimpleNamespace(
+                scan_id=1,
+                result_revision=5,
+            ),
         )
 
 
@@ -325,7 +328,7 @@ class DeepVerificationCoordinatorTests(unittest.TestCase):
         ):
             service.run(1)
 
-        self.assertEqual(state.calls, ())
+        self.assertEqual(state.calls, [])
 
 
 if __name__ == "__main__":
