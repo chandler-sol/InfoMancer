@@ -4,6 +4,8 @@ import unittest
 
 from app.media_identity.deep_correlation_view import (
     DeepCorrelationViewError,
+    _attach_display_context,
+    _related_file_ids,
     _target_patterns,
 )
 from app.media_identity.service import MediaIdentityDecisionService
@@ -178,6 +180,78 @@ class DeepCorrelationViewStateTests(unittest.TestCase):
                 target_file_id=1,
                 target_season=1,
             )
+
+
+class DeepCorrelationDisplayContextTests(unittest.TestCase):
+    def test_display_context_names_peers_without_changing_pattern_identity(self) -> None:
+        patterns = _target_patterns(
+            _output(
+                duplicates=[{
+                    "left_file_id": 1,
+                    "right_file_id": 2,
+                    "strength": "strong_multimodal",
+                    "agreement": "both_high",
+                }],
+                sequence=[
+                    _sequence(supporters=(1, 2, 3))
+                ],
+            ),
+            target_file_id=1,
+            target_season=1,
+        )
+        coverage = {
+            "missing_scan_file_ids": (3,),
+            "invalid_scan_file_ids": (),
+        }
+        related = _related_file_ids(
+            patterns,
+            coverage,
+            target_file_id=1,
+        )
+        self.assertEqual(related, (2, 3))
+
+        enriched, enriched_coverage = _attach_display_context(
+            patterns,
+            coverage,
+            {
+                2: {
+                    "id": 2,
+                    "filename": "Example - S01E02.mkv",
+                    "season": 1,
+                    "episode_start": 2,
+                    "episode_end": 2,
+                },
+                3: {
+                    "id": 3,
+                    "filename": "Example - S01E03.mkv",
+                    "season": 1,
+                    "episode_start": 3,
+                    "episode_end": 3,
+                },
+            },
+        )
+
+        self.assertEqual(
+            enriched["duplicates"][0]["other_file"]["filename"],
+            "Example - S01E02.mkv",
+        )
+        self.assertEqual(
+            [
+                item["filename"]
+                for item in enriched["sequence_observations"][0][
+                    "supporting_files"
+                ]
+            ],
+            [
+                "File #1",
+                "Example - S01E02.mkv",
+                "Example - S01E03.mkv",
+            ],
+        )
+        self.assertEqual(
+            enriched_coverage["missing_scan_files"][0]["filename"],
+            "Example - S01E03.mkv",
+        )
 
 
 class DeepCorrelationMieAdvisoryTests(unittest.TestCase):
