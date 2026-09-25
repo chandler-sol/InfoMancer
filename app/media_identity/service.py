@@ -2333,11 +2333,17 @@ class MediaIdentityDecisionService:
             decision_digest = str(
                 detail.get("decision_snapshot_sha256") or ""
             ).strip().casefold()
+            finding_fingerprint = (
+                f"episode-identity:file:{int(detail['file_id'])}:"
+                f"decision:{decision_digest}"
+            )
+            if deep_finding is not None:
+                finding_fingerprint += (
+                    ":deep:"
+                    f"{int(deep_finding['evidence']['deep_artifact_id'])}"
+                )
             findings.append({
-                "fingerprint": (
-                    f"episode-identity:file:{int(detail['file_id'])}:"
-                    f"decision:{decision_digest}"
-                ),
+                "fingerprint": finding_fingerprint,
                 "rule_key": "episode-identity-review",
                 "category": "identity",
                 "severity": severity,
