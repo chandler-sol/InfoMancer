@@ -54,7 +54,7 @@ class DeepVerificationRun:
     def completed_revision(self) -> int:
         if self.completion is not None:
             return self.completion.completed_revision
-        return self.correlation.result_revision
+        return self.correlation.interpretation.result_revision
 
 
 def _json_object(value: object) -> dict[str, Any]:
