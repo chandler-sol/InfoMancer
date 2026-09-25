@@ -22,6 +22,10 @@ DEFAULT_CALIBRATION = {
 }
 FEEDBACK_REASONS = {"expected", "incorrect", "resolved_elsewhere", "other"}
 FEEDBACK_SCOPES = {"finding", "title", "source"}
+EPISODE_IDENTITY_RULES = {
+    "episode-identity-review",
+    "episode-identity-deep-review",
+}
 
 
 def _utc_now() -> str:
@@ -950,7 +954,7 @@ class MediaIntelligenceEngine:
             reconcile_identity = bool(
                 finding
                 and str(finding["rule_key"] or "")
-                == "episode-identity-review"
+                in EPISODE_IDENTITY_RULES
             )
             if reconcile_identity:
                 # Removing feedback does not prove that this historical sealed
@@ -1279,6 +1283,7 @@ class MediaIntelligenceEngine:
                 "metadata-identifiers-missing": "Review provider match",
                 "media-identity-unreviewed": "Review editions and versions",
                 "episode-identity-review": "Review episode identity",
+                "episode-identity-deep-review": "Review Deep episode analysis",
             }.get(finding["rule_key"], "Review affected media")
             findings.append(finding)
         return findings
@@ -1296,7 +1301,7 @@ class MediaIntelligenceEngine:
             "duplicate-candidates", "duplicate-storage-recovery",
         }:
             return "/duplicates"
-        if finding["rule_key"] == "episode-identity-review":
+        if finding["rule_key"] in EPISODE_IDENTITY_RULES:
             scan_id = (finding.get("evidence") or {}).get("scan_id")
             if scan_id:
                 return f"/episode-identity/scans/{int(scan_id)}"
@@ -1329,7 +1334,7 @@ class MediaIntelligenceEngine:
             ).fetchone()
             if not finding:
                 return False
-            if finding["rule_key"] == "episode-identity-review":
+            if finding["rule_key"] in EPISODE_IDENTITY_RULES:
                 # Episode Identity feedback is bound to one evidence snapshot.
                 # Never allow a UI or direct POST to suppress future identity
                 # warnings for an entire title or source.
@@ -1376,7 +1381,7 @@ class MediaIntelligenceEngine:
                 (finding["fingerprint"],),
             )
             reconcile_identity = (
-                str(finding["rule_key"] or "") == "episode-identity-review"
+                str(finding["rule_key"] or "") in EPISODE_IDENTITY_RULES
             )
             if reconcile_identity:
                 # Removing feedback does not prove that the sealed decision this
