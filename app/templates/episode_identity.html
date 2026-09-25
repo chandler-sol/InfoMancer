@@ -190,6 +190,17 @@
     </div>
   </header>
 
+  <article class="mie-profile-card">
+    <header>
+      <div>
+        <h3>{{ deep.review_label }}</h3>
+        <p>{{ deep.review_explanation }}</p>
+      </div>
+      <span class="mie-profile-state">Diagnostic only</span>
+    </header>
+    <p class="legal-note">This Deep review state does not change the resolver result, enable confirmation, or authorize a rename.</p>
+  </article>
+
   <div class="mie-score-grid">
     <article>
       <strong>{{ deep.coverage.complete_modalities|join(' + ')|title if deep.coverage.complete_modalities else 'None' }}</strong>
