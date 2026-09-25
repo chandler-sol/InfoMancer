@@ -122,6 +122,8 @@ class ModalityInterpretationTests(unittest.TestCase):
     def test_audio_exact_high_boundary_is_high(self) -> None:
         result = interpret_modality(
             _comparison(
+                algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                algorithm_version=AUDIO_ENVELOPE_DHASH64_V1.version,
                 mean=0.89,
                 median=0.91,
                 coverage=0.75,
@@ -708,7 +710,12 @@ class CorrelationInterpretationServiceTests(unittest.TestCase):
         bundle = _bundle(
             video=_correlation_run(
                 algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
-                comparisons=(),
+                comparisons=(
+                    _comparison(
+                        algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                        algorithm_version=AUDIO_ENVELOPE_DHASH64_V1.version,
+                    ),
+                ),
             )
         )
 
@@ -722,7 +729,12 @@ class CorrelationInterpretationServiceTests(unittest.TestCase):
         bundle = _bundle(
             audio=_correlation_run(
                 algorithm_key=VIDEO_DHASH64_V1.key,
-                comparisons=(),
+                comparisons=(
+                    _comparison(
+                        algorithm_key=VIDEO_DHASH64_V1.key,
+                        algorithm_version=VIDEO_DHASH64_V1.version,
+                    ),
+                ),
             )
         )
 
@@ -736,7 +748,12 @@ class CorrelationInterpretationServiceTests(unittest.TestCase):
         bundle = _bundle(
             audio=_correlation_run(
                 algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
-                comparisons=(),
+                comparisons=(
+                    _comparison(
+                        algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                        algorithm_version=AUDIO_ENVELOPE_DHASH64_V1.version,
+                    ),
+                ),
                 signature="b" * 64,
             )
         )
@@ -751,7 +768,26 @@ class CorrelationInterpretationServiceTests(unittest.TestCase):
         bundle = _bundle(
             audio=_correlation_run(
                 algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
-                comparisons=(),
+                comparisons=(
+                    _comparison(
+                        left=1,
+                        right=2,
+                        algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                        algorithm_version=AUDIO_ENVELOPE_DHASH64_V1.version,
+                    ),
+                    _comparison(
+                        left=1,
+                        right=3,
+                        algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                        algorithm_version=AUDIO_ENVELOPE_DHASH64_V1.version,
+                    ),
+                    _comparison(
+                        left=2,
+                        right=3,
+                        algorithm_key=AUDIO_ENVELOPE_DHASH64_V1.key,
+                        algorithm_version=AUDIO_ENVELOPE_DHASH64_V1.version,
+                    ),
+                ),
                 planned_file_count=3,
                 planned_pair_count=3,
             )
@@ -827,7 +863,14 @@ class CorrelationInterpretationServiceTests(unittest.TestCase):
         self.assertTrue(result.pairs[0].contradictory)
 
     def test_invalid_bundle_plan_signature_fails_closed(self) -> None:
-        bundle = _bundle(signature="not-a-sha")
+        valid = _bundle()
+        bundle = DeepFingerprintBundleRun(
+            scan_id=valid.scan_id,
+            result_revision=valid.result_revision,
+            correlation_plan_signature="not-a-sha",
+            video=valid.video,
+            audio=valid.audio,
+        )
 
         with self.assertRaisesRegex(
             CorrelationInterpretationError,
