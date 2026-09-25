@@ -10,6 +10,7 @@ from ..db import Database
 from ..naming import contained_destination, plex_episode_filename
 from .candidates import generate_episode_candidates
 from .deep import deep_plan_metadata_is_current
+from .deep_evidence import deep_evidence_metadata_is_current
 from .deep_correlation_view import load_current_deep_correlation_view
 from .decision_snapshot import (
     DECISION_SNAPSHOT_VERSION,
@@ -1000,6 +1001,12 @@ class MediaIdentityDecisionService:
                 ),
                 language=language,
                 metadata=claimed.get("deep_identity"),
+            ):
+                return False, file_row
+            if not deep_evidence_metadata_is_current(
+                claimed.get("deep_evidence"),
+                evidence,
+                file_id=int(scan["file_id"]),
             ):
                 return False, file_row
 
