@@ -1190,6 +1190,27 @@ class DeepEvidencePromotionService:
                 candidate.key
                 for candidate in candidate_plan.candidates
             }
+            existing_candidate_keys = {
+                str(row["candidate_key"])
+                for row in conn.execute(
+                    """SELECT candidate_key
+                       FROM media_identity_candidates
+                       WHERE scan_id=?""",
+                    (int(scan_id),),
+                ).fetchall()
+            }
+            baseline_candidate_keys = (
+                existing_candidate_keys - previous_added_keys
+            )
+            missing_baseline_keys = sorted(
+                baseline_candidate_keys - current_plan_keys
+            )
+            if missing_baseline_keys:
+                raise DeepEvidencePromotionError(
+                    "Deep candidate widening would narrow the persisted "
+                    "Normal/Fast baseline candidate set."
+                )
+
             obsolete_added_keys = sorted(
                 previous_added_keys - current_plan_keys
             )
@@ -1221,11 +1242,17 @@ class DeepEvidencePromotionService:
                 ),
             )
 
-            added_candidates, added_candidate_keys = self._upsert_candidates(
+            added_candidates, newly_added_keys = self._upsert_candidates(
                 conn,
                 int(scan_id),
                 candidate_plan,
             )
+            active_deep_added_keys = tuple(sorted(
+                (
+                    previous_added_keys & current_plan_keys
+                )
+                | set(newly_added_keys)
+            ))
             candidates = self._candidate_rows(
                 conn,
                 int(scan_id),
@@ -1267,7 +1294,7 @@ class DeepEvidencePromotionService:
                 ),
                 "visual_evidence_count": visual_evidence_count,
                 "speech_evidence_count": speech_evidence_count,
-                "added_candidate_keys": list(added_candidate_keys),
+                "added_candidate_keys": list(active_deep_added_keys),
             }
             conn.execute(
                 """UPDATE media_identity_scans
