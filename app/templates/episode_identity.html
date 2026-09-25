@@ -233,6 +233,7 @@
         <div>
           <h3>S{{ '%02d'|format(item.season) }} · episode offset {% if item.offset > 0 %}+{% endif %}{{ item.offset }}</h3>
           <p>{{ item.support_count }} of {{ item.usable_count }} usable files support the same offset across a {{ item.longest_chain }}-file chain.</p>
+          {% if item.supporting_files %}<p>Supporting files: {% for peer in item.supporting_files %}<strong>{{ peer.filename }}</strong> (File #{{ peer.id }}){% if not loop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
         </div>
         <span class="mie-profile-state">Cross-file pattern</span>
       </header>
@@ -246,7 +247,7 @@
   <h3>Duplicate-content observations</h3>
   <ul>
     {% for item in deep.duplicates %}
-    <li>File #{{ item.other_file_id }} · {{ item.strength|replace('_', ' ')|title }} · {{ item.agreement|replace('_', ' ')|title }}</li>
+    <li><strong>{{ item.other_file.filename }}</strong> (File #{{ item.other_file.id }}) · {{ item.strength|replace('_', ' ')|title }} · {{ item.agreement|replace('_', ' ')|title }}</li>
     {% endfor %}
   </ul>
   {% endif %}
@@ -256,7 +257,7 @@
   <ul>
     {% for item in deep.swaps %}
     <li>
-      File #{{ item.other_file_id }} · {{ item.status|replace('_', ' ')|title }}.
+      <strong>{{ item.other_file.filename }}</strong> (File #{{ item.other_file.id }}) · {{ item.status|replace('_', ' ')|title }}.
       This file claims S{{ '%02d'|format(item.target_claimed[0]) }}E{{ '%02d'|format(item.target_claimed[1]) }}
       while its resolver hypothesis points to S{{ '%02d'|format(item.target_hypothesis[0]) }}E{{ '%02d'|format(item.target_hypothesis[1]) }}.
     </li>
@@ -268,7 +269,7 @@
   <h3>Multi-file identity rotations</h3>
   <ul>
     {% for item in deep.identity_cycles %}
-    <li>Cycle involving files #{{ item.file_ids|join(', #') }}.</li>
+    <li>Cycle involving {% for peer in item.files %}<strong>{{ peer.filename }}</strong> (File #{{ peer.id }}){% if not loop.last %}, {% endif %}{% endfor %}.</li>
     {% endfor %}
   </ul>
   {% endif %}
@@ -285,15 +286,15 @@
   <details>
     <summary class="button">Coverage diagnostics</summary>
     {% if deep.coverage.missing_scan_file_ids %}
-    <p>Missing peer scans: {{ deep.coverage.missing_scan_file_ids|join(', #') }}</p>
+    <p>Missing peer scans: {% for peer in deep.coverage.missing_scan_files %}<strong>{{ peer.filename }}</strong> (File #{{ peer.id }}){% if not loop.last %}, {% endif %}{% endfor %}.</p>
     {% endif %}
     {% if deep.coverage.invalid_scan_file_ids %}
-    <p>Invalid or stale peer scans: {{ deep.coverage.invalid_scan_file_ids|join(', #') }}</p>
+    <p>Invalid or stale peer scans: {% for peer in deep.coverage.invalid_scan_files %}<strong>{{ peer.filename }}</strong> (File #{{ peer.id }}){% if not loop.last %}, {% endif %}{% endfor %}.</p>
     {% endif %}
   </details>
   {% endif %}
 
-  <p class="legal-note">Deep correlation is diagnostic only in this view. It does not confirm an episode, alter the catalog claim, or apply a filesystem rename.</p>
+  <p class="legal-note">Peer filenames above are current catalog labels for orientation only; the sealed Deep analysis remains bound to file IDs and media snapshots. Deep correlation is diagnostic only in this view. It does not confirm an episode, alter the catalog claim, or apply a filesystem rename.</p>
 </section>
 {% endif %}
 
