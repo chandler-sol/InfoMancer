@@ -208,12 +208,19 @@ class DeepCorrelationDisplayContextTests(unittest.TestCase):
             coverage,
             target_file_id=1,
         )
-        self.assertEqual(related, (2, 3))
+        self.assertEqual(related, (1, 2, 3))
 
         enriched, enriched_coverage = _attach_display_context(
             patterns,
             coverage,
             {
+                1: {
+                    "id": 1,
+                    "filename": "Example - S01E01.mkv",
+                    "season": 1,
+                    "episode_start": 1,
+                    "episode_end": 1,
+                },
                 2: {
                     "id": 2,
                     "filename": "Example - S01E02.mkv",
@@ -243,7 +250,7 @@ class DeepCorrelationDisplayContextTests(unittest.TestCase):
                 ]
             ],
             [
-                "File #1",
+                "Example - S01E01.mkv",
                 "Example - S01E02.mkv",
                 "Example - S01E03.mkv",
             ],
