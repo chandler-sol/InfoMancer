@@ -2264,10 +2264,17 @@ class MediaIdentityDecisionService:
             scan_id = int(detail["id"])
             state = str(detail.get("result_state") or "")
             deep_finding = self._deep_correlation_finding(detail)
+            deep_is_distinct_duplicate = bool(
+                deep_finding is not None
+                and deep_finding["evidence"]["deep_review_state"]
+                == "duplicate_content_identity"
+            )
             if state not in ACTIONABLE_STATES:
                 if deep_finding is not None:
                     findings.append(deep_finding)
                 continue
+            if deep_is_distinct_duplicate:
+                findings.append(deep_finding)
             file_row = detail.get("file") or {}
             best = detail.get("best_candidate")
             confirmation = detail.get("confirmation")
