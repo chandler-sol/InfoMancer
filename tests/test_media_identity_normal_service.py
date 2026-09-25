@@ -1082,6 +1082,22 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         decisions = MediaIdentityDecisionService(self.database)
         decisions.resolve_scan(self.fast_scan.scan_id)
         detail = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertIn(
+            detail["result_state"],
+            {"possible_mismatch", "likely_mismatch", "strong_match_other"},
+        )
+        claimed = next(
+            candidate
+            for candidate in detail["candidates"]
+            if candidate["candidate_key"]
+                in set(detail["claimed_candidate_keys"])
+        )
+        detail["confirmation"] = {
+            "current": True,
+            "provider": claimed["provider"],
+            "provider_item_id": claimed["provider_item_id"],
+            "expected_episode_id": claimed["expected_episode_id"],
+        }
         detail["deep_correlation_analysis"] = {
             "artifact_id": 903,
             "review_state": "duplicate_content_identity",
@@ -1113,10 +1129,17 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         ):
             findings = decisions.mie_findings()
 
-        self.assertTrue(any(
-            item["rule_key"] == "episode-identity-deep-review"
-            and item["evidence"]["deep_review_state"]
-                == "duplicate_content_identity"
+        self.assertEqual(
+            sum(
+                item["rule_key"] == "episode-identity-deep-review"
+                and item["evidence"]["deep_review_state"]
+                    == "duplicate_content_identity"
+                for item in findings
+            ),
+            1,
+        )
+        self.assertFalse(any(
+            item["rule_key"] == "episode-identity-review"
             for item in findings
         ))
 
