@@ -1078,6 +1078,48 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             902,
         )
 
+    def test_actionable_identity_does_not_hide_deep_duplicate_content(self):
+        decisions = MediaIdentityDecisionService(self.database)
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        detail = decisions.scan_detail(self.fast_scan.scan_id)
+        detail["deep_correlation_analysis"] = {
+            "artifact_id": 903,
+            "review_state": "duplicate_content_identity",
+            "review_label": "Duplicate content identity",
+            "review_explanation": (
+                "Multimodal fingerprint evidence indicates this file shares "
+                "episode content with another claimed file."
+            ),
+            "review_actionable": False,
+            "duplicates": ({
+                "other_file_id": 2,
+                "strength": "strong_multimodal",
+                "agreement": "both_high",
+            },),
+            "swaps": (),
+            "identity_cycles": (),
+            "target_sequence_observations": (),
+            "coverage": {
+                "fully_multimodal": True,
+                "complete_modalities": ("video", "audio"),
+                "sequence_peer_coverage_complete": True,
+            },
+        }
+
+        with patch.object(
+            decisions,
+            "scan_detail",
+            return_value=detail,
+        ):
+            findings = decisions.mie_findings()
+
+        self.assertTrue(any(
+            item["rule_key"] == "episode-identity-deep-review"
+            and item["evidence"]["deep_review_state"]
+                == "duplicate_content_identity"
+            for item in findings
+        ))
+
     def test_current_deep_result_outranks_newer_normal_result(self):
         source = FakePreviewSource()
         normal = NormalIdentityService(
