@@ -37,6 +37,7 @@ from app.media_identity.fingerprint_service import (
 from app.media_identity.media_generation import media_generation_identity
 from app.media_identity.fingerprint_correlation import (
     DeepFingerprintCorrelationError,
+    DeepFingerprintCorrelationRun,
     DeepFingerprintCorrelationService,
 )
 
@@ -73,6 +74,74 @@ def _fingerprint(
             "scale": "9x8-gray",
         },
     )
+
+
+class FingerprintCorrelationRunContractTests(unittest.TestCase):
+    def test_incomplete_run_cannot_carry_completion_manifest(self) -> None:
+        with self.assertRaisesRegex(
+            DeepFingerprintCorrelationError,
+            "cannot carry a completion manifest",
+        ):
+            DeepFingerprintCorrelationRun(
+                scan_id=1,
+                algorithm_key=VIDEO_DHASH64_V1.key,
+                correlation_plan_signature="a" * 64,
+                planned_file_count=2,
+                completed_file_count=1,
+                planned_pair_count=1,
+                completed_pair_count=0,
+                reused_fingerprint_count=0,
+                generated_fingerprint_count=1,
+                manifest_artifact_id=99,
+                coverage_complete=False,
+                missing_file_ids=(2,),
+                comparisons=(),
+                failures=("missing-peer",),
+            )
+
+    def test_complete_run_requires_full_sealed_coverage(self) -> None:
+        with self.assertRaisesRegex(
+            DeepFingerprintCorrelationError,
+            "lacks sealed full coverage",
+        ):
+            DeepFingerprintCorrelationRun(
+                scan_id=1,
+                algorithm_key=VIDEO_DHASH64_V1.key,
+                correlation_plan_signature="a" * 64,
+                planned_file_count=2,
+                completed_file_count=1,
+                planned_pair_count=1,
+                completed_pair_count=0,
+                reused_fingerprint_count=0,
+                generated_fingerprint_count=1,
+                manifest_artifact_id=99,
+                coverage_complete=True,
+                missing_file_ids=(2,),
+                comparisons=(),
+                failures=("missing-peer",),
+            )
+
+    def test_pair_count_must_match_comparison_records(self) -> None:
+        with self.assertRaisesRegex(
+            DeepFingerprintCorrelationError,
+            "pair accounting is inconsistent",
+        ):
+            DeepFingerprintCorrelationRun(
+                scan_id=1,
+                algorithm_key=VIDEO_DHASH64_V1.key,
+                correlation_plan_signature="a" * 64,
+                planned_file_count=2,
+                completed_file_count=2,
+                planned_pair_count=1,
+                completed_pair_count=1,
+                reused_fingerprint_count=0,
+                generated_fingerprint_count=2,
+                manifest_artifact_id=None,
+                coverage_complete=False,
+                missing_file_ids=(),
+                comparisons=(),
+                failures=("incomparable",),
+            )
 
 
 class FingerprintContractTests(unittest.TestCase):
