@@ -310,6 +310,7 @@ class DeepVerificationCoordinatorTests(unittest.TestCase):
         )
         self.assertIsNone(result.promotion)
         self.assertIsNone(result.completion)
+        self.assertEqual(result.completed_revision, 5)
 
     def test_raw_fast_scan_requires_normal_service(self) -> None:
         state = _State(raw_fast=True)
