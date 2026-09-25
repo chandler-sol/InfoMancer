@@ -46,12 +46,32 @@ class DeepCompletionService:
                     int(scan_id),
                 )
             )
+            claimed = _json_object(
+                scan.get("claimed_identity_json")
+            )
+            completed_profile = str(
+                scan.get("completed_profile") or ""
+            )
+            normal_attempted_fast = (
+                completed_profile == IdentityProfile.FAST.value
+                and isinstance(
+                    claimed.get("normal_ocr"),
+                    Mapping,
+                )
+                and isinstance(
+                    claimed.get("normal_speech"),
+                    Mapping,
+                )
+            )
             if (
                 scan.get("status") != "complete"
                 or str(scan.get("requested_profile") or "")
                 != IdentityProfile.DEEP.value
-                or str(scan.get("completed_profile") or "")
-                != IdentityProfile.NORMAL.value
+                or (
+                    completed_profile
+                    != IdentityProfile.NORMAL.value
+                    and not normal_attempted_fast
+                )
                 or not str(scan.get("result_state") or "")
                 or not str(scan.get("best_candidate_key") or "")
             ):
@@ -75,9 +95,6 @@ class DeepCompletionService:
                     "Deep completion requires a sealed resolved revision."
                 )
 
-            claimed = _json_object(
-                scan.get("claimed_identity_json")
-            )
             deep_identity = claimed.get("deep_identity")
             if not isinstance(deep_identity, Mapping):
                 raise DeepCompletionError(
