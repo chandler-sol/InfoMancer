@@ -140,6 +140,20 @@ class DeepEvidencePromotionServiceTests(unittest.TestCase):
             )
             self.scan_id = int(cursor.lastrowid)
             self._insert_candidate(conn, self.base)
+            conn.executemany(
+                """INSERT INTO media_identity_artifacts(
+                     id,file_id,artifact_type,analyzer_key,analyzer_version,
+                     profile,file_size_bytes,file_modified_at
+                   ) VALUES (?,1,?,?,?,'deep',?,?)""",
+                [
+                    (101, "deep_visual_manifest", "deep-preview-ocr", "1", stat.st_size, stat.st_mtime),
+                    (102, "deep_speech_manifest", "deep-speech-transcript", "1", stat.st_size, stat.st_mtime),
+                    (201, "visual_text", "deep-preview-ocr", "1", stat.st_size, stat.st_mtime),
+                    (202, "visual_text", "deep-preview-ocr", "1", stat.st_size, stat.st_mtime),
+                    (301, "speech_transcript", "deep-speech-transcript", "1", stat.st_size, stat.st_mtime),
+                    (302, "speech_transcript", "deep-speech-transcript", "1", stat.st_size, stat.st_mtime),
+                ],
+            )
             conn.execute(
                 """INSERT INTO media_identity_evidence(
                      scan_id,candidate_key,analyzer_key,analyzer_version,
