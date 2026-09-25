@@ -15,6 +15,11 @@ from .deep import (
     generate_deep_episode_candidates,
     plan_deep_correlation,
 )
+from .deep_evidence import (
+    DEEP_EVIDENCE_VERSION,
+    DEEP_SPEECH_EVIDENCE_KEY,
+    DEEP_VISUAL_EVIDENCE_KEY,
+)
 from .deep_sampling_service import (
     DEEP_SAMPLING_MANIFEST_KEY,
     DEEP_SAMPLING_MANIFEST_VERSION,
@@ -50,9 +55,6 @@ from .versions import (
 )
 
 
-DEEP_VISUAL_EVIDENCE_KEY = "deep-preview-ocr-synopsis"
-DEEP_SPEECH_EVIDENCE_KEY = "deep-speech-synopsis"
-DEEP_EVIDENCE_VERSION = str(DEEP_EVIDENCE_PROMOTION_VERSION)
 _MAX_PROMOTED_TEXT_CHARS = 512_000
 _MAX_MANIFEST_ITEMS = 64
 
