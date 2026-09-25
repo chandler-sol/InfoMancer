@@ -50,7 +50,9 @@
     <article>
       <strong>{{ (identity.completed_profile or identity.requested_profile)|title }}</strong>
       <h3>Completed tier</h3>
-      {% if identity.completed_profile == 'normal' %}
+      {% if identity.completed_profile == 'deep' %}
+      <p>Deep keeps the lower-tier evidence, widens the bounded episode candidate set, can add denser OCR and speech evidence, and prepares cross-file fingerprint and sequence diagnostics.</p>
+      {% elif identity.completed_profile == 'normal' %}
       <p>Normal includes the Fast evidence plus bounded visual text and, when cheaper evidence is insufficient, targeted local speech analysis.</p>
       {% else %}
       <p>Fast uses local catalog, provider metadata, stream facts, and available subtitle text.</p>
@@ -81,6 +83,29 @@
     </button>
   </form>
   <p class="legal-note">Normal remains read-only. OCR observations only add evidence to this scan.</p>
+  {% else %}
+  <p>Run Fast verification again first because this scan no longer matches the current file and metadata snapshot.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if current_user.is_librarian %}
+<section class="panel">
+  <header>
+    <div>
+      <p class="eyebrow">DEEP VERIFICATION</p>
+      <h2>Run bounded cross-file verification</h2>
+      <p>Deep resumes from the current sealed scan, widens the episode candidate set, reuses completed Normal work, attempts denser local OCR and speech when available, then compares the bounded episode cohort with video and audio fingerprints.</p>
+    </div>
+  </header>
+  {% if identity.snapshot_current %}
+  <form method="post" action="/episode-identity/scans/{{ identity.id }}/deep">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="button primary">
+      {% if identity.completed_profile == 'deep' %}Run Deep again{% else %}Run Deep verification{% endif %}
+    </button>
+  </form>
+  <p class="legal-note">Deep is read-only and may use substantially more CPU and media decoding than Fast or Normal. Optional OCR, speech, or peer evidence can remain unavailable; an inconclusive result is valid. Deep never confirms, renames, moves, or deletes media automatically.</p>
   {% else %}
   <p>Run Fast verification again first because this scan no longer matches the current file and metadata snapshot.</p>
   {% endif %}
@@ -232,7 +257,7 @@
   <h3>Multi-file identity rotations</h3>
   <ul>
     {% for item in deep.identity_cycles %}
-    <li>Cycle involving files {{ item.file_ids|join(', #') }}.</li>
+    <li>Cycle involving files #{{ item.file_ids|join(', #') }}.</li>
     {% endfor %}
   </ul>
   {% endif %}
