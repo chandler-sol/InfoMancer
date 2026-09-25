@@ -255,7 +255,7 @@ class DeepCorrelationAnalysisServiceTests(unittest.TestCase):
                      bitrate,container,dynamic_range,
                      media_info_at,media_info_error,seen_scan
                    ) VALUES (
-                     1,1,?,?,?,?,1,1,1,'Example',
+                     1,1,?,?,?,?,?,1,1,1,'Example',
                      600,1920,1080,'H264','AAC',2,
                      5000000,'MKV','SDR',
                      '2026-09-24T12:00:00','','fixture'
