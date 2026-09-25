@@ -8,7 +8,7 @@ from ..db import Database
 from .deep import deep_plan_metadata_is_current
 from .deep_evidence import deep_evidence_metadata_is_current
 from .decision_snapshot import result_revision, seal_decision_snapshot
-from .models import IdentityProfile
+from .models import IdentityProfile, IdentityResultState
 from .service import MediaIdentityDecisionService
 
 
@@ -63,6 +63,12 @@ class DeepCompletionService:
                     Mapping,
                 )
             )
+            result_state = str(
+                scan.get("result_state") or ""
+            )
+            best_candidate_key = str(
+                scan.get("best_candidate_key") or ""
+            )
             if (
                 scan.get("status") != "complete"
                 or str(scan.get("requested_profile") or "")
@@ -72,8 +78,12 @@ class DeepCompletionService:
                     != IdentityProfile.NORMAL.value
                     and not normal_attempted_fast
                 )
-                or not str(scan.get("result_state") or "")
-                or not str(scan.get("best_candidate_key") or "")
+                or not result_state
+                or (
+                    not best_candidate_key
+                    and result_state
+                    != IdentityResultState.INCONCLUSIVE.value
+                )
             ):
                 raise DeepCompletionError(
                     "Deep completion requires one resolved staged Deep upgrade."
