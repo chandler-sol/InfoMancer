@@ -12,6 +12,13 @@ from app.media_identity.decision_snapshot import (
     result_revision,
     seal_decision_snapshot,
 )
+from app.media_identity.deep_completion_service import (
+    DeepCompletionError,
+    DeepCompletionService,
+)
+from app.media_identity.deep_evidence import (
+    deep_evidence_metadata_is_current,
+)
 from app.media_identity.deep_evidence_service import (
     DEEP_SPEECH_EVIDENCE_KEY,
     DEEP_VISUAL_EVIDENCE_KEY,
@@ -580,6 +587,174 @@ class DeepEvidencePromotionServiceTests(unittest.TestCase):
         self.assertEqual(scan["stage"], "resolved")
         self.assertEqual(result_revision(scan), 6)
 
+
+
+    def test_staged_candidate_only_revision_can_resolve_and_finalize_deep(self) -> None:
+        self.service._deep_plan = (
+            lambda _conn, _scan, _file: self._plan(
+                (self.base, self.deep)
+            )
+        )
+        decision = MediaIdentityDecisionService(
+            self.database
+        )
+        completion = DeepCompletionService(
+            self.database
+        )
+
+        with self._current_patch():
+            promotion = self.service.promote(
+                self.scan_id
+            )
+        self.assertEqual(promotion.staged_revision, 6)
+
+        with patch.object(
+            MediaIdentityDecisionService,
+            "_scan_snapshot_is_current",
+            side_effect=lambda _conn, _scan, _evidence: (
+                True,
+                {
+                    "id": 1,
+                    "title_id": 1,
+                    "season": 1,
+                    "episode_start": 1,
+                    "episode_end": 1,
+                    "path": str(self.media_path),
+                },
+            ),
+        ):
+            resolution = decision.resolve_scan(
+                self.scan_id
+            )
+
+        self.assertIsNotNone(
+            resolution.best_candidate_key
+        )
+        with self.database.connect() as conn:
+            resolved_scan = dict(conn.execute(
+                "SELECT * FROM media_identity_scans WHERE id=?",
+                (self.scan_id,),
+            ).fetchone())
+        self.assertEqual(
+            result_revision(resolved_scan),
+            7,
+        )
+        self.assertEqual(
+            resolved_scan["completed_profile"],
+            "normal",
+        )
+
+        with patch(
+            "app.media_identity.deep_completion_service."
+            "deep_plan_metadata_is_current",
+            return_value=True,
+        ), patch.object(
+            MediaIdentityDecisionService,
+            "_scan_snapshot_is_current",
+            side_effect=lambda _conn, _scan, _evidence: (
+                True,
+                {
+                    "id": 1,
+                    "title_id": 1,
+                    "season": 1,
+                    "episode_start": 1,
+                    "episode_end": 1,
+                    "path": str(self.media_path),
+                },
+            ),
+        ):
+            finalized = completion.finalize(
+                self.scan_id
+            )
+
+        self.assertEqual(
+            finalized.resolved_revision,
+            7,
+        )
+        self.assertEqual(
+            finalized.completed_revision,
+            8,
+        )
+        with self.database.connect() as conn:
+            final_scan = dict(conn.execute(
+                "SELECT * FROM media_identity_scans WHERE id=?",
+                (self.scan_id,),
+            ).fetchone())
+            evidence = [
+                dict(row)
+                for row in conn.execute(
+                    """SELECT * FROM media_identity_evidence
+                       WHERE scan_id=? ORDER BY id""",
+                    (self.scan_id,),
+                ).fetchall()
+            ]
+            for item in evidence:
+                item["details"] = json.loads(
+                    item.pop("details_json") or "{}"
+                )
+        claimed = json.loads(
+            final_scan["claimed_identity_json"]
+        )
+        self.assertEqual(
+            final_scan["completed_profile"],
+            "deep",
+        )
+        self.assertEqual(
+            final_scan["stage"],
+            "deep_resolved",
+        )
+        self.assertEqual(
+            result_revision(final_scan),
+            8,
+        )
+        self.assertTrue(
+            deep_evidence_metadata_is_current(
+                claimed["deep_evidence"],
+                evidence,
+                file_id=1,
+            )
+        )
+
+    def test_completion_rejects_unresolved_staged_deep_revision(self) -> None:
+        self.service._deep_plan = (
+            lambda _conn, _scan, _file: self._plan(
+                (self.base, self.deep)
+            )
+        )
+        with self._current_patch():
+            self.service.promote(
+                self.scan_id
+            )
+
+        completion = DeepCompletionService(
+            self.database
+        )
+        with self.assertRaisesRegex(
+            DeepCompletionError,
+            "resolved staged Deep upgrade",
+        ):
+            completion.finalize(
+                self.scan_id
+            )
+
+    def test_deep_evidence_metadata_rejects_count_manifest_mismatch(self) -> None:
+        metadata = {
+            "version": 1,
+            "baseline_revision": 5,
+            "visual_manifest_artifact_id": None,
+            "speech_manifest_artifact_id": None,
+            "visual_evidence_count": 1,
+            "speech_evidence_count": 0,
+            "added_candidate_keys": [],
+        }
+
+        self.assertFalse(
+            deep_evidence_metadata_is_current(
+                metadata,
+                [],
+                file_id=1,
+            )
+        )
 
 if __name__ == "__main__":
     unittest.main()
