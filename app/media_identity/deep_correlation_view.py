@@ -496,6 +496,142 @@ def _target_patterns(
     }
 
 
+def _related_file_ids(
+    patterns: Mapping[str, Any],
+    coverage: Mapping[str, Any],
+    *,
+    target_file_id: int,
+) -> tuple[int, ...]:
+    related: set[int] = set()
+    for key in ("duplicates", "swaps"):
+        for item in patterns.get(key, ()):
+            related.add(int(item["other_file_id"]))
+    for item in patterns.get("identity_cycles", ()):
+        related.update(int(value) for value in item["file_ids"])
+    for item in patterns.get("sequence_observations", ()):
+        related.update(
+            int(value)
+            for value in item["supporting_file_ids"]
+        )
+    related.update(
+        int(value)
+        for value in coverage.get("missing_scan_file_ids", ())
+    )
+    related.update(
+        int(value)
+        for value in coverage.get("invalid_scan_file_ids", ())
+    )
+    related.discard(int(target_file_id))
+    if len(related) > _MAX_VIEW_ITEMS:
+        raise DeepCorrelationViewError(
+            "Deep correlation display context exceeds the supported bound."
+        )
+    return tuple(sorted(related))
+
+
+def _file_display_context(
+    conn: sqlite3.Connection,
+    file_ids: tuple[int, ...],
+) -> dict[int, dict[str, Any]]:
+    if not file_ids:
+        return {}
+    rows = conn.execute(
+        f"""SELECT id,filename,season,episode_start,episode_end
+            FROM files
+            WHERE id IN ({','.join('?' for _ in file_ids)})
+            ORDER BY id""",
+        file_ids,
+    ).fetchall()
+    return {
+        int(row["id"]): {
+            "id": int(row["id"]),
+            "filename": str(row["filename"] or f"File #{int(row['id'])}"),
+            "season": (
+                None if row["season"] is None else int(row["season"])
+            ),
+            "episode_start": (
+                None
+                if row["episode_start"] is None
+                else int(row["episode_start"])
+            ),
+            "episode_end": (
+                None
+                if row["episode_end"] is None
+                else int(row["episode_end"])
+            ),
+        }
+        for row in rows
+    }
+
+
+def _attach_display_context(
+    patterns: Mapping[str, Any],
+    coverage: Mapping[str, Any],
+    display_by_id: Mapping[int, Mapping[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    def display(file_id: int) -> dict[str, Any]:
+        item = display_by_id.get(int(file_id))
+        if item is not None:
+            return dict(item)
+        return {
+            "id": int(file_id),
+            "filename": f"File #{int(file_id)}",
+            "season": None,
+            "episode_start": None,
+            "episode_end": None,
+        }
+
+    result = dict(patterns)
+    result["duplicates"] = tuple(
+        {**item, "other_file": display(int(item["other_file_id"]))}
+        for item in patterns.get("duplicates", ())
+    )
+    result["swaps"] = tuple(
+        {**item, "other_file": display(int(item["other_file_id"]))}
+        for item in patterns.get("swaps", ())
+    )
+    result["identity_cycles"] = tuple(
+        {
+            **item,
+            "files": tuple(
+                display(int(file_id))
+                for file_id in item["file_ids"]
+            ),
+        }
+        for item in patterns.get("identity_cycles", ())
+    )
+    result["sequence_observations"] = tuple(
+        {
+            **item,
+            "supporting_files": tuple(
+                display(int(file_id))
+                for file_id in item["supporting_file_ids"]
+            ),
+        }
+        for item in patterns.get("sequence_observations", ())
+    )
+    result["target_sequence_observations"] = tuple(
+        item
+        for item in result["sequence_observations"]
+        if item.get("target_supports")
+    )
+    result["related_files"] = tuple(
+        dict(display_by_id[file_id])
+        for file_id in sorted(display_by_id)
+    )
+
+    coverage_result = dict(coverage)
+    coverage_result["missing_scan_files"] = tuple(
+        display(int(file_id))
+        for file_id in coverage.get("missing_scan_file_ids", ())
+    )
+    coverage_result["invalid_scan_files"] = tuple(
+        display(int(file_id))
+        for file_id in coverage.get("invalid_scan_file_ids", ())
+    )
+    return result, coverage_result
+
+
 def load_current_deep_correlation_view(
     conn: sqlite3.Connection,
     *,
@@ -610,6 +746,20 @@ def load_current_deep_correlation_view(
             output,
             target_file_id=file_id,
             target_season=target_season,
+        )
+        related_file_ids = _related_file_ids(
+            patterns,
+            coverage,
+            target_file_id=file_id,
+        )
+        display_by_id = _file_display_context(
+            conn,
+            related_file_ids,
+        )
+        patterns, coverage = _attach_display_context(
+            patterns,
+            coverage,
+            display_by_id,
         )
     except (
         DeepCorrelationViewError,
