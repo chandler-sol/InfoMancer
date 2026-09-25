@@ -9,6 +9,24 @@ from ..media_identity.external_config import (
     ExternalSourceConfigService,
     build_configured_source_registry,
 )
+from ..media_identity.deep_completion_service import DeepCompletionError
+from ..media_identity.deep_correlation_service import (
+    DeepCorrelationAnalysisError,
+    DeepCorrelationAnalysisService,
+)
+from ..media_identity.deep_evidence_service import DeepEvidencePromotionError
+from ..media_identity.deep_sampling_service import (
+    DeepSamplingScanError,
+    DeepSamplingService,
+)
+from ..media_identity.deep_speech_service import (
+    DeepSpeechSamplingError,
+    DeepSpeechSamplingService,
+)
+from ..media_identity.deep_verification_service import (
+    DeepVerificationError,
+    DeepVerificationService,
+)
 from ..media_identity.fast import FastIdentityScanError, FastIdentityService
 from ..media_identity.local_frames import LOCAL_FRAME_SOURCE_KEY
 from ..media_identity.models import IdentityProfile
@@ -57,6 +75,47 @@ def build_router(ctx: RouteContext):
         db,
         external_registry_factory=_decision_external_registry,
     )
+
+    def _configured_analysis_services():
+        credential_warning = ""
+        try:
+            secrets = provider_secrets.load()
+        except ProviderSecretError as exc:
+            secrets = {}
+            credential_warning = str(exc)
+        registry = build_configured_source_registry(
+            ExternalSourceConfigService(db),
+            secrets,
+        )
+        speech_model_component = speech_model_components["base-q5_1"]
+        speech_engine = WhisperCppSpeechEngine(
+            speech_runtime_component,
+            speech_model_component,
+        )
+        ocr_engine = RapidOcrCpuEngine()
+        normal = NormalIdentityService(
+            db,
+            registry,
+            ocr_engine,
+            speech_engine=speech_engine,
+            speech_model=speech_model_component.identity,
+        )
+        deep = DeepVerificationService(
+            db,
+            normal_service=normal,
+            visual_service=DeepSamplingService(
+                db,
+                ocr_engine,
+            ),
+            speech_service=DeepSpeechSamplingService(
+                db,
+                speech_engine,
+                speech_model_component.identity,
+            ),
+            decision_service=decisions,
+            correlation_service=DeepCorrelationAnalysisService(db),
+        )
+        return normal, deep, credential_warning
 
     def _reviewed_intent(values) -> tuple[int, str, str]:
         try:
@@ -171,11 +230,10 @@ def build_router(ctx: RouteContext):
         title_id = int(file_row.get("title_id") or 0)
         credential_warning = ""
         try:
-            try:
-                secrets = provider_secrets.load()
-            except ProviderSecretError as exc:
-                secrets = {}
-                credential_warning = str(exc)
+            normal, _deep, credential_warning = (
+                _configured_analysis_services()
+            )
+            if credential_warning:
                 record_event(
                     "mie",
                     "Episode Identity Normal could not read external integration credentials; local fallback remains available.",
@@ -188,22 +246,6 @@ def build_router(ctx: RouteContext):
                     },
                     user_id=request.state.user.id,
                 )
-            registry = build_configured_source_registry(
-                ExternalSourceConfigService(db),
-                secrets,
-            )
-            speech_model_component = speech_model_components["base-q5_1"]
-            speech_engine = WhisperCppSpeechEngine(
-                speech_runtime_component,
-                speech_model_component,
-            )
-            normal = NormalIdentityService(
-                db,
-                registry,
-                RapidOcrCpuEngine(),
-                speech_engine=speech_engine,
-                speech_model=speech_model_component.identity,
-            )
             result = normal.run_scan(int(scan_id))
             speech_escalated = bool(
                 getattr(result, "speech_escalated", False)
@@ -360,6 +402,141 @@ def build_router(ctx: RouteContext):
             message,
         )
 
+    @librarian_post("/episode-identity/scans/{scan_id}/deep")
+    def run_deep_episode_identity(request: Request, scan_id: int):
+        try:
+            detail = decisions.scan_detail(int(scan_id))
+        except MediaIdentityDecisionError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        file_row = detail.get("file") or {}
+        title_id = int(file_row.get("title_id") or 0)
+        credential_warning = ""
+        try:
+            _normal, deep, credential_warning = (
+                _configured_analysis_services()
+            )
+            result = deep.run(int(scan_id))
+            findings_refreshed = _refresh_findings(
+                request.state.user.id
+            )
+        except (
+            DeepVerificationError,
+            DeepSamplingScanError,
+            DeepSpeechSamplingError,
+            DeepEvidencePromotionError,
+            DeepCompletionError,
+            DeepCorrelationAnalysisError,
+            NormalIdentityScanError,
+            MediaIdentityDecisionError,
+        ) as exc:
+            record_event(
+                "mie",
+                f"Episode Identity Deep verification could not complete for scan {scan_id}.",
+                level="warning",
+                detail=str(exc),
+                context={
+                    "scan_id": int(scan_id),
+                    "title_id": title_id or None,
+                    "profile": "deep",
+                },
+                user_id=request.state.user.id,
+            )
+            return redirect(
+                f"/episode-identity/scans/{scan_id}",
+                f"Deep verification could not complete: {exc}",
+            )
+
+        visual_complete = bool(
+            result.visual is not None
+            and result.visual.coverage_complete
+        )
+        speech_complete = bool(
+            result.speech is not None
+            and result.speech.coverage_complete
+        )
+        record_event(
+            "mie",
+            f"Episode Identity Deep verification completed for scan {scan_id}.",
+            context={
+                "scan_id": int(scan_id),
+                "title_id": title_id or None,
+                "profile": "deep",
+                "completed_revision": result.completed_revision,
+                "resumed_from_stage": result.resumed_from_stage,
+                "visual_complete": visual_complete,
+                "speech_complete": speech_complete,
+                "visual_failures": (
+                    list(result.visual.failures)
+                    if result.visual is not None
+                    else []
+                ),
+                "speech_failures": (
+                    list(result.speech.failures)
+                    if result.speech is not None
+                    else []
+                ),
+                "correlation_artifact_id": (
+                    result.correlation.artifact_id
+                ),
+                "correlation_reused": bool(
+                    result.correlation.reused
+                ),
+                "complete_modalities": list(
+                    result.correlation.interpretation.complete_modalities
+                ),
+                "sequence_peer_coverage_complete": (
+                    result.correlation.sequence.analysis.usable_count
+                    == result.correlation.sequence.planned_file_count
+                    and not result.correlation.sequence.missing_scan_file_ids
+                    and not result.correlation.sequence.invalid_scan_file_ids
+                ),
+            },
+            user_id=request.state.user.id,
+        )
+
+        message = (
+            "Deep verification completed and the resolver was republished "
+            "against the widened candidate set."
+        )
+        if visual_complete:
+            message += " Deep OCR coverage completed."
+        elif result.visual is not None and result.visual.failures:
+            message += (
+                " Deep OCR was unavailable or incomplete, so it did not "
+                "contribute resolver evidence."
+            )
+        if speech_complete:
+            message += " Deep speech coverage completed."
+        elif result.speech is not None and result.speech.failures:
+            message += (
+                " Deep speech was unavailable or incomplete, so it did not "
+                "contribute resolver evidence."
+            )
+        if result.correlation.interpretation.fully_multimodal:
+            message += (
+                " Cross-file fingerprint correlation completed with both "
+                "video and audio modalities."
+            )
+        else:
+            message += (
+                " Cross-file correlation completed with the evidence "
+                "modalities that were available."
+            )
+        message += " Review the updated Deep diagnostics before any correction."
+        if credential_warning:
+            message += (
+                " Plex/Jellyfin credentials could not be read, so external "
+                "Normal previews were skipped and local fallback was used."
+            )
+        if not findings_refreshed:
+            message += (
+                " Library Health will catch up on the next successful analysis."
+            )
+        return redirect(
+            f"/episode-identity/scans/{scan_id}",
+            message,
+        )
+
     @librarian_get(
         "/episode-identity/scans/{scan_id}",
         response_class=HTMLResponse,
@@ -482,6 +659,7 @@ def build_router(ctx: RouteContext):
         "episode_identity_decisions": decisions,
         "verify_episode_identity": verify_episode_identity,
         "run_normal_episode_identity": run_normal_episode_identity,
+        "run_deep_episode_identity": run_deep_episode_identity,
         "episode_identity_detail": episode_identity_detail,
         "episode_identity_rename_preview": episode_identity_rename_preview,
         "confirm_current_identity": confirm_current_identity,
