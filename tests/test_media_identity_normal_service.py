@@ -1016,6 +1016,68 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             for item in findings
         ))
 
+    def test_actionable_resolver_folds_deep_context_into_one_finding(self):
+        decisions = MediaIdentityDecisionService(self.database)
+        resolution = decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertIn(
+            resolution.state.value,
+            {"possible_mismatch", "likely_mismatch", "strong_match_other"},
+        )
+        detail = decisions.scan_detail(self.fast_scan.scan_id)
+        detail["deep_correlation_analysis"] = {
+            "artifact_id": 902,
+            "review_state": "possible_swapped_episodes",
+            "review_label": "Possible swapped episodes",
+            "review_explanation": (
+                "Two resolver hypotheses are reciprocal and fingerprint "
+                "evidence supports the files being distinct."
+            ),
+            "review_actionable": False,
+            "duplicates": (),
+            "swaps": ({
+                "other_file_id": 2,
+                "status": "corroborated_distinct",
+            },),
+            "identity_cycles": (),
+            "target_sequence_observations": (),
+            "coverage": {
+                "fully_multimodal": True,
+                "complete_modalities": ("video", "audio"),
+                "sequence_peer_coverage_complete": True,
+            },
+        }
+
+        with patch.object(
+            decisions,
+            "scan_detail",
+            return_value=detail,
+        ):
+            findings = decisions.mie_findings()
+
+        self.assertEqual(
+            sum(
+                item["rule_key"] == "episode-identity-review"
+                for item in findings
+            ),
+            1,
+        )
+        self.assertFalse(any(
+            item["rule_key"] == "episode-identity-deep-review"
+            for item in findings
+        ))
+        identity_finding = next(
+            item for item in findings
+            if item["rule_key"] == "episode-identity-review"
+        )
+        self.assertEqual(
+            identity_finding["evidence"]["deep_review_state"],
+            "possible_swapped_episodes",
+        )
+        self.assertEqual(
+            identity_finding["evidence"]["deep_artifact_id"],
+            902,
+        )
+
     def test_current_deep_result_outranks_newer_normal_result(self):
         source = FakePreviewSource()
         normal = NormalIdentityService(
