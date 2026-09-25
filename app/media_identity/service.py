@@ -1843,6 +1843,215 @@ class MediaIdentityDecisionService:
         expected = candidate.get("expected_episode_id")
         return expected is not None and confirmation.get("expected_episode_id") == expected
 
+    @staticmethod
+    def _deep_correlation_finding(
+        detail: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        """Translate one sealed target-specific J4 pattern into read-only MIE advice."""
+        analysis = detail.get("deep_correlation_analysis")
+        if not isinstance(analysis, Mapping):
+            return None
+        review_state = str(analysis.get("review_state") or "")
+        allowed_states = {
+            "duplicate_content_identity",
+            "possible_swapped_episodes",
+            "identity_cycle",
+            "sequence_offset",
+            "conflicting_swap_similarity",
+            "conflicting_fingerprint_modalities",
+            "ambiguous_claim",
+        }
+        if (
+            review_state not in allowed_states
+            or analysis.get("review_actionable") is not False
+        ):
+            return None
+
+        try:
+            scan_id = int(detail["id"])
+            file_id = int(detail["file_id"])
+            result_revision_value = int(detail.get("result_revision") or 0)
+            artifact_id = int(analysis.get("artifact_id") or 0)
+        except (KeyError, TypeError, ValueError):
+            return None
+        decision_digest = str(
+            detail.get("decision_snapshot_sha256") or ""
+        ).strip().casefold()
+        if (
+            scan_id < 1
+            or file_id < 1
+            or result_revision_value < 1
+            or artifact_id < 1
+            or len(decision_digest) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in decision_digest
+            )
+        ):
+            return None
+
+        file_row = detail.get("file")
+        if not isinstance(file_row, Mapping):
+            return None
+        filename = str(file_row.get("filename") or "Media file")
+        review_label = str(
+            analysis.get("review_label") or "Deep cross-file pattern"
+        ).strip()
+        review_explanation = str(
+            analysis.get("review_explanation")
+            or "Deep found a cross-file Episode Identity pattern that needs review."
+        ).strip()
+        coverage = analysis.get("coverage")
+        if not isinstance(coverage, Mapping):
+            return None
+
+        related_file_ids: set[int] = set()
+        for key in ("duplicates", "swaps"):
+            values = analysis.get(key)
+            if not isinstance(values, (list, tuple)):
+                return None
+            for item in values:
+                if not isinstance(item, Mapping):
+                    return None
+                try:
+                    other_file_id = int(item.get("other_file_id") or 0)
+                except (TypeError, ValueError):
+                    return None
+                if other_file_id > 0 and other_file_id != file_id:
+                    related_file_ids.add(other_file_id)
+        cycles = analysis.get("identity_cycles")
+        if not isinstance(cycles, (list, tuple)):
+            return None
+        for item in cycles:
+            if not isinstance(item, Mapping):
+                return None
+            raw_ids = item.get("file_ids")
+            if not isinstance(raw_ids, (list, tuple)):
+                return None
+            try:
+                related_file_ids.update(
+                    int(value)
+                    for value in raw_ids
+                    if int(value) > 0 and int(value) != file_id
+                )
+            except (TypeError, ValueError):
+                return None
+        target_sequence = analysis.get("target_sequence_observations")
+        if not isinstance(target_sequence, (list, tuple)):
+            return None
+        sequence_offsets: list[int] = []
+        for item in target_sequence:
+            if not isinstance(item, Mapping):
+                return None
+            try:
+                offset = int(item.get("offset") or 0)
+                supporters = tuple(
+                    int(value)
+                    for value in item.get("supporting_file_ids", ())
+                )
+            except (TypeError, ValueError):
+                return None
+            if offset:
+                sequence_offsets.append(offset)
+            related_file_ids.update(
+                value
+                for value in supporters
+                if value > 0 and value != file_id
+            )
+
+        corroborated_swap = any(
+            str(item.get("status") or "") == "corroborated_distinct"
+            for item in analysis.get("swaps", ())
+            if isinstance(item, Mapping)
+        )
+        severity = (
+            "warning"
+            if review_state == "duplicate_content_identity"
+            or (
+                review_state == "possible_swapped_episodes"
+                and corroborated_swap
+            )
+            else "information"
+        )
+        recommendations = {
+            "duplicate_content_identity": (
+                "Review this file and the related episode file before changing either identity. "
+                "Deep correlation is advisory and cannot rename or confirm media by itself."
+            ),
+            "possible_swapped_episodes": (
+                "Review both episode identities and their Deep evidence before making a correction. "
+                "Use the normal Episode Identity review actions only after the per-file evidence supports it."
+            ),
+            "identity_cycle": (
+                "Review the files in this identity rotation together before making any correction. "
+                "Deep does not apply a multi-file rename automatically."
+            ),
+            "sequence_offset": (
+                "Review the season-level offset and episode order before changing filenames. "
+                "The sequence observation remains advisory."
+            ),
+            "conflicting_swap_similarity": (
+                "Review the reciprocal identity hypotheses and fingerprint evidence together. "
+                "The conflicting signals are intentionally non-actionable."
+            ),
+            "conflicting_fingerprint_modalities": (
+                "Review the video and audio evidence before relying on the swap hypothesis. "
+                "Conflicting modalities are intentionally non-actionable."
+            ),
+            "ambiguous_claim": (
+                "Resolve the duplicate claimed episode ownership before using cross-file identity patterns. "
+                "Deep will not infer a correction from an ambiguous claim."
+            ),
+        }
+        complete_modalities = coverage.get("complete_modalities")
+        if not isinstance(complete_modalities, (list, tuple)):
+            return None
+
+        return {
+            "fingerprint": (
+                f"episode-identity-deep:file:{file_id}:"
+                f"decision:{decision_digest}:artifact:{artifact_id}:"
+                f"state:{review_state}"
+            ),
+            "rule_key": "episode-identity-deep-review",
+            "category": "identity",
+            "severity": severity,
+            "root_id": file_row.get("root_id"),
+            "title_id": file_row.get("title_id"),
+            "file_id": file_id,
+            "expected_episode_id": None,
+            "summary": f"{filename}: {review_label}",
+            "explanation": (
+                f"{review_explanation} This Deep cross-file observation is "
+                "advisory and does not change the per-file resolver decision."
+            ),
+            "recommendation": recommendations[review_state],
+            "evidence": {
+                "scan_id": scan_id,
+                "resolver_result_state": str(detail.get("result_state") or ""),
+                "result_revision": result_revision_value,
+                "decision_snapshot_sha256": decision_digest,
+                "profile": str(
+                    detail.get("completed_profile")
+                    or detail.get("requested_profile")
+                    or "deep"
+                ),
+                "deep_artifact_id": artifact_id,
+                "deep_review_state": review_state,
+                "deep_review_label": review_label,
+                "deep_review_actionable": False,
+                "fully_multimodal": bool(coverage.get("fully_multimodal")),
+                "complete_modalities": [
+                    str(value) for value in complete_modalities
+                ],
+                "sequence_peer_coverage_complete": bool(
+                    coverage.get("sequence_peer_coverage_complete")
+                ),
+                "related_file_ids": sorted(related_file_ids)[:64],
+                "sequence_offsets": sorted(set(sequence_offsets)),
+            },
+        }
+
     def mie_findings(self) -> list[dict[str, Any]]:
         with self.database.connect() as conn:
             latest_rows = [
@@ -2054,6 +2263,9 @@ class MediaIdentityDecisionService:
                 continue
             scan_id = int(detail["id"])
             state = str(detail.get("result_state") or "")
+            deep_finding = self._deep_correlation_finding(detail)
+            if deep_finding is not None:
+                findings.append(deep_finding)
             if state not in ACTIONABLE_STATES:
                 continue
             file_row = detail.get("file") or {}
