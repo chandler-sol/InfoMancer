@@ -16,6 +16,7 @@ from app import main
 from app.db import Database
 from app.duplicates import DuplicateService
 from app.media_identity.decision_snapshot import result_revision, seal_decision_snapshot
+from app.media_identity.deep_verification_service import DeepVerificationService
 from app.media_identity.fast import FastIdentityService
 from app.media_identity.models import IdentityProfile, IdentityResultState
 from app.media_identity.service import MediaIdentityDecisionService
@@ -41,6 +42,9 @@ class EpisodeIdentityReviewAdapterTests(unittest.TestCase):
         self.assertIn("Speech and subtitle matches share one dialogue correlation group", template)
         self.assertIn("Transcript sample", template)
         self.assertIn("Sampled speech windows", template)
+        self.assertIn("DEEP VERIFICATION", template)
+        self.assertIn("/deep", template)
+        self.assertIn("Deep never confirms, renames, moves, or deletes media automatically", template)
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -400,6 +404,7 @@ class EpisodeIdentityHttpBindingTests(unittest.TestCase):
             ("POST", "/files/999999/episode-identity/fast"),
             ("GET", "/episode-identity/scans/999999"),
             ("POST", "/episode-identity/scans/999999/normal"),
+            ("POST", "/episode-identity/scans/999999/deep"),
             ("GET", "/episode-identity/scans/999999/rename-preview"),
             ("POST", "/episode-identity/scans/999999/confirm-current"),
             ("POST", "/episode-identity/scans/999999/confirm-best"),
@@ -414,11 +419,11 @@ class EpisodeIdentityHttpBindingTests(unittest.TestCase):
                 f"{method} {url} treated request as a query parameter: {response.text}",
             )
         self.assertEqual(
-            [response.status_code for response in responses[:4]],
-            [404, 404, 404, 409],
+            [response.status_code for response in responses[:5]],
+            [404, 404, 404, 404, 409],
         )
         self.assertEqual(
-            [response.status_code for response in responses[4:]],
+            [response.status_code for response in responses[5:]],
             [303, 303],
         )
 
@@ -426,6 +431,7 @@ class EpisodeIdentityHttpBindingTests(unittest.TestCase):
             "/files/{file_id}/episode-identity/fast",
             "/episode-identity/scans/{scan_id}",
             "/episode-identity/scans/{scan_id}/normal",
+            "/episode-identity/scans/{scan_id}/deep",
             "/episode-identity/scans/{scan_id}/rename-preview",
             "/episode-identity/scans/{scan_id}/confirm-current",
             "/episode-identity/scans/{scan_id}/confirm-best",
@@ -441,6 +447,90 @@ class EpisodeIdentityHttpBindingTests(unittest.TestCase):
             }
             self.assertNotIn("request", query_names, route.path)
         self.assertEqual(checked, target_paths)
+
+
+class EpisodeIdentityDeepRouteTests(EpisodeIdentityHttpBindingTests):
+    def test_deep_route_runs_coordinator_and_reports_partial_optional_coverage(self) -> None:
+        fake_provider_secrets = SimpleNamespace(load=lambda: {})
+        deep_result = SimpleNamespace(
+            completed_revision=8,
+            resumed_from_stage="resolved",
+            visual=SimpleNamespace(
+                coverage_complete=False,
+                failures=("ocr-engine-unavailable",),
+            ),
+            speech=SimpleNamespace(
+                coverage_complete=False,
+                failures=("speech-engine-unavailable",),
+            ),
+            correlation=SimpleNamespace(
+                artifact_id=901,
+                reused=False,
+                interpretation=SimpleNamespace(
+                    complete_modalities=("video",),
+                    fully_multimodal=False,
+                ),
+                sequence=SimpleNamespace(
+                    planned_file_count=3,
+                    missing_scan_file_ids=(),
+                    invalid_scan_file_ids=(),
+                    analysis=SimpleNamespace(
+                        usable_count=3,
+                    ),
+                ),
+            ),
+        )
+
+        with (
+            patch.object(
+                main,
+                "provider_secrets",
+                fake_provider_secrets,
+            ),
+            patch(
+                "app.routes.episode_identity_review."
+                "build_configured_source_registry",
+                return_value=SimpleNamespace(),
+            ),
+            patch.object(
+                main,
+                "analyze_library_health_with_activity",
+                return_value=None,
+            ),
+            patch.object(
+                main,
+                "record_event",
+                return_value=None,
+            ),
+            patch(
+                "app.media_identity.service."
+                "MediaIdentityDecisionService.scan_detail",
+                return_value={"file": {"title_id": 1}},
+            ),
+            patch.object(
+                DeepVerificationService,
+                "run",
+                return_value=deep_result,
+            ) as run_deep,
+        ):
+            response = self.client.post(
+                "/episode-identity/scans/42/deep"
+            )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn(
+            "/episode-identity/scans/42",
+            response.headers["location"],
+        )
+        self.assertIn(
+            "Deep",
+            response.headers["location"],
+        )
+        self.assertIn(
+            "evidence",
+            response.headers["location"].casefold(),
+        )
+        run_deep.assert_called_once_with(42)
 
 
 class EpisodeIdentityNormalRouteTests(EpisodeIdentityHttpBindingTests):
