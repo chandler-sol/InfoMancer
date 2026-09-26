@@ -29,6 +29,7 @@ from .fast import (
 from .media_generation import media_content_sha256
 from .models import IdentityProfile, IdentityResultState
 from .scoring import IdentityResolution, resolve_identity
+from .sequence_correlation import SequenceHypothesis
 from .speech_audio import normalize_speech_language
 from .text import (
     TextCorpus,
@@ -60,6 +61,7 @@ _ACTION_EXTERNAL_PREVIEW_MAX_FRAMES = 12
 _ACTION_EXTERNAL_PREVIEW_MAX_SOURCE_BYTES = 48 * 1024 * 1024
 _MIE_PROFILE_HISTORY_VALIDATION_LIMIT = 8
 _MIE_NORMAL_HISTORY_VALIDATION_LIMIT = _MIE_PROFILE_HISTORY_VALIDATION_LIMIT
+_SEQUENCE_SCAN_HISTORY_LIMIT = 8
 
 
 def _same_modified_at(first: Any, second: Any) -> bool:
@@ -1198,8 +1200,440 @@ class MediaIdentityDecisionService:
         return (
             str(scan.get("completed_profile") or "")
             == IdentityProfile.DEEP.value
-            and str(scan.get("stage") or "") == "deep_resolved"
         )
+
+    @staticmethod
+    def _sequence_candidate_default_coordinate(
+        conn: sqlite3.Connection,
+        candidate: Mapping[str, Any],
+        *,
+        title_id: int,
+    ) -> tuple[int, int] | None:
+        def coordinate(value: object) -> int | None:
+            if isinstance(value, bool) or not isinstance(value, int):
+                return None
+            return value if value >= 0 else None
+
+        expected_id = candidate.get("expected_episode_id")
+        if (
+            not isinstance(expected_id, bool)
+            and isinstance(expected_id, int)
+            and expected_id > 0
+        ):
+            row = conn.execute(
+                """SELECT season,episode
+                   FROM expected_episodes
+                   WHERE id=? AND title_id=?""",
+                (expected_id, int(title_id)),
+            ).fetchone()
+            if row is not None:
+                season = coordinate(row["season"])
+                episode = coordinate(row["episode"])
+                if season is not None and episode is not None:
+                    return season, episode
+
+        details = candidate.get("details")
+        mappings = (
+            details.get("mappings")
+            if isinstance(details, Mapping)
+            else None
+        )
+        default_coordinates: set[tuple[int, int]] = set()
+        if isinstance(mappings, list):
+            for mapping in mappings:
+                if (
+                    not isinstance(mapping, Mapping)
+                    or str(
+                        mapping.get("order_namespace") or ""
+                    ).strip().casefold() != "default"
+                ):
+                    continue
+                season = coordinate(mapping.get("season"))
+                episode = coordinate(mapping.get("episode"))
+                if season is not None and episode is not None:
+                    default_coordinates.add((season, episode))
+        if len(default_coordinates) == 1:
+            return next(iter(default_coordinates))
+        if len(default_coordinates) > 1:
+            return None
+
+        if str(
+            candidate.get("order_namespace") or ""
+        ).strip().casefold() == "default":
+            season = coordinate(candidate.get("season"))
+            episode = coordinate(candidate.get("episode"))
+            if season is not None and episode is not None:
+                return season, episode
+        return None
+
+    @staticmethod
+    def _sequence_scan_ids(
+        conn: sqlite3.Connection,
+        file_id: int,
+    ) -> tuple[int, ...]:
+        rows = conn.execute(
+            """SELECT id
+               FROM media_identity_scans
+               WHERE file_id=? AND status='complete'
+                 AND result_state IS NOT NULL
+               ORDER BY
+                 CASE completed_profile
+                   WHEN 'deep' THEN 0
+                   WHEN 'normal' THEN 1
+                   WHEN 'fast' THEN 2
+                   ELSE 3
+                 END,
+                 id DESC
+               LIMIT ?""",
+            (
+                int(file_id),
+                _SEQUENCE_SCAN_HISTORY_LIMIT,
+            ),
+        ).fetchall()
+        return tuple(int(row["id"]) for row in rows)
+
+    @staticmethod
+    def _validated_sequence_hypothesis(
+        conn: sqlite3.Connection,
+        scan_id: int,
+    ) -> SequenceHypothesis | None:
+        try:
+            scan, candidates, evidence = (
+                MediaIdentityDecisionService._scan_snapshot(
+                    conn,
+                    int(scan_id),
+                )
+            )
+        except MediaIdentityDecisionError:
+            return None
+        if (
+            scan.get("status") != "complete"
+            or scan.get("result_state") is None
+            or not str(scan.get("best_candidate_key") or "")
+        ):
+            return None
+
+        current, file_row = (
+            MediaIdentityDecisionService._scan_snapshot_is_current(
+                conn,
+                scan,
+                evidence,
+            )
+        )
+        if not current or not isinstance(file_row, Mapping):
+            return None
+        try:
+            title_id = int(file_row["title_id"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+        revision = result_revision(scan)
+        claimed = MediaIdentityDecisionService._claimed_identity(scan)
+        sealed_revision, sealed_digest = (
+            MediaIdentityDecisionService._decision_token(claimed)
+        )
+        if (
+            revision <= 0
+            or sealed_revision != revision
+            or not sealed_digest
+        ):
+            return None
+
+        resolution = MediaIdentityDecisionService._resolve_snapshot(
+            scan,
+            candidates,
+            evidence,
+        )
+        if (
+            resolution.state.value
+            != str(scan.get("result_state") or "")
+            or str(resolution.best_candidate_key or "")
+            != str(scan.get("best_candidate_key") or "")
+            or resolution.best_candidate_key is None
+        ):
+            return None
+
+        candidate_by_key = {
+            str(item.get("candidate_key") or ""): item
+            for item in candidates
+        }
+        candidate = candidate_by_key.get(
+            resolution.best_candidate_key
+        )
+        resolved = next(
+            (
+                item for item in resolution.candidates
+                if item.candidate_key
+                == resolution.best_candidate_key
+            ),
+            None,
+        )
+        if candidate is None or resolved is None:
+            return None
+
+        default_coordinate = (
+            MediaIdentityDecisionService._sequence_candidate_default_coordinate(
+                conn,
+                candidate,
+                title_id=title_id,
+            )
+        )
+        if default_coordinate is None:
+            return None
+
+        def coordinate(value: object) -> int | None:
+            if isinstance(value, bool) or not isinstance(value, int):
+                return None
+            return value if value >= 0 else None
+
+        claimed_season = coordinate(claimed.get("season"))
+        claimed_episode = coordinate(
+            claimed.get("episode_start")
+        )
+        claimed_end = coordinate(
+            claimed.get("episode_end")
+        )
+        if (
+            claimed_season is None
+            or claimed_episode is None
+        ):
+            return None
+        if claimed_end is None:
+            claimed_end = claimed_episode
+
+        try:
+            result_state = IdentityResultState(
+                str(scan["result_state"])
+            )
+            return SequenceHypothesis(
+                file_id=int(scan["file_id"]),
+                scan_id=int(scan["id"]),
+                result_revision=revision,
+                claimed_season=claimed_season,
+                claimed_episode=claimed_episode,
+                claimed_episode_end=claimed_end,
+                candidate_key=resolution.best_candidate_key,
+                hypothesis_season=default_coordinate[0],
+                hypothesis_episode=default_coordinate[1],
+                result_state=result_state,
+                support_strength=resolved.support_strength,
+                conflict_strength=resolved.conflict_strength,
+                margin=resolution.margin,
+                independent_categories=resolved.independent_categories,
+                content_support=resolved.content_support,
+            )
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _best_current_sequence_hypothesis(
+        conn: sqlite3.Connection,
+        file_id: int,
+    ) -> tuple[SequenceHypothesis | None, bool]:
+        scan_ids = MediaIdentityDecisionService._sequence_scan_ids(
+            conn,
+            file_id,
+        )
+        if not scan_ids:
+            return None, False
+        for scan_id in scan_ids:
+            hypothesis = (
+                MediaIdentityDecisionService._validated_sequence_hypothesis(
+                    conn,
+                    scan_id,
+                )
+            )
+            if hypothesis is not None:
+                return hypothesis, True
+        return None, True
+
+    @staticmethod
+    def _sequence_hypothesis_from_payload(
+        value: object,
+    ) -> SequenceHypothesis | None:
+        if not isinstance(value, Mapping):
+            return None
+
+        def integer(key: str) -> int:
+            raw = value.get(key)
+            if isinstance(raw, bool) or not isinstance(raw, int):
+                raise ValueError(key)
+            return raw
+
+        def number(key: str) -> float:
+            raw = value.get(key)
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                raise ValueError(key)
+            return float(raw)
+
+        try:
+            candidate_key = str(value.get("candidate_key") or "")
+            content_support = value.get("content_support")
+            if not candidate_key or not isinstance(content_support, bool):
+                return None
+            return SequenceHypothesis(
+                file_id=integer("file_id"),
+                scan_id=integer("scan_id"),
+                result_revision=integer("result_revision"),
+                claimed_season=integer("claimed_season"),
+                claimed_episode=integer("claimed_episode"),
+                claimed_episode_end=integer("claimed_episode_end"),
+                candidate_key=candidate_key,
+                hypothesis_season=integer("hypothesis_season"),
+                hypothesis_episode=integer("hypothesis_episode"),
+                result_state=IdentityResultState(
+                    str(value.get("result_state") or "")
+                ),
+                support_strength=number("support_strength"),
+                conflict_strength=number("conflict_strength"),
+                margin=number("margin"),
+                independent_categories=integer(
+                    "independent_categories"
+                ),
+                content_support=content_support,
+            )
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _deep_correlation_inputs_current(
+        conn: sqlite3.Connection,
+        scan: Mapping[str, Any],
+        claimed: Mapping[str, Any],
+        view: Mapping[str, Any],
+    ) -> bool:
+        try:
+            artifact_id = int(view.get("artifact_id") or 0)
+            target_file_id = int(scan["file_id"])
+        except (KeyError, TypeError, ValueError):
+            return False
+        if artifact_id < 1 or target_file_id < 1:
+            return False
+
+        row = conn.execute(
+            """SELECT payload_json
+               FROM media_identity_artifacts
+               WHERE id=? AND file_id=?
+                 AND artifact_type='deep_correlation_analysis'
+                 AND analyzer_key='deep-correlation-analysis'
+                 AND status='complete' AND profile='deep'""",
+            (artifact_id, target_file_id),
+        ).fetchone()
+        if row is None:
+            return False
+        try:
+            payload = json.loads(str(row["payload_json"] or ""))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+        identity = (
+            payload.get("identity")
+            if isinstance(payload, Mapping)
+            else None
+        )
+        if not isinstance(identity, Mapping):
+            return False
+
+        raw_hypotheses = identity.get("peer_hypotheses")
+        raw_missing = identity.get("missing_scan_file_ids")
+        raw_invalid = identity.get("invalid_scan_file_ids")
+        deep_identity = claimed.get("deep_identity")
+        if (
+            not isinstance(raw_hypotheses, list)
+            or not isinstance(raw_missing, list)
+            or not isinstance(raw_invalid, list)
+            or not isinstance(deep_identity, Mapping)
+        ):
+            return False
+        raw_cohort = deep_identity.get("correlation_file_ids")
+        if not isinstance(raw_cohort, list):
+            return False
+
+        hypotheses: list[SequenceHypothesis] = []
+        for value in raw_hypotheses:
+            hypothesis = (
+                MediaIdentityDecisionService._sequence_hypothesis_from_payload(
+                    value
+                )
+            )
+            if hypothesis is None:
+                return False
+            hypotheses.append(hypothesis)
+        if (
+            len({item.file_id for item in hypotheses})
+            != len(hypotheses)
+        ):
+            return False
+
+        def ids(values: list[object]) -> tuple[int, ...] | None:
+            result: list[int] = []
+            for value in values:
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, int)
+                    or value < 1
+                ):
+                    return None
+                result.append(value)
+            if len(set(result)) != len(result):
+                return None
+            return tuple(result)
+
+        missing = ids(raw_missing)
+        invalid = ids(raw_invalid)
+        cohort = ids(raw_cohort)
+        if missing is None or invalid is None or cohort is None:
+            return False
+
+        hypothesis_ids = {item.file_id for item in hypotheses}
+        missing_ids = set(missing)
+        invalid_ids = set(invalid)
+        cohort_ids = set(cohort)
+        if (
+            target_file_id not in hypothesis_ids
+            or hypothesis_ids & missing_ids
+            or hypothesis_ids & invalid_ids
+            or missing_ids & invalid_ids
+            or hypothesis_ids | missing_ids | invalid_ids
+            != cohort_ids
+        ):
+            return False
+
+        for expected in hypotheses:
+            if expected.file_id == target_file_id:
+                current = (
+                    MediaIdentityDecisionService._validated_sequence_hypothesis(
+                        conn,
+                        expected.scan_id,
+                    )
+                )
+                if current != expected:
+                    return False
+                continue
+            current, had_scan = (
+                MediaIdentityDecisionService._best_current_sequence_hypothesis(
+                    conn,
+                    expected.file_id,
+                )
+            )
+            if not had_scan or current != expected:
+                return False
+
+        for file_id in missing:
+            if MediaIdentityDecisionService._sequence_scan_ids(
+                conn,
+                file_id,
+            ):
+                return False
+        for file_id in invalid:
+            current, had_scan = (
+                MediaIdentityDecisionService._best_current_sequence_hypothesis(
+                    conn,
+                    file_id,
+                )
+            )
+            if current is not None or not had_scan:
+                return False
+        return True
 
     @staticmethod
     def _current_deep_correlation_view(
@@ -1219,13 +1653,24 @@ class MediaIdentityDecisionService:
             or target_season < 0
         ):
             target_season = None
-        return load_current_deep_correlation_view(
+        view = load_current_deep_correlation_view(
             conn,
             scan=scan,
             result_revision=revision,
             decision_snapshot_sha256=digest,
             target_season=target_season,
         )
+        if (
+            view is None
+            or not MediaIdentityDecisionService._deep_correlation_inputs_current(
+                conn,
+                scan,
+                claimed,
+                view,
+            )
+        ):
+            return None
+        return view
 
     @staticmethod
     def _confirmation_provenance(
