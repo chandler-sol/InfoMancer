@@ -16,6 +16,7 @@ from app import main
 from app.db import Database
 from app.duplicates import DuplicateService
 from app.media_identity.decision_snapshot import result_revision, seal_decision_snapshot
+from app.media_identity.deep_correlation_service import DeepCorrelationAnalysisError
 from app.media_identity.deep_verification_service import DeepVerificationService
 from app.media_identity.fast import FastIdentityService
 from app.media_identity.models import IdentityProfile, IdentityResultState
@@ -536,6 +537,62 @@ class EpisodeIdentityHttpBindingTests(unittest.TestCase):
 
 
 class EpisodeIdentityDeepRouteTests(EpisodeIdentityHttpBindingTests):
+    def test_deep_route_turns_j4_integrity_failure_into_retry_state(self) -> None:
+        fake_provider_secrets = SimpleNamespace(load=lambda: {})
+
+        with (
+            patch.object(
+                main,
+                "provider_secrets",
+                fake_provider_secrets,
+            ),
+            patch(
+                "app.routes.episode_identity_review."
+                "build_configured_source_registry",
+                return_value=SimpleNamespace(),
+            ),
+            patch.object(
+                main,
+                "analyze_library_health_with_activity",
+                return_value=None,
+            ) as refresh_health,
+            patch.object(
+                main,
+                "record_event",
+                return_value=None,
+            ),
+            patch(
+                "app.media_identity.service."
+                "MediaIdentityDecisionService.scan_detail",
+                return_value={"file": {"title_id": 1}},
+            ),
+            patch.object(
+                DeepVerificationService,
+                "run",
+                side_effect=DeepCorrelationAnalysisError(
+                    "fixture J4 correlation failure"
+                ),
+            ),
+        ):
+            response = self.client.post(
+                "/episode-identity/scans/42/deep"
+            )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn(
+            "/episode-identity/scans/42",
+            response.headers["location"],
+        )
+        self.assertIn(
+            "could+not+complete",
+            response.headers["location"].casefold(),
+        )
+        self.assertIn(
+            "fixture+j4+correlation+failure",
+            response.headers["location"].casefold(),
+        )
+        refresh_health.assert_called_once()
+
     def test_deep_route_runs_coordinator_and_reports_partial_optional_coverage(self) -> None:
         fake_provider_secrets = SimpleNamespace(load=lambda: {})
         deep_result = SimpleNamespace(
@@ -826,6 +883,9 @@ class EpisodeIdentityReviewContractTests(unittest.TestCase):
         self.assertIn("Mark current filename correct", identity)
         self.assertIn("Confirm suggested content", identity)
         self.assertIn("Preview rename suggestion", identity)
+        self.assertIn("Cross-file verification needs retry", identity)
+        self.assertIn("identity.human_decision_available", identity)
+        self.assertIn("Deep cross-file correlation has not completed", identity)
         self.assertIn("Verify Episode Identity", detail)
         self.assertIn("read-only", rename.casefold())
         self.assertIn("identity.snapshot_current", identity)
