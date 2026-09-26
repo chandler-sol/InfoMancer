@@ -2159,6 +2159,8 @@ class MediaIdentityDecisionService:
         deep_correlation_analysis = None
         if snapshot_current:
             with self.database.connect() as conn:
+                if not conn.in_transaction:
+                    conn.execute("BEGIN")
                 deep_correlation_analysis = (
                     self._current_deep_correlation_view(
                         conn,
