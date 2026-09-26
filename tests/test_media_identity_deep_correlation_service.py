@@ -38,6 +38,7 @@ from app.media_identity.fingerprint_audio_service import (
     DeepAudioFingerprintArtifactService,
     DeepAudioFingerprintCorrelationService,
 )
+from app.media_identity.fingerprint_bundle import DeepFingerprintBundleError
 from app.media_identity.fingerprint_correlation import (
     DeepFingerprintCorrelationService,
 )
@@ -882,6 +883,29 @@ class DeepCorrelationAnalysisServiceTests(unittest.TestCase):
                 self.analysis_service.run(
                     self.scan_id
                 )
+
+        with self.database.connect() as conn:
+            count = conn.execute(
+                """SELECT COUNT(*)
+                   FROM media_identity_artifacts
+                   WHERE file_id=1
+                     AND artifact_type='deep_correlation_analysis'"""
+            ).fetchone()[0]
+        self.assertEqual(count, 0)
+
+    def test_j4_subservice_failure_is_normalized_at_public_boundary(self) -> None:
+        with patch(
+            "app.media_identity.deep_correlation_service."
+            "DeepFingerprintBundleService.run",
+            side_effect=DeepFingerprintBundleError(
+                "fixture bundle integrity failure"
+            ),
+        ):
+            with self.assertRaisesRegex(
+                DeepCorrelationAnalysisError,
+                "could not complete safely.*fixture bundle integrity failure",
+            ):
+                self.analysis_service.run(self.scan_id)
 
         with self.database.connect() as conn:
             count = conn.execute(
