@@ -27,8 +27,6 @@ from .service import (
 from .versions import DEEP_CORRELATION_INTERPRETATION_VERSION
 
 
-SEQUENCE_SCAN_HISTORY_LIMIT = 8
-
 
 class DeepSequenceCorrelationError(RuntimeError):
     """Current cohort scans cannot support safe sequence-offset correlation."""
@@ -263,212 +261,36 @@ class DeepSequenceCorrelationService:
         *,
         title_id: int,
     ) -> tuple[int, int] | None:
-        expected_id = candidate.get("expected_episode_id")
-        if (
-            not isinstance(expected_id, bool)
-            and isinstance(expected_id, int)
-            and expected_id > 0
-        ):
-            row = conn.execute(
-                """SELECT season,episode
-                   FROM expected_episodes
-                   WHERE id=? AND title_id=?""",
-                (expected_id, int(title_id)),
-            ).fetchone()
-            if row is not None:
-                season = _strict_coordinate(row["season"])
-                episode = _strict_coordinate(row["episode"])
-                if season is not None and episode is not None:
-                    return season, episode
-
-        details = candidate.get("details")
-        mappings = (
-            details.get("mappings")
-            if isinstance(details, Mapping)
-            else None
+        return (
+            MediaIdentityDecisionService
+            ._sequence_candidate_default_coordinate(
+                conn,
+                candidate,
+                title_id=title_id,
+            )
         )
-        default_coordinates: set[tuple[int, int]] = set()
-        if isinstance(mappings, list):
-            for mapping in mappings:
-                if (
-                    not isinstance(mapping, Mapping)
-                    or str(
-                        mapping.get("order_namespace") or ""
-                    ).strip().casefold() != "default"
-                ):
-                    continue
-                season = _strict_coordinate(mapping.get("season"))
-                episode = _strict_coordinate(mapping.get("episode"))
-                if season is not None and episode is not None:
-                    default_coordinates.add((season, episode))
-        if len(default_coordinates) == 1:
-            return next(iter(default_coordinates))
-        if len(default_coordinates) > 1:
-            return None
-
-        if str(
-            candidate.get("order_namespace") or ""
-        ).strip().casefold() == "default":
-            season = _strict_coordinate(candidate.get("season"))
-            episode = _strict_coordinate(candidate.get("episode"))
-            if season is not None and episode is not None:
-                return season, episode
-        return None
 
     @staticmethod
     def _scan_ids(
         conn: sqlite3.Connection,
         file_id: int,
     ) -> tuple[int, ...]:
-        rows = conn.execute(
-            """SELECT id
-               FROM media_identity_scans
-               WHERE file_id=? AND status='complete'
-                 AND result_state IS NOT NULL
-               ORDER BY
-                 CASE completed_profile
-                   WHEN 'deep' THEN 0
-                   WHEN 'normal' THEN 1
-                   WHEN 'fast' THEN 2
-                   ELSE 3
-                 END,
-                 id DESC
-               LIMIT ?""",
-            (
-                int(file_id),
-                SEQUENCE_SCAN_HISTORY_LIMIT,
-            ),
-        ).fetchall()
-        return tuple(int(row["id"]) for row in rows)
+        return MediaIdentityDecisionService._sequence_scan_ids(
+            conn,
+            file_id,
+        )
 
     @staticmethod
     def _validated_hypothesis(
         conn: sqlite3.Connection,
         scan_id: int,
     ) -> SequenceHypothesis | None:
-        try:
-            scan, candidates, evidence = (
-                MediaIdentityDecisionService._scan_snapshot(
-                    conn,
-                    int(scan_id),
-                )
-            )
-        except MediaIdentityDecisionError:
-            return None
-        if (
-            scan.get("status") != "complete"
-            or scan.get("result_state") is None
-            or not str(scan.get("best_candidate_key") or "")
-        ):
-            return None
-
-        current, file_row = (
-            MediaIdentityDecisionService._scan_snapshot_is_current(
+        return (
+            MediaIdentityDecisionService
+            ._validated_sequence_hypothesis(
                 conn,
-                scan,
-                evidence,
+                scan_id,
             )
-        )
-        if not current or not isinstance(file_row, Mapping):
-            return None
-        try:
-            title_id = int(file_row["title_id"])
-        except (KeyError, TypeError, ValueError):
-            return None
-
-        revision = result_revision(scan)
-        claimed = MediaIdentityDecisionService._claimed_identity(scan)
-        sealed_revision, sealed_digest = (
-            MediaIdentityDecisionService._decision_token(claimed)
-        )
-        if (
-            revision <= 0
-            or sealed_revision != revision
-            or not sealed_digest
-        ):
-            return None
-
-        resolution = MediaIdentityDecisionService._resolve_snapshot(
-            scan,
-            candidates,
-            evidence,
-        )
-        if (
-            resolution.state.value
-            != str(scan.get("result_state") or "")
-            or str(resolution.best_candidate_key or "")
-            != str(scan.get("best_candidate_key") or "")
-        ):
-            return None
-        if resolution.best_candidate_key is None:
-            return None
-
-        candidate_by_key = {
-            str(item.get("candidate_key") or ""): item
-            for item in candidates
-        }
-        candidate = candidate_by_key.get(
-            resolution.best_candidate_key
-        )
-        resolved = next(
-            (
-                item for item in resolution.candidates
-                if item.candidate_key
-                == resolution.best_candidate_key
-            ),
-            None,
-        )
-        if candidate is None or resolved is None:
-            return None
-
-        default_coordinate = (
-            DeepSequenceCorrelationService._candidate_default_coordinate(
-                conn,
-                candidate,
-                title_id=title_id,
-            )
-        )
-        if default_coordinate is None:
-            return None
-
-        claimed_season = _strict_coordinate(claimed.get("season"))
-        claimed_episode = _strict_coordinate(
-            claimed.get("episode_start")
-        )
-        claimed_end = _strict_coordinate(
-            claimed.get("episode_end")
-        )
-        if (
-            claimed_season is None
-            or claimed_episode is None
-        ):
-            return None
-        if claimed_end is None:
-            claimed_end = claimed_episode
-
-        try:
-            result_state = IdentityResultState(
-                str(scan["result_state"])
-            )
-        except ValueError:
-            return None
-
-        return SequenceHypothesis(
-            file_id=int(scan["file_id"]),
-            scan_id=int(scan["id"]),
-            result_revision=revision,
-            claimed_season=claimed_season,
-            claimed_episode=claimed_episode,
-            claimed_episode_end=claimed_end,
-            candidate_key=resolution.best_candidate_key,
-            hypothesis_season=default_coordinate[0],
-            hypothesis_episode=default_coordinate[1],
-            result_state=result_state,
-            support_strength=resolved.support_strength,
-            conflict_strength=resolved.conflict_strength,
-            margin=resolution.margin,
-            independent_categories=resolved.independent_categories,
-            content_support=resolved.content_support,
         )
 
     def _best_current_hypothesis(
@@ -476,17 +298,13 @@ class DeepSequenceCorrelationService:
         conn: sqlite3.Connection,
         file_id: int,
     ) -> tuple[SequenceHypothesis | None, bool]:
-        scan_ids = self._scan_ids(conn, file_id)
-        if not scan_ids:
-            return None, False
-        for scan_id in scan_ids:
-            hypothesis = self._validated_hypothesis(
+        return (
+            MediaIdentityDecisionService
+            ._best_current_sequence_hypothesis(
                 conn,
-                scan_id,
+                file_id,
             )
-            if hypothesis is not None:
-                return hypothesis, True
-        return None, True
+        )
 
     def run(
         self,
