@@ -1279,14 +1279,27 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             newer_fast.scan_id,
         )
 
-        findings = [
+        findings = decisions.mie_findings()
+        retry_findings = [
             finding
-            for finding in decisions.mie_findings()
-            if finding["rule_key"] == "episode-identity-review"
+            for finding in findings
+            if finding["rule_key"] == "episode-identity-deep-review"
+            and finding["evidence"]["deep_review_state"]
+                == "correlation_incomplete"
         ]
-        self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0]["evidence"]["scan_id"], deep_id)
-        self.assertEqual(findings[0]["evidence"]["profile"], "deep")
+        self.assertEqual(len(retry_findings), 1)
+        self.assertEqual(
+            retry_findings[0]["evidence"]["scan_id"],
+            deep_id,
+        )
+        self.assertEqual(
+            retry_findings[0]["evidence"]["profile"],
+            "deep",
+        )
+        self.assertFalse(any(
+            finding["rule_key"] == "episode-identity-review"
+            for finding in findings
+        ))
 
     def test_stale_newer_normal_does_not_hide_older_current_normal(self):
         source = FakePreviewSource()
