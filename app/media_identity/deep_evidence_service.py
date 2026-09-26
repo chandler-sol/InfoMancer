@@ -157,8 +157,9 @@ class DeepEvidencePromotionService:
     """Stage complete J2 Deep artifacts as resolver candidates/evidence.
 
     This service deliberately leaves completed_profile at its prior Normal value.
-    A later J5 orchestration step resolves the staged evidence, runs J4 against the
-    new sealed revision, and only then may publish Deep completion.
+    J5 resolves the staged evidence, seals the final per-file Deep revision, then
+    runs J4 against that exact final revision. Human confirmation and rename
+    preview stay locked until a current sealed J4 artifact exists.
     """
 
     def __init__(
