@@ -44,7 +44,10 @@ from app.media_identity.normal_service import (
     NormalIdentityScanError,
     NormalIdentityService,
 )
-from app.media_identity.service import MediaIdentityDecisionService
+from app.media_identity.service import (
+    MediaIdentityDecisionError,
+    MediaIdentityDecisionService,
+)
 from app.media_identity.speech import (
     SpeechAudioIdentity,
     SpeechBinaryIdentity,
@@ -1161,6 +1164,82 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             item["rule_key"] == "episode-identity-review"
             for item in findings
         ))
+
+    def test_finalized_deep_without_j4_is_current_but_human_actions_are_locked(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+
+        normal.run_scan(self.fast_scan.scan_id)
+        resolution = decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertIn(
+            resolution.state.value,
+            {"possible_mismatch", "likely_mismatch", "strong_match_other"},
+        )
+        self._promote_normal_fixture_to_deep()
+        with self.database.connect() as conn:
+            conn.execute(
+                """UPDATE media_identity_scans
+                   SET stage='deep_resolved'
+                   WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            )
+        self._reseal_scan_fixture()
+
+        detail = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertTrue(detail["snapshot_current"])
+        self.assertEqual(detail["completed_profile"], "deep")
+        self.assertTrue(detail["deep_correlation_required"])
+        self.assertFalse(detail["deep_correlation_ready"])
+        self.assertFalse(detail["human_decision_available"])
+        self.assertFalse(detail["actionable"])
+        self.assertIsNone(detail["deep_correlation_analysis"])
+
+        findings = decisions.mie_findings()
+        retry_findings = [
+            item for item in findings
+            if item["rule_key"] == "episode-identity-deep-review"
+            and item["evidence"]["deep_review_state"]
+                == "correlation_incomplete"
+        ]
+        self.assertEqual(len(retry_findings), 1)
+        self.assertFalse(any(
+            item["rule_key"] == "episode-identity-review"
+            for item in findings
+        ))
+
+        reviewed = _reviewed_action_kwargs(
+            decisions,
+            self.fast_scan.scan_id,
+        )
+        with self.assertRaisesRegex(
+            MediaIdentityDecisionError,
+            "cross-file correlation has not completed",
+        ):
+            decisions.confirm_best(
+                self.fast_scan.scan_id,
+                None,
+                **reviewed,
+            )
+
+        preview = decisions.rename_preview(
+            self.fast_scan.scan_id,
+            **reviewed,
+        )
+        self.assertFalse(preview["available"])
+        self.assertEqual(preview["status"], "unavailable")
+        self.assertIn(
+            "cross-file correlation has not completed",
+            preview["reason"],
+        )
+        self.assertTrue(preview["scan"]["snapshot_current"])
 
     def test_current_deep_result_outranks_newer_normal_result(self):
         source = FakePreviewSource()
