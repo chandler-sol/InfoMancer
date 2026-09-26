@@ -6,6 +6,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from app.db import Database
+from app.media_identity.deep_correlation_service import (
+    DeepCorrelationAnalysisError,
+)
 from app.media_identity.deep_verification_service import (
     DeepVerificationError,
     DeepVerificationService,
@@ -153,6 +156,17 @@ class _Correlation:
         )
 
 
+class _FailingCorrelation:
+    def __init__(self, state: _State) -> None:
+        self.state = state
+
+    def run(self, _scan_id: int):
+        self.state.calls.append("correlate")
+        raise DeepCorrelationAnalysisError(
+            "fixture J4 publication failure"
+        )
+
+
 class DeepVerificationCoordinatorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -291,6 +305,45 @@ class DeepVerificationCoordinatorTests(unittest.TestCase):
             state.calls,
             ["finalize", "correlate"],
         )
+
+    def test_j4_failure_preserves_finalized_deep_for_correlation_only_resume(self) -> None:
+        state = _State(raw_fast=False)
+        service = self._service(
+            state,
+            normal=False,
+            visual=False,
+            speech=False,
+        )
+        service.correlation_service = _FailingCorrelation(state)
+
+        with self.assertRaisesRegex(
+            DeepCorrelationAnalysisError,
+            "fixture J4 publication failure",
+        ):
+            service.run(1)
+
+        self.assertEqual(
+            state.calls,
+            [
+                "promote",
+                "resolve-deep",
+                "finalize",
+                "correlate",
+            ],
+        )
+        self.assertEqual(state.scan["completed_profile"], "deep")
+        self.assertEqual(state.scan["stage"], "deep_resolved")
+
+        state.calls.clear()
+        service.correlation_service = _Correlation(state)
+        resumed = service.run(1)
+
+        self.assertEqual(state.calls, ["correlate"])
+        self.assertIsNone(resumed.normal)
+        self.assertIsNone(resumed.visual)
+        self.assertIsNone(resumed.speech)
+        self.assertIsNone(resumed.promotion)
+        self.assertIsNone(resumed.completion)
 
     def test_already_deep_only_runs_current_correlation(self) -> None:
         state = _State(raw_fast=False)
