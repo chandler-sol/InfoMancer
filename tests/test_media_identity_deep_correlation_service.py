@@ -653,6 +653,96 @@ class DeepCorrelationAnalysisServiceTests(unittest.TestCase):
             run.sequence.hypothesis_count,
         )
 
+    def test_scan_detail_invalidates_j4_when_missing_peer_gains_scan(self) -> None:
+        peer_media = (
+            self.show_root / "Example - S01E02.mkv"
+        )
+        peer_media.write_bytes(b"j4-peer-media" * 256)
+        peer_stat = peer_media.stat()
+        peer_digest = hashlib.sha256(
+            peer_media.read_bytes()
+        ).hexdigest()
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO files(
+                     id,title_id,path,filename,extension,
+                     size_bytes,modified_at,season,
+                     episode_start,episode_end,parsed_title,
+                     runtime_seconds,width,height,
+                     video_codec,audio_codec,audio_channels,
+                     bitrate,container,dynamic_range,
+                     media_info_at,media_info_error,seen_scan
+                   ) VALUES (
+                     2,1,?,?,?,?,?,1,2,2,'Example',
+                     600,1920,1080,'H264','AAC',2,
+                     5000000,'MKV','SDR',
+                     '2026-09-24T12:00:00','','fixture'
+                   )""",
+                (
+                    str(peer_media),
+                    peer_media.name,
+                    "mkv",
+                    peer_stat.st_size,
+                    peer_stat.st_mtime,
+                ),
+            )
+            conn.execute(
+                """INSERT INTO media_streams(
+                     file_id,stream_index,stream_type,codec,
+                     language,title,channels,channel_layout,
+                     sample_rate,default_flag,forced_flag,
+                     hearing_impaired,visual_impaired,
+                     commentary,disposition_json
+                   ) VALUES (
+                     2,1,'audio','aac','eng','Main',
+                     2,'stereo',48000,1,0,0,0,0,'{}'
+                   )"""
+            )
+
+        run = self.analysis_service.run(
+            self.scan_id
+        )
+        self.assertIn(
+            2,
+            run.sequence.missing_scan_file_ids,
+        )
+        before = self.decision_service.scan_detail(
+            self.scan_id
+        )
+        self.assertIsNotNone(
+            before["deep_correlation_analysis"]
+        )
+
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO media_identity_scans(
+                     file_id,identity_kind,requested_profile,
+                     completed_profile,status,stage,
+                     claimed_identity_json,file_size_bytes,
+                     file_modified_at,file_sha256,
+                     metadata_signature,result_state,
+                     completed_at
+                   ) VALUES (
+                     2,'episode','fast','fast','complete',
+                     'resolved','{}',?,?,?,
+                     'fixture','inconclusive',
+                     CURRENT_TIMESTAMP
+                   )""",
+                (
+                    peer_stat.st_size,
+                    peer_stat.st_mtime,
+                    peer_digest,
+                ),
+            )
+
+        after = self.decision_service.scan_detail(
+            self.scan_id
+        )
+        self.assertTrue(after["snapshot_current"])
+        self.assertIsNone(
+            after["deep_correlation_analysis"]
+        )
+
     def test_scan_detail_ignores_tampered_j4_artifact(self) -> None:
         run = self.analysis_service.run(
             self.scan_id
