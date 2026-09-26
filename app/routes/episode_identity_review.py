@@ -429,6 +429,7 @@ def build_router(ctx: RouteContext):
             NormalIdentityScanError,
             MediaIdentityDecisionError,
         ) as exc:
+            _refresh_findings(request.state.user.id)
             record_event(
                 "mie",
                 f"Episode Identity Deep verification could not complete for scan {scan_id}.",
