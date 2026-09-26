@@ -977,6 +977,7 @@ class DeepCorrelationAnalysisService:
             DeepSequenceCorrelationError,
             FingerprintError,
             SequenceCorrelationError,
+            sqlite3.Error,
         ) as exc:
             raise DeepCorrelationAnalysisError(
                 "J4 cross-file correlation could not complete safely: "
