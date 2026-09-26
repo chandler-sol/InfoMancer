@@ -296,6 +296,18 @@
 
   <p class="legal-note">Peer filenames above are current catalog labels for orientation only; the sealed Deep analysis remains bound to file IDs and media snapshots. Deep correlation is diagnostic only in this view. It does not confirm an episode, alter the catalog claim, or apply a filesystem rename.</p>
 </section>
+{% elif identity.deep_correlation_required %}
+<section class="panel">
+  <header>
+    <div>
+      <p class="eyebrow">DEEP CORRELATION</p>
+      <h2>Cross-file verification needs retry</h2>
+      <p>The per-file Deep resolver result is sealed, but its required cross-file correlation artifact did not complete or is no longer current.</p>
+    </div>
+  </header>
+  <p>Run Deep verification again to finish the correlation stage. InfoMancer keeps confirmation and rename preview locked until a current sealed J4 analysis is available.</p>
+  <p class="legal-note">This preserves completed Deep resolver work for resume without treating a partially completed Deep request as safe for a human identity decision.</p>
+</section>
 {% endif %}
 
 {% if current_user.is_librarian %}
@@ -303,6 +315,8 @@
   <header><div><p class="eyebrow">HUMAN DECISION</p><h2>Confirm or inspect</h2><p>Confirmation records your decision for this exact file snapshot. It does not rename or rewrite the catalog claim.</p></div></header>
   {% if identity.decision_pending %}
   <p>This scan is waiting for the decision resolver. Refresh Library Health before confirming or previewing a rename.</p>
+  {% elif identity.snapshot_current and not identity.human_decision_available %}
+  <p>Deep cross-file correlation has not completed for this sealed result. Run Deep verification again before confirming an identity or previewing a rename.</p>
   {% elif identity.snapshot_current %}
   <div class="button-row">
     {% if identity.claimed_candidate_keys|length == 1 %}
