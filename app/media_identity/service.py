@@ -1192,6 +1192,44 @@ class MediaIdentityDecisionService:
         return revision, digest
 
     @staticmethod
+    def _deep_correlation_required(
+        scan: Mapping[str, Any],
+    ) -> bool:
+        return (
+            str(scan.get("completed_profile") or "")
+            == IdentityProfile.DEEP.value
+            and str(scan.get("stage") or "") == "deep_resolved"
+        )
+
+    @staticmethod
+    def _current_deep_correlation_view(
+        conn: sqlite3.Connection,
+        scan: Mapping[str, Any],
+        claimed: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        if str(scan.get("completed_profile") or "") != IdentityProfile.DEEP.value:
+            return None
+        revision, digest = MediaIdentityDecisionService._decision_token(
+            claimed
+        )
+        if revision < 1 or not digest:
+            return None
+        target_season = claimed.get("season")
+        if (
+            isinstance(target_season, bool)
+            or not isinstance(target_season, int)
+            or target_season < 0
+        ):
+            target_season = None
+        return load_current_deep_correlation_view(
+            conn,
+            scan=scan,
+            result_revision=revision,
+            decision_snapshot_sha256=digest,
+            target_season=target_season,
+        )
+
+    @staticmethod
     def _confirmation_provenance(
         scan: Mapping[str, Any],
     ) -> dict[str, Any]:
@@ -1487,6 +1525,20 @@ class MediaIdentityDecisionService:
                 raise MediaIdentityDecisionError(
                     "The media file or supporting evidence changed after this identity scan. Run verification again before confirming it."
                 )
+            if (
+                self._deep_correlation_required(scan)
+                and self._current_deep_correlation_view(
+                    conn,
+                    scan,
+                    current_claimed,
+                )
+                is None
+            ):
+                raise MediaIdentityDecisionError(
+                    "Deep cross-file correlation has not completed for this "
+                    "sealed result. Run Deep verification again before "
+                    "confirming an episode identity."
+                )
             provenance = self._confirmation_provenance(scan)
             conn.execute(
                 """INSERT INTO media_identity_confirmations(
@@ -1637,25 +1689,21 @@ class MediaIdentityDecisionService:
         claimed = self._claimed_identity(scan)
         resolution = self._resolve_snapshot(scan, candidates, evidence)
         result_revision_value, decision_digest = self._decision_token(claimed)
-        claimed_season = claimed.get("season")
-        if (
-            isinstance(claimed_season, bool)
-            or not isinstance(claimed_season, int)
-            or claimed_season < 0
-        ):
-            claimed_season = None
         deep_correlation_analysis = None
         if snapshot_current:
             with self.database.connect() as conn:
                 deep_correlation_analysis = (
-                    load_current_deep_correlation_view(
+                    self._current_deep_correlation_view(
                         conn,
-                        scan=scan,
-                        result_revision=result_revision_value,
-                        decision_snapshot_sha256=decision_digest,
-                        target_season=claimed_season,
+                        scan,
+                        claimed,
                     )
                 )
+        deep_correlation_required = self._deep_correlation_required(scan)
+        deep_correlation_ready = (
+            not deep_correlation_required
+            or deep_correlation_analysis is not None
+        )
         content_verified = bool(
             verify_actionable_content
             and str(scan.get("result_state") or "") in ACTIONABLE_STATES
@@ -1795,6 +1843,13 @@ class MediaIdentityDecisionService:
         )
         result["confirmation"] = confirmation
         result["snapshot_current"] = snapshot_current
+        result["deep_correlation_required"] = deep_correlation_required
+        result["deep_correlation_ready"] = deep_correlation_ready
+        result["human_decision_available"] = (
+            snapshot_current
+            and deep_correlation_ready
+            and not result["decision_pending"]
+        )
         confirmed_key = None
         if confirmation and confirmation.get("current"):
             for candidate in candidates:
@@ -1806,7 +1861,7 @@ class MediaIdentityDecisionService:
             and confirmed_key in set(result["claimed_candidate_keys"])
         )
         result["actionable"] = (
-            snapshot_current
+            result["human_decision_available"]
             and not result["confirmed_claimed"]
             and str(result.get("result_state") or "") in ACTIONABLE_STATES
         )
@@ -2052,6 +2107,80 @@ class MediaIdentityDecisionService:
             },
         }
 
+    @staticmethod
+    def _deep_correlation_incomplete_finding(
+        detail: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        if (
+            detail.get("deep_correlation_required") is not True
+            or detail.get("deep_correlation_ready") is not False
+        ):
+            return None
+        try:
+            scan_id = int(detail["id"])
+            file_id = int(detail["file_id"])
+            revision = int(detail.get("result_revision") or 0)
+        except (KeyError, TypeError, ValueError):
+            return None
+        digest = str(
+            detail.get("decision_snapshot_sha256") or ""
+        ).strip().casefold()
+        file_row = detail.get("file")
+        if (
+            scan_id < 1
+            or file_id < 1
+            or revision < 1
+            or len(digest) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in digest
+            )
+            or not isinstance(file_row, Mapping)
+        ):
+            return None
+        filename = str(file_row.get("filename") or "Media file")
+        return {
+            "fingerprint": (
+                f"episode-identity-deep:file:{file_id}:"
+                f"decision:{digest}:state:correlation-incomplete"
+            ),
+            "rule_key": "episode-identity-deep-review",
+            "category": "identity",
+            "severity": "information",
+            "root_id": file_row.get("root_id"),
+            "title_id": file_row.get("title_id"),
+            "file_id": file_id,
+            "expected_episode_id": None,
+            "summary": (
+                f"{filename}: Deep cross-file verification needs retry"
+            ),
+            "explanation": (
+                "The per-file Deep resolver result is sealed, but the required "
+                "J4 cross-file correlation artifact is not current. InfoMancer "
+                "keeps this result non-actionable until that correlation finishes."
+            ),
+            "recommendation": (
+                "Run Deep verification again. Confirmation and rename preview "
+                "remain unavailable until a current sealed cross-file analysis "
+                "is published."
+            ),
+            "evidence": {
+                "scan_id": scan_id,
+                "resolver_result_state": str(
+                    detail.get("result_state") or ""
+                ),
+                "result_revision": revision,
+                "decision_snapshot_sha256": digest,
+                "profile": "deep",
+                "deep_artifact_id": None,
+                "deep_review_state": "correlation_incomplete",
+                "deep_review_label": "Deep correlation incomplete",
+                "deep_review_actionable": False,
+                "related_file_ids": [],
+                "sequence_offsets": [],
+            },
+        }
+
     def mie_findings(self) -> list[dict[str, Any]]:
         with self.database.connect() as conn:
             latest_rows = [
@@ -2263,6 +2392,12 @@ class MediaIdentityDecisionService:
                 continue
             scan_id = int(detail["id"])
             state = str(detail.get("result_state") or "")
+            incomplete_deep = self._deep_correlation_incomplete_finding(
+                detail
+            )
+            if incomplete_deep is not None:
+                findings.append(incomplete_deep)
+                continue
             deep_finding = self._deep_correlation_finding(detail)
             deep_is_distinct_duplicate = bool(
                 deep_finding is not None
@@ -2533,6 +2668,16 @@ class MediaIdentityDecisionService:
                     evidence,
                     verify_content=True,
                 )
+        deep_correlation_ready = True
+        if current and self._deep_correlation_required(scan):
+            deep_correlation_ready = (
+                self._current_deep_correlation_view(
+                    conn,
+                    scan,
+                    current_claimed,
+                )
+                is not None
+            )
         if not current:
             stale_detail = dict(detail)
             stale_detail["snapshot_current"] = False
@@ -2545,6 +2690,21 @@ class MediaIdentityDecisionService:
                     "evidence changed after review."
                 ),
                 "scan": stale_detail,
+            }
+
+        if not deep_correlation_ready:
+            locked_detail = dict(detail)
+            locked_detail["deep_correlation_ready"] = False
+            locked_detail["human_decision_available"] = False
+            locked_detail["actionable"] = False
+            return {
+                "available": False,
+                "status": "unavailable",
+                "reason": (
+                    "Deep cross-file correlation is no longer current for this "
+                    "result. Run Deep verification again before considering a rename."
+                ),
+                "scan": locked_detail,
             }
 
         validated_source = {
@@ -2582,8 +2742,11 @@ class MediaIdentityDecisionService:
         detail["confirmation"] = confirmation
         detail["confirmed_claimed"] = confirmed_claimed
         detail["snapshot_current"] = True
+        detail["deep_correlation_ready"] = deep_correlation_ready
+        detail["human_decision_available"] = deep_correlation_ready
         detail["actionable"] = (
-            not confirmed_claimed
+            deep_correlation_ready
+            and not confirmed_claimed
             and str(detail.get("result_state") or "") in ACTIONABLE_STATES
         )
         if confirmed_claimed:
