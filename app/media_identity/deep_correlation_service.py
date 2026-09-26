@@ -8,6 +8,7 @@ from typing import Any, Callable, Mapping
 
 from ..db import Database
 from .correlation_interpretation import (
+    CorrelationInterpretationError,
     CorrelationInterpretationPolicy,
     ModalityInterpretation,
     PairInterpretation,
@@ -23,27 +24,33 @@ from .correlation_patterns import (
     SwapPatternObservation,
 )
 from .correlation_patterns_service import (
+    DeepCorrelationPatternError,
     DeepCorrelationPatternRun,
     correlate_deep_patterns,
 )
 from .decision_snapshot import result_revision
 from .deep import (
     DeepCorrelationPolicy,
+    DeepIdentityError,
     plan_deep_correlation,
 )
-from .fingerprint import FingerprintMatchPolicy
+from .fingerprint import FingerprintError, FingerprintMatchPolicy
 from .fingerprint_audio_service import (
     DeepAudioFingerprintCorrelationService,
 )
 from .fingerprint_bundle import (
+    DeepFingerprintBundleError,
     DeepFingerprintBundleRun,
     DeepFingerprintBundleService,
 )
 from .fingerprint_correlation import (
+    DeepFingerprintCorrelationError,
     DeepFingerprintCorrelationRun,
     DeepFingerprintCorrelationService,
 )
+from .fingerprint_service import DeepFingerprintError
 from .sequence_correlation import (
+    SequenceCorrelationError,
     SequenceHypothesis,
     SequenceOffsetAnalysis,
     SequenceOffsetObservation,
@@ -51,6 +58,7 @@ from .sequence_correlation import (
     detect_sequence_offsets,
 )
 from .sequence_correlation_service import (
+    DeepSequenceCorrelationError,
     DeepSequenceCorrelationRun,
     DeepSequenceCorrelationService,
 )
@@ -952,6 +960,30 @@ class DeepCorrelationAnalysisService:
             return int(persisted["id"]), inserted
 
     def run(
+        self,
+        scan_id: int,
+    ) -> DeepCorrelationArtifactRun:
+        try:
+            return self._run(int(scan_id))
+        except DeepCorrelationAnalysisError:
+            raise
+        except (
+            CorrelationInterpretationError,
+            DeepCorrelationPatternError,
+            DeepFingerprintBundleError,
+            DeepFingerprintCorrelationError,
+            DeepFingerprintError,
+            DeepIdentityError,
+            DeepSequenceCorrelationError,
+            FingerprintError,
+            SequenceCorrelationError,
+        ) as exc:
+            raise DeepCorrelationAnalysisError(
+                "J4 cross-file correlation could not complete safely: "
+                f"{exc}"
+            ) from exc
+
+    def _run(
         self,
         scan_id: int,
     ) -> DeepCorrelationArtifactRun:
