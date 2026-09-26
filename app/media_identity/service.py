@@ -2593,6 +2593,20 @@ class MediaIdentityDecisionService:
                 "reason": "The media or supporting evidence changed after verification. Run Episode Identity again before considering a rename.",
                 "scan": detail,
             }
+        if (
+            detail.get("deep_correlation_required")
+            and not detail.get("deep_correlation_ready")
+        ):
+            return {
+                "available": False,
+                "status": "unavailable",
+                "reason": (
+                    "Deep cross-file correlation has not completed for this "
+                    "sealed result. Run Deep verification again before "
+                    "considering a rename."
+                ),
+                "scan": detail,
+            }
         if not detail.get("actionable"):
             return {
                 "available": False,
@@ -2661,6 +2675,7 @@ class MediaIdentityDecisionService:
                 and current_digest == reviewed_digest
             )
             current = False
+            deep_correlation_ready = True
             if same_reviewed_result:
                 current, _ = self._review_snapshot_is_current(
                     conn,
@@ -2668,16 +2683,15 @@ class MediaIdentityDecisionService:
                     evidence,
                     verify_content=True,
                 )
-        deep_correlation_ready = True
-        if current and self._deep_correlation_required(scan):
-            deep_correlation_ready = (
-                self._current_deep_correlation_view(
-                    conn,
-                    scan,
-                    current_claimed,
-                )
-                is not None
-            )
+                if current and self._deep_correlation_required(scan):
+                    deep_correlation_ready = (
+                        self._current_deep_correlation_view(
+                            conn,
+                            scan,
+                            current_claimed,
+                        )
+                        is not None
+                    )
         if not current:
             stale_detail = dict(detail)
             stale_detail["snapshot_current"] = False
