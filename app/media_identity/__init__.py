@@ -1,6 +1,26 @@
 """Generic media identity verification contracts for InfoMancer 0.9."""
 
 from .analyzers import IdentityAnalyzer
+from .deep import (
+    DeepCandidatePlan,
+    DeepCandidatePolicy,
+    DeepCorrelationPlan,
+    DeepCorrelationPolicy,
+    DeepFileSnapshot,
+    DeepIdentityError,
+    build_deep_plan_metadata,
+    deep_plan_metadata_is_current,
+    generate_deep_episode_candidates,
+    plan_deep_correlation,
+)
+
+from .deep_sampling import (
+    DeepSamplingError,
+    DeepSamplingPolicy,
+    DeepVisualPlan,
+    DeepVisualSample,
+    build_deep_visual_plan,
+)
 from .external import ExternalAnalysisSource
 from .models import (
     AnalyzerContext,
@@ -42,6 +62,21 @@ from .speech_audio import (
 __all__ = [
     "AnalyzerContext",
     "AnalyzerResult",
+    "DeepCandidatePlan",
+    "DeepCandidatePolicy",
+    "DeepCorrelationPlan",
+    "DeepCorrelationPolicy",
+    "DeepFileSnapshot",
+    "DeepIdentityError",
+    "DeepSamplingError",
+    "DeepSamplingPolicy",
+    "DeepVisualPlan",
+    "DeepVisualSample",
+    "build_deep_visual_plan",
+    "build_deep_plan_metadata",
+    "deep_plan_metadata_is_current",
+    "generate_deep_episode_candidates",
+    "plan_deep_correlation",
     "EvidenceCategory",
     "EvidenceRelation",
     "ExternalAnalysisSource",

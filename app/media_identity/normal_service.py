@@ -27,6 +27,7 @@ from .normal import (
     NormalSamplingStage,
     OcrEngine,
     OcrTextResult,
+    ocr_artifact_output_is_sealed,
 )
 from .service import MediaIdentityDecisionService
 from .speech import SpeechEngine, SpeechModelIdentity
@@ -111,6 +112,18 @@ def _json_object(value: Any) -> dict[str, Any]:
     except (TypeError, ValueError, json.JSONDecodeError):
         return {}
     return loaded if isinstance(loaded, dict) else {}
+
+
+def _deep_ocr_artifact_output_is_valid(
+    profile: object,
+    text_value: object,
+    payload: Mapping[str, Any],
+) -> bool:
+    """Require the shared Deep OCR output seal for cross-profile reuse."""
+
+    if str(profile or "") != IdentityProfile.DEEP.value:
+        return True
+    return ocr_artifact_output_is_sealed(text_value, payload)
 
 
 def _same_modified_at(first: Any, second: Any) -> bool:
@@ -295,7 +308,7 @@ class NormalIdentityService:
         with self.database.connect() as conn:
             row = conn.execute(
                 """SELECT text_value,payload_json,source_signature,
-                          file_size_bytes,file_modified_at
+                          file_size_bytes,file_modified_at,profile
                    FROM media_identity_artifacts
                    WHERE file_id=? AND artifact_type='visual_text'
                      AND analyzer_key=? AND analyzer_version=?
@@ -321,6 +334,12 @@ class NormalIdentityService:
             return None
 
         payload = _json_object(row["payload_json"])
+        if not _deep_ocr_artifact_output_is_valid(
+            row["profile"],
+            row["text_value"],
+            payload,
+        ):
+            return None
         confidence = payload.get("confidence")
         try:
             normalized_confidence = (
@@ -421,6 +440,14 @@ class NormalIdentityService:
                 )
 
             persisted_payload = _json_object(row["payload_json"])
+            if not _deep_ocr_artifact_output_is_valid(
+                row["profile"],
+                row["text_value"],
+                persisted_payload,
+            ):
+                raise NormalIdentityScanError(
+                    "The persisted Deep OCR winner failed its output integrity seal."
+                )
             details = persisted_payload.get("details")
             confidence = persisted_payload.get("confidence")
             try:
@@ -454,7 +481,10 @@ class NormalIdentityService:
                 or str(row["analyzer_version"] or "") != NORMAL_OCR_ARTIFACT_VERSION
                 or str(row["cache_key"] or "") != str(item.cache_key)
                 or str(row["status"] or "") != "complete"
-                or str(row["profile"] or "") != IdentityProfile.NORMAL.value
+                or str(row["profile"] or "") not in {
+                    IdentityProfile.NORMAL.value,
+                    IdentityProfile.DEEP.value,
+                }
                 or str(row["source_kind"] or "") != str(item.source_key)
                 or str(row["source_ref"] or "") != str(item.asset_ref)
                 or str(row["source_signature"] or "") != str(item.source_signature)

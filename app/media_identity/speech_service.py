@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import math
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -30,6 +31,8 @@ from .speech_audio import (
     normalize_speech_language,
     validate_normal_speech_audio_budget,
     validate_normal_speech_window_plan,
+    validate_speech_audio_budget,
+    validate_speech_window_plan,
 )
 
 
@@ -127,6 +130,50 @@ def _canonical_json(value: Any) -> str:
         separators=(",", ":"),
         allow_nan=False,
     )
+
+
+def _transcript_output_sha256(
+    text_value: object,
+    payload: Mapping[str, Any],
+) -> str:
+    digest_payload = dict(payload)
+    digest_payload.pop("transcript_output_sha256", None)
+    return hashlib.sha256(
+        _canonical_json({
+            "text_value": str(text_value or ""),
+            "payload": digest_payload,
+        }).encode("utf-8")
+    ).hexdigest()
+
+
+def _transcript_output_is_sealed(
+    text_value: object,
+    payload: Mapping[str, Any],
+) -> bool:
+    expected = str(
+        payload.get("transcript_output_sha256") or ""
+    ).strip().casefold()
+    if (
+        len(expected) != 64
+        or any(character not in "0123456789abcdef" for character in expected)
+    ):
+        return False
+    return expected == _transcript_output_sha256(text_value, payload)
+
+def _transcript_output_is_acceptable(
+    text_value: object,
+    payload: Mapping[str, Any],
+    *,
+    require_seal: bool,
+) -> bool:
+    raw_seal = str(
+        payload.get("transcript_output_sha256") or ""
+    ).strip()
+    if require_seal or raw_seal:
+        return _transcript_output_is_sealed(text_value, payload)
+    # Pre-J2 Normal artifacts have no output seal. Normal retains compatibility
+    # with those exact audio-bound rows, while Deep requires a seal.
+    return True
 
 
 def _same_modified_at(first: Any, second: Any) -> bool:
@@ -235,6 +282,10 @@ def _bounded_failure(prefix: str, exc: BaseException) -> str:
 
 
 class NormalSpeechService:
+    artifact_profile = "normal"
+    profile_label = "Normal"
+    require_transcript_output_seal = False
+
     """Run resumable, bounded local speech transcription for one Normal scan.
 
     This layer deliberately persists transcripts only. It does not turn speech
@@ -311,6 +362,22 @@ class NormalSpeechService:
         self.language = legacy_language
         self.translate = translate
         self.parameters = dict(parameters or {})
+
+    def plan_speech_windows(self, runtime_seconds: Any) -> tuple[SpeechWindow, ...]:
+        return plan_normal_speech_windows(runtime_seconds)
+
+    def validate_window_plan(
+        self,
+        windows: Iterable[SpeechWindow],
+    ) -> tuple[SpeechWindow, ...]:
+        return validate_normal_speech_window_plan(windows)
+
+    def validate_audio_budget(
+        self,
+        records: Iterable[tuple[SpeechWindow, SpeechAudioIdentity]],
+    ) -> tuple[tuple[SpeechWindow, SpeechAudioIdentity], ...]:
+        return validate_normal_speech_audio_budget(records)
+
 
     def _engine_snapshot(self) -> _SpeechEngineSnapshot:
         binary = self.engine.binary_identity()
@@ -423,7 +490,7 @@ class NormalSpeechService:
         with self.database.connect() as conn:
             row = conn.execute(
                 """SELECT id,cache_key,source_signature,file_size_bytes,
-                          file_modified_at,text_value,payload_json
+                          file_modified_at,text_value,payload_json,profile
                    FROM media_identity_artifacts
                    WHERE file_id=? AND artifact_type='speech_transcript'
                      AND analyzer_key=? AND analyzer_version=?
@@ -456,6 +523,12 @@ class NormalSpeechService:
             except (TypeError, ValueError, json.JSONDecodeError):
                 continue
             if not isinstance(payload, Mapping):
+                continue
+            if not _transcript_output_is_acceptable(
+                row["text_value"],
+                payload,
+                require_seal=self.require_transcript_output_seal,
+            ):
                 continue
             audio_identity = _audio_identity_from_payload(payload)
             transcript = _transcript_from_row(row["text_value"], payload)
@@ -595,6 +668,10 @@ class NormalSpeechService:
                 "details": transcript.details_payload(),
             },
         }
+        payload["transcript_output_sha256"] = _transcript_output_sha256(
+            transcript.text,
+            payload,
+        )
         with self.database.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             # Revalidate again inside the write transaction so a changed scan
@@ -653,7 +730,7 @@ class NormalSpeechService:
                      start_ms,end_ms,text_value,payload_json,
                      updated_at,last_used_at
                    ) VALUES (
-                     ?,'speech_transcript',?,? ,?,'complete','normal',
+                     ?,'speech_transcript',?,? ,?,'complete',?,
                      'local_speech',?,?,?,?,?,?,?,?,
                      CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
                    )""",
@@ -662,6 +739,7 @@ class NormalSpeechService:
                     NORMAL_SPEECH_ARTIFACT_KEY,
                     NORMAL_SPEECH_ARTIFACT_VERSION,
                     cache_key,
+                    self.artifact_profile,
                     f"file:{int(transaction_scan['file_id'])}:audio:{extractor.stream.index}",
                     request.audio.source_signature,
                     int(transaction_scan["file_size_bytes"] or 0),
@@ -674,7 +752,7 @@ class NormalSpeechService:
             )
             inserted = insert_cursor.rowcount == 1
             persisted = conn.execute(
-                """SELECT id,text_value,payload_json,status
+                """SELECT id,text_value,payload_json,status,profile
                    FROM media_identity_artifacts
                    WHERE file_id=? AND artifact_type='speech_transcript'
                      AND analyzer_key=? AND analyzer_version=? AND cache_key=?
@@ -719,6 +797,14 @@ class NormalSpeechService:
                 str(persisted["status"] or "") == "complete"
                 and persisted_audio is not None
                 and persisted_transcript is not None
+                and (
+                    persisted_payload is not None
+                    and _transcript_output_is_acceptable(
+                        persisted["text_value"],
+                        persisted_payload,
+                        require_seal=self.require_transcript_output_seal,
+                    )
+                )
             ):
                 try:
                     persisted_request = SpeechRequest(
@@ -747,7 +833,7 @@ class NormalSpeechService:
                 repair_cursor = conn.execute(
                     """UPDATE media_identity_artifacts
                        SET status='complete',
-                           profile='normal',
+                           profile=?,
                            source_kind='local_speech',
                            source_ref=?,
                            source_signature=?,
@@ -762,6 +848,7 @@ class NormalSpeechService:
                            last_used_at=CURRENT_TIMESTAMP
                        WHERE id=? AND cache_key=?""",
                     (
+                        self.artifact_profile,
                         f"file:{int(transaction_scan['file_id'])}:audio:{extractor.stream.index}",
                         request.audio.source_signature,
                         int(transaction_scan["file_size_bytes"] or 0),
@@ -807,14 +894,14 @@ class NormalSpeechService:
         runtime_seconds: Any,
         streams: Sequence[Mapping[str, Any]] | Iterable[Mapping[str, Any]],
     ) -> NormalSpeechRun:
-        windows = plan_normal_speech_windows(runtime_seconds)
+        windows = self.plan_speech_windows(runtime_seconds)
         if not windows:
             return NormalSpeechRun(
                 planned_windows=(),
                 failures=("speech-runtime-unavailable",),
             )
         try:
-            validate_normal_speech_window_plan(windows)
+            self.validate_window_plan(windows)
         except SpeechIdentityError as exc:
             return NormalSpeechRun(
                 planned_windows=windows,
@@ -936,7 +1023,7 @@ class NormalSpeechService:
                         )
                     )
                     if exact_cached is not None:
-                        validate_normal_speech_audio_budget(
+                        self.validate_audio_budget(
                             [*budget_records, (window, exact_cached.audio_identity)]
                         )
                         self._require_fresh_scan(
@@ -950,7 +1037,7 @@ class NormalSpeechService:
                         observations.append(exact_cached)
                         continue
 
-                    validate_normal_speech_audio_budget(
+                    self.validate_audio_budget(
                         [*budget_records, (window, prepared.identity)]
                     )
                     validated_path = prepared.validated_path(request.audio)

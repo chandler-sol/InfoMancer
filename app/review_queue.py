@@ -36,6 +36,7 @@ RULE_BUCKETS = {
     "quality-consistency": "quality",
     "media-identity-unreviewed": "editions",
     "episode-identity-review": "matching",
+    "episode-identity-deep-review": "matching",
     "source-stale": "sources",
     "source-offline": "sources",
     "source-degraded": "sources",
@@ -131,11 +132,22 @@ class ReviewQueue:
             "evidence_rows": _evidence_rows(finding.get("evidence") or {}),
             "files": [],
         }
-        if item["rule_key"] == "episode-identity-review":
+        if item["rule_key"] in {
+            "episode-identity-review",
+            "episode-identity-deep-review",
+        }:
             item["source_label"] = "Episode Identity"
-            item["review_label"] = "Review episode identity"
+            item["review_label"] = (
+                "Review Deep episode analysis"
+                if item["rule_key"] == "episode-identity-deep-review"
+                else "Review episode identity"
+            )
             item["identity_scan_id"] = item["evidence"].get("scan_id")
-            item["identity_state"] = item["evidence"].get("result_state")
+            item["identity_state"] = (
+                item["evidence"].get("deep_review_state")
+                if item["rule_key"] == "episode-identity-deep-review"
+                else item["evidence"].get("result_state")
+            )
             item["identity_confirmation"] = item["evidence"].get("confirmation")
         item["drawer_url"] = f"/review/items/finding/{item['item_id']}"
         return item

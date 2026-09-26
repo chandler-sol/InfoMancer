@@ -11,17 +11,23 @@ from .db import Database
 class MediaHashService:
     """Maintain reusable SHA-256 fingerprints without modifying media."""
 
-    def __init__(self, database: Database):
+    def __init__(
+        self,
+        database: Database,
+        *,
+        recover_interrupted: bool = True,
+    ):
         self.database = database
-        # A process restart can interrupt a fingerprint mid-file. Put those
-        # records back in the queue so they are never stranded as "running".
-        with self.database.connect() as conn:
-            conn.execute(
-                """UPDATE media_file_hashes SET status='queued',
-                   error='Fingerprinting was interrupted and will be retried.',
-                   queued_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
-                   WHERE status='running'"""
-            )
+        # Startup owners recover stranded work. Helper callers that only need
+        # one synchronous hash must not mutate unrelated in-flight queue rows.
+        if recover_interrupted:
+            with self.database.connect() as conn:
+                conn.execute(
+                    """UPDATE media_file_hashes SET status='queued',
+                       error='Fingerprinting was interrupted and will be retried.',
+                       queued_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+                       WHERE status='running'"""
+                )
 
     @staticmethod
     def _current(row) -> bool:

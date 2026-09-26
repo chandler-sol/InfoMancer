@@ -9,6 +9,13 @@ from unittest.mock import patch
 
 from app.db import Database
 from app.mie import MediaIntelligenceEngine
+from app.media_identity.deep import (
+    DeepCandidatePolicy,
+    DeepCorrelationPolicy,
+    build_deep_plan_metadata,
+    generate_deep_episode_candidates,
+    plan_deep_correlation,
+)
 from app.media_identity.external import (
     ExternalCapability,
     ExternalMediaRef,
@@ -37,7 +44,10 @@ from app.media_identity.normal_service import (
     NormalIdentityScanError,
     NormalIdentityService,
 )
-from app.media_identity.service import MediaIdentityDecisionService
+from app.media_identity.service import (
+    MediaIdentityDecisionError,
+    MediaIdentityDecisionService,
+)
 from app.media_identity.speech import (
     SpeechAudioIdentity,
     SpeechBinaryIdentity,
@@ -51,6 +61,7 @@ from app.media_identity.speech_service import (
     NormalSpeechRun,
 )
 from app.media_identity.versions import (
+    DEEP_EVIDENCE_PROMOTION_VERSION,
     EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION,
     NORMAL_EVIDENCE_ALGORITHM_VERSION,
 )
@@ -401,6 +412,61 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
                 ) + 1,
             )
 
+    def _promote_normal_fixture_to_deep(self) -> None:
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """SELECT claimed_identity_json
+                   FROM media_identity_scans WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            claimed = json.loads(row["claimed_identity_json"])
+            candidate_plan = generate_deep_episode_candidates(
+                conn,
+                title_id=1,
+                season=1,
+                episode_start=1,
+                episode_end=1,
+                language=str(claimed.get("scan_language") or "eng"),
+                policy=DeepCandidatePolicy(
+                    adjacent_season_radius=1,
+                    include_specials=True,
+                    max_candidates=16,
+                    max_specials=4,
+                ),
+            )
+            correlation_plan = plan_deep_correlation(
+                conn,
+                file_id=1,
+                policy=DeepCorrelationPolicy(
+                    season_radius=0,
+                    max_files=2,
+                    max_pairwise_comparisons=1,
+                ),
+            )
+            claimed["deep_identity"] = build_deep_plan_metadata(
+                candidate_plan,
+                correlation_plan,
+            )
+            claimed["deep_evidence"] = {
+                "version": DEEP_EVIDENCE_PROMOTION_VERSION,
+                "baseline_revision": result_revision(claimed),
+                "visual_manifest_artifact_id": None,
+                "speech_manifest_artifact_id": None,
+                "visual_evidence_count": 0,
+                "speech_evidence_count": 0,
+                "added_candidate_keys": [],
+            }
+            conn.execute(
+                """UPDATE media_identity_scans
+                   SET completed_profile='deep',claimed_identity_json=?
+                   WHERE id=?""",
+                (
+                    json.dumps(claimed, sort_keys=True),
+                    self.fast_scan.scan_id,
+                ),
+            )
+        self._reseal_scan_fixture()
+
     def test_decision_version_drift_makes_fast_scan_stale(self):
         decisions = MediaIdentityDecisionService(self.database)
         detail = decisions.scan_detail(self.fast_scan.scan_id)
@@ -456,6 +522,83 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
                 "UPDATE media_identity_scans SET claimed_identity_json=? WHERE id=?",
                 (json.dumps(claimed, sort_keys=True), self.fast_scan.scan_id),
             )
+
+        stale = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
+    def test_deep_profile_inherits_normal_freshness(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        normal.run_scan(self.fast_scan.scan_id)
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        self._promote_normal_fixture_to_deep()
+
+        current = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertEqual(current["completed_profile"], "deep")
+        self.assertTrue(current["snapshot_current"])
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT claimed_identity_json FROM media_identity_scans WHERE id=?",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            claimed = json.loads(row["claimed_identity_json"])
+            claimed["normal_ocr"]["algorithm_version"] += 1
+            conn.execute(
+                "UPDATE media_identity_scans SET claimed_identity_json=? WHERE id=?",
+                (
+                    json.dumps(claimed, sort_keys=True),
+                    self.fast_scan.scan_id,
+                ),
+            )
+        self._reseal_scan_fixture()
+
+        stale = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertFalse(stale["snapshot_current"])
+        self.assertFalse(stale["actionable"])
+
+    def test_deep_profile_requires_exact_current_deep_plan(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        normal.run_scan(self.fast_scan.scan_id)
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        self._promote_normal_fixture_to_deep()
+
+        current = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertTrue(current["snapshot_current"])
+
+        with self.database.connect() as conn:
+            row = conn.execute(
+                "SELECT claimed_identity_json FROM media_identity_scans WHERE id=?",
+                (self.fast_scan.scan_id,),
+            ).fetchone()
+            claimed = json.loads(row["claimed_identity_json"])
+            claimed["deep_identity"]["candidate_plan_signature"] = "0" * 64
+            conn.execute(
+                "UPDATE media_identity_scans SET claimed_identity_json=? WHERE id=?",
+                (
+                    json.dumps(claimed, sort_keys=True),
+                    self.fast_scan.scan_id,
+                ),
+            )
+        self._reseal_scan_fixture()
 
         stale = decisions.scan_detail(self.fast_scan.scan_id)
         self.assertFalse(stale["snapshot_current"])
@@ -823,6 +966,341 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             "strong_match_other",
         )
 
+    def test_nonactionable_resolver_can_surface_deep_cross_file_advisory(self):
+        decisions = MediaIdentityDecisionService(self.database)
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        detail = decisions.scan_detail(self.fast_scan.scan_id)
+        detail["result_state"] = "probably_correct"
+        detail["actionable"] = False
+        detail["deep_correlation_analysis"] = {
+            "artifact_id": 901,
+            "review_state": "sequence_offset",
+            "review_label": "Episode sequence offset",
+            "review_explanation": (
+                "This file participates in an authoritative season-level "
+                "episode offset pattern (+1)."
+            ),
+            "review_actionable": False,
+            "duplicates": (),
+            "swaps": (),
+            "identity_cycles": (),
+            "target_sequence_observations": ({
+                "offset": 1,
+                "supporting_file_ids": (1, 2, 3),
+            },),
+            "coverage": {
+                "fully_multimodal": True,
+                "complete_modalities": ("video", "audio"),
+                "sequence_peer_coverage_complete": True,
+            },
+        }
+
+        with patch.object(
+            decisions,
+            "scan_detail",
+            return_value=detail,
+        ):
+            findings = decisions.mie_findings()
+
+        deep_findings = [
+            item for item in findings
+            if item["rule_key"] == "episode-identity-deep-review"
+        ]
+        self.assertEqual(len(deep_findings), 1)
+        self.assertEqual(
+            deep_findings[0]["evidence"]["resolver_result_state"],
+            "probably_correct",
+        )
+        self.assertFalse(
+            deep_findings[0]["evidence"]["deep_review_actionable"]
+        )
+        self.assertFalse(any(
+            item["rule_key"] == "episode-identity-review"
+            for item in findings
+        ))
+
+    def test_actionable_resolver_folds_deep_context_into_one_finding(self):
+        decisions = MediaIdentityDecisionService(self.database)
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        detail = decisions.scan_detail(self.fast_scan.scan_id)
+        detail["result_state"] = "likely_mismatch"
+        detail["actionable"] = True
+        detail["deep_correlation_analysis"] = {
+            "artifact_id": 902,
+            "review_state": "possible_swapped_episodes",
+            "review_label": "Possible swapped episodes",
+            "review_explanation": (
+                "Two resolver hypotheses are reciprocal and fingerprint "
+                "evidence supports the files being distinct."
+            ),
+            "review_actionable": False,
+            "duplicates": (),
+            "swaps": ({
+                "other_file_id": 2,
+                "status": "corroborated_distinct",
+            },),
+            "identity_cycles": (),
+            "target_sequence_observations": (),
+            "coverage": {
+                "fully_multimodal": True,
+                "complete_modalities": ("video", "audio"),
+                "sequence_peer_coverage_complete": True,
+            },
+        }
+
+        with patch.object(
+            decisions,
+            "scan_detail",
+            return_value=detail,
+        ):
+            findings = decisions.mie_findings()
+
+        self.assertEqual(
+            sum(
+                item["rule_key"] == "episode-identity-review"
+                for item in findings
+            ),
+            1,
+        )
+        self.assertFalse(any(
+            item["rule_key"] == "episode-identity-deep-review"
+            for item in findings
+        ))
+        identity_finding = next(
+            item for item in findings
+            if item["rule_key"] == "episode-identity-review"
+        )
+        self.assertEqual(
+            identity_finding["evidence"]["deep_review_state"],
+            "possible_swapped_episodes",
+        )
+        self.assertEqual(
+            identity_finding["evidence"]["deep_artifact_id"],
+            902,
+        )
+        self.assertTrue(
+            identity_finding["fingerprint"].endswith(":deep:902")
+        )
+
+        first_fingerprint = identity_finding["fingerprint"]
+        detail["deep_correlation_analysis"]["artifact_id"] = 904
+        with patch.object(
+            decisions,
+            "scan_detail",
+            return_value=detail,
+        ):
+            refreshed = decisions.mie_findings()
+        refreshed_identity = next(
+            item for item in refreshed
+            if item["rule_key"] == "episode-identity-review"
+        )
+        self.assertTrue(
+            refreshed_identity["fingerprint"].endswith(":deep:904")
+        )
+        self.assertNotEqual(
+            refreshed_identity["fingerprint"],
+            first_fingerprint,
+        )
+
+    def test_actionable_identity_does_not_hide_deep_duplicate_content(self):
+        decisions = MediaIdentityDecisionService(self.database)
+        decisions.resolve_scan(self.fast_scan.scan_id)
+        detail = decisions.scan_detail(self.fast_scan.scan_id)
+        detail["result_state"] = "likely_mismatch"
+        detail["actionable"] = True
+        claimed = next(
+            candidate
+            for candidate in detail["candidates"]
+            if candidate["candidate_key"]
+                in set(detail["claimed_candidate_keys"])
+        )
+        detail["confirmation"] = {
+            "current": True,
+            "provider": claimed["provider"],
+            "provider_item_id": claimed["provider_item_id"],
+            "expected_episode_id": claimed["expected_episode_id"],
+        }
+        detail["deep_correlation_analysis"] = {
+            "artifact_id": 903,
+            "review_state": "duplicate_content_identity",
+            "review_label": "Duplicate content identity",
+            "review_explanation": (
+                "Multimodal fingerprint evidence indicates this file shares "
+                "episode content with another claimed file."
+            ),
+            "review_actionable": False,
+            "duplicates": ({
+                "other_file_id": 2,
+                "strength": "strong_multimodal",
+                "agreement": "both_high",
+            },),
+            "swaps": (),
+            "identity_cycles": (),
+            "target_sequence_observations": (),
+            "coverage": {
+                "fully_multimodal": True,
+                "complete_modalities": ("video", "audio"),
+                "sequence_peer_coverage_complete": True,
+            },
+        }
+
+        with patch.object(
+            decisions,
+            "scan_detail",
+            return_value=detail,
+        ):
+            findings = decisions.mie_findings()
+
+        self.assertEqual(
+            sum(
+                item["rule_key"] == "episode-identity-deep-review"
+                and item["evidence"]["deep_review_state"]
+                    == "duplicate_content_identity"
+                for item in findings
+            ),
+            1,
+        )
+        self.assertFalse(any(
+            item["rule_key"] == "episode-identity-review"
+            for item in findings
+        ))
+
+    def test_finalized_deep_without_j4_is_current_but_human_actions_are_locked(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+
+        normal.run_scan(self.fast_scan.scan_id)
+        resolution = decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertIn(
+            resolution.state.value,
+            {"possible_mismatch", "likely_mismatch", "strong_match_other"},
+        )
+        self._promote_normal_fixture_to_deep()
+        with self.database.connect() as conn:
+            # An unexpected/legacy stage label must not bypass the
+            # completed-Deep J4 action lock.
+            conn.execute(
+                """UPDATE media_identity_scans
+                   SET stage='resolved'
+                   WHERE id=?""",
+                (self.fast_scan.scan_id,),
+            )
+        self._reseal_scan_fixture()
+
+        detail = decisions.scan_detail(self.fast_scan.scan_id)
+        self.assertTrue(detail["snapshot_current"])
+        self.assertEqual(detail["completed_profile"], "deep")
+        self.assertTrue(detail["deep_correlation_required"])
+        self.assertFalse(detail["deep_correlation_ready"])
+        self.assertFalse(detail["human_decision_available"])
+        self.assertFalse(detail["actionable"])
+        self.assertIsNone(detail["deep_correlation_analysis"])
+
+        findings = decisions.mie_findings()
+        retry_findings = [
+            item for item in findings
+            if item["rule_key"] == "episode-identity-deep-review"
+            and item["evidence"]["deep_review_state"]
+                == "correlation_incomplete"
+        ]
+        self.assertEqual(len(retry_findings), 1)
+        self.assertFalse(any(
+            item["rule_key"] == "episode-identity-review"
+            for item in findings
+        ))
+
+        reviewed = _reviewed_action_kwargs(
+            decisions,
+            self.fast_scan.scan_id,
+        )
+        with self.assertRaisesRegex(
+            MediaIdentityDecisionError,
+            "cross-file correlation has not completed",
+        ):
+            decisions.confirm_best(
+                self.fast_scan.scan_id,
+                None,
+                **reviewed,
+            )
+
+        preview = decisions.rename_preview(
+            self.fast_scan.scan_id,
+            **reviewed,
+        )
+        self.assertFalse(preview["available"])
+        self.assertEqual(preview["status"], "unavailable")
+        self.assertIn(
+            "cross-file correlation has not completed",
+            preview["reason"],
+        )
+        self.assertTrue(preview["scan"]["snapshot_current"])
+
+    def test_current_deep_result_outranks_newer_normal_result(self):
+        source = FakePreviewSource()
+        normal = NormalIdentityService(
+            self.database,
+            ExternalSourceRegistry([source]),
+            FakeOcr(),
+        )
+        decisions = MediaIdentityDecisionService(
+            self.database,
+            external_registry_factory=lambda: ExternalSourceRegistry([source]),
+        )
+
+        normal.run_scan(self.fast_scan.scan_id)
+        deep_resolution = decisions.resolve_scan(self.fast_scan.scan_id)
+        self.assertEqual(
+            deep_resolution.state.value,
+            "strong_match_other",
+        )
+        self._promote_normal_fixture_to_deep()
+        deep_id = self.fast_scan.scan_id
+        deep_detail = decisions.scan_detail(deep_id)
+        self.assertEqual(deep_detail["completed_profile"], "deep")
+        self.assertTrue(deep_detail["snapshot_current"])
+
+        newer_fast = self.fast.scan_file(1)
+        normal.run_scan(newer_fast.scan_id)
+        decisions.resolve_scan(newer_fast.scan_id)
+        newer_detail = decisions.scan_detail(newer_fast.scan_id)
+        self.assertEqual(newer_detail["completed_profile"], "normal")
+        self.assertTrue(newer_detail["snapshot_current"])
+        self.assertGreater(newer_fast.scan_id, deep_id)
+        self.assertEqual(
+            decisions.latest_scan_for_file(1)["id"],
+            newer_fast.scan_id,
+        )
+
+        findings = decisions.mie_findings()
+        retry_findings = [
+            finding
+            for finding in findings
+            if finding["rule_key"] == "episode-identity-deep-review"
+            and finding["evidence"]["deep_review_state"]
+                == "correlation_incomplete"
+        ]
+        self.assertEqual(len(retry_findings), 1)
+        self.assertEqual(
+            retry_findings[0]["evidence"]["scan_id"],
+            deep_id,
+        )
+        self.assertEqual(
+            retry_findings[0]["evidence"]["profile"],
+            "deep",
+        )
+        self.assertFalse(any(
+            finding["rule_key"] == "episode-identity-review"
+            for finding in findings
+        ))
+
     def test_stale_newer_normal_does_not_hide_older_current_normal(self):
         source = FakePreviewSource()
         normal = NormalIdentityService(
@@ -983,6 +1461,10 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
             if finding["rule_key"] == "episode-identity-history-uncertain"
         ]
         self.assertEqual(len(uncertain), 1)
+        self.assertEqual(
+            uncertain[0]["fingerprint"],
+            f"episode-identity-history:file:1:latest:{latest_fast.scan_id}",
+        )
         self.assertEqual(
             uncertain[0]["evidence"]["latest_scan_id"],
             latest_fast.scan_id,

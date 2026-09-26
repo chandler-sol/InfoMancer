@@ -50,7 +50,9 @@
     <article>
       <strong>{{ (identity.completed_profile or identity.requested_profile)|title }}</strong>
       <h3>Completed tier</h3>
-      {% if identity.completed_profile == 'normal' %}
+      {% if identity.completed_profile == 'deep' %}
+      <p>Deep keeps the lower-tier evidence, widens the bounded episode candidate set, can add denser OCR and speech evidence, and prepares cross-file fingerprint and sequence diagnostics.</p>
+      {% elif identity.completed_profile == 'normal' %}
       <p>Normal includes the Fast evidence plus bounded visual text and, when cheaper evidence is insufficient, targeted local speech analysis.</p>
       {% else %}
       <p>Fast uses local catalog, provider metadata, stream facts, and available subtitle text.</p>
@@ -81,6 +83,29 @@
     </button>
   </form>
   <p class="legal-note">Normal remains read-only. OCR observations only add evidence to this scan.</p>
+  {% else %}
+  <p>Run Fast verification again first because this scan no longer matches the current file and metadata snapshot.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if current_user.is_librarian %}
+<section class="panel">
+  <header>
+    <div>
+      <p class="eyebrow">DEEP VERIFICATION</p>
+      <h2>Run bounded cross-file verification</h2>
+      <p>Deep resumes from the current sealed scan, widens the episode candidate set, reuses completed Normal work, attempts denser local OCR and speech when available, then compares the bounded episode cohort with video and audio fingerprints.</p>
+    </div>
+  </header>
+  {% if identity.snapshot_current %}
+  <form method="post" action="/episode-identity/scans/{{ identity.id }}/deep">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="button primary">
+      {% if identity.completed_profile == 'deep' %}Run Deep again{% else %}Run Deep verification{% endif %}
+    </button>
+  </form>
+  <p class="legal-note">Deep is read-only and may use substantially more CPU and media decoding than Fast or Normal. Optional OCR, speech, or peer evidence can remain unavailable; an inconclusive result is valid. Deep never confirms, renames, moves, or deletes media automatically.</p>
   {% else %}
   <p>Run Fast verification again first because this scan no longer matches the current file and metadata snapshot.</p>
   {% endif %}
@@ -154,11 +179,144 @@
 </section>
 {% endif %}
 
+{% if identity.deep_correlation_analysis %}
+{% set deep = identity.deep_correlation_analysis %}
+<section class="panel">
+  <header>
+    <div>
+      <p class="eyebrow">DEEP CORRELATION</p>
+      <h2>Cross-file identity patterns</h2>
+      <p>Deep compares this file with its bounded episode cohort and correlates those measurements with current resolver hypotheses. These observations are read-only context and do not change the resolver decision shown above.</p>
+    </div>
+  </header>
+
+  <article class="mie-profile-card">
+    <header>
+      <div>
+        <h3>{{ deep.review_label }}</h3>
+        <p>{{ deep.review_explanation }}</p>
+      </div>
+      <span class="mie-profile-state">Diagnostic only</span>
+    </header>
+    <p class="legal-note">This Deep review state does not change the resolver result, enable confirmation, or authorize a rename.</p>
+  </article>
+
+  <div class="mie-score-grid">
+    <article>
+      <strong>{{ deep.coverage.complete_modalities|join(' + ')|title if deep.coverage.complete_modalities else 'None' }}</strong>
+      <h3>Complete fingerprint modalities</h3>
+      <p>{% if deep.coverage.fully_multimodal %}Both video and audio matrices were complete for the planned cohort.{% else %}One or more fingerprint modalities were incomplete, so Deep keeps those measurements non-authoritative.{% endif %}</p>
+    </article>
+    <article>
+      <strong>{{ deep.coverage.valid_hypothesis_count }} / {{ deep.coverage.planned_file_count }}</strong>
+      <h3>Current resolver hypotheses</h3>
+      <p>{% if deep.coverage.sequence_peer_coverage_complete %}Every planned file had a usable sealed resolver hypothesis when this artifact was published.{% else %}Some peer scans were missing or invalid and are listed in coverage diagnostics.{% endif %}</p>
+    </article>
+    <article>
+      <strong>{{ deep.coverage.interpreted_pair_count }} / {{ deep.coverage.planned_pair_count }}</strong>
+      <h3>Interpreted fingerprint pairs</h3>
+      <p>Pair counts describe available measurements, not a probability or certainty score.</p>
+    </article>
+    <article>
+      <strong>{{ 'Current target' if deep.target_current else 'Stale' }}</strong>
+      <h3>Artifact binding</h3>
+      <p>This Deep artifact is sealed to this exact target scan revision and media snapshot.</p>
+    </article>
+  </div>
+
+  {% if deep.sequence_observations %}
+  <h3>Sequence patterns involving this season</h3>
+  <div class="mie-profile-list">
+    {% for item in deep.sequence_observations %}
+    <article class="mie-profile-card">
+      <header>
+        <div>
+          <h3>S{{ '%02d'|format(item.season) }} · episode offset {% if item.offset > 0 %}+{% endif %}{{ item.offset }}</h3>
+          <p>{{ item.support_count }} of {{ item.usable_count }} usable files support the same offset across a {{ item.longest_chain }}-file chain.</p>
+          {% if item.supporting_files %}<p>Supporting files: {% for peer in item.supporting_files %}<strong>{{ peer.filename }}</strong> (File #{{ peer.id }}){% if not loop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
+        </div>
+        <span class="mie-profile-state">Cross-file pattern</span>
+      </header>
+      <p>Observed claimed episode span: E{{ '%02d'|format(item.first_claimed_episode) }} through E{{ '%02d'|format(item.last_claimed_episode) }}.</p>
+    </article>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if deep.duplicates %}
+  <h3>Duplicate-content observations</h3>
+  <ul>
+    {% for item in deep.duplicates %}
+    <li><strong>{{ item.other_file.filename }}</strong> (File #{{ item.other_file.id }}) · {{ item.strength|replace('_', ' ')|title }} · {{ item.agreement|replace('_', ' ')|title }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if deep.swaps %}
+  <h3>Reciprocal identity observations</h3>
+  <ul>
+    {% for item in deep.swaps %}
+    <li>
+      <strong>{{ item.other_file.filename }}</strong> (File #{{ item.other_file.id }}) · {{ item.status|replace('_', ' ')|title }}.
+      This file claims S{{ '%02d'|format(item.target_claimed[0]) }}E{{ '%02d'|format(item.target_claimed[1]) }}
+      while its resolver hypothesis points to S{{ '%02d'|format(item.target_hypothesis[0]) }}E{{ '%02d'|format(item.target_hypothesis[1]) }}.
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if deep.identity_cycles %}
+  <h3>Multi-file identity rotations</h3>
+  <ul>
+    {% for item in deep.identity_cycles %}
+    <li>Cycle involving {% for peer in item.files %}<strong>{{ peer.filename }}</strong> (File #{{ peer.id }}){% if not loop.last %}, {% endif %}{% endfor %}.</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if deep.target_claim_ambiguous %}
+  <p class="legal-note">More than one file in the cohort claims this episode coordinate. Deep treats ownership as ambiguous and will not infer a swap from that coordinate.</p>
+  {% endif %}
+
+  {% if not deep.sequence_observations and not deep.duplicates and not deep.swaps and not deep.identity_cycles %}
+  <p>No authoritative cross-file pattern currently involves this file. That is a valid Deep result.</p>
+  {% endif %}
+
+  {% if deep.coverage.missing_scan_file_ids or deep.coverage.invalid_scan_file_ids %}
+  <details>
+    <summary class="button">Coverage diagnostics</summary>
+    {% if deep.coverage.missing_scan_file_ids %}
+    <p>Missing peer scans: {% for peer in deep.coverage.missing_scan_files %}<strong>{{ peer.filename }}</strong> (File #{{ peer.id }}){% if not loop.last %}, {% endif %}{% endfor %}.</p>
+    {% endif %}
+    {% if deep.coverage.invalid_scan_file_ids %}
+    <p>Invalid or stale peer scans: {% for peer in deep.coverage.invalid_scan_files %}<strong>{{ peer.filename }}</strong> (File #{{ peer.id }}){% if not loop.last %}, {% endif %}{% endfor %}.</p>
+    {% endif %}
+  </details>
+  {% endif %}
+
+  <p class="legal-note">Peer filenames above are current catalog labels for orientation only; the sealed Deep analysis remains bound to file IDs and media snapshots. Deep correlation is diagnostic only in this view. It does not confirm an episode, alter the catalog claim, or apply a filesystem rename.</p>
+</section>
+{% elif identity.deep_correlation_required %}
+<section class="panel">
+  <header>
+    <div>
+      <p class="eyebrow">DEEP CORRELATION</p>
+      <h2>Cross-file verification needs retry</h2>
+      <p>The per-file Deep resolver result is sealed, but its required cross-file correlation artifact did not complete or is no longer current.</p>
+    </div>
+  </header>
+  <p>Run Deep verification again to finish the correlation stage. InfoMancer keeps confirmation and rename preview locked until a current sealed J4 analysis is available.</p>
+  <p class="legal-note">This preserves completed Deep resolver work for resume without treating a partially completed Deep request as safe for a human identity decision.</p>
+</section>
+{% endif %}
+
 {% if current_user.is_librarian %}
 <section class="panel">
   <header><div><p class="eyebrow">HUMAN DECISION</p><h2>Confirm or inspect</h2><p>Confirmation records your decision for this exact file snapshot. It does not rename or rewrite the catalog claim.</p></div></header>
   {% if identity.decision_pending %}
   <p>This scan is waiting for the decision resolver. Refresh Library Health before confirming or previewing a rename.</p>
+  {% elif identity.snapshot_current and not identity.human_decision_available %}
+  <p>Deep cross-file correlation has not completed for this sealed result. Run Deep verification again before confirming an identity or previewing a rename.</p>
   {% elif identity.snapshot_current %}
   <div class="button-row">
     {% if identity.claimed_candidate_keys|length == 1 %}

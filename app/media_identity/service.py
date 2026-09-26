@@ -9,6 +9,14 @@ from typing import Any, Callable, Mapping
 from ..db import Database
 from ..naming import contained_destination, plex_episode_filename
 from .candidates import generate_episode_candidates
+from .deep import (
+    DeepCorrelationPolicy,
+    DeepIdentityError,
+    deep_plan_metadata_is_current,
+    plan_deep_correlation,
+)
+from .deep_evidence import deep_evidence_metadata_is_current
+from .deep_correlation_view import load_current_deep_correlation_view
 from .decision_snapshot import (
     DECISION_SNAPSHOT_VERSION,
     decision_snapshot_matches,
@@ -26,6 +34,7 @@ from .fast import (
 from .media_generation import media_content_sha256
 from .models import IdentityProfile, IdentityResultState
 from .scoring import IdentityResolution, resolve_identity
+from .sequence_correlation import SequenceHypothesis
 from .speech_audio import normalize_speech_language
 from .text import (
     TextCorpus,
@@ -55,7 +64,9 @@ ACTIONABLE_STATES = SUGGESTED_CONFIRM_STATES | {
 
 _ACTION_EXTERNAL_PREVIEW_MAX_FRAMES = 12
 _ACTION_EXTERNAL_PREVIEW_MAX_SOURCE_BYTES = 48 * 1024 * 1024
-_MIE_NORMAL_HISTORY_VALIDATION_LIMIT = 8
+_MIE_PROFILE_HISTORY_VALIDATION_LIMIT = 8
+_MIE_NORMAL_HISTORY_VALIDATION_LIMIT = _MIE_PROFILE_HISTORY_VALIDATION_LIMIT
+_SEQUENCE_SCAN_HISTORY_LIMIT = 8
 
 
 def _same_modified_at(first: Any, second: Any) -> bool:
@@ -466,7 +477,8 @@ class MediaIdentityDecisionService:
         if decision_version != EPISODE_IDENTITY_DECISION_ALGORITHM_VERSION:
             return False, file_row
 
-        if str(scan.get("completed_profile") or "") == "normal":
+        completed_profile = str(scan.get("completed_profile") or "")
+        if completed_profile in {"normal", "deep"}:
             normal_metadata = claimed.get("normal_ocr")
             if not isinstance(normal_metadata, Mapping):
                 return False, file_row
@@ -984,6 +996,27 @@ class MediaIdentityDecisionService:
                     ):
                         return False, file_row
 
+        if completed_profile == "deep":
+            if not deep_plan_metadata_is_current(
+                conn,
+                file_id=int(scan["file_id"]),
+                title_id=int(full_file["title_id"]),
+                season=int(full_file["season"]),
+                episode_start=int(full_file["episode_start"]),
+                episode_end=int(
+                    full_file["episode_end"] or full_file["episode_start"]
+                ),
+                language=language,
+                metadata=claimed.get("deep_identity"),
+            ):
+                return False, file_row
+            if not deep_evidence_metadata_is_current(
+                claimed.get("deep_evidence"),
+                evidence,
+                file_id=int(scan["file_id"]),
+            ):
+                return False, file_row
+
         normalized_expected = {
             str(key): str(value)
             for key, value in expected_signatures.items()
@@ -1164,6 +1197,504 @@ class MediaIdentityDecisionService:
         ):
             return 0, ""
         return revision, digest
+
+    @staticmethod
+    def _deep_correlation_required(
+        scan: Mapping[str, Any],
+    ) -> bool:
+        return (
+            str(scan.get("completed_profile") or "")
+            == IdentityProfile.DEEP.value
+        )
+
+    @staticmethod
+    def _sequence_candidate_default_coordinate(
+        conn: sqlite3.Connection,
+        candidate: Mapping[str, Any],
+        *,
+        title_id: int,
+    ) -> tuple[int, int] | None:
+        def coordinate(value: object) -> int | None:
+            if isinstance(value, bool) or not isinstance(value, int):
+                return None
+            return value if value >= 0 else None
+
+        expected_id = candidate.get("expected_episode_id")
+        if (
+            not isinstance(expected_id, bool)
+            and isinstance(expected_id, int)
+            and expected_id > 0
+        ):
+            row = conn.execute(
+                """SELECT season,episode
+                   FROM expected_episodes
+                   WHERE id=? AND title_id=?""",
+                (expected_id, int(title_id)),
+            ).fetchone()
+            if row is not None:
+                season = coordinate(row["season"])
+                episode = coordinate(row["episode"])
+                if season is not None and episode is not None:
+                    return season, episode
+
+        details = candidate.get("details")
+        mappings = (
+            details.get("mappings")
+            if isinstance(details, Mapping)
+            else None
+        )
+        default_coordinates: set[tuple[int, int]] = set()
+        if isinstance(mappings, list):
+            for mapping in mappings:
+                if (
+                    not isinstance(mapping, Mapping)
+                    or str(
+                        mapping.get("order_namespace") or ""
+                    ).strip().casefold() != "default"
+                ):
+                    continue
+                season = coordinate(mapping.get("season"))
+                episode = coordinate(mapping.get("episode"))
+                if season is not None and episode is not None:
+                    default_coordinates.add((season, episode))
+        if len(default_coordinates) == 1:
+            return next(iter(default_coordinates))
+        if len(default_coordinates) > 1:
+            return None
+
+        if str(
+            candidate.get("order_namespace") or ""
+        ).strip().casefold() == "default":
+            season = coordinate(candidate.get("season"))
+            episode = coordinate(candidate.get("episode"))
+            if season is not None and episode is not None:
+                return season, episode
+        return None
+
+    @staticmethod
+    def _sequence_scan_ids(
+        conn: sqlite3.Connection,
+        file_id: int,
+    ) -> tuple[int, ...]:
+        rows = conn.execute(
+            """SELECT id
+               FROM media_identity_scans
+               WHERE file_id=? AND status='complete'
+                 AND result_state IS NOT NULL
+               ORDER BY
+                 CASE completed_profile
+                   WHEN 'deep' THEN 0
+                   WHEN 'normal' THEN 1
+                   WHEN 'fast' THEN 2
+                   ELSE 3
+                 END,
+                 id DESC
+               LIMIT ?""",
+            (
+                int(file_id),
+                _SEQUENCE_SCAN_HISTORY_LIMIT,
+            ),
+        ).fetchall()
+        return tuple(int(row["id"]) for row in rows)
+
+    @staticmethod
+    def _validated_sequence_hypothesis(
+        conn: sqlite3.Connection,
+        scan_id: int,
+    ) -> SequenceHypothesis | None:
+        try:
+            scan, candidates, evidence = (
+                MediaIdentityDecisionService._scan_snapshot(
+                    conn,
+                    int(scan_id),
+                )
+            )
+        except MediaIdentityDecisionError:
+            return None
+        if (
+            scan.get("status") != "complete"
+            or scan.get("result_state") is None
+            or not str(scan.get("best_candidate_key") or "")
+        ):
+            return None
+
+        current, file_row = (
+            MediaIdentityDecisionService._scan_snapshot_is_current(
+                conn,
+                scan,
+                evidence,
+            )
+        )
+        if not current or not isinstance(file_row, Mapping):
+            return None
+        try:
+            title_id = int(file_row["title_id"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+        revision = result_revision(scan)
+        claimed = MediaIdentityDecisionService._claimed_identity(scan)
+        sealed_revision, sealed_digest = (
+            MediaIdentityDecisionService._decision_token(claimed)
+        )
+        if (
+            revision <= 0
+            or sealed_revision != revision
+            or not sealed_digest
+        ):
+            return None
+
+        resolution = MediaIdentityDecisionService._resolve_snapshot(
+            scan,
+            candidates,
+            evidence,
+        )
+        if (
+            resolution.state.value
+            != str(scan.get("result_state") or "")
+            or str(resolution.best_candidate_key or "")
+            != str(scan.get("best_candidate_key") or "")
+            or resolution.best_candidate_key is None
+        ):
+            return None
+
+        candidate_by_key = {
+            str(item.get("candidate_key") or ""): item
+            for item in candidates
+        }
+        candidate = candidate_by_key.get(
+            resolution.best_candidate_key
+        )
+        resolved = next(
+            (
+                item for item in resolution.candidates
+                if item.candidate_key
+                == resolution.best_candidate_key
+            ),
+            None,
+        )
+        if candidate is None or resolved is None:
+            return None
+
+        default_coordinate = (
+            MediaIdentityDecisionService._sequence_candidate_default_coordinate(
+                conn,
+                candidate,
+                title_id=title_id,
+            )
+        )
+        if default_coordinate is None:
+            return None
+
+        def coordinate(value: object) -> int | None:
+            if isinstance(value, bool) or not isinstance(value, int):
+                return None
+            return value if value >= 0 else None
+
+        claimed_season = coordinate(claimed.get("season"))
+        claimed_episode = coordinate(
+            claimed.get("episode_start")
+        )
+        claimed_end = coordinate(
+            claimed.get("episode_end")
+        )
+        if (
+            claimed_season is None
+            or claimed_episode is None
+        ):
+            return None
+        if claimed_end is None:
+            claimed_end = claimed_episode
+
+        try:
+            result_state = IdentityResultState(
+                str(scan["result_state"])
+            )
+            return SequenceHypothesis(
+                file_id=int(scan["file_id"]),
+                scan_id=int(scan["id"]),
+                result_revision=revision,
+                claimed_season=claimed_season,
+                claimed_episode=claimed_episode,
+                claimed_episode_end=claimed_end,
+                candidate_key=resolution.best_candidate_key,
+                hypothesis_season=default_coordinate[0],
+                hypothesis_episode=default_coordinate[1],
+                result_state=result_state,
+                support_strength=resolved.support_strength,
+                conflict_strength=resolved.conflict_strength,
+                margin=resolution.margin,
+                independent_categories=resolved.independent_categories,
+                content_support=resolved.content_support,
+            )
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _best_current_sequence_hypothesis(
+        conn: sqlite3.Connection,
+        file_id: int,
+    ) -> tuple[SequenceHypothesis | None, bool]:
+        scan_ids = MediaIdentityDecisionService._sequence_scan_ids(
+            conn,
+            file_id,
+        )
+        if not scan_ids:
+            return None, False
+        for scan_id in scan_ids:
+            hypothesis = (
+                MediaIdentityDecisionService._validated_sequence_hypothesis(
+                    conn,
+                    scan_id,
+                )
+            )
+            if hypothesis is not None:
+                return hypothesis, True
+        return None, True
+
+    @staticmethod
+    def _sequence_hypothesis_from_payload(
+        value: object,
+    ) -> SequenceHypothesis | None:
+        if not isinstance(value, Mapping):
+            return None
+
+        def integer(key: str) -> int:
+            raw = value.get(key)
+            if isinstance(raw, bool) or not isinstance(raw, int):
+                raise ValueError(key)
+            return raw
+
+        def number(key: str) -> float:
+            raw = value.get(key)
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                raise ValueError(key)
+            return float(raw)
+
+        try:
+            candidate_key = str(value.get("candidate_key") or "")
+            content_support = value.get("content_support")
+            if not candidate_key or not isinstance(content_support, bool):
+                return None
+            return SequenceHypothesis(
+                file_id=integer("file_id"),
+                scan_id=integer("scan_id"),
+                result_revision=integer("result_revision"),
+                claimed_season=integer("claimed_season"),
+                claimed_episode=integer("claimed_episode"),
+                claimed_episode_end=integer("claimed_episode_end"),
+                candidate_key=candidate_key,
+                hypothesis_season=integer("hypothesis_season"),
+                hypothesis_episode=integer("hypothesis_episode"),
+                result_state=IdentityResultState(
+                    str(value.get("result_state") or "")
+                ),
+                support_strength=number("support_strength"),
+                conflict_strength=number("conflict_strength"),
+                margin=number("margin"),
+                independent_categories=integer(
+                    "independent_categories"
+                ),
+                content_support=content_support,
+            )
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _deep_correlation_inputs_current(
+        conn: sqlite3.Connection,
+        scan: Mapping[str, Any],
+        claimed: Mapping[str, Any],
+        view: Mapping[str, Any],
+    ) -> bool:
+        try:
+            artifact_id = int(view.get("artifact_id") or 0)
+            target_file_id = int(scan["file_id"])
+        except (KeyError, TypeError, ValueError):
+            return False
+        if artifact_id < 1 or target_file_id < 1:
+            return False
+
+        row = conn.execute(
+            """SELECT payload_json
+               FROM media_identity_artifacts
+               WHERE id=? AND file_id=?
+                 AND artifact_type='deep_correlation_analysis'
+                 AND analyzer_key='deep-correlation-analysis'
+                 AND status='complete' AND profile='deep'""",
+            (artifact_id, target_file_id),
+        ).fetchone()
+        if row is None:
+            return False
+        try:
+            payload = json.loads(str(row["payload_json"] or ""))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+        identity = (
+            payload.get("identity")
+            if isinstance(payload, Mapping)
+            else None
+        )
+        if not isinstance(identity, Mapping):
+            return False
+
+        raw_hypotheses = identity.get("peer_hypotheses")
+        raw_missing = identity.get("missing_scan_file_ids")
+        raw_invalid = identity.get("invalid_scan_file_ids")
+        if (
+            not isinstance(raw_hypotheses, list)
+            or not isinstance(raw_missing, list)
+            or not isinstance(raw_invalid, list)
+        ):
+            return False
+
+        deep_identity = claimed.get("deep_identity")
+        try:
+            if isinstance(deep_identity, Mapping):
+                correlation_policy = DeepCorrelationPolicy.from_payload(
+                    deep_identity.get("correlation_policy")
+                )
+            else:
+                correlation_policy = DeepCorrelationPolicy()
+            current_plan = plan_deep_correlation(
+                conn,
+                file_id=target_file_id,
+                policy=correlation_policy,
+            )
+        except (DeepIdentityError, TypeError, ValueError, sqlite3.Error):
+            return False
+        if (
+            current_plan.plan_signature
+            != str(identity.get("correlation_plan_signature") or "")
+        ):
+            return False
+        raw_cohort = [
+            item.file_id for item in current_plan.files
+        ]
+
+        hypotheses: list[SequenceHypothesis] = []
+        for value in raw_hypotheses:
+            hypothesis = (
+                MediaIdentityDecisionService._sequence_hypothesis_from_payload(
+                    value
+                )
+            )
+            if hypothesis is None:
+                return False
+            hypotheses.append(hypothesis)
+        if (
+            len({item.file_id for item in hypotheses})
+            != len(hypotheses)
+        ):
+            return False
+
+        def ids(values: list[object]) -> tuple[int, ...] | None:
+            result: list[int] = []
+            for value in values:
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, int)
+                    or value < 1
+                ):
+                    return None
+                result.append(value)
+            if len(set(result)) != len(result):
+                return None
+            return tuple(result)
+
+        missing = ids(raw_missing)
+        invalid = ids(raw_invalid)
+        cohort = ids(raw_cohort)
+        if missing is None or invalid is None or cohort is None:
+            return False
+
+        hypothesis_ids = {item.file_id for item in hypotheses}
+        missing_ids = set(missing)
+        invalid_ids = set(invalid)
+        cohort_ids = set(cohort)
+        if (
+            target_file_id not in hypothesis_ids
+            or hypothesis_ids & missing_ids
+            or hypothesis_ids & invalid_ids
+            or missing_ids & invalid_ids
+            or hypothesis_ids | missing_ids | invalid_ids
+            != cohort_ids
+        ):
+            return False
+
+        for expected in hypotheses:
+            if expected.file_id == target_file_id:
+                current = (
+                    MediaIdentityDecisionService._validated_sequence_hypothesis(
+                        conn,
+                        expected.scan_id,
+                    )
+                )
+                if current != expected:
+                    return False
+                continue
+            current, had_scan = (
+                MediaIdentityDecisionService._best_current_sequence_hypothesis(
+                    conn,
+                    expected.file_id,
+                )
+            )
+            if not had_scan or current != expected:
+                return False
+
+        for file_id in missing:
+            if MediaIdentityDecisionService._sequence_scan_ids(
+                conn,
+                file_id,
+            ):
+                return False
+        for file_id in invalid:
+            current, had_scan = (
+                MediaIdentityDecisionService._best_current_sequence_hypothesis(
+                    conn,
+                    file_id,
+                )
+            )
+            if current is not None or not had_scan:
+                return False
+        return True
+
+    @staticmethod
+    def _current_deep_correlation_view(
+        conn: sqlite3.Connection,
+        scan: Mapping[str, Any],
+        claimed: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        revision, digest = MediaIdentityDecisionService._decision_token(
+            claimed
+        )
+        if revision < 1 or not digest:
+            return None
+        target_season = claimed.get("season")
+        if (
+            isinstance(target_season, bool)
+            or not isinstance(target_season, int)
+            or target_season < 0
+        ):
+            target_season = None
+        view = load_current_deep_correlation_view(
+            conn,
+            scan=scan,
+            result_revision=revision,
+            decision_snapshot_sha256=digest,
+            target_season=target_season,
+        )
+        if (
+            view is None
+            or not MediaIdentityDecisionService._deep_correlation_inputs_current(
+                conn,
+                scan,
+                claimed,
+                view,
+            )
+        ):
+            return None
+        return view
 
     @staticmethod
     def _confirmation_provenance(
@@ -1461,6 +1992,20 @@ class MediaIdentityDecisionService:
                 raise MediaIdentityDecisionError(
                     "The media file or supporting evidence changed after this identity scan. Run verification again before confirming it."
                 )
+            if (
+                self._deep_correlation_required(scan)
+                and self._current_deep_correlation_view(
+                    conn,
+                    scan,
+                    current_claimed,
+                )
+                is None
+            ):
+                raise MediaIdentityDecisionError(
+                    "Deep cross-file correlation has not completed for this "
+                    "sealed result. Run Deep verification again before "
+                    "confirming an episode identity."
+                )
             provenance = self._confirmation_provenance(scan)
             conn.execute(
                 """INSERT INTO media_identity_confirmations(
@@ -1611,6 +2156,23 @@ class MediaIdentityDecisionService:
         claimed = self._claimed_identity(scan)
         resolution = self._resolve_snapshot(scan, candidates, evidence)
         result_revision_value, decision_digest = self._decision_token(claimed)
+        deep_correlation_analysis = None
+        if snapshot_current:
+            with self.database.connect() as conn:
+                if not conn.in_transaction:
+                    conn.execute("BEGIN")
+                deep_correlation_analysis = (
+                    self._current_deep_correlation_view(
+                        conn,
+                        scan,
+                        claimed,
+                    )
+                )
+        deep_correlation_required = self._deep_correlation_required(scan)
+        deep_correlation_ready = (
+            not deep_correlation_required
+            or deep_correlation_analysis is not None
+        )
         content_verified = bool(
             verify_actionable_content
             and str(scan.get("result_state") or "") in ACTIONABLE_STATES
@@ -1734,6 +2296,7 @@ class MediaIdentityDecisionService:
             )
         result["evidence"] = evidence
         result["speech_analysis"] = speech_analysis
+        result["deep_correlation_analysis"] = deep_correlation_analysis
         result["file"] = dict(file_row) if file_row else None
         result["best_candidate"] = best
         result["claimed_candidate_keys"] = list(resolution.claimed_candidate_keys)
@@ -1749,6 +2312,13 @@ class MediaIdentityDecisionService:
         )
         result["confirmation"] = confirmation
         result["snapshot_current"] = snapshot_current
+        result["deep_correlation_required"] = deep_correlation_required
+        result["deep_correlation_ready"] = deep_correlation_ready
+        result["human_decision_available"] = (
+            snapshot_current
+            and deep_correlation_ready
+            and not result["decision_pending"]
+        )
         confirmed_key = None
         if confirmation and confirmation.get("current"):
             for candidate in candidates:
@@ -1760,7 +2330,7 @@ class MediaIdentityDecisionService:
             and confirmed_key in set(result["claimed_candidate_keys"])
         )
         result["actionable"] = (
-            snapshot_current
+            result["human_decision_available"]
             and not result["confirmed_claimed"]
             and str(result.get("result_state") or "") in ACTIONABLE_STATES
         )
@@ -1797,6 +2367,289 @@ class MediaIdentityDecisionService:
         expected = candidate.get("expected_episode_id")
         return expected is not None and confirmation.get("expected_episode_id") == expected
 
+    @staticmethod
+    def _deep_correlation_finding(
+        detail: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        """Translate one sealed target-specific J4 pattern into read-only MIE advice."""
+        analysis = detail.get("deep_correlation_analysis")
+        if not isinstance(analysis, Mapping):
+            return None
+        review_state = str(analysis.get("review_state") or "")
+        allowed_states = {
+            "duplicate_content_identity",
+            "possible_swapped_episodes",
+            "identity_cycle",
+            "sequence_offset",
+            "conflicting_swap_similarity",
+            "conflicting_fingerprint_modalities",
+            "ambiguous_claim",
+        }
+        if (
+            review_state not in allowed_states
+            or analysis.get("review_actionable") is not False
+        ):
+            return None
+
+        try:
+            scan_id = int(detail["id"])
+            file_id = int(detail["file_id"])
+            result_revision_value = int(detail.get("result_revision") or 0)
+            artifact_id = int(analysis.get("artifact_id") or 0)
+        except (KeyError, TypeError, ValueError):
+            return None
+        decision_digest = str(
+            detail.get("decision_snapshot_sha256") or ""
+        ).strip().casefold()
+        if (
+            scan_id < 1
+            or file_id < 1
+            or result_revision_value < 1
+            or artifact_id < 1
+            or len(decision_digest) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in decision_digest
+            )
+        ):
+            return None
+
+        file_row = detail.get("file")
+        if not isinstance(file_row, Mapping):
+            return None
+        filename = str(file_row.get("filename") or "Media file")
+        review_label = str(
+            analysis.get("review_label") or "Deep cross-file pattern"
+        ).strip()
+        review_explanation = str(
+            analysis.get("review_explanation")
+            or "Deep found a cross-file Episode Identity pattern that needs review."
+        ).strip()
+        coverage = analysis.get("coverage")
+        if not isinstance(coverage, Mapping):
+            return None
+
+        related_file_ids: set[int] = set()
+        for key in ("duplicates", "swaps"):
+            values = analysis.get(key)
+            if not isinstance(values, (list, tuple)):
+                return None
+            for item in values:
+                if not isinstance(item, Mapping):
+                    return None
+                try:
+                    other_file_id = int(item.get("other_file_id") or 0)
+                except (TypeError, ValueError):
+                    return None
+                if other_file_id > 0 and other_file_id != file_id:
+                    related_file_ids.add(other_file_id)
+        cycles = analysis.get("identity_cycles")
+        if not isinstance(cycles, (list, tuple)):
+            return None
+        for item in cycles:
+            if not isinstance(item, Mapping):
+                return None
+            raw_ids = item.get("file_ids")
+            if not isinstance(raw_ids, (list, tuple)):
+                return None
+            try:
+                related_file_ids.update(
+                    int(value)
+                    for value in raw_ids
+                    if int(value) > 0 and int(value) != file_id
+                )
+            except (TypeError, ValueError):
+                return None
+        target_sequence = analysis.get("target_sequence_observations")
+        if not isinstance(target_sequence, (list, tuple)):
+            return None
+        sequence_offsets: list[int] = []
+        for item in target_sequence:
+            if not isinstance(item, Mapping):
+                return None
+            try:
+                offset = int(item.get("offset") or 0)
+                supporters = tuple(
+                    int(value)
+                    for value in item.get("supporting_file_ids", ())
+                )
+            except (TypeError, ValueError):
+                return None
+            if offset:
+                sequence_offsets.append(offset)
+            related_file_ids.update(
+                value
+                for value in supporters
+                if value > 0 and value != file_id
+            )
+
+        corroborated_swap = any(
+            str(item.get("status") or "") == "corroborated_distinct"
+            for item in analysis.get("swaps", ())
+            if isinstance(item, Mapping)
+        )
+        severity = (
+            "warning"
+            if review_state == "duplicate_content_identity"
+            or (
+                review_state == "possible_swapped_episodes"
+                and corroborated_swap
+            )
+            else "information"
+        )
+        recommendations = {
+            "duplicate_content_identity": (
+                "Review this file and the related episode file before changing either identity. "
+                "Deep correlation is advisory and cannot rename or confirm media by itself."
+            ),
+            "possible_swapped_episodes": (
+                "Review both episode identities and their Deep evidence before making a correction. "
+                "Use the normal Episode Identity review actions only after the per-file evidence supports it."
+            ),
+            "identity_cycle": (
+                "Review the files in this identity rotation together before making any correction. "
+                "Deep does not apply a multi-file rename automatically."
+            ),
+            "sequence_offset": (
+                "Review the season-level offset and episode order before changing filenames. "
+                "The sequence observation remains advisory."
+            ),
+            "conflicting_swap_similarity": (
+                "Review the reciprocal identity hypotheses and fingerprint evidence together. "
+                "The conflicting signals are intentionally non-actionable."
+            ),
+            "conflicting_fingerprint_modalities": (
+                "Review the video and audio evidence before relying on the swap hypothesis. "
+                "Conflicting modalities are intentionally non-actionable."
+            ),
+            "ambiguous_claim": (
+                "Resolve the duplicate claimed episode ownership before using cross-file identity patterns. "
+                "Deep will not infer a correction from an ambiguous claim."
+            ),
+        }
+        complete_modalities = coverage.get("complete_modalities")
+        if not isinstance(complete_modalities, (list, tuple)):
+            return None
+
+        return {
+            "fingerprint": (
+                f"episode-identity-deep:file:{file_id}:"
+                f"decision:{decision_digest}:artifact:{artifact_id}:"
+                f"state:{review_state}"
+            ),
+            "rule_key": "episode-identity-deep-review",
+            "category": "identity",
+            "severity": severity,
+            "root_id": file_row.get("root_id"),
+            "title_id": file_row.get("title_id"),
+            "file_id": file_id,
+            "expected_episode_id": None,
+            "summary": f"{filename}: {review_label}",
+            "explanation": (
+                f"{review_explanation} This Deep cross-file observation is "
+                "advisory and does not change the per-file resolver decision."
+            ),
+            "recommendation": recommendations[review_state],
+            "evidence": {
+                "scan_id": scan_id,
+                "resolver_result_state": str(detail.get("result_state") or ""),
+                "result_revision": result_revision_value,
+                "decision_snapshot_sha256": decision_digest,
+                "profile": str(
+                    detail.get("completed_profile")
+                    or detail.get("requested_profile")
+                    or "deep"
+                ),
+                "deep_artifact_id": artifact_id,
+                "deep_review_state": review_state,
+                "deep_review_label": review_label,
+                "deep_review_actionable": False,
+                "fully_multimodal": bool(coverage.get("fully_multimodal")),
+                "complete_modalities": [
+                    str(value) for value in complete_modalities
+                ],
+                "sequence_peer_coverage_complete": bool(
+                    coverage.get("sequence_peer_coverage_complete")
+                ),
+                "related_file_ids": sorted(related_file_ids)[:64],
+                "sequence_offsets": sorted(set(sequence_offsets)),
+            },
+        }
+
+    @staticmethod
+    def _deep_correlation_incomplete_finding(
+        detail: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        if (
+            detail.get("deep_correlation_required") is not True
+            or detail.get("deep_correlation_ready") is not False
+        ):
+            return None
+        try:
+            scan_id = int(detail["id"])
+            file_id = int(detail["file_id"])
+            revision = int(detail.get("result_revision") or 0)
+        except (KeyError, TypeError, ValueError):
+            return None
+        digest = str(
+            detail.get("decision_snapshot_sha256") or ""
+        ).strip().casefold()
+        file_row = detail.get("file")
+        if (
+            scan_id < 1
+            or file_id < 1
+            or revision < 1
+            or len(digest) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in digest
+            )
+            or not isinstance(file_row, Mapping)
+        ):
+            return None
+        filename = str(file_row.get("filename") or "Media file")
+        return {
+            "fingerprint": (
+                f"episode-identity-deep:file:{file_id}:"
+                f"decision:{digest}:state:correlation-incomplete"
+            ),
+            "rule_key": "episode-identity-deep-review",
+            "category": "identity",
+            "severity": "information",
+            "root_id": file_row.get("root_id"),
+            "title_id": file_row.get("title_id"),
+            "file_id": file_id,
+            "expected_episode_id": None,
+            "summary": (
+                f"{filename}: Deep cross-file verification needs retry"
+            ),
+            "explanation": (
+                "The per-file Deep resolver result is sealed, but the required "
+                "J4 cross-file correlation artifact is not current. InfoMancer "
+                "keeps this result non-actionable until that correlation finishes."
+            ),
+            "recommendation": (
+                "Run Deep verification again. Confirmation and rename preview "
+                "remain unavailable until a current sealed cross-file analysis "
+                "is published."
+            ),
+            "evidence": {
+                "scan_id": scan_id,
+                "resolver_result_state": str(
+                    detail.get("result_state") or ""
+                ),
+                "result_revision": revision,
+                "decision_snapshot_sha256": digest,
+                "profile": "deep",
+                "deep_artifact_id": None,
+                "deep_review_state": "correlation_incomplete",
+                "deep_review_label": "Deep correlation incomplete",
+                "deep_review_actionable": False,
+                "related_file_ids": [],
+                "sequence_offsets": [],
+            },
+        }
+
     def mie_findings(self) -> list[dict[str, Any]]:
         with self.database.connect() as conn:
             latest_rows = [
@@ -1814,15 +2667,25 @@ class MediaIdentityDecisionService:
                 ).fetchall()
             ]
             effective_scan_ids: list[
-                tuple[int, tuple[int, ...], bool]
+                tuple[
+                    int,
+                    tuple[int, ...],
+                    bool,
+                    tuple[int, ...],
+                    bool,
+                ]
             ] = []
             for latest in latest_rows:
+                preserved_deep_ids: tuple[int, ...] = ()
+                deep_history_truncated = False
                 preserved_normal_ids: tuple[int, ...] = ()
-                history_truncated = False
+                normal_history_truncated = False
                 metadata_signature = str(
                     latest.get("metadata_signature") or ""
                 )
-                file_sha256 = str(latest.get("file_sha256") or "").strip().casefold()
+                file_sha256 = str(
+                    latest.get("file_sha256") or ""
+                ).strip().casefold()
                 if (
                     metadata_signature
                     and len(file_sha256) == 64
@@ -1831,56 +2694,122 @@ class MediaIdentityDecisionService:
                         for character in file_sha256
                     )
                 ):
-                    preserved_rows = conn.execute(
-                        """SELECT id
-                           FROM media_identity_scans
-                           WHERE file_id=? AND id<=?
-                             AND status='complete' AND result_state IS NOT NULL
-                             AND completed_profile='normal'
-                             AND metadata_signature=?
-                             AND file_size_bytes=?
-                             AND COALESCE(file_sha256,'')=?
-                           ORDER BY id DESC LIMIT ?""",
-                        (
-                            int(latest["file_id"]),
-                            int(latest["id"]),
-                            metadata_signature,
-                            int(latest.get("file_size_bytes") or 0),
-                            file_sha256,
-                            _MIE_NORMAL_HISTORY_VALIDATION_LIMIT + 1,
-                        ),
-                    ).fetchall()
-                    history_truncated = (
-                        len(preserved_rows)
-                        > _MIE_NORMAL_HISTORY_VALIDATION_LIMIT
-                    )
-                    preserved_normal_ids = tuple(
-                        int(row["id"])
-                        for row in preserved_rows[
-                            :_MIE_NORMAL_HISTORY_VALIDATION_LIMIT
-                        ]
-                    )
+                    history_by_profile: dict[
+                        str, tuple[tuple[int, ...], bool]
+                    ] = {}
+                    for profile in ("deep", "normal"):
+                        preserved_rows = conn.execute(
+                            """SELECT id
+                               FROM media_identity_scans
+                               WHERE file_id=? AND id<=?
+                                 AND status='complete'
+                                 AND result_state IS NOT NULL
+                                 AND completed_profile=?
+                                 AND metadata_signature=?
+                                 AND file_size_bytes=?
+                                 AND COALESCE(file_sha256,'')=?
+                               ORDER BY id DESC LIMIT ?""",
+                            (
+                                int(latest["file_id"]),
+                                int(latest["id"]),
+                                profile,
+                                metadata_signature,
+                                int(latest.get("file_size_bytes") or 0),
+                                file_sha256,
+                                _MIE_PROFILE_HISTORY_VALIDATION_LIMIT + 1,
+                            ),
+                        ).fetchall()
+                        history_by_profile[profile] = (
+                            tuple(
+                                int(row["id"])
+                                for row in preserved_rows[
+                                    :_MIE_PROFILE_HISTORY_VALIDATION_LIMIT
+                                ]
+                            ),
+                            len(preserved_rows)
+                            > _MIE_PROFILE_HISTORY_VALIDATION_LIMIT,
+                        )
+                    (
+                        preserved_deep_ids,
+                        deep_history_truncated,
+                    ) = history_by_profile["deep"]
+                    (
+                        preserved_normal_ids,
+                        normal_history_truncated,
+                    ) = history_by_profile["normal"]
                 effective_scan_ids.append(
                     (
                         int(latest["id"]),
+                        preserved_deep_ids,
+                        deep_history_truncated,
                         preserved_normal_ids,
-                        history_truncated,
+                        normal_history_truncated,
                     )
                 )
 
         findings: list[dict[str, Any]] = []
         for (
             latest_scan_id,
+            preserved_deep_ids,
+            deep_history_truncated,
             preserved_normal_ids,
-            history_truncated,
+            normal_history_truncated,
         ) in effective_scan_ids:
             detail = None
-            for preserved_normal_id in preserved_normal_ids:
-                preserved_detail = self.scan_detail(preserved_normal_id)
+            for preserved_deep_id in preserved_deep_ids:
+                preserved_detail = self.scan_detail(preserved_deep_id)
                 if preserved_detail.get("snapshot_current"):
                     detail = preserved_detail
                     break
-            if detail is None and history_truncated:
+            if detail is None and deep_history_truncated:
+                latest_detail = self.scan_detail(latest_scan_id)
+                file_row = latest_detail.get("file") or {}
+                findings.append({
+                    "fingerprint": (
+                        "episode-identity-history:"
+                        f"file:{int(latest_detail['file_id'])}:"
+                        f"latest:{latest_scan_id}:profile:deep"
+                    ),
+                    "rule_key": "episode-identity-history-uncertain",
+                    "category": "identity",
+                    "severity": "information",
+                    "root_id": file_row.get("root_id"),
+                    "title_id": file_row.get("title_id"),
+                    "file_id": latest_detail["file_id"],
+                    "expected_episode_id": None,
+                    "summary": (
+                        f"{file_row.get('filename')}: Episode Identity history "
+                        "needs a fresh Deep verification"
+                    ),
+                    "explanation": (
+                        "InfoMancer found more matching historical Deep results "
+                        "than it can safely revalidate in one Library Health pass. "
+                        "The checked newer Deep results were stale, so it did not "
+                        "silently fall back to a weaker Normal or Fast result."
+                    ),
+                    "recommendation": (
+                        "Run Deep verification again to establish a fresh bounded "
+                        "result before relying on the current identity warning state."
+                    ),
+                    "evidence": {
+                        "latest_scan_id": latest_scan_id,
+                        "profile": "deep",
+                        "deep_history_checked": len(preserved_deep_ids),
+                        "deep_history_validation_limit": (
+                            _MIE_PROFILE_HISTORY_VALIDATION_LIMIT
+                        ),
+                        "history_truncated": True,
+                    },
+                })
+                continue
+
+            if detail is None:
+                for preserved_normal_id in preserved_normal_ids:
+                    preserved_detail = self.scan_detail(preserved_normal_id)
+                    if preserved_detail.get("snapshot_current"):
+                        detail = preserved_detail
+                        break
+            if detail is None and normal_history_truncated:
                 latest_detail = self.scan_detail(latest_scan_id)
                 file_row = latest_detail.get("file") or {}
                 findings.append({
@@ -1912,9 +2841,10 @@ class MediaIdentityDecisionService:
                     ),
                     "evidence": {
                         "latest_scan_id": latest_scan_id,
+                        "profile": "normal",
                         "normal_history_checked": len(preserved_normal_ids),
                         "normal_history_validation_limit": (
-                            _MIE_NORMAL_HISTORY_VALIDATION_LIMIT
+                            _MIE_PROFILE_HISTORY_VALIDATION_LIMIT
                         ),
                         "history_truncated": True,
                     },
@@ -1931,8 +2861,24 @@ class MediaIdentityDecisionService:
                 continue
             scan_id = int(detail["id"])
             state = str(detail.get("result_state") or "")
-            if state not in ACTIONABLE_STATES:
+            incomplete_deep = self._deep_correlation_incomplete_finding(
+                detail
+            )
+            if incomplete_deep is not None:
+                findings.append(incomplete_deep)
                 continue
+            deep_finding = self._deep_correlation_finding(detail)
+            deep_is_distinct_duplicate = bool(
+                deep_finding is not None
+                and deep_finding["evidence"]["deep_review_state"]
+                == "duplicate_content_identity"
+            )
+            if state not in ACTIONABLE_STATES:
+                if deep_finding is not None:
+                    findings.append(deep_finding)
+                continue
+            if deep_is_distinct_duplicate:
+                findings.append(deep_finding)
             file_row = detail.get("file") or {}
             best = detail.get("best_candidate")
             confirmation = detail.get("confirmation")
@@ -1991,11 +2937,17 @@ class MediaIdentityDecisionService:
             decision_digest = str(
                 detail.get("decision_snapshot_sha256") or ""
             ).strip().casefold()
+            finding_fingerprint = (
+                f"episode-identity:file:{int(detail['file_id'])}:"
+                f"decision:{decision_digest}"
+            )
+            if deep_finding is not None:
+                finding_fingerprint += (
+                    ":deep:"
+                    f"{int(deep_finding['evidence']['deep_artifact_id'])}"
+                )
             findings.append({
-                "fingerprint": (
-                    f"episode-identity:file:{int(detail['file_id'])}:"
-                    f"decision:{decision_digest}"
-                ),
+                "fingerprint": finding_fingerprint,
                 "rule_key": "episode-identity-review",
                 "category": "identity",
                 "severity": severity,
@@ -2029,6 +2981,18 @@ class MediaIdentityDecisionService:
                     "support_categories": best_resolution.get("support_categories", []),
                     "confirmation": (
                         confirmation.get("freshness") if confirmation else "none"
+                    ),
+                    "deep_review_state": (
+                        deep_finding["evidence"]["deep_review_state"]
+                        if deep_finding is not None else "none"
+                    ),
+                    "deep_review_label": (
+                        deep_finding["evidence"]["deep_review_label"]
+                        if deep_finding is not None else "None"
+                    ),
+                    "deep_artifact_id": (
+                        deep_finding["evidence"]["deep_artifact_id"]
+                        if deep_finding is not None else None
                     ),
                 },
             })
@@ -2096,6 +3060,20 @@ class MediaIdentityDecisionService:
                 "available": False,
                 "status": "stale",
                 "reason": "The media or supporting evidence changed after verification. Run Episode Identity again before considering a rename.",
+                "scan": detail,
+            }
+        if (
+            detail.get("deep_correlation_required")
+            and not detail.get("deep_correlation_ready")
+        ):
+            return {
+                "available": False,
+                "status": "unavailable",
+                "reason": (
+                    "Deep cross-file correlation has not completed for this "
+                    "sealed result. Run Deep verification again before "
+                    "considering a rename."
+                ),
                 "scan": detail,
             }
         if not detail.get("actionable"):
@@ -2166,6 +3144,7 @@ class MediaIdentityDecisionService:
                 and current_digest == reviewed_digest
             )
             current = False
+            deep_correlation_ready = True
             if same_reviewed_result:
                 current, _ = self._review_snapshot_is_current(
                     conn,
@@ -2173,6 +3152,15 @@ class MediaIdentityDecisionService:
                     evidence,
                     verify_content=True,
                 )
+                if current and self._deep_correlation_required(scan):
+                    deep_correlation_ready = (
+                        self._current_deep_correlation_view(
+                            conn,
+                            scan,
+                            current_claimed,
+                        )
+                        is not None
+                    )
         if not current:
             stale_detail = dict(detail)
             stale_detail["snapshot_current"] = False
@@ -2185,6 +3173,21 @@ class MediaIdentityDecisionService:
                     "evidence changed after review."
                 ),
                 "scan": stale_detail,
+            }
+
+        if not deep_correlation_ready:
+            locked_detail = dict(detail)
+            locked_detail["deep_correlation_ready"] = False
+            locked_detail["human_decision_available"] = False
+            locked_detail["actionable"] = False
+            return {
+                "available": False,
+                "status": "unavailable",
+                "reason": (
+                    "Deep cross-file correlation is no longer current for this "
+                    "result. Run Deep verification again before considering a rename."
+                ),
+                "scan": locked_detail,
             }
 
         validated_source = {
@@ -2222,8 +3225,11 @@ class MediaIdentityDecisionService:
         detail["confirmation"] = confirmation
         detail["confirmed_claimed"] = confirmed_claimed
         detail["snapshot_current"] = True
+        detail["deep_correlation_ready"] = deep_correlation_ready
+        detail["human_decision_available"] = deep_correlation_ready
         detail["actionable"] = (
-            not confirmed_claimed
+            deep_correlation_ready
+            and not confirmed_claimed
             and str(detail.get("result_state") or "") in ACTIONABLE_STATES
         )
         if confirmed_claimed:

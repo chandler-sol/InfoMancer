@@ -16,6 +16,8 @@ from app import main
 from app.db import Database
 from app.duplicates import DuplicateService
 from app.media_identity.decision_snapshot import result_revision, seal_decision_snapshot
+from app.media_identity.deep_correlation_service import DeepCorrelationAnalysisError
+from app.media_identity.deep_verification_service import DeepVerificationService
 from app.media_identity.fast import FastIdentityService
 from app.media_identity.models import IdentityProfile, IdentityResultState
 from app.media_identity.service import MediaIdentityDecisionService
@@ -41,6 +43,9 @@ class EpisodeIdentityReviewAdapterTests(unittest.TestCase):
         self.assertIn("Speech and subtitle matches share one dialogue correlation group", template)
         self.assertIn("Transcript sample", template)
         self.assertIn("Sampled speech windows", template)
+        self.assertIn("DEEP VERIFICATION", template)
+        self.assertIn("/deep", template)
+        self.assertIn("Deep never confirms, renames, moves, or deletes media automatically", template)
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -109,6 +114,35 @@ class EpisodeIdentityReviewAdapterTests(unittest.TestCase):
             for row in item["evidence_rows"]
         ))
 
+    def test_deep_episode_identity_advisory_uses_matching_review_surface(self) -> None:
+        item = self.queue._finding_item({
+            "id": 2,
+            "rule_key": "episode-identity-deep-review",
+            "category": "identity",
+            "severity": "information",
+            "status": "active",
+            "summary": "S01E01.mkv: Episode sequence offset",
+            "explanation": "Deep found a cross-file pattern.",
+            "recommendation": "Review the season-level pattern.",
+            "title_id": 1,
+            "root_id": 1,
+            "evidence": {
+                "scan_id": 43,
+                "deep_review_state": "sequence_offset",
+                "deep_review_actionable": False,
+            },
+        })
+
+        self.assertEqual(item["bucket"], "matching")
+        self.assertEqual(item["source_label"], "Episode Identity")
+        self.assertEqual(
+            item["review_label"],
+            "Review Deep episode analysis",
+        )
+        self.assertEqual(item["identity_scan_id"], 43)
+        self.assertEqual(item["identity_state"], "sequence_offset")
+        self.assertFalse(item["evidence"]["deep_review_actionable"])
+
     def test_episode_identity_feedback_scope_is_forced_server_side(self) -> None:
         engine = MediaIntelligenceEngine(self.database)
 
@@ -170,6 +204,54 @@ class EpisodeIdentityReviewAdapterTests(unittest.TestCase):
         self.assertIsNone(finding["dismissed_at"])
         self.assertEqual(active_feedback, 0)
 
+    def test_deep_episode_identity_feedback_is_snapshot_scoped(self) -> None:
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO mie_findings(
+                     id,fingerprint,rule_key,category,severity,root_id,title_id,
+                     file_id,summary,explanation,recommendation,evidence_json,
+                     status,first_seen_at,last_seen_at
+                   ) VALUES (
+                     2,'episode-identity-deep:file:1:fixture',
+                     'episode-identity-deep-review','identity','information',
+                     1,1,1,'Deep sequence offset','Deep found a pattern.',
+                     'Review the Deep evidence.',?,'active',
+                     CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+                   )""",
+                (json.dumps({
+                    "scan_id": 43,
+                    "deep_review_state": "sequence_offset",
+                }),),
+            )
+        engine = MediaIntelligenceEngine(self.database)
+
+        self.assertTrue(
+            engine.dismiss(2, None, reason="expected", scope="title")
+        )
+        with self.database.connect() as conn:
+            feedback = conn.execute(
+                """SELECT scope FROM mie_feedback
+                   WHERE finding_fingerprint=
+                         'episode-identity-deep:file:1:fixture'
+                     AND active=1
+                   ORDER BY id DESC LIMIT 1"""
+            ).fetchone()
+        self.assertEqual(feedback["scope"], "finding")
+
+        self.assertTrue(engine.restore(2))
+        with self.database.connect() as conn:
+            finding = conn.execute(
+                "SELECT status FROM mie_findings WHERE id=2"
+            ).fetchone()
+            active_feedback = conn.execute(
+                """SELECT COUNT(*) FROM mie_feedback
+                   WHERE finding_fingerprint=
+                         'episode-identity-deep:file:1:fixture'
+                     AND active=1"""
+            ).fetchone()[0]
+        self.assertEqual(finding["status"], "resolved")
+        self.assertEqual(active_feedback, 0)
+
     def test_health_action_routes_identity_finding_to_exact_scan(self) -> None:
         self.assertEqual(
             health_finding_href({
@@ -179,6 +261,15 @@ class EpisodeIdentityReviewAdapterTests(unittest.TestCase):
                 "evidence": {"scan_id": 42},
             }),
             "/episode-identity/scans/42",
+        )
+        self.assertEqual(
+            health_finding_href({
+                "rule_key": "episode-identity-deep-review",
+                "title_id": 1,
+                "root_id": 1,
+                "evidence": {"scan_id": 43},
+            }),
+            "/episode-identity/scans/43",
         )
 
 
@@ -400,6 +491,7 @@ class EpisodeIdentityHttpBindingTests(unittest.TestCase):
             ("POST", "/files/999999/episode-identity/fast"),
             ("GET", "/episode-identity/scans/999999"),
             ("POST", "/episode-identity/scans/999999/normal"),
+            ("POST", "/episode-identity/scans/999999/deep"),
             ("GET", "/episode-identity/scans/999999/rename-preview"),
             ("POST", "/episode-identity/scans/999999/confirm-current"),
             ("POST", "/episode-identity/scans/999999/confirm-best"),
@@ -414,11 +506,11 @@ class EpisodeIdentityHttpBindingTests(unittest.TestCase):
                 f"{method} {url} treated request as a query parameter: {response.text}",
             )
         self.assertEqual(
-            [response.status_code for response in responses[:4]],
-            [404, 404, 404, 409],
+            [response.status_code for response in responses[:5]],
+            [404, 404, 404, 404, 409],
         )
         self.assertEqual(
-            [response.status_code for response in responses[4:]],
+            [response.status_code for response in responses[5:]],
             [303, 303],
         )
 
@@ -426,6 +518,7 @@ class EpisodeIdentityHttpBindingTests(unittest.TestCase):
             "/files/{file_id}/episode-identity/fast",
             "/episode-identity/scans/{scan_id}",
             "/episode-identity/scans/{scan_id}/normal",
+            "/episode-identity/scans/{scan_id}/deep",
             "/episode-identity/scans/{scan_id}/rename-preview",
             "/episode-identity/scans/{scan_id}/confirm-current",
             "/episode-identity/scans/{scan_id}/confirm-best",
@@ -441,6 +534,146 @@ class EpisodeIdentityHttpBindingTests(unittest.TestCase):
             }
             self.assertNotIn("request", query_names, route.path)
         self.assertEqual(checked, target_paths)
+
+
+class EpisodeIdentityDeepRouteTests(EpisodeIdentityHttpBindingTests):
+    def test_deep_route_turns_j4_integrity_failure_into_retry_state(self) -> None:
+        fake_provider_secrets = SimpleNamespace(load=lambda: {})
+
+        with (
+            patch.object(
+                main,
+                "provider_secrets",
+                fake_provider_secrets,
+            ),
+            patch(
+                "app.routes.episode_identity_review."
+                "build_configured_source_registry",
+                return_value=SimpleNamespace(),
+            ),
+            patch.object(
+                main,
+                "analyze_library_health_with_activity",
+                return_value=None,
+            ) as refresh_health,
+            patch.object(
+                main,
+                "record_event",
+                return_value=None,
+            ),
+            patch(
+                "app.media_identity.service."
+                "MediaIdentityDecisionService.scan_detail",
+                return_value={"file": {"title_id": 1}},
+            ),
+            patch.object(
+                DeepVerificationService,
+                "run",
+                side_effect=DeepCorrelationAnalysisError(
+                    "fixture J4 correlation failure"
+                ),
+            ),
+        ):
+            response = self.client.post(
+                "/episode-identity/scans/42/deep"
+            )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn(
+            "/episode-identity/scans/42",
+            response.headers["location"],
+        )
+        self.assertIn(
+            "could+not+complete",
+            response.headers["location"].casefold(),
+        )
+        self.assertIn(
+            "fixture+j4+correlation+failure",
+            response.headers["location"].casefold(),
+        )
+        refresh_health.assert_called_once()
+
+    def test_deep_route_runs_coordinator_and_reports_partial_optional_coverage(self) -> None:
+        fake_provider_secrets = SimpleNamespace(load=lambda: {})
+        deep_result = SimpleNamespace(
+            completed_revision=8,
+            resumed_from_stage="resolved",
+            visual=SimpleNamespace(
+                coverage_complete=False,
+                failures=("ocr-engine-unavailable",),
+            ),
+            speech=SimpleNamespace(
+                coverage_complete=False,
+                failures=("speech-engine-unavailable",),
+            ),
+            correlation=SimpleNamespace(
+                artifact_id=901,
+                reused=False,
+                interpretation=SimpleNamespace(
+                    complete_modalities=("video",),
+                    fully_multimodal=False,
+                ),
+                sequence=SimpleNamespace(
+                    planned_file_count=3,
+                    missing_scan_file_ids=(),
+                    invalid_scan_file_ids=(),
+                    analysis=SimpleNamespace(
+                        usable_count=3,
+                    ),
+                ),
+            ),
+        )
+
+        with (
+            patch.object(
+                main,
+                "provider_secrets",
+                fake_provider_secrets,
+            ),
+            patch(
+                "app.routes.episode_identity_review."
+                "build_configured_source_registry",
+                return_value=SimpleNamespace(),
+            ),
+            patch.object(
+                main,
+                "analyze_library_health_with_activity",
+                return_value=None,
+            ),
+            patch.object(
+                main,
+                "record_event",
+                return_value=None,
+            ),
+            patch(
+                "app.media_identity.service."
+                "MediaIdentityDecisionService.scan_detail",
+                return_value={"file": {"title_id": 1}},
+            ),
+            patch.object(
+                DeepVerificationService,
+                "run",
+                return_value=deep_result,
+            ) as run_deep,
+        ):
+            response = self.client.post(
+                "/episode-identity/scans/42/deep"
+            )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn(
+            "/episode-identity/scans/42",
+            response.headers["location"],
+        )
+        self.assertIn(
+            "Deep",
+            response.headers["location"],
+        )
+        self.assertIn(
+            "evidence",
+            response.headers["location"].casefold(),
+        )
+        run_deep.assert_called_once_with(42)
 
 
 class EpisodeIdentityNormalRouteTests(EpisodeIdentityHttpBindingTests):
@@ -650,6 +883,9 @@ class EpisodeIdentityReviewContractTests(unittest.TestCase):
         self.assertIn("Mark current filename correct", identity)
         self.assertIn("Confirm suggested content", identity)
         self.assertIn("Preview rename suggestion", identity)
+        self.assertIn("Cross-file verification needs retry", identity)
+        self.assertIn("identity.human_decision_available", identity)
+        self.assertIn("Deep cross-file correlation has not completed", identity)
         self.assertIn("Verify Episode Identity", detail)
         self.assertIn("read-only", rename.casefold())
         self.assertIn("identity.snapshot_current", identity)
