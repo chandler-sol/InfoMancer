@@ -1185,9 +1185,11 @@ class NormalIdentityPersistenceTests(unittest.TestCase):
         )
         self._promote_normal_fixture_to_deep()
         with self.database.connect() as conn:
+            # An unexpected/legacy stage label must not bypass the
+            # completed-Deep J4 action lock.
             conn.execute(
                 """UPDATE media_identity_scans
-                   SET stage='deep_resolved'
+                   SET stage='resolved'
                    WHERE id=?""",
                 (self.fast_scan.scan_id,),
             )
