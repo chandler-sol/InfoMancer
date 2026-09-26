@@ -71,7 +71,10 @@ class DeepVerificationService:
     J2 visual/speech services are optional because Deep candidate widening and
     fingerprint/correlation analysis remain valid when local OCR/transcription
     is unavailable. A raw Fast scan must still pass through the Normal attempt
-    so the inherited Normal provenance is explicit.
+    so the inherited Normal provenance is explicit. The final per-file Deep
+    revision is sealed before J4 so correlation binds to the exact published
+    resolver state. If J4 fails, that sealed work remains resumable, but the
+    decision layer keeps confirmation and rename preview locked until J4 succeeds.
     """
 
     def __init__(
