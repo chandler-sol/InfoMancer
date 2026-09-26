@@ -9,7 +9,12 @@ from typing import Any, Callable, Mapping
 from ..db import Database
 from ..naming import contained_destination, plex_episode_filename
 from .candidates import generate_episode_candidates
-from .deep import deep_plan_metadata_is_current
+from .deep import (
+    DeepCorrelationPolicy,
+    DeepIdentityError,
+    deep_plan_metadata_is_current,
+    plan_deep_correlation,
+)
 from .deep_evidence import deep_evidence_metadata_is_current
 from .deep_correlation_view import load_current_deep_correlation_view
 from .decision_snapshot import (
@@ -1536,17 +1541,36 @@ class MediaIdentityDecisionService:
         raw_hypotheses = identity.get("peer_hypotheses")
         raw_missing = identity.get("missing_scan_file_ids")
         raw_invalid = identity.get("invalid_scan_file_ids")
-        deep_identity = claimed.get("deep_identity")
         if (
             not isinstance(raw_hypotheses, list)
             or not isinstance(raw_missing, list)
             or not isinstance(raw_invalid, list)
-            or not isinstance(deep_identity, Mapping)
         ):
             return False
-        raw_cohort = deep_identity.get("correlation_file_ids")
-        if not isinstance(raw_cohort, list):
+
+        deep_identity = claimed.get("deep_identity")
+        try:
+            if isinstance(deep_identity, Mapping):
+                correlation_policy = DeepCorrelationPolicy.from_payload(
+                    deep_identity.get("correlation_policy")
+                )
+            else:
+                correlation_policy = DeepCorrelationPolicy()
+            current_plan = plan_deep_correlation(
+                conn,
+                file_id=target_file_id,
+                policy=correlation_policy,
+            )
+        except (DeepIdentityError, TypeError, ValueError, sqlite3.Error):
             return False
+        if (
+            current_plan.plan_signature
+            != str(identity.get("correlation_plan_signature") or "")
+        ):
+            return False
+        raw_cohort = [
+            item.file_id for item in current_plan.files
+        ]
 
         hypotheses: list[SequenceHypothesis] = []
         for value in raw_hypotheses:
