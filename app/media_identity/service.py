@@ -1207,8 +1207,6 @@ class MediaIdentityDecisionService:
         scan: Mapping[str, Any],
         claimed: Mapping[str, Any],
     ) -> dict[str, Any] | None:
-        if str(scan.get("completed_profile") or "") != IdentityProfile.DEEP.value:
-            return None
         revision, digest = MediaIdentityDecisionService._decision_token(
             claimed
         )
